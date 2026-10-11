@@ -17,10 +17,17 @@ struct Main {
         switch command {
         case "init": try state.initialize(); print("Initialized private TLS and pairing state.")
         case "pairing":
-            let pairing = try state.pairing(host: options.value("host") ?? "localhost", port: port)
-            let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            print(String(decoding: try encoder.encode(pairing), as: UTF8.self))
+            let pairing = try state.pairing(host: options.value("host") ?? LANAddressResolver().address() ?? "localhost", port: port)
+            if options.value("format") == "json" {
+                let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+                print(String(decoding: try encoder.encode(pairing), as: UTF8.self))
+            } else {
+                print("Scan this code in cmux remote on your iPhone. Keep it private.")
+                print(try TerminalQRCode().render(PairingLinkCodec().encode(pairing)))
+                print("Endpoint: https://\(pairing.host):\(pairing.port)")
+            }
         case "serve":
+            if options.contains("pair"), !FileManager.default.fileExists(atPath: state.directory.appendingPathComponent("token").path) { try state.initialize() }
             let cmux: any CmuxControlling; let roots: [URL]
             if options.contains("demo") {
                 let directory = state.directory.appendingPathComponent("demo", isDirectory: true)
@@ -47,13 +54,20 @@ struct Main {
                 }
             }
             defer { events?.cancel() }
-            try await HTTPServer().run(host: options.value("listen") ?? "127.0.0.1", port: port, certificate: state.certificate, key: state.key, router: BridgeRouter(service: service, token: state.token()))
+            let qr: String?
+            if options.contains("pair") {
+                guard let host = options.value("host") ?? LANAddressResolver().address() else { throw BridgeError("lan_unavailable", "No private LAN address was found. Connect to Wi-Fi or pass --host.") }
+                qr = try TerminalQRCode().render(PairingLinkCodec().encode(state.pairing(host: host, port: port)))
+            } else { qr = nil }
+            try await HTTPServer().run(host: options.value("listen") ?? (options.contains("pair") ? "0.0.0.0" : "127.0.0.1"), port: port, certificate: state.certificate, key: state.key, router: BridgeRouter(service: service, token: state.token()), onListening: { _ in
+                if let qr { print("Scan this pairing code on your iPhone. Keep it private."); print(qr) }
+            })
         case "doctor":
             let path = try SocketDiscovery().resolve(explicit: options.value("socket"), environment: ProcessInfo.processInfo.environment, home: home)
             let client = UnixSocketClient(path: path, password: ProcessInfo.processInfo.environment["CMUX_REMOTE_SOCKET_PASSWORD"])
             _ = try await client.request("system.ping", params: [:]); print("cmux socket is reachable.")
         default:
-            print("cmux-remote init|serve|pairing|doctor [--state PATH] [--socket PATH] [--listen HOST] [--host HOST] [--port PORT] [--demo]")
+            print("cmux-remote init|serve|pairing|doctor [--pair] [--state PATH] [--socket PATH] [--listen HOST] [--host HOST] [--port PORT] [--format json] [--demo]")
         }
     }
 }

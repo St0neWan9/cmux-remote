@@ -21,6 +21,9 @@ public struct ProjectFilePolicy: Sendable {
               !["pem", "key", "p12", "pfx", "mobileprovision"].contains(URL(fileURLWithPath: relativePath).pathExtension.lowercased()) else { throw denied() }
         let file = base.appendingPathComponent(relativePath).resolvingSymlinksInPath().standardizedFileURL
         guard file.path.hasPrefix(base.path + "/") else { throw denied() }
+        let canonicalRelative = String(file.path.dropFirst(base.path.count + 1))
+        guard !canonicalRelative.split(separator: "/").contains(where: { $0.hasPrefix(".") || ["id_rsa", "id_ed25519", "credentials.json"].contains(String($0)) }),
+              !["pem", "key", "p12", "pfx", "mobileprovision"].contains(file.pathExtension.lowercased()) else { throw denied() }
         let attributes = try FileManager.default.attributesOfItem(atPath: file.path)
         guard attributes[.type] as? FileAttributeType == .typeRegular,
               let size = attributes[.size] as? NSNumber, size.intValue <= 1_048_576 else { throw denied() }

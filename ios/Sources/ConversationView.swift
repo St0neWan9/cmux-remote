@@ -24,9 +24,9 @@ struct ConversationView: View {
             VStack(spacing: 8) {
                 if !model.session.writable { Text(String(localized: "sessions.read_only")).font(.caption).foregroundStyle(.secondary) }
                 HStack(alignment: .bottom) {
-                    TextField(String(localized: "chat.prompt"), text: $model.draft, axis: .vertical).lineLimit(1...6).textFieldStyle(.roundedBorder)
+                    TextField(String(localized: "chat.prompt"), text: $model.draft, axis: .vertical).lineLimit(1...6).textFieldStyle(.roundedBorder).accessibilityIdentifier("chat.composer")
                     Button { Task { await model.send() } } label: { Image(systemName: "arrow.up.circle.fill").font(.title) }.accessibilityLabel(String(localized: "chat.send"))
-                        .disabled(model.busy || !model.session.writable || model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .accessibilityIdentifier("chat.send").disabled(model.busy || !model.session.writable || model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     Button { Task { await model.interrupt() } } label: { Image(systemName: "stop.circle") }.accessibilityLabel(String(localized: "chat.stop")).disabled(model.busy || !model.session.writable)
                 }
             }.padding().background(.regularMaterial)

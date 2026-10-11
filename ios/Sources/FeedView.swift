@@ -23,9 +23,7 @@ struct FeedView: View {
                             Button(String(localized: "feed.deny"), role: .destructive) { Task { await reply(item, mode: "deny") } }
                         }.buttonStyle(.bordered).disabled(busy)
                     } else if kind == "question" {
-                        ForEach(Array((item["question_options"].array ?? []).enumerated()), id: \.offset) { _, choice in
-                            Button(choice["label"].string ?? "") { Task { await reply(item, selections: [choice["id"].string ?? choice["label"].string ?? ""]) } }.disabled(busy)
-                        }
+                        FeedQuestionView(questions: item["questions"].array ?? [], busy: busy) { answers in Task { await reply(item, selections: answers) } }
                     }
                 }
             }

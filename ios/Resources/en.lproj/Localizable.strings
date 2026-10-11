@@ -1,6 +1,6 @@
 "app.title" = "cmux remote";
 "pair.intro" = "Your cmux, on your phone";
-"pair.instructions" = "Start the Bridge on your Mac, then enter the pairing information it prints.";
+"pair.instructions" = "Start the Bridge on your Mac and scan its pairing QR code.";
 "pair.connection" = "Connection";
 "pair.host" = "Mac address";
 "pair.port" = "Port";
@@ -41,3 +41,12 @@
 "error.file" = "This file cannot be previewed or shared from the project.";
 "error.expired" = "This request is no longer pending. Refresh the list.";
 "error.connection" = "Could not complete the request. Check the connection and pairing fingerprint.";
+"pair.scan" = "Scan pairing QR code";
+"pair.scan_instructions" = "On your Mac, run cmux-remote pairing. Scan the displayed code to connect automatically.";
+"pair.advanced" = "Advanced settings";
+"pair.cancel" = "Cancel";
+"pair.camera_unavailable" = "Camera access is unavailable. Allow camera access in Settings or use advanced pairing.";
+"feed.custom" = "Or type an answer";
+"feed.submit" = "Submit answers";
+"pair.connecting" = "Connecting…";
+"error.keychain" = "The connection succeeded, but device credentials could not be saved. Check app signing.";

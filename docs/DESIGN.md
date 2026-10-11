@@ -18,7 +18,7 @@ The Bridge initializes a 256-bit random credential and self-signed certificate i
 
 All `/v1` routes require the bearer credential. There is no generic remote `rpc(method, params)` endpoint. Routes invoke a fixed list of cmux operations, with explicit IDs and fresh binding checks before terminal writes. No focus/selection RPC is used when browsing a task. The Bridge preserves cmux's own socket access policy and never enables `allowAll` itself.
 
-Initial pairing uses a single device credential. Per-device revocation and QR enrollment are a future protocol extension; `init --rotate` is not implemented and must not overwrite existing state implicitly. Access is the authority of the logged-in Mac user; network access still requires the separate Bridge credential.
+Initial pairing uses a single device credential encoded in a versioned QR link with endpoint and certificate pin. The CLI picks a private LAN address; the phone validates and connects immediately after scanning. Manual fields remain under advanced settings. Per-device revocation and expiring enrollment tickets are future protocol extensions; `init --rotate` is not implemented and must not overwrite existing state implicitly. Access is the authority of the logged-in Mac user; network access still requires the separate Bridge credential.
 
 ## Session discovery
 
@@ -62,4 +62,4 @@ HIG references: https://developer.apple.com/design/human-interface-guidelines/na
 4. Exercise synthetic socket + HTTP + phone client integration, adversarial path/pinning/idempotency/history tests, and compile the Simulator app.
 5. Verify a real official cmux instance and a physical phone when available; disclose exact missing gates. No official cmux process is restarted or changed for this verification.
 
-Follow-ups: event-driven phone updates, durable receipt/session caching, multi-device credentials, QR pairing, physical-phone network handoff, Windows/Linux backend adapters, Developer ID signing/notarization and release installers. None is reported complete merely because its interface is documented.
+Follow-ups: event-driven phone updates, durable receipt/session caching, multi-device credentials, physical-phone camera/network handoff, Windows/Linux backend adapters, Developer ID signing/notarization and release installers. None is reported complete merely because its interface is documented.

@@ -2,6 +2,8 @@
 { archiveVersion = 1; classes = {}; objectVersion = 56; objects = {
 341DF039C8EE13DBB0C91FDE = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Sources/AppModel.swift"; sourceTree = "<group>"; };
 99F24AA4DF5FAADD53256A09 = { isa = PBXBuildFile; fileRef = 341DF039C8EE13DBB0C91FDE; };
+77838D4719C203861239356F = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Sources/CameraSessionWorker.swift"; sourceTree = "<group>"; };
+CA0A8F5ECAF285D440E957FA = { isa = PBXBuildFile; fileRef = 77838D4719C203861239356F; };
 C9F58B6E1DE6BBC55EEA5977 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Sources/CmuxRemoteApp.swift"; sourceTree = "<group>"; };
 955585385F9D3209AE72E2C1 = { isa = PBXBuildFile; fileRef = C9F58B6E1DE6BBC55EEA5977; };
 F3EAB4CD3D3E410898571E03 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Sources/ConversationModel.swift"; sourceTree = "<group>"; };
@@ -10,6 +12,8 @@ F3EAB4CD3D3E410898571E03 = { isa = PBXFileReference; lastKnownFileType = sourcec
 3B0F2C4A8CE77154F1D9E3EA = { isa = PBXBuildFile; fileRef = 7EAB4817928B28B0A0308C7E; };
 41954E6F5301FCCC59C0E349 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Sources/ErrorPresentation.swift"; sourceTree = "<group>"; };
 7A786CAD12614346FAADFECA = { isa = PBXBuildFile; fileRef = 41954E6F5301FCCC59C0E349; };
+31393AE8A88EF282B3215667 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Sources/FeedQuestionView.swift"; sourceTree = "<group>"; };
+2B84F80D3EB64BFC70DB8709 = { isa = PBXBuildFile; fileRef = 31393AE8A88EF282B3215667; };
 327CD97BBB8974B8021B4620 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Sources/FeedView.swift"; sourceTree = "<group>"; };
 A6353563A751633F0D56C6D8 = { isa = PBXBuildFile; fileRef = 327CD97BBB8974B8021B4620; };
 3891E533DC59E3116657ED2A = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Sources/MessageRow.swift"; sourceTree = "<group>"; };
@@ -20,6 +24,10 @@ DE89A0678603DB006F4E2CDE = { isa = PBXFileReference; lastKnownFileType = sourcec
 48AE52FBF65038E79D9CE6A7 = { isa = PBXBuildFile; fileRef = DE89A0678603DB006F4E2CDE; };
 884372611BBC430D5CCED7A9 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Sources/ProjectView.swift"; sourceTree = "<group>"; };
 1E0AB722D90BA7A6653AA08D = { isa = PBXBuildFile; fileRef = 884372611BBC430D5CCED7A9; };
+44351E4D8DF53FEC33FEBABA = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Sources/QRScannerController.swift"; sourceTree = "<group>"; };
+2C8C96B7C46153E953660976 = { isa = PBXBuildFile; fileRef = 44351E4D8DF53FEC33FEBABA; };
+7FCBA9D51BA69BAA91E093AD = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Sources/QRScannerView.swift"; sourceTree = "<group>"; };
+BC9ABF507A6056D581F0B7D2 = { isa = PBXBuildFile; fileRef = 7FCBA9D51BA69BAA91E093AD; };
 1D87281C0A753FA7DF4589D4 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Sources/RefreshTicker.swift"; sourceTree = "<group>"; };
 0FD8710D57F87973173DFDBE = { isa = PBXBuildFile; fileRef = 1D87281C0A753FA7DF4589D4; };
 83E066B19C3EB402E75E255D = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Sources/SessionListView.swift"; sourceTree = "<group>"; };
@@ -30,7 +38,7 @@ B35432EC304767C2A253EFD7 = { isa = PBXFileReference; lastKnownFileType = text.pl
 3D63C6937ED43ADE4AE6DEDA = { isa = PBXBuildFile; fileRef = 1877F3CB6E58176272997A08; };
 38A007151ABE87CC01A5B6E9 = { isa = PBXFileReference; explicitFileType = wrapper.application; path = CmuxRemote.app; sourceTree = BUILT_PRODUCTS_DIR; };
 FBDC4F23F93125BBEEAE800C = { isa = PBXGroup; children = (38A007151ABE87CC01A5B6E9); name = Products; sourceTree = "<group>"; };
-B28B7AF69320201D1CF206EB = { isa = PBXGroup; children = (341DF039C8EE13DBB0C91FDE, C9F58B6E1DE6BBC55EEA5977, F3EAB4CD3D3E410898571E03, 7EAB4817928B28B0A0308C7E, 41954E6F5301FCCC59C0E349, 327CD97BBB8974B8021B4620, 3891E533DC59E3116657ED2A, E7A54C34D1CCA710E5429B00, DE89A0678603DB006F4E2CDE, 884372611BBC430D5CCED7A9, 1D87281C0A753FA7DF4589D4, 83E066B19C3EB402E75E255D, 1877F3CB6E58176272997A08, FBDC4F23F93125BBEEAE800C); sourceTree = "<group>"; };
+B28B7AF69320201D1CF206EB = { isa = PBXGroup; children = (341DF039C8EE13DBB0C91FDE, 77838D4719C203861239356F, C9F58B6E1DE6BBC55EEA5977, F3EAB4CD3D3E410898571E03, 7EAB4817928B28B0A0308C7E, 41954E6F5301FCCC59C0E349, 31393AE8A88EF282B3215667, 327CD97BBB8974B8021B4620, 3891E533DC59E3116657ED2A, E7A54C34D1CCA710E5429B00, DE89A0678603DB006F4E2CDE, 884372611BBC430D5CCED7A9, 44351E4D8DF53FEC33FEBABA, 7FCBA9D51BA69BAA91E093AD, 1D87281C0A753FA7DF4589D4, 83E066B19C3EB402E75E255D, 1877F3CB6E58176272997A08, FBDC4F23F93125BBEEAE800C); sourceTree = "<group>"; };
 582681C2EAE02B3F3D399C0C = { isa = XCLocalSwiftPackageReference; relativePath = ".."; };
 9F963732F9B848F2B1866D79 = { isa = XCLocalSwiftPackageReference; relativePath = "../Vendor/CmuxAgentChat"; };
 B5E5ABCEEDCC014A008A3907 = { isa = XCSwiftPackageProductDependency; productName = CmuxRemoteCore; };
@@ -39,29 +47,35 @@ B5E5ABCEEDCC014A008A3907 = { isa = XCSwiftPackageProductDependency; productName 
 C1E381A794D9B5A6D96B52B9 = { isa = PBXBuildFile; productRef = 83B2B5D75C7725551C5EE264; };
 317DEA8ACD9E8E126475B8EB = { isa = XCSwiftPackageProductDependency; productName = CmuxAgentChat; };
 A78A679E946D3C0E426CE7D1 = { isa = PBXBuildFile; productRef = 317DEA8ACD9E8E126475B8EB; };
-BCE16DD0260827ECF338C787 = { isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (99F24AA4DF5FAADD53256A09, 955585385F9D3209AE72E2C1, 70995B82259FB9A45DC6E572, 3B0F2C4A8CE77154F1D9E3EA, 7A786CAD12614346FAADFECA, A6353563A751633F0D56C6D8, 96D3C9263D0FE730FAA941D6, EDE30657BE1BBD4DB0FC8ACC, 48AE52FBF65038E79D9CE6A7, 1E0AB722D90BA7A6653AA08D, 0FD8710D57F87973173DFDBE, 0CF7502F1D8E437264E71E85); runOnlyForDeploymentPostprocessing = 0; };
+BCE16DD0260827ECF338C787 = { isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (99F24AA4DF5FAADD53256A09, CA0A8F5ECAF285D440E957FA, 955585385F9D3209AE72E2C1, 70995B82259FB9A45DC6E572, 3B0F2C4A8CE77154F1D9E3EA, 7A786CAD12614346FAADFECA, 2B84F80D3EB64BFC70DB8709, A6353563A751633F0D56C6D8, 96D3C9263D0FE730FAA941D6, EDE30657BE1BBD4DB0FC8ACC, 48AE52FBF65038E79D9CE6A7, 1E0AB722D90BA7A6653AA08D, 2C8C96B7C46153E953660976, BC9ABF507A6056D581F0B7D2, 0FD8710D57F87973173DFDBE, 0CF7502F1D8E437264E71E85); runOnlyForDeploymentPostprocessing = 0; };
 0189424A5A60FED329FA868E = { isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (3D63C6937ED43ADE4AE6DEDA); runOnlyForDeploymentPostprocessing = 0; };
 7561BFB015D8F536760CB671 = { isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (999DDFAB8C41279798FAB484, C1E381A794D9B5A6D96B52B9, A78A679E946D3C0E426CE7D1); runOnlyForDeploymentPostprocessing = 0; };
-AB52CB08E0FDF02BF6C67C33 = { isa = XCBuildConfiguration; name = Debug; buildSettings = { SDKROOT = iphoneos; IPHONEOS_DEPLOYMENT_TARGET = 17.0; SWIFT_VERSION = 6.0; CLANG_ENABLE_MODULES = YES; }; };
+AB52CB08E0FDF02BF6C67C33 = { isa = XCBuildConfiguration; name = Debug; buildSettings = { SDKROOT = iphoneos; IPHONEOS_DEPLOYMENT_TARGET = 17.0; SWIFT_VERSION = 6.0; CLANG_ENABLE_MODULES = YES; SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)"; SWIFT_OPTIMIZATION_LEVEL = "-Onone"; }; };
 59E1BEE911F66DA37FEBACDC = { isa = XCBuildConfiguration; name = Debug; buildSettings = {
         PRODUCT_NAME = "$(TARGET_NAME)"; PRODUCT_BUNDLE_IDENTIFIER = com.st0newan9.cmux-remote;
         GENERATE_INFOPLIST_FILE = YES; INFOPLIST_KEY_CFBundleDisplayName = "cmux remote";
+        CREATE_INFOPLIST_SECTION_IN_BINARY = YES;
         INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Connect to your paired cmux Bridge on your local network.";
+        INFOPLIST_KEY_NSCameraUsageDescription = "Scan your Mac Bridge pairing code.";
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
         INFOPLIST_KEY_UILaunchScreen_Generation = YES;
         SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; TARGETED_DEVICE_FAMILY = "1,2";
         CODE_SIGN_STYLE = Automatic; MARKETING_VERSION = 0.1.0; CURRENT_PROJECT_VERSION = 1;
+        CODE_SIGN_ENTITLEMENTS = CmuxRemote.entitlements;
         SWIFT_STRICT_CONCURRENCY = complete;
     }; };
-5283471FF90C511CFE244FFF = { isa = XCBuildConfiguration; name = Release; buildSettings = { SDKROOT = iphoneos; IPHONEOS_DEPLOYMENT_TARGET = 17.0; SWIFT_VERSION = 6.0; CLANG_ENABLE_MODULES = YES; }; };
+5283471FF90C511CFE244FFF = { isa = XCBuildConfiguration; name = Release; buildSettings = { SDKROOT = iphoneos; IPHONEOS_DEPLOYMENT_TARGET = 17.0; SWIFT_VERSION = 6.0; CLANG_ENABLE_MODULES = YES; SWIFT_OPTIMIZATION_LEVEL = "-O"; }; };
 F4C425279CD5DDD18FD6DC6D = { isa = XCBuildConfiguration; name = Release; buildSettings = {
         PRODUCT_NAME = "$(TARGET_NAME)"; PRODUCT_BUNDLE_IDENTIFIER = com.st0newan9.cmux-remote;
         GENERATE_INFOPLIST_FILE = YES; INFOPLIST_KEY_CFBundleDisplayName = "cmux remote";
+        CREATE_INFOPLIST_SECTION_IN_BINARY = YES;
         INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Connect to your paired cmux Bridge on your local network.";
+        INFOPLIST_KEY_NSCameraUsageDescription = "Scan your Mac Bridge pairing code.";
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
         INFOPLIST_KEY_UILaunchScreen_Generation = YES;
         SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; TARGETED_DEVICE_FAMILY = "1,2";
         CODE_SIGN_STYLE = Automatic; MARKETING_VERSION = 0.1.0; CURRENT_PROJECT_VERSION = 1;
+        CODE_SIGN_ENTITLEMENTS = CmuxRemote.entitlements;
         SWIFT_STRICT_CONCURRENCY = complete;
     }; };
 90061A5F4E19D1411B425E01 = { isa = XCConfigurationList; buildConfigurations = (AB52CB08E0FDF02BF6C67C33, 5283471FF90C511CFE244FFF); defaultConfigurationName = Release; defaultConfigurationIsVisible = 0; };

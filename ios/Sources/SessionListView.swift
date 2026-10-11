@@ -20,7 +20,7 @@ struct SessionListView: View {
                                     }.font(.caption).foregroundStyle(.secondary)
                                     if let cwd = session.cwd { Text(cwd).font(.caption2).foregroundStyle(.secondary).lineLimit(1) }
                                 }.padding(.vertical, 4)
-                            }
+                            }.accessibilityIdentifier("session." + session.id)
                         }
                     }
                 }

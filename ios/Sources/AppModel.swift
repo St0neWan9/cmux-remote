@@ -15,6 +15,15 @@ final class AppModel {
     private var restored = false
     func restorePairing() {
         guard !restored else { return }; restored = true
+        #if DEBUG
+        // Only an explicit isolated-Simulator test injection can enroll a fixture host.
+        if let path = ProcessInfo.processInfo.environment["CMUX_REMOTE_TEST_PAIRING_PATH"],
+           let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
+           let value = try? JSONDecoder().decode(PairingConfiguration.self, from: data),
+           let pairing = try? PairingConfiguration(host: value.host, port: value.port, token: value.token, certificateSHA256: value.certificateSHA256) {
+            Task { await pair(pairing) }; return
+        }
+        #endif
         if let pairing = store.load() { host = pairing.host; client = RemoteClient(pairing: pairing) }
     }
     func pair(_ pairing: PairingConfiguration) async {
@@ -23,7 +32,13 @@ final class AppModel {
         do {
             _ = try await candidate.get("/v1/status", as: JSONValue.self)
             try store.save(pairing); client = candidate; host = pairing.host
-        } catch { candidate.close(); self.error = ErrorPresentation().message(error) }
+        } catch {
+            #if DEBUG
+            let value = error as NSError
+            print("Pairing failed: \((error as? BridgeError)?.code ?? value.domain) \(value.code)")
+            #endif
+            candidate.close(); self.error = ErrorPresentation().message(error)
+        }
     }
     func refresh() async {
         guard let client else { return }; loading = true; defer { loading = false }
