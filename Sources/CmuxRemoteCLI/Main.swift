@@ -39,7 +39,10 @@ struct Main {
                 }
                 cmux = DemoCmux(transcript: transcript.path, project: directory.path); roots = [directory]
             } else {
-                cmux = UnixSocketClient(path: try SocketDiscovery().resolve(explicit: options.value("socket"), environment: ProcessInfo.processInfo.environment, home: home), password: ProcessInfo.processInfo.environment["CMUX_REMOTE_SOCKET_PASSWORD"])
+                let socket = try SocketDiscovery().resolve(explicit: options.value("socket"), environment: ProcessInfo.processInfo.environment, home: home)
+                let cli = options.value("cli") ?? "/Applications/cmux.app/Contents/Resources/bin/cmux"
+                if !options.contains("direct-socket"), FileManager.default.isExecutableFile(atPath: cli) { cmux = CLIControlClient(executable: URL(fileURLWithPath: cli), socketPath: socket) }
+                else { cmux = UnixSocketClient(path: socket, password: ProcessInfo.processInfo.environment["CMUX_REMOTE_SOCKET_PASSWORD"]) }
                 roots = [URL(fileURLWithPath: ProcessInfo.processInfo.environment["CLAUDE_CONFIG_DIR"] ?? home.appendingPathComponent(".claude").path), URL(fileURLWithPath: ProcessInfo.processInfo.environment["CODEX_HOME"] ?? home.appendingPathComponent(".codex").path)]
             }
             let service = SessionService(cmux: cmux, home: home, transcriptRoots: roots)
@@ -67,7 +70,7 @@ struct Main {
             let client = UnixSocketClient(path: path, password: ProcessInfo.processInfo.environment["CMUX_REMOTE_SOCKET_PASSWORD"])
             _ = try await client.request("system.ping", params: [:]); print("cmux socket is reachable.")
         default:
-            print("cmux-remote init|serve|pairing|doctor [--pair] [--state PATH] [--socket PATH] [--listen HOST] [--host HOST] [--port PORT] [--format json] [--demo]")
+            print("cmux-remote init|serve|pairing|doctor [--pair] [--state PATH] [--socket PATH] [--cli PATH] [--direct-socket] [--listen HOST] [--host HOST] [--port PORT] [--format json] [--demo]")
         }
     }
 }
