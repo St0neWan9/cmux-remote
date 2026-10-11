@@ -160,11 +160,18 @@ public actor SessionService {
     }
     public func diff(id: String, path: String?) async throws -> TextFileSnapshot {
         let cwd = try await project(id)
+        let listed = try await GitReader().run(directory: cwd, arguments: ["diff", "--no-ext-diff", "--no-textconv", "--name-only", "-z", "HEAD", "--"])
+        let changed = listed.split(separator: "\0").map(String.init)
+        let permitted = Set(changed.filter { (try? files.resolveDiffPath(root: cwd, relativePath: $0)) != nil })
+        // Literal pathspecs also match directory prefixes. No chosen path may include a denied descendant.
+        let safe = permitted.filter { candidate in !changed.contains(where: { $0.hasPrefix(candidate + "/") && !permitted.contains($0) }) }
         let allowed: [String]
-        if let path { _ = try files.resolveDiffPath(root: cwd, relativePath: path); allowed = [path] }
+        if let path {
+            guard changed.contains(path), safe.contains(path) else { throw BridgeError("file_forbidden", "Select an exact shareable changed file.", status: 403) }
+            allowed = [path]
+        }
         else {
-            let paths = try await GitReader().run(directory: cwd, arguments: ["diff", "--no-ext-diff", "--no-textconv", "--name-only", "-z", "HEAD", "--"])
-            allowed = paths.split(separator: "\0").map(String.init).filter { (try? files.resolveDiffPath(root: cwd, relativePath: $0)) != nil }
+            allowed = Array(safe).sorted()
         }
         guard !allowed.isEmpty else { return TextFileSnapshot(path: path ?? "", text: "", truncated: false) }
         let arguments = ["diff", "--no-ext-diff", "--no-textconv", "HEAD", "--"] + allowed
