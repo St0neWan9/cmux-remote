@@ -42,7 +42,14 @@ final class AppModel {
     }
     func refresh() async {
         guard let client else { return }; loading = true; defer { loading = false }
-        do { sessions = try await client.get("/v1/sessions", as: [SessionDescriptor].self); error = nil }
+        do {
+            let discovered = try await client.get("/v1/sessions", as: [SessionDescriptor].self)
+            sessions = discovered.sorted {
+                if $0.writable != $1.writable { return $0.writable }
+                return $0.title.localizedStandardCompare($1.title) == .orderedAscending
+            }
+            error = nil
+        }
         catch { self.error = ErrorPresentation().message(error) }
     }
     func unpair() { client?.close(); client = nil; sessions = []; store.remove() }

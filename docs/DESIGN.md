@@ -18,6 +18,8 @@ The Bridge initializes a 256-bit random credential and self-signed certificate i
 
 All `/v1` routes require the bearer credential. There is no generic remote `rpc(method, params)` endpoint. Routes invoke a fixed list of cmux operations, with explicit IDs and fresh binding checks before terminal writes. No focus/selection RPC is used when browsing a task. Requests prefer the installed official CLI's `rpc` command, with JSON in private stdin, so cmux retains its own capability/password handling. A raw Unix transport is an explicit fallback. The separate raw event connection may be denied under a restrictive policy and then the Bridge relies on snapshots. The Bridge never enables `allowAll` itself.
 
+Under `cmuxOnly`, launch the Bridge inside a cmux terminal. The official CLI also undergoes process ancestry checks; an external Bridge cannot gain access merely by using it. This was verified against the installed official Mac app during live integration.
+
 Initial pairing uses a single device credential encoded in a versioned QR link with endpoint and certificate pin. The CLI picks a private LAN address; the phone validates and connects immediately after scanning. Manual fields remain under advanced settings. Per-device revocation and expiring enrollment tickets are future protocol extensions; `init --rotate` is not implemented and must not overwrite existing state implicitly. Access is the authority of the logged-in Mac user; network access still requires the separate Bridge credential.
 
 ## Session discovery
