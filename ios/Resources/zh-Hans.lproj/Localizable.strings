@@ -77,3 +77,4 @@
 "chat.more" = "更多选项";
 "chat.activity_one" = "1 项操作";
 "pair.details" = "配对详情";
+"chat.stop_requested" = "停止请求已发送";

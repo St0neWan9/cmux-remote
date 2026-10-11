@@ -79,7 +79,9 @@ struct ConversationView: View {
         .safeAreaInset(edge: .top, spacing: 0) { header }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: 12) {
-                if model.working {
+                if model.stopRequested {
+                    Label(String(localized: "chat.stop_requested"), systemImage: "checkmark.circle").font(.footnote).foregroundStyle(.secondary)
+                } else if model.working {
                     HStack(spacing: 7) { ProgressView().controlSize(.mini); Text(String(localized: "chat.working")).font(.footnote); Spacer(); Label(model.session.agent.capitalized, systemImage: "sparkles").font(.caption) }
                         .foregroundStyle(.secondary).padding(.horizontal, 12)
                 } else if !model.canSend { Text(String(localized: "sessions.read_only")).font(.caption).foregroundStyle(.secondary) }

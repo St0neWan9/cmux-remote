@@ -48,10 +48,15 @@ Scoped regressions cover permission changes during backend awaits, stale binding
 refresh, IPv6 endpoint formatting, interrupted turns and enrollment lifecycle.
 The actual iOS-model harness checks six behaviors, including a submission that
 finishes after scene pause and a later desktop turn with an unobserved idle
-transition. English and Simplified Chinese phone catalogs have 79 matching keys.
+transition. English and Simplified Chinese phone catalogs have 80 matching keys.
 The isolated connection/phone submission passes 41 package tests in 15 suites
 and all six actual-model checks; the generic iOS Simulator build passes. Camera scanning on a physical phone,
 physical device-only Keychain and Wi-Fi handoff still require device acceptance.
 Automated touch dragging did not yield a reliable Simulator acceptance result;
 inertial scrolling while replies grow and the iOS 17 gesture fallback remain
 explicit visual coverage gaps.
+
+After cancellation, cmux can retain a working snapshot even when Claude has
+restored the prompt. The phone acknowledges the successful stop request without
+claiming completion or suppressing further stop controls. The acknowledgement
+clears on an observed state change, a new user message, or a phone send.

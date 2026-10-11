@@ -12,6 +12,8 @@ final class ConversationModel {
     var messages: [ChatMessage] = []
     var timelineItems: [ConversationTimelineItem] = []
     var jumpToLatest = 0
+    var stopRequested = false
+    private var interruptedUserID: String?
     var working: Bool { session.state.hasPrefix("working") }
     var latestMessageText: String? {
         guard let message = messages.last else { return nil }
@@ -25,9 +27,13 @@ final class ConversationModel {
     private var generation: String?
     init(session: SessionDescriptor, client: RemoteClient) { self.session = session; self.client = client }
     func updateSession(_ current: SessionDescriptor) {
+        if current.state != session.state { stopRequested = false }
         session = current
     }
-    func markInterrupted() { session.state = "idle" }
+    func markInterrupted() {
+        stopRequested = true
+        interruptedUserID = messages.last(where: { $0.role == .user })?.id
+    }
     func refresh() async {
         do {
             let descriptors = try await client.get("/v1/sessions", as: [SessionDescriptor].self)
@@ -43,6 +49,7 @@ final class ConversationModel {
                 }
                 messages = next.sorted { $0.seq < $1.seq }
             } else { messages = history.messages; generation = history.generation; hasMore = history.hasMore }
+            if stopRequested, messages.last(where: { $0.role == .user })?.id != interruptedUserID { stopRequested = false }
             timelineItems = ConversationTimeline().items(from: messages)
             let committed = messages.reversed().compactMap { message -> String? in
                 if message.role == .agent, case .prose(let value) = message.kind { return value.text }; return nil
@@ -64,7 +71,7 @@ final class ConversationModel {
         let input = draft
         do {
             _ = try await client.post("/v1/sessions/\(session.id)/send", body: SendRequest(text: input), as: MutationReceipt.self)
-            draft = ""; await refresh(); jumpToLatest += 1
+            draft = ""; stopRequested = false; await refresh(); jumpToLatest += 1
         } catch { self.error = ErrorPresentation().message(error) }
     }
     func interrupt() async {

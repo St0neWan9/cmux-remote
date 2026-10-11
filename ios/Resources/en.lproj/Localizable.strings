@@ -77,3 +77,4 @@
 "chat.more" = "More options";
 "chat.activity_one" = "1 operation";
 "pair.details" = "Enrollment details";
+"chat.stop_requested" = "Stop request sent";
