@@ -22,6 +22,7 @@ final class AppModel {
     private var saved: AuthorizedConnection?
     private var enrollmentTask: Task<Void, Never>?
     private var restored = false
+    private var enrollmentActive = true
     private var enrollmentGeneration = UUID()
     private var monitorGeneration = UUID()
     init(discovery: BridgeDiscovery = BridgeDiscovery(), store: PairingStore = PairingStore(),
@@ -90,7 +91,7 @@ final class AppModel {
     }
     private func enroll(_ bootstrap: SignedValue<EnrollmentBootstrap>, endpoint: BridgeEndpoint? = nil) async {
         let generation = UUID(); enrollmentGeneration = generation
-        let previous = pendingEnrollment; pendingEnrollment = nil; pauseEnrollment()
+        let previous = pendingEnrollment; pendingEnrollment = nil; stopEnrollmentMonitor()
         if let previous { try? await previous.cancel(); previous.close() }
         guard enrollmentGeneration == generation else { return }
         error = nil; loading = true
@@ -100,14 +101,15 @@ final class AppModel {
             let status = try await enrollment.submit()
             guard enrollmentGeneration == generation, pendingEnrollment === enrollment else { enrollment.close(); return }
             enrollmentState = status.state; loading = false
-            resumeEnrollment()
+            startEnrollmentMonitor()
         } catch {
             guard enrollmentGeneration == generation else { return }
             loading = false; pendingEnrollment?.close(); pendingEnrollment = nil; self.error = ErrorPresentation().message(error)
         }
     }
-    func resumeEnrollment() {
-        guard enrollmentTask == nil, let enrollment = pendingEnrollment else { return }
+    func resumeEnrollment() { enrollmentActive = true; startEnrollmentMonitor() }
+    private func startEnrollmentMonitor() {
+        guard enrollmentActive, enrollmentTask == nil, let enrollment = pendingEnrollment else { return }
         let generation = UUID(); monitorGeneration = generation
         enrollmentTask = Task {
             defer { if monitorGeneration == generation { enrollmentTask = nil } }
@@ -118,7 +120,7 @@ final class AppModel {
                     do {
                         let status = try await enrollment.status()
                         guard !Task.isCancelled, pendingEnrollment === enrollment else { break }
-                        enrollmentState = status.state
+                        enrollmentState = status.state; error = nil
                         if status.state == "approved" {
                             let value = try enrollment.connection(from: status); let candidate = try RemoteClient(connection: value)
                             do {
@@ -130,13 +132,21 @@ final class AppModel {
                             client?.close(); client = candidate; saved = value; host = value.host.name; pendingEnrollment = nil; enrollment.close(); await refresh(); break
                         }
                         if ["denied", "expired", "cancelled", "revoked"].contains(status.state) { pendingEnrollment = nil; enrollment.close(); error = String(localized: "pair.enrollment_ended"); break }
-                    } catch { if !Task.isCancelled { self.error = ErrorPresentation().message(error) }; break }
+                    } catch {
+                        guard !Task.isCancelled, pendingEnrollment === enrollment else { break }
+                        self.error = ErrorPresentation().message(error)
+                        if let network = error as? URLError,
+                           [.notConnectedToInternet, .networkConnectionLost, .timedOut, .cannotFindHost, .cannotConnectToHost, .dnsLookupFailed].contains(network.code),
+                           enrollment.request.value.expiresAt > Int(Date().timeIntervalSince1970) { continue }
+                        break
+                    }
                 }
             }
     }
-    func pauseEnrollment() { monitorGeneration = UUID(); enrollmentTask?.cancel(); enrollmentTask = nil }
+    func pauseEnrollment() { enrollmentActive = false; stopEnrollmentMonitor() }
+    private func stopEnrollmentMonitor() { monitorGeneration = UUID(); enrollmentTask?.cancel(); enrollmentTask = nil }
     func cancelEnrollment() async {
-        enrollmentGeneration = UUID(); pauseEnrollment()
+        enrollmentGeneration = UUID(); stopEnrollmentMonitor(); loading = false; error = nil
         let previous = pendingEnrollment; pendingEnrollment = nil; enrollmentState = ""
         if let previous { try? await previous.cancel(); previous.close() }
     }
@@ -155,5 +165,5 @@ final class AppModel {
             error = nil
         } catch { self.error = ErrorPresentation().message(error) }
     }
-    func unpair() { enrollmentGeneration = UUID(); pauseEnrollment(); client?.close(); client = nil; saved = nil; sessions = []; store.remove(); store.removeConnection(); store.disableLegacy() }
+    func unpair() { enrollmentGeneration = UUID(); stopEnrollmentMonitor(); client?.close(); client = nil; saved = nil; sessions = []; store.remove(); store.removeConnection(); store.disableLegacy() }
 }
