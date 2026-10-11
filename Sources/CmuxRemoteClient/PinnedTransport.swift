@@ -11,6 +11,7 @@ final class PinnedTransport: Sendable {
         configuration.timeoutIntervalForRequest = 15; configuration.timeoutIntervalForResource = 20; configuration.httpShouldSetCookies = false
         session = URLSession(configuration: configuration, delegate: PinnedSessionDelegate(pairing: pairing), delegateQueue: nil)
     }
+    deinit { session.invalidateAndCancel() }
     func close() { session.invalidateAndCancel() }
     func request<T: Decodable & Sendable>(_ path: String, method: String, query: [String: String] = [:], body: Data? = nil, authorization: (@Sendable (String, Data) throws -> String)? = nil, as: T.Type) async throws -> T {
         guard path.hasPrefix("/v1/") || path.hasPrefix("/v2/"), !path.contains(".."),

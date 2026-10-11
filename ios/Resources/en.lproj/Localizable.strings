@@ -7,7 +7,7 @@
 "pair.token" = "Pairing token";
 "pair.fingerprint" = "Certificate fingerprint";
 "pair.import" = "Import pairing information";
-"pair.json" = "Paste pairing JSON";
+"pair.json" = "Paste enrollment link or JSON";
 "pair.fill" = "Fill connection fields";
 "pair.invalid" = "Check the pairing information.";
 "pair.connect" = "Connect";
@@ -51,7 +51,7 @@
 "pair.connecting" = "Connecting…";
 "error.keychain" = "The connection succeeded, but device credentials could not be saved. Check app signing.";
 "pair.awaiting_owner" = "Waiting for Mac approval";
-"pair.owner_instructions" = "On the Mac, inspect enrollment pending and approve this exact request. Match the device identity below.";
+"pair.owner_instructions" = "Confirm this iPhone’s connection request on your Mac. Match the device identity below; this screen connects automatically after approval.";
 "pair.nearby" = "Nearby Bridges";
 "pair.searching" = "Searching the local network… QR pairing also works when discovery is unavailable.";
 "pair.trust_host" = "Confirm host identity";
@@ -64,3 +64,16 @@
 "error.authorization" = "This device is revoked or not approved for this workspace or operation. Check its grant on the Mac.";
 "error.enrollment" = "Open an enrollment window on the Mac, then scan a fresh QR code.";
 "error.identity" = "Host or device identity verification failed. Compare identities and pair again explicitly.";
+"chat.activity_count" = "%ld operations";
+"chat.expanded" = "Expanded";
+"chat.collapsed" = "Collapsed";
+"chat.actions" = "Files and actions";
+"chat.follow_up" = "Follow up";
+"chat.empty" = "Start a conversation";
+"chat.latest" = "Jump to latest";
+"chat.working" = "Working";
+"chat.back" = "Back to conversations";
+"chat.refresh" = "Refresh conversation";
+"chat.more" = "More options";
+"chat.activity_one" = "1 operation";
+"pair.details" = "Enrollment details";

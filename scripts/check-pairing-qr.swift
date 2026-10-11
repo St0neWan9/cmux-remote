@@ -2,11 +2,12 @@ import Foundation
 import CoreGraphics
 import Vision
 
-// Validate the actual terminal QR renderer without printing or persisting its credential payload.
+// Decode the actual terminal QR renderer without displaying its host-trust payload.
 let state = CommandLine.arguments[1]
+let port = CommandLine.arguments.count > 2 ? CommandLine.arguments[2] : "7740"
 let process = Process(); let output = Pipe()
 process.executableURL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath + "/.build/debug/cmux-remote")
-process.arguments = ["pairing", "--state", state, "--host", "127.0.0.1", "--port", "7759"]
+process.arguments = ["pairing", "--state", state, "--host", "127.0.0.1", "--port", port]
 process.standardOutput = output; try process.run()
 let data = output.fileHandleForReading.readDataToEndOfFile(); process.waitUntilExit()
 let text = String(decoding: data, as: UTF8.self)
@@ -29,5 +30,5 @@ let provider = CGDataProvider(data: Data(pixels) as CFData)!
 let image = CGImage(width: width * scale, height: height * scale, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: width * scale * 4, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.last.rawValue), provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent)!
 let request = VNDetectBarcodesRequest(); request.symbologies = [.qr]
 try VNImageRequestHandler(cgImage: image).perform([request])
-guard let result = request.results?.first?.payloadStringValue, result.hasPrefix("cmux-remote://pair?v=1&payload=") else { fatalError("Rendered QR did not decode") }
-print("Terminal QR decoded successfully; credential contents were not displayed.")
+guard let result = request.results?.first?.payloadStringValue, result.hasPrefix("cmux-remote://enroll?v=2&payload=") else { fatalError("Rendered QR did not decode") }
+print("Version 2 enrollment QR decoded successfully; no permanent device credential is present.")

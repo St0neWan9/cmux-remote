@@ -51,7 +51,7 @@ private actor ScopedCmux: CmuxControlling {
         let raw = try await ownerClient.request("enrollment.open", params: ["host": .string("127.0.0.1"), "port": .number(Double(port))])
         let bootstrap = try JSONDecoder().decode(SignedValue<EnrollmentBootstrap>.self, from: JSONEncoder().encode(raw))
         let phone = try EnrollmentClient(bootstrap: bootstrap, privateKey: IdentityCryptography().generatePrivateKey(), name: "Phone", kind: "iphone")
-        let mac = try EnrollmentClient(bootstrap: bootstrap, privateKey: IdentityCryptography().generatePrivateKey(), name: "Mac", kind: "mac")
+        let mac = try EnrollmentClient(bootstrap: bootstrap, privateKey: IdentityCryptography().generatePrivateKey(), name: "Mac", kind: "mac", capabilities: ClientCapability.allCases)
         defer { phone.close(); mac.close() }
         #expect(try await phone.submit().state == "pending"); #expect(try await mac.submit().state == "pending")
         let pending = try await ownerClient.request("enrollment.pending")
@@ -87,14 +87,29 @@ private actor ScopedCmux: CmuxControlling {
         let legacy = RemoteClient(pairing: try state.pairing(host: "127.0.0.1", port: port)); defer { legacy.close() }
         do { _ = try await legacy.get("/v1/status", as: JSONValue.self); Issue.record("Legacy is not enabled implicitly") }
         catch { #expect((error as? BridgeError)?.code == "unauthorized") }
-        server.cancel(); owner.cancel(); try await server.value; try await owner.value
+        let restartedAuthority = try state.authority(name: "Test host")
+        let movedListening = AsyncThrowingStream<Int, any Error>.makeStream()
+        let movedServer = Task {
+            do { try await HTTPServer().run(host: "127.0.0.1", port: 0, certificate: state.certificate, key: state.key, router: BridgeRouter(service: service, authority: restartedAuthority), onListening: { movedListening.continuation.yield($0); movedListening.continuation.finish() }) }
+            catch { movedListening.continuation.finish(throwing: error); throw error }
+        }
+        defer { movedServer.cancel() }
+        var movedIterator = movedListening.stream.makeAsyncIterator(); let movedPort = try #require(await movedIterator.next())
+        let movedConnection = try macConnection.relocated(to: BridgeEndpoint(host: "127.0.0.1", port: movedPort), advertisedHost: restartedAuthority.host)
+        try await macClient.relocate(movedConnection)
+        server.cancel(); try await server.value
+        // The existing client retained by a conversation now uses the new endpoint and host epoch.
+        #expect(try await macClient.get("/v1/sessions", as: [SessionDescriptor].self).map(\.id) == ["second"])
+        _ = try await macClient.post("/v1/sessions/second/send", body: SendRequest(text: "After relocation"), as: MutationReceipt.self)
+        #expect(await cmux.sends == 2)
+        movedServer.cancel(); owner.cancel(); try await movedServer.value; try await owner.value
     }
     @Test func savedTrustAllowsEndpointChangesButRejectsDifferentIdentitiesOrCertificates() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString); defer { try? FileManager.default.removeItem(at: directory) }
         let state = BridgeState(directory: directory); try state.initialize(); let authority = try state.authority(name: "Host")
         let workspace = "11111111-1111-1111-1111-111111111111"
         let bootstrap = try await authority.open(endpoint: BridgeEndpoint(host: "192.168.1.2", port: 7740), workspaces: [workspace])
-        let client = try EnrollmentClient(bootstrap: bootstrap, privateKey: IdentityCryptography().generatePrivateKey(), name: "Mac", kind: "mac"); defer { client.close() }
+        let client = try EnrollmentClient(bootstrap: bootstrap, privateKey: IdentityCryptography().generatePrivateKey(), name: "Mac", kind: "mac", capabilities: ClientCapability.allCases); defer { client.close() }
         _ = try await authority.submit(client.request); try await authority.approve(requestID: client.request.value.requestID, scope: client.request.value.scope)
         let connection = try client.connection(from: await authority.status(client.request).value)
         let moved = try connection.relocated(to: BridgeEndpoint(host: "192.168.1.99", port: 8888), advertisedHost: connection.host)
