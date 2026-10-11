@@ -22,9 +22,10 @@ public final class RemoteClient: Sendable {
     public func close() { session.invalidateAndCancel() }
     private func request<T: Decodable & Sendable>(_ path: String, method: String, query: [String: String], body: Data?, as type: T.Type) async throws -> T {
         guard path.hasPrefix("/v1/"), !path.contains("..") else { throw BridgeError("invalid_route", "Invalid resource path.") }
-        var components = URLComponents(url: pairing.baseURL, resolvingAgainstBaseURL: false)!
+        guard let base = pairing.baseURL, var components = URLComponents(url: base, resolvingAgainstBaseURL: false) else { throw BridgeError("invalid_pairing", "The paired endpoint is invalid.") }
         components.path = path; components.queryItems = query.map { URLQueryItem(name: $0.key, value: $0.value) }
-        var request = URLRequest(url: components.url!); request.httpMethod = method; request.httpBody = body
+        guard let url = components.url else { throw BridgeError("invalid_route", "The resource URL is invalid.") }
+        var request = URLRequest(url: url); request.httpMethod = method; request.httpBody = body
         request.setValue("Bearer " + pairing.token, forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         let (data, response) = try await session.data(for: request)

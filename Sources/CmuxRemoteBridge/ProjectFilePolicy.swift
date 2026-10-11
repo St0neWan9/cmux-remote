@@ -13,6 +13,12 @@ public struct ProjectFilePolicy: Sendable {
         return base
     }
     public func resolve(root: String, relativePath: String) throws -> URL {
+        try resolve(root: root, relativePath: relativePath, allowMissing: false)
+    }
+    public func resolveDiffPath(root: String, relativePath: String) throws -> URL {
+        try resolve(root: root, relativePath: relativePath, allowMissing: true)
+    }
+    private func resolve(root: String, relativePath: String, allowMissing: Bool) throws -> URL {
         let base = try projectRoot(root)
         guard base.path != "/", base.path != home.path, !relativePath.isEmpty, !relativePath.hasPrefix("/"),
               !relativePath.split(separator: "/").contains("..") else { throw denied() }
@@ -24,6 +30,7 @@ public struct ProjectFilePolicy: Sendable {
         let canonicalRelative = String(file.path.dropFirst(base.path.count + 1))
         guard !canonicalRelative.split(separator: "/").contains(where: { $0.hasPrefix(".") || ["id_rsa", "id_ed25519", "credentials.json"].contains(String($0)) }),
               !["pem", "key", "p12", "pfx", "mobileprovision"].contains(file.pathExtension.lowercased()) else { throw denied() }
+        if allowMissing, !FileManager.default.fileExists(atPath: file.path) { return file }
         let attributes = try FileManager.default.attributesOfItem(atPath: file.path)
         guard attributes[.type] as? FileAttributeType == .typeRegular,
               let size = attributes[.size] as? NSNumber, size.intValue <= 1_048_576 else { throw denied() }

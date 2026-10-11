@@ -8,7 +8,7 @@ public struct GitReader: Sendable {
         try await Task.detached {
             let process = Process(); let output = Pipe(); let errors = Pipe()
             process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-            process.arguments = ["--no-pager", "-c", "core.fsmonitor=false", "-C", directory] + arguments
+            process.arguments = ["--literal-pathspecs", "--no-pager", "-c", "core.fsmonitor=false", "-C", directory] + arguments
             process.environment = ["PATH": "/usr/bin:/bin", "GIT_TERMINAL_PROMPT": "0", "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "/dev/null"]
             process.standardOutput = output; process.standardError = errors
             let completion = AsyncStream<Int32>.makeStream(bufferingPolicy: .bufferingNewest(1))
