@@ -7,7 +7,7 @@
 "pair.token" = "配对令牌";
 "pair.fingerprint" = "证书指纹";
 "pair.import" = "导入配对信息";
-"pair.json" = "粘贴配对 JSON";
+"pair.json" = "粘贴配对链接或 JSON";
 "pair.fill" = "填入连接信息";
 "pair.invalid" = "请检查配对信息。";
 "pair.connect" = "连接";
@@ -51,7 +51,7 @@
 "pair.connecting" = "正在连接…";
 "error.keychain" = "连接成功，但无法保存设备凭证，请检查应用签名。";
 "pair.awaiting_owner" = "等待 Mac 批准";
-"pair.owner_instructions" = "在 Mac 查看 enrollment pending，并批准下面这个确切的请求。请核对设备身份。";
+"pair.owner_instructions" = "请在 Mac 确认这台 iPhone 的连接请求，并核对下方设备身份。批准后手机会自动连接。";
 "pair.nearby" = "附近的 Bridge";
 "pair.searching" = "正在搜索局域网……无法发现设备时，也可以扫码配对。";
 "pair.trust_host" = "确认主机身份";
@@ -64,3 +64,16 @@
 "error.authorization" = "这台设备已被撤销，或未获准访问该工作区或执行此操作。请在 Mac 检查授权。";
 "error.enrollment" = "请在 Mac 开启配对窗口，再扫描新的二维码。";
 "error.identity" = "主机或设备身份验证失败。请核对身份，并明确重新配对。";
+"chat.activity_count" = "%ld 项操作";
+"chat.expanded" = "已展开";
+"chat.collapsed" = "已折叠";
+"chat.actions" = "文件与操作";
+"chat.follow_up" = "跟进";
+"chat.empty" = "开始对话";
+"chat.latest" = "跳到最新消息";
+"chat.working" = "正在运行";
+"chat.back" = "返回对话列表";
+"chat.refresh" = "刷新对话";
+"chat.more" = "更多选项";
+"chat.activity_one" = "1 项操作";
+"pair.details" = "配对详情";

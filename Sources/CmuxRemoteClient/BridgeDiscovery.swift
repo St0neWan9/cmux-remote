@@ -35,9 +35,10 @@ import CmuxRemoteCore
         connection.stateUpdateHandler = { state in
             switch state {
             case .ready:
-                if case .hostPort(let host, let port) = connection.currentPath?.remoteEndpoint {
-                    stream.continuation.yield(BridgeEndpoint(host: String(describing: host), port: Int(port.rawValue))); stream.continuation.finish()
-                } else { stream.continuation.finish(throwing: BridgeError("discovery_failed", "The service endpoint could not be resolved.")) }
+                do {
+                    let endpoint = try BonjourEndpointResolver().resolve(connection.currentPath?.remoteEndpoint)
+                    stream.continuation.yield(endpoint); stream.continuation.finish()
+                } catch { stream.continuation.finish(throwing: error) }
             case .failed: stream.continuation.finish(throwing: BridgeError("discovery_failed", "The service is not reachable."))
             case .cancelled: stream.continuation.finish(throwing: CancellationError())
             default: break

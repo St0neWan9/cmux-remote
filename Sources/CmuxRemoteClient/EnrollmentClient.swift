@@ -2,17 +2,17 @@ import Foundation
 import CmuxRemoteCore
 
 /// One independently identified client requesting bounded owner-approved enrollment.
-public final class EnrollmentClient: Sendable {
+public final class EnrollmentClient: DeviceEnrolling {
     public let bootstrap: SignedValue<EnrollmentBootstrap>
     public let request: SignedValue<EnrollmentRequest>
     private let endpoint: BridgeEndpoint
     private let privateKey: Data
     private let transport: PinnedTransport
-    public init(bootstrap: SignedValue<EnrollmentBootstrap>, privateKey: Data, name: String, kind: String, endpoint: BridgeEndpoint? = nil, now: Int = Int(Date().timeIntervalSince1970)) throws {
+    public init(bootstrap: SignedValue<EnrollmentBootstrap>, privateKey: Data, name: String, kind: String, capabilities: [ClientCapability] = [.workspaceRead, .conversationRead, .projectRead, .conversationControl, .feedRead, .feedReply], endpoint: BridgeEndpoint? = nil, now: Int = Int(Date().timeIntervalSince1970)) throws {
         try EnrollmentLinkCodec().validate(bootstrap, now: now)
         self.bootstrap = bootstrap; self.privateKey = privateKey; self.endpoint = endpoint ?? bootstrap.value.endpoint
         let crypto = IdentityCryptography(); let publicKey = try crypto.publicKey(privateKey: privateKey)
-        let scope = ClientScope(workspaces: bootstrap.value.workspaces, capabilities: ClientCapability.allCases)
+        let scope = ClientScope(workspaces: bootstrap.value.workspaces, capabilities: capabilities)
         let value = EnrollmentRequest(hostID: bootstrap.value.host.id, windowID: bootstrap.value.windowID, requestID: UUID().uuidString, clientID: try crypto.identityID(publicKey: publicKey), clientPublicKey: publicKey, clientName: name, clientKind: kind, nonce: UUID().uuidString, scope: scope, expiresAt: bootstrap.value.expiresAt)
         request = try crypto.sign(value, domain: "enrollment-request", privateKey: privateKey)
         transport = PinnedTransport(pairing: try PairingConfiguration(host: self.endpoint.host, port: self.endpoint.port, token: String(repeating: "0", count: 32), certificateSHA256: bootstrap.value.host.certificateSHA256))

@@ -9,12 +9,18 @@ final class PinnedSessionDelegate: NSObject, URLSessionDelegate, URLSessionTaskD
     init(pairing: PairingConfiguration) { self.pairing = pairing }
     func urlSession(_ session: URLSession, didReceive challenge: URLAuthenticationChallenge, completionHandler: @escaping @Sendable (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
         guard challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
-              challenge.protectionSpace.host.lowercased() == pairing.host.lowercased(), challenge.protectionSpace.port == pairing.port,
+              canonicalHost(challenge.protectionSpace.host) == canonicalHost(pairing.host), challenge.protectionSpace.port == pairing.port,
               let trust = challenge.protectionSpace.serverTrust, let certificates = SecTrustCopyCertificateChain(trust) as? [SecCertificate],
               let certificate = certificates.first else { completionHandler(.cancelAuthenticationChallenge, nil); return }
         let digest = SHA256.hash(data: SecCertificateCopyData(certificate) as Data).map { String(format: "%02x", $0) }.joined()
         guard digest == pairing.certificateSHA256 else { completionHandler(.cancelAuthenticationChallenge, nil); return }
         completionHandler(.useCredential, URLCredential(trust: trust))
+    }
+    private func canonicalHost(_ value: String) -> String {
+        let decoded = value.removingPercentEncoding ?? value
+        let host = decoded.trimmingCharacters(in: CharacterSet(charactersIn: "[]")).lowercased()
+        // IPv6 URL brackets/zones are endpoint syntax, not a different host certificate identity.
+        return host.contains(":") ? String(host.split(separator: "%", maxSplits: 1)[0]) : host.trimmingCharacters(in: CharacterSet(charactersIn: "."))
     }
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest, completionHandler: @escaping @Sendable (URLRequest?) -> Void) {
         // Never forward the bearer credential to a redirected endpoint.

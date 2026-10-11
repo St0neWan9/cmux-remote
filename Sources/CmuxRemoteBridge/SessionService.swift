@@ -86,16 +86,16 @@ public actor SessionService {
     }
     public func eventCursor() -> Int? { eventSequence }
 
-    public func history(id: String, beforeSeq: Int?, limit: Int) async throws -> ConversationSnapshot {
-        let record = try await record(id)
+    public func history(id: String, beforeSeq: Int?, limit: Int, access: SessionAccess? = nil) async throws -> ConversationSnapshot {
+        let record = try await authorizedRecord(id, capability: .conversationRead, access: access)
         guard let path = record.transcript else { throw BridgeError("history_unavailable", "No readable conversation record is available.", status: 404) }
         let reader = reader; let agent = record.descriptor.agent
         return try await reader.history(path: path, agent: agent, beforeSeq: beforeSeq, limit: limit)
     }
 
-    public func preview(id: String) async throws -> PreviewSnapshot {
+    public func preview(id: String, access: SessionAccess? = nil) async throws -> PreviewSnapshot {
         _ = try await sessions()
-        let record = try await record(id)
+        let record = try await authorizedRecord(id, capability: .conversationRead, access: access)
         guard record.descriptor.writable, let surface = record.descriptor.surfaceID else { return PreviewSnapshot(text: nil, available: false) }
         let snapshot = try await cmux.request("surface.read_text", params: ["surface_id": .string(surface)])
         let lines = (snapshot["text"].string ?? "").components(separatedBy: .newlines)
@@ -103,11 +103,11 @@ public actor SessionService {
         return PreviewSnapshot(text: text, available: true)
     }
 
-    public func send(id: String, request: SendRequest) async throws -> MutationReceipt {
+    public func send(id: String, request: SendRequest, access: SessionAccess? = nil) async throws -> MutationReceipt {
         guard !request.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, request.text.utf8.count <= 65_536 else { throw BridgeError("invalid_input", "Enter a prompt within the size limit.") }
         let signature = "send:\(id):\(request.text)"
         if let receipt = try existing(request.operationID, signature: signature) { return receipt }
-        let session = try await verifiedBinding(id, requiresEmptyPrompt: true)
+        let session = try await verifiedBinding(id, requiresEmptyPrompt: true, access: access)
         try begin(request.operationID, signature: signature)
         do {
             _ = try await cmux.request("mobile.chat.send", params: ["session_id": .string(session.id), "text": .string(request.text)])
@@ -115,10 +115,10 @@ public actor SessionService {
         } catch { failedOperations.insert(request.operationID); throw mutationError(error) }
     }
 
-    public func interrupt(id: String, request: InterruptRequest) async throws -> MutationReceipt {
+    public func interrupt(id: String, request: InterruptRequest, access: SessionAccess? = nil) async throws -> MutationReceipt {
         let signature = "interrupt:\(id):\(request.hard)"
         if let receipt = try existing(request.operationID, signature: signature) { return receipt }
-        let session = try await verifiedBinding(id, requiresEmptyPrompt: false)
+        let session = try await verifiedBinding(id, requiresEmptyPrompt: false, access: access)
         try begin(request.operationID, signature: signature)
         do {
             _ = try await cmux.request("mobile.chat.interrupt", params: ["session_id": .string(session.id), "hard": .bool(request.hard)])
@@ -126,13 +126,14 @@ public actor SessionService {
         } catch { failedOperations.insert(request.operationID); throw mutationError(error) }
     }
 
-    public func reply(requestID: String, body: JSONValue) async throws -> MutationReceipt {
+    public func reply(requestID: String, body: JSONValue, access: SessionAccess? = nil) async throws -> MutationReceipt {
         guard let rawID = body["operation_id"].string, let operation = UUID(uuidString: rawID), let kind = body["kind"].string else { throw BridgeError("invalid_input", "A decision identity and kind are required.") }
         let serialized = String(decoding: try JSONEncoder().encode(body), as: UTF8.self)
         let signature = "reply:\(requestID):\(serialized)"
         if let receipt = try existing(operation, signature: signature) { return receipt }
         let items = try await feed()["items"].array ?? []
         guard let pending = items.first(where: { $0["request_id"].string == requestID && $0["status"].string == "pending" }), pending["kind"].string == kind else { throw BridgeError("request_expired", "This request is no longer waiting for a decision.", status: 409) }
+        try await access?.require(.feedReply, workspace: pending["workspace_id"].string)
         let method: String; var params: [String: JSONValue] = ["request_id": .string(requestID)]
         switch kind {
         case "permissionRequest":
@@ -151,20 +152,20 @@ public actor SessionService {
         catch { failedOperations.insert(operation); throw mutationError(error) }
     }
 
-    public func file(id: String, path: String) async throws -> TextFileSnapshot {
-        guard let cwd = try await record(id).descriptor.cwd else { throw BridgeError("project_unavailable", "This conversation has no project directory.", status: 404) }
+    public func file(id: String, path: String, access: SessionAccess? = nil) async throws -> TextFileSnapshot {
+        guard let cwd = try await authorizedRecord(id, capability: .projectRead, access: access).descriptor.cwd else { throw BridgeError("project_unavailable", "This conversation has no project directory.", status: 404) }
         let file = try files.resolve(root: cwd, relativePath: path)
         let data = try Data(contentsOf: file)
         guard !data.contains(0), let text = String(data: data, encoding: .utf8) else { throw BridgeError("unsupported_file", "The initial preview supports UTF-8 text files.", status: 415) }
         return TextFileSnapshot(path: path, text: text, truncated: false)
     }
-    public func changes(id: String) async throws -> JSONValue {
-        let cwd = try await project(id)
+    public func changes(id: String, access: SessionAccess? = nil) async throws -> JSONValue {
+        let cwd = try await project(id, access: access)
         let output = try await GitReader().run(directory: cwd, arguments: ["status", "--porcelain=v1", "-z", "--untracked-files=normal"])
         return .object(["entries": .array(output.split(separator: "\0").map { .string(String($0)) })])
     }
-    public func diff(id: String, path: String?) async throws -> TextFileSnapshot {
-        let cwd = try await project(id)
+    public func diff(id: String, path: String?, access: SessionAccess? = nil) async throws -> TextFileSnapshot {
+        let cwd = try await project(id, access: access)
         let listed = try await GitReader().run(directory: cwd, arguments: ["diff", "--no-ext-diff", "--no-textconv", "--name-only", "-z", "HEAD", "--"])
         let changed = listed.split(separator: "\0").map(String.init)
         let permitted = Set(changed.filter { (try? files.resolveDiffPath(root: cwd, relativePath: $0)) != nil })
@@ -184,8 +185,8 @@ public actor SessionService {
         return TextFileSnapshot(path: path ?? "", text: text, truncated: false)
     }
 
-    private func project(_ id: String) async throws -> String {
-        guard let cwd = try await record(id).descriptor.cwd, cwd != "/" else { throw BridgeError("project_unavailable", "This conversation has no project directory.", status: 404) }
+    private func project(_ id: String, access: SessionAccess?) async throws -> String {
+        guard let cwd = try await authorizedRecord(id, capability: .projectRead, access: access).descriptor.cwd, cwd != "/" else { throw BridgeError("project_unavailable", "This conversation has no project directory.", status: 404) }
         return try files.projectRoot(cwd).path
     }
     private func record(_ id: String) async throws -> Record {
@@ -193,7 +194,7 @@ public actor SessionService {
         guard let record = records[id] else { throw BridgeError("session_not_found", "This conversation is no longer available.", status: 404) }
         return record
     }
-    private func verifiedBinding(_ id: String, requiresEmptyPrompt: Bool) async throws -> SessionDescriptor {
+    private func verifiedBinding(_ id: String, requiresEmptyPrompt: Bool, access: SessionAccess?) async throws -> SessionDescriptor {
         _ = try await sessions()
         let value = try await record(id).descriptor
         guard value.writable, let surface = value.surfaceID, let workspace = value.workspaceID else { throw BridgeError("read_only", "This historical conversation has no verified running terminal.", status: 409) }
@@ -201,6 +202,15 @@ public actor SessionService {
         guard state["agent"].bool == true, state["workspace_id"].string?.lowercased() == workspace.lowercased(), state["surface_id"].string?.lowercased() == surface.lowercased() else { throw BridgeError("stale_binding", "The agent's terminal binding changed. Refresh the task.", status: 409) }
         // Interrupt does not paste over a draft and must remain available during a dialog.
         if requiresEmptyPrompt, state["blocks_typing"].bool == true { throw BridgeError("input_busy", "The desktop has a draft or an open question. Resolve it first.", status: 409) }
+        try await access?.require(.conversationControl, workspace: workspace)
+        guard records[id]?.descriptor.workspaceID == workspace, records[id]?.descriptor.surfaceID == surface, records[id]?.descriptor.writable == true else { throw BridgeError("stale_binding", "The terminal changed while authorizing the action.", status: 409) }
+        return value
+    }
+    private func authorizedRecord(_ id: String, capability: ClientCapability, access: SessionAccess?) async throws -> Record {
+        if access != nil { _ = try await sessions() }
+        let value = try await record(id)
+        try await access?.require(capability, workspace: value.descriptor.workspaceID)
+        guard records[id]?.descriptor.workspaceID == value.descriptor.workspaceID, records[id]?.descriptor.surfaceID == value.descriptor.surfaceID else { throw BridgeError("stale_binding", "The session changed while authorizing access.", status: 409) }
         return value
     }
     private func allowedTranscript(_ path: String?) -> String? {

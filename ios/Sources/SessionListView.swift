@@ -10,7 +10,7 @@ struct SessionListView: View {
                     ForEach(model.sessions) { session in
                         if let client = model.client {
                             NavigationLink {
-                                ConversationView(session: session, client: client)
+                                ConversationView(session: session, client: client, hostName: model.host)
                             } label: {
                                 VStack(alignment: .leading, spacing: 6) {
                                     Text(session.title).lineLimit(2)

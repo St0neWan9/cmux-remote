@@ -36,6 +36,10 @@ public struct BridgeRouter: Sendable {
                 guard path.first == "v1", let legacyToken, constantTimeEqual(authorization ?? "", "Bearer " + legacyToken) else { throw BridgeError("unauthorized", "Enroll this device to continue. Legacy pairing is disabled unless explicitly enabled.", status: 401) }
                 client = nil
             }
+            let access: SessionAccess?
+            if let client, let authority {
+                access = SessionAccess { capability, workspace in _ = try await authority.require(client.id, capability: capability, workspace: workspace) }
+            } else { access = nil }
             let data: Data
             if method == "GET", path == ["v1", "status"] {
                 if let client, let authority {
@@ -45,19 +49,22 @@ public struct BridgeRouter: Sendable {
             } else if method == "GET", path == ["v1", "workspaces"] {
                 try await require(client, .workspaceRead)
                 var workspaces = try await service.workspaces()
-                if let client, var object = workspaces.object {
-                    object["workspaces"] = .array((workspaces["workspaces"].array ?? []).filter { allowed($0["id"].string, client) }); workspaces = .object(object)
+                if let client, let authority {
+                    let current = try await authority.require(client.id, capability: .workspaceRead)
+                    workspaces = .object(["workspaces": .array((workspaces["workspaces"].array ?? []).filter { allowed($0["id"].string, current) })])
                 }
                 data = try encode(workspaces)
             } else if method == "GET", path == ["v1", "sessions"] {
                 try await require(client, .conversationRead)
                 let sessions = try await service.sessions()
-                data = try encode(client.map { client in sessions.filter { allowed($0.workspaceID, client) } } ?? sessions)
+                if let client, let authority { let current = try await authority.require(client.id, capability: .conversationRead); data = try encode(sessions.filter { allowed($0.workspaceID, current) }) }
+                else { data = try encode(sessions) }
             } else if method == "GET", path == ["v1", "feed"] {
                 try await require(client, .feedRead)
                 var feed = try await service.feed()
-                if let client, var object = feed.object {
-                    object["items"] = .array((feed["items"].array ?? []).filter { allowed($0["workspace_id"].string, client) }); feed = .object(object)
+                if let client, let authority {
+                    let current = try await authority.require(client.id, capability: .feedRead)
+                    feed = .object(["items": .array((feed["items"].array ?? []).filter { allowed($0["workspace_id"].string, current) })])
                 }
                 data = try encode(feed)
             } else if path.count == 4, path[0...1] == ["v1", "sessions"] {
@@ -69,15 +76,15 @@ public struct BridgeRouter: Sendable {
                     try await require(client, capability, workspace: workspace)
                 }
                 switch (method, path[3]) {
-                case ("GET", "history"): data = try encode(await service.history(id: id, beforeSeq: query["before_seq"].flatMap(Int.init), limit: query["limit"].flatMap(Int.init) ?? 100))
-                case ("GET", "preview"): data = try encode(await service.preview(id: id))
-                case ("GET", "changes"): data = try encode(await service.changes(id: id))
-                case ("GET", "diff"): data = try encode(await service.diff(id: id, path: query["path"]))
+                case ("GET", "history"): data = try encode(await service.history(id: id, beforeSeq: query["before_seq"].flatMap(Int.init), limit: query["limit"].flatMap(Int.init) ?? 100, access: access))
+                case ("GET", "preview"): data = try encode(await service.preview(id: id, access: access))
+                case ("GET", "changes"): data = try encode(await service.changes(id: id, access: access))
+                case ("GET", "diff"): data = try encode(await service.diff(id: id, path: query["path"], access: access))
                 case ("GET", "file"):
                     guard let relative = query["path"] else { throw BridgeError("invalid_input", "A relative file path is required.") }
-                    data = try encode(await service.file(id: id, path: relative))
-                case ("POST", "send"): data = try encode(await service.send(id: id, request: JSONDecoder().decode(SendRequest.self, from: body)))
-                case ("POST", "interrupt"): data = try encode(await service.interrupt(id: id, request: JSONDecoder().decode(InterruptRequest.self, from: body)))
+                    data = try encode(await service.file(id: id, path: relative, access: access))
+                case ("POST", "send"): data = try encode(await service.send(id: id, request: JSONDecoder().decode(SendRequest.self, from: body), access: access))
+                case ("POST", "interrupt"): data = try encode(await service.interrupt(id: id, request: JSONDecoder().decode(InterruptRequest.self, from: body), access: access))
                 default: throw BridgeError("not_found", "This resource is not available.", status: 404)
                 }
             } else if method == "POST", path.count == 4, path[0...1] == ["v1", "feed"], path[3] == "reply" {
@@ -86,7 +93,7 @@ public struct BridgeRouter: Sendable {
                     guard let item = items.first(where: { $0["request_id"].string == path[2] }), let workspace = item["workspace_id"].string else { throw BridgeError("scope_denied", "This decision is outside this device's approved workspaces.", status: 403) }
                     try await require(client, .feedReply, workspace: workspace)
                 }
-                data = try encode(await service.reply(requestID: path[2], body: JSONDecoder().decode(JSONValue.self, from: body)))
+                data = try encode(await service.reply(requestID: path[2], body: JSONDecoder().decode(JSONValue.self, from: body), access: access))
             } else { throw BridgeError("not_found", "This resource is not available.", status: 404) }
             return (200, data)
         } catch {

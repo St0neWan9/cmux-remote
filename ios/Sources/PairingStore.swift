@@ -6,6 +6,9 @@ import CmuxRemoteCore
 struct PairingStore {
     private let service = "com.st0newan9.cmux-remote.pairing"
     private let protected = SecureDeviceStore(service: "com.st0newan9.cmux-remote.authorized")
+    func legacyEnabled() -> Bool { protected.load(account: "explicit-legacy") == Data([1]) }
+    func enableLegacy() throws { try protected.save(Data([1]), account: "explicit-legacy") }
+    func disableLegacy() { protected.remove(account: "explicit-legacy") }
     func loadConnection() -> AuthorizedConnection? {
         guard let data = protected.load(account: "host"), let value = try? JSONDecoder().decode(AuthorizedConnection.self, from: data), (try? value.validate()) != nil else { return nil }
         return value

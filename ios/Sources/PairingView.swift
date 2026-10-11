@@ -26,8 +26,11 @@ struct PairingView: View {
                 if let enrollment = model.pendingEnrollment {
                     Section(String(localized: "pair.awaiting_owner")) {
                         Text(String(localized: "pair.owner_instructions"))
-                        Text(enrollment.request.value.requestID).font(.caption.monospaced()).textSelection(.enabled)
-                        Text(enrollment.request.value.clientID).font(.caption2.monospaced()).textSelection(.enabled)
+                        Label(String(enrollment.request.value.clientID.prefix(12)).uppercased(), systemImage: "checkmark.shield").font(.caption.monospaced()).textSelection(.enabled)
+                        DisclosureGroup(String(localized: "pair.details")) {
+                            Text(enrollment.request.value.requestID).font(.caption.monospaced()).textSelection(.enabled)
+                            Text(enrollment.request.value.clientID).font(.caption2.monospaced()).textSelection(.enabled)
+                        }
                         Button(String(localized: "pair.cancel")) { Task { await model.cancelEnrollment() } }
                     }
                 } else {
