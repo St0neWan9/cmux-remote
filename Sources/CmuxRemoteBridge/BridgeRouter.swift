@@ -1,25 +1,73 @@
 import Foundation
 import CmuxRemoteCore
 
-/// A fixed resource router; never forwards caller-selected RPC methods.
+/// Fixed scoped resources and public enrollment routes. Owner approval is never exposed over HTTPS.
 public struct BridgeRouter: Sendable {
     private let service: SessionService
-    private let token: String
-    public init(service: SessionService, token: String) { self.service = service; self.token = token }
+    private let legacyToken: String?
+    private let authority: ConnectionAuthority?
+    /// An explicitly selected legacy router, retained for migration and fixtures.
+    public init(service: SessionService, token: String) { self.service = service; legacyToken = token; authority = nil }
+    public init(service: SessionService, authority: ConnectionAuthority, legacyToken: String? = nil) {
+        self.service = service; self.authority = authority; self.legacyToken = legacyToken
+    }
     public func respond(method: String, uri: String, authorization: String?, body: Data) async -> (Int, Data) {
         do {
-            guard constantTimeEqual(authorization ?? "", "Bearer " + token) else { throw BridgeError("unauthorized", "Pair this device to continue.", status: 401) }
             guard body.count <= 1_048_576 else { throw BridgeError("too_large", "The request is too large.", status: 413) }
             guard let components = URLComponents(string: uri), components.scheme == nil, components.host == nil else { throw BridgeError("invalid_route", "Invalid resource path.") }
-            let path = components.path.split(separator: "/").map(String.init)
+            var path = components.path.split(separator: "/").map(String.init)
             let query = Dictionary((components.queryItems ?? []).map { ($0.name, $0.value ?? "") }, uniquingKeysWith: { _, last in last })
+            let client: EnrolledClient?
+            if path.first == "v2", let authority {
+                if method == "GET", path == ["v2", "identity"] { return (200, try encode(await authority.announcement())) }
+                if method == "GET", path == ["v2", "enrollment", "bootstrap"] { return (200, try encode(await authority.bootstrap())) }
+                if method == "POST", path.count == 3, path[1] == "enrollment" {
+                    let request = try JSONDecoder().decode(SignedValue<EnrollmentRequest>.self, from: body)
+                    switch path[2] {
+                    case "request": return (200, try encode(await authority.submit(request)))
+                    case "status": return (200, try encode(await authority.status(request)))
+                    case "cancel": return (200, try encode(await authority.cancel(request)))
+                    default: throw BridgeError("not_found", "This enrollment resource is unavailable.", status: 404)
+                    }
+                }
+                client = try await authority.authorize(header: authorization, method: method, uri: uri, body: body)
+                path[0] = "v1"
+            } else {
+                guard path.first == "v1", let legacyToken, constantTimeEqual(authorization ?? "", "Bearer " + legacyToken) else { throw BridgeError("unauthorized", "Enroll this device to continue. Legacy pairing is disabled unless explicitly enabled.", status: 401) }
+                client = nil
+            }
             let data: Data
-            if method == "GET", path == ["v1", "status"] { data = try encode(await service.status()) }
-            else if method == "GET", path == ["v1", "workspaces"] { data = try encode(await service.workspaces()) }
-            else if method == "GET", path == ["v1", "sessions"] { data = try encode(await service.sessions()) }
-            else if method == "GET", path == ["v1", "feed"] { data = try encode(await service.feed()) }
-            else if path.count == 4, path[0...1] == ["v1", "sessions"] {
+            if method == "GET", path == ["v1", "status"] {
+                if let client, let authority {
+                    let approved = try await authority.require(client.id, capability: .workspaceRead)
+                    data = try encode(JSONValue.object(["protocol": .string("cmux-remote/2"), "host_id": .string(authority.host.id), "capabilities": .array(approved.scope.capabilities.map { .string($0.rawValue) })]))
+                } else { data = try encode(await service.status()) }
+            } else if method == "GET", path == ["v1", "workspaces"] {
+                try await require(client, .workspaceRead)
+                var workspaces = try await service.workspaces()
+                if let client, var object = workspaces.object {
+                    object["workspaces"] = .array((workspaces["workspaces"].array ?? []).filter { allowed($0["id"].string, client) }); workspaces = .object(object)
+                }
+                data = try encode(workspaces)
+            } else if method == "GET", path == ["v1", "sessions"] {
+                try await require(client, .conversationRead)
+                let sessions = try await service.sessions()
+                data = try encode(client.map { client in sessions.filter { allowed($0.workspaceID, client) } } ?? sessions)
+            } else if method == "GET", path == ["v1", "feed"] {
+                try await require(client, .feedRead)
+                var feed = try await service.feed()
+                if let client, var object = feed.object {
+                    object["items"] = .array((feed["items"].array ?? []).filter { allowed($0["workspace_id"].string, client) }); feed = .object(object)
+                }
+                data = try encode(feed)
+            } else if path.count == 4, path[0...1] == ["v1", "sessions"] {
                 let id = path[2]
+                let capability: ClientCapability = method == "POST" ? .conversationControl : (["changes", "diff", "file"].contains(path[3]) ? .projectRead : .conversationRead)
+                if let client {
+                    let sessions = try await service.sessions()
+                    guard let session = sessions.first(where: { $0.id == id }), let workspace = session.workspaceID else { throw BridgeError("scope_denied", "This session is outside this device's approved workspaces.", status: 403) }
+                    try await require(client, capability, workspace: workspace)
+                }
                 switch (method, path[3]) {
                 case ("GET", "history"): data = try encode(await service.history(id: id, beforeSeq: query["before_seq"].flatMap(Int.init), limit: query["limit"].flatMap(Int.init) ?? 100))
                 case ("GET", "preview"): data = try encode(await service.preview(id: id))
@@ -33,6 +81,11 @@ public struct BridgeRouter: Sendable {
                 default: throw BridgeError("not_found", "This resource is not available.", status: 404)
                 }
             } else if method == "POST", path.count == 4, path[0...1] == ["v1", "feed"], path[3] == "reply" {
+                if let client {
+                    let items = try await service.feed()["items"].array ?? []
+                    guard let item = items.first(where: { $0["request_id"].string == path[2] }), let workspace = item["workspace_id"].string else { throw BridgeError("scope_denied", "This decision is outside this device's approved workspaces.", status: 403) }
+                    try await require(client, .feedReply, workspace: workspace)
+                }
                 data = try encode(await service.reply(requestID: path[2], body: JSONDecoder().decode(JSONValue.self, from: body)))
             } else { throw BridgeError("not_found", "This resource is not available.", status: 404) }
             return (200, data)
@@ -41,14 +94,13 @@ public struct BridgeRouter: Sendable {
             return (failure.status, (try? encode(["error": failure])) ?? Data())
         }
     }
-    private func encode<T: Encodable>(_ value: T) throws -> Data {
-        let encoder = JSONEncoder(); encoder.dateEncodingStrategy = .iso8601
-        return try encoder.encode(value)
+    private func allowed(_ workspace: String?, _ client: EnrolledClient) -> Bool { workspace.map { client.scope.workspaces.contains($0.lowercased()) } ?? false }
+    private func require(_ client: EnrolledClient?, _ capability: ClientCapability, workspace: String? = nil) async throws {
+        if let client, let authority { _ = try await authority.require(client.id, capability: capability, workspace: workspace) }
     }
+    private func encode<T: Encodable>(_ value: T) throws -> Data { let encoder = JSONEncoder(); encoder.dateEncodingStrategy = .iso8601; return try encoder.encode(value) }
     private func constantTimeEqual(_ a: String, _ b: String) -> Bool {
-        let left = Array(a.utf8); let right = Array(b.utf8)
-        var difference = left.count ^ right.count
-        for index in 0..<max(left.count, right.count) { difference |= Int((index < left.count ? left[index] : 0) ^ (index < right.count ? right[index] : 0)) }
-        return difference == 0
+        let left = Array(a.utf8); let right = Array(b.utf8); var difference = left.count ^ right.count
+        for index in 0..<max(left.count, right.count) { difference |= Int((index < left.count ? left[index] : 0) ^ (index < right.count ? right[index] : 0)) }; return difference == 0
     }
 }

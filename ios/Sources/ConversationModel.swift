@@ -8,6 +8,7 @@ import CmuxAgentChat
 final class ConversationModel {
     let session: SessionDescriptor
     let client: RemoteClient
+    var canSend: Bool { session.writable && client.canControlConversations }
     var messages: [ChatMessage] = []
     var preview: String?
     var error: String?

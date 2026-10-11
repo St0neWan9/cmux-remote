@@ -21,9 +21,9 @@ struct FeedView: View {
                         HStack {
                             Button(String(localized: "feed.allow")) { Task { await reply(item, mode: kind == "permissionRequest" ? "once" : "manual") } }
                             Button(String(localized: "feed.deny"), role: .destructive) { Task { await reply(item, mode: "deny") } }
-                        }.buttonStyle(.bordered).disabled(busy)
+                        }.buttonStyle(.bordered).disabled(busy || !client.canReplyFeed)
                     } else if kind == "question" {
-                        FeedQuestionView(questions: item["questions"].array ?? [], busy: busy) { answers in Task { await reply(item, selections: answers) } }
+                        FeedQuestionView(questions: item["questions"].array ?? [], busy: busy || !client.canReplyFeed) { answers in Task { await reply(item, selections: answers) } }
                     }
                 }
             }

@@ -5,6 +5,13 @@ import CmuxRemoteCore
 /// Pairing credentials remain in device-only Keychain storage.
 struct PairingStore {
     private let service = "com.st0newan9.cmux-remote.pairing"
+    private let protected = SecureDeviceStore(service: "com.st0newan9.cmux-remote.authorized")
+    func loadConnection() -> AuthorizedConnection? {
+        guard let data = protected.load(account: "host"), let value = try? JSONDecoder().decode(AuthorizedConnection.self, from: data), (try? value.validate()) != nil else { return nil }
+        return value
+    }
+    func saveConnection(_ value: AuthorizedConnection) throws { try value.validate(); try protected.save(JSONEncoder().encode(value), account: "host") }
+    func removeConnection() { protected.remove(account: "host") }
     func load() -> PairingConfiguration? {
         #if targetEnvironment(simulator)
         // Simulator verification has no provisioning profile. Keep fixture state inside its sandbox.

@@ -50,6 +50,7 @@ for config in ('Debug', 'Release'):
         GENERATE_INFOPLIST_FILE = YES; INFOPLIST_KEY_CFBundleDisplayName = "cmux remote";
         CREATE_INFOPLIST_SECTION_IN_BINARY = YES;
         INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Connect to your paired cmux Bridge on your local network.";
+        INFOPLIST_KEY_NSBonjourServices = "_cmux-remote._tcp";
         INFOPLIST_KEY_NSCameraUsageDescription = "Scan your Mac Bridge pairing code.";
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
         INFOPLIST_KEY_UILaunchScreen_Generation = YES;
