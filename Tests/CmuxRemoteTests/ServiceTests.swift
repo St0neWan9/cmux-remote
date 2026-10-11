@@ -5,17 +5,22 @@ import CmuxRemoteBridge
 
 private actor FakeCmux: CmuxControlling {
     var sendCount = 0
+    var interruptCount = 0
     var screenReadCount = 0
     var ended = false
     func markEnded() { ended = true }
     let validBinding: Bool
     let failSend: Bool
-    init(validBinding: Bool = true, failSend: Bool = false) { self.validBinding = validBinding; self.failSend = failSend }
+    let blocksTyping: Bool
+    init(validBinding: Bool = true, failSend: Bool = false, blocksTyping: Bool = false) {
+        self.validBinding = validBinding; self.failSend = failSend; self.blocksTyping = blocksTyping
+    }
     func request(_ method: String, params: [String: JSONValue]) async throws -> JSONValue {
         switch method {
         case "vault.sessions": return .object(["sessions": .array([.object(["session_id": .string("session"), "agent": .string("claude"), "title": .string("Task")])])])
         case "chat.sessions.dump": return .object(["sessions": .array([.object(["session_id": .string("session"), "agent": .string("claude"), "workspace_id": .string("workspace"), "surface_id": .string("surface"), "state": .string(ended ? "ended" : "idle")])])])
-        case "surface.input_state": return .object(["agent": .bool(validBinding), "workspace_id": .string("workspace"), "surface_id": .string("surface"), "blocks_typing": .bool(false)])
+        case "surface.input_state": return .object(["agent": .bool(validBinding), "workspace_id": .string("workspace"), "surface_id": .string("surface"), "blocks_typing": .bool(blocksTyping)])
+        case "mobile.chat.interrupt": interruptCount += 1; return .object(["interrupted": .bool(true)])
         case "mobile.chat.send":
             sendCount += 1
             if failSend { throw BridgeError("outcome_unknown", "Response lost", status: 504) }
@@ -27,6 +32,22 @@ private actor FakeCmux: CmuxControlling {
 }
 
 @Suite struct ServiceTests {
+    @Test func interruptCanStopAnAgentWithBlockedTyping() async throws {
+        let cmux = FakeCmux(blocksTyping: true)
+        let service = SessionService(cmux: cmux, home: URL(fileURLWithPath: "/example/home"), transcriptRoots: [])
+        do { _ = try await service.send(id: "session", request: SendRequest(text: "Test")); Issue.record("Expected draft protection") }
+        catch { #expect((error as? BridgeError)?.code == "input_busy") }
+        _ = try await service.interrupt(id: "session", request: InterruptRequest())
+        #expect(await cmux.interruptCount == 1)
+        #expect(await cmux.sendCount == 0)
+    }
+    @Test func staleBindingNeverInterruptsAnotherAgent() async {
+        let cmux = FakeCmux(validBinding: false, blocksTyping: true)
+        let service = SessionService(cmux: cmux, home: URL(fileURLWithPath: "/example/home"), transcriptRoots: [])
+        do { _ = try await service.interrupt(id: "session", request: InterruptRequest()); Issue.record("Expected stale binding rejection") }
+        catch { #expect((error as? BridgeError)?.code == "stale_binding") }
+        #expect(await cmux.interruptCount == 0)
+    }
     @Test func successfulSendIsNotRepeatedForSameOperation() async throws {
         let cmux = FakeCmux(); let home = URL(fileURLWithPath: "/example/home")
         let service = SessionService(cmux: cmux, home: home, transcriptRoots: [])
