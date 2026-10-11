@@ -35,6 +35,7 @@ public actor SessionService {
     public func sessions() async throws -> [SessionDescriptor] {
         let vault = try await cmux.request("vault.sessions", params: ["limit": .number(200)])
         let dump = try? await cmux.request("chat.sessions.dump", params: [:])
+        let authoritativeIDs = Set((dump?["sessions"].array ?? []).compactMap { $0["session_id"].string })
         var discovered: [String: Record] = [:]
         for item in vault["sessions"].array ?? [] {
             guard let id = item["session_id"].string, let agent = item["agent"].string,
@@ -54,6 +55,8 @@ public actor SessionService {
         records = discovered
         for (id, event) in liveBindings {
             guard records[id] != nil else { continue }
+            // Fresh cmux process-exit state outranks an older retained hook binding.
+            guard !authoritativeIDs.contains(id) || event["state"].string == "ended" else { continue }
             records[id]?.descriptor.workspaceID = event["workspace_id"].string
             records[id]?.descriptor.surfaceID = event["surface_id"].string
             records[id]?.descriptor.state = event["state"].string ?? "unknown"
@@ -158,10 +161,10 @@ public actor SessionService {
     public func diff(id: String, path: String?) async throws -> TextFileSnapshot {
         let cwd = try await project(id)
         let allowed: [String]
-        if let path { _ = try files.resolve(root: cwd, relativePath: path); allowed = [path] }
+        if let path { _ = try files.resolveDiffPath(root: cwd, relativePath: path); allowed = [path] }
         else {
             let paths = try await GitReader().run(directory: cwd, arguments: ["diff", "--no-ext-diff", "--no-textconv", "--name-only", "-z", "HEAD", "--"])
-            allowed = paths.split(separator: "\0").map(String.init).filter { (try? files.resolve(root: cwd, relativePath: $0)) != nil }
+            allowed = paths.split(separator: "\0").map(String.init).filter { (try? files.resolveDiffPath(root: cwd, relativePath: $0)) != nil }
         }
         guard !allowed.isEmpty else { return TextFileSnapshot(path: path ?? "", text: "", truncated: false) }
         let arguments = ["diff", "--no-ext-diff", "--no-textconv", "HEAD", "--"] + allowed
