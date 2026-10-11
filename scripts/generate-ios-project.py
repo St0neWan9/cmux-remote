@@ -19,9 +19,9 @@ def add(name, value):
 
 source_refs, source_builds = [], []
 for path in sorted((ios / 'Sources').glob('*.swift')):
-    ref = add(str(path), f'isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Sources/{path.name}"; sourceTree = "<group>";')
+    ref = add(str(path.relative_to(ios)), f'isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Sources/{path.name}"; sourceTree = "<group>";')
     source_refs.append(ref)
-    source_builds.append(add('build:' + str(path), f'isa = PBXBuildFile; fileRef = {ref};'))
+    source_builds.append(add('build:' + str(path.relative_to(ios)), f'isa = PBXBuildFile; fileRef = {ref};'))
 
 locale_refs = []
 for locale in ('en', 'zh-Hans'):
