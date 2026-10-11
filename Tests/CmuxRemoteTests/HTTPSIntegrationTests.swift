@@ -5,6 +5,31 @@ import CmuxRemoteBridge
 import CmuxRemoteClient
 
 @Suite struct HTTPSIntegrationTests {
+    @Test func bridgeCanRestartImmediatelyOnItsPairedPort() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let state = BridgeState(directory: directory); try state.initialize()
+        let service = SessionService(cmux: DemoCmux(transcript: directory.appendingPathComponent("conversation.jsonl").path, project: directory.path), home: directory, transcriptRoots: [directory])
+        let router = BridgeRouter(service: service, token: try state.token())
+        var pairedPort = 0
+        for _ in 0..<2 {
+            let listening = AsyncStream<Int>.makeStream()
+            let requestedPort = pairedPort
+            let server = Task {
+                defer { listening.continuation.finish() }
+                try await HTTPServer().run(host: "127.0.0.1", port: requestedPort, certificate: state.certificate, key: state.key, router: router, onListening: { listening.continuation.yield($0) })
+            }
+            defer { server.cancel() }
+            var iterator = listening.stream.makeAsyncIterator()
+            guard let port = await iterator.next() else { try await server.value; Issue.record("Listener did not start"); return }
+            pairedPort = port
+            let client = RemoteClient(pairing: try state.pairing(host: "127.0.0.1", port: port))
+            defer { client.close() }
+            _ = try await client.get("/v1/status", as: JSONValue.self)
+            // Close the server while a keep-alive client is still connected.
+            server.cancel(); try await server.value
+        }
+    }
     @Test func pinnedClientRunsHistoryAndSendWithoutAProviderConnection() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
