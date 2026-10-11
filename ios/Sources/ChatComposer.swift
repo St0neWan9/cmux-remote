@@ -11,6 +11,8 @@ struct ChatComposer: View {
     let showProject: () -> Void
     let showFeed: () -> Void
     @FocusState private var focused: Bool
+    // Match visible text to the symbol centers, rather than the text field's line box.
+    @ScaledMetric(relativeTo: .body) private var textCenterOffset: CGFloat = 1.5
     private var hasDraft: Bool { !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     var body: some View {
         HStack(alignment: .center, spacing: 10) {
@@ -21,6 +23,7 @@ struct ChatComposer: View {
                 .tint(.primary).accessibilityLabel(String(localized: "chat.actions")).accessibilityIdentifier("chat.actions")
             TextField(String(localized: "chat.follow_up"), text: $draft, axis: .vertical)
                 .font(.body).lineLimit(1...6).focused($focused).padding(.vertical, 11)
+                .offset(y: textCenterOffset)
                 .accessibilityIdentifier("chat.composer")
             if working && !hasDraft {
                 Button(action: stop) { Image(systemName: "stop.fill").font(.system(size: 15, weight: .semibold)).foregroundStyle(.white).frame(width: 40, height: 40).background(Color.accentColor, in: Circle()) }
