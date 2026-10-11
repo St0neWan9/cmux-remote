@@ -11,4 +11,8 @@ import CmuxRemoteCore
     func unrelatedOrMalformedCodesNeverStartPairing(_ text: String) {
         #expect(throws: BridgeError.self) { try PairingLinkCodec().decode(text) }
     }
+    @Test(arguments: ["[", ":", "%", "bad host", "host:7740", "host\nname"])
+    func malformedEndpointsAreRejectedBeforeNetworking(_ host: String) {
+        #expect(throws: BridgeError.self) { try PairingConfiguration(host: host, port: 7740, token: String(repeating: "a", count: 64), certificateSHA256: String(repeating: "b", count: 64)) }
+    }
 }

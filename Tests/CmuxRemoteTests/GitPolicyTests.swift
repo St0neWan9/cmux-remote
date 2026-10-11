@@ -19,6 +19,26 @@ import CmuxRemoteBridge
         let diff = try await service.diff(id: "demo-session", path: nil)
         #expect(!diff.text.contains("fixture-private-value"))
         #expect(diff.text.contains("public-value"))
+        try FileManager.default.removeItem(at: publicFile)
+        let deletion = try await service.diff(id: "demo-session", path: nil)
+        #expect(deletion.text.contains("deleted file mode"))
+        #expect(!deletion.text.contains("fixture-private-value"))
+    }
+    @Test func literalPathspecCannotExpandIntoCredentialFiles() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try git(directory, ["init", "-q"])
+        let pattern = directory.appendingPathComponent("*"); let secret = directory.appendingPathComponent(".env")
+        try Data("original".utf8).write(to: pattern); try Data("original".utf8).write(to: secret)
+        try git(directory, ["add", "--", "."])
+        try git(directory, ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "--no-gpg-sign", "-qm", "baseline"])
+        try Data("public-star-file".utf8).write(to: pattern); try Data("fixture-private-value".utf8).write(to: secret)
+        let cmux = DemoCmux(transcript: directory.appendingPathComponent("unused.jsonl").path, project: directory.path)
+        let service = SessionService(cmux: cmux, home: URL(fileURLWithPath: "/unrelated/home"), transcriptRoots: [directory])
+        let diff = try await service.diff(id: "demo-session", path: "*")
+        #expect(diff.text.contains("public-star-file"))
+        #expect(!diff.text.contains("fixture-private-value"))
     }
     private func git(_ directory: URL, _ arguments: [String]) throws {
         let process = Process(); process.executableURL = URL(fileURLWithPath: "/usr/bin/git"); process.arguments = ["-C", directory.path] + arguments
