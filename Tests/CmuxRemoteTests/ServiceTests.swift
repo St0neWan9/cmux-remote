@@ -5,6 +5,7 @@ import CmuxRemoteBridge
 
 private actor FakeCmux: CmuxControlling {
     var sendCount = 0
+    var screenReadCount = 0
     let validBinding: Bool
     let failSend: Bool
     init(validBinding: Bool = true, failSend: Bool = false) { self.validBinding = validBinding; self.failSend = failSend }
@@ -17,6 +18,7 @@ private actor FakeCmux: CmuxControlling {
             sendCount += 1
             if failSend { throw BridgeError("outcome_unknown", "Response lost", status: 504) }
             return .object(["submitted": .bool(true)])
+        case "surface.read_text": screenReadCount += 1; return .object(["text": .string("Other agent output")])
         default: return .object([:])
         }
     }
@@ -52,5 +54,13 @@ private actor FakeCmux: CmuxControlling {
         let result = await router.respond(method: "POST", uri: "/v1/sessions/session/send", authorization: nil, body: try JSONEncoder().encode(SendRequest(text: "Test")))
         #expect(result.0 == 401)
         #expect(await cmux.sendCount == 0)
+    }
+    @Test func endedSessionNeverReadsAReusedTerminalPreview() async throws {
+        let cmux = FakeCmux(); let service = SessionService(cmux: cmux, home: URL(fileURLWithPath: "/example/home"), transcriptRoots: [])
+        _ = try await service.sessions()
+        await service.acceptEvent(.object(["type": .string("event"), "category": .string("agent"), "workspace_id": .string("workspace"), "surface_id": .string("surface"), "payload": .object(["session_id": .string("session"), "hook_event_name": .string("SessionEnd")])]))
+        let preview = try await service.preview(id: "session")
+        #expect(!preview.available)
+        #expect(await cmux.screenReadCount == 0)
     }
 }
