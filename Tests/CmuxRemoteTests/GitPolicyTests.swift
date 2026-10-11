@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 import CmuxRemoteBridge
+import CmuxRemoteCore
 
 @Suite struct GitPolicyTests {
     @Test func wholeDiffCannotExportFilesDeniedByFilePreviewPolicy() async throws {
