@@ -24,7 +24,7 @@ Initial pairing uses a single device credential encoded in a versioned QR link w
 
 ## Session discovery
 
-Use `vault.sessions` for known history and file locations. Reconcile the optional local `chat.sessions.dump` diagnostic snapshot and authoritative `agent` hook events for session/workspace/surface bindings. A missing/unsupported diagnostic method is normal. Never infer writable identity solely from cwd, title or chronological proximity. Ended/unbound sessions remain readable but cannot receive input. cmux restart/rebind invalidates cached bindings; actions verify that the exact workspace/surface still exists and runs an agent.
+List only sessions with cmux provenance: an explicit workspace/surface binding from the local `chat.sessions.dump` registry or an authoritative `agent` hook event. `vault.sessions` also contains conversations started outside cmux; use it only to enrich already identified cmux sessions with titles, history and file locations. Matching cwd, title or chronological proximity does not establish provenance. If the diagnostic method is unavailable and no hook binding was observed, show an empty list rather than global history. Known cmux sessions that ended remain read-only; the app does not launch or resume historical agents. cmux restart/rebind invalidates cached bindings; actions verify that the exact workspace/surface still exists and runs an agent.
 
 The registry excludes unsupported providers and files outside configured transcript roots. The first list is bounded by the underlying Vault API; the response reports this discovery limit. Reading a historical session never creates or resumes an agent.
 

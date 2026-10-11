@@ -6,7 +6,7 @@ HTTPS with `Authorization: Bearer <pairing credential>`. Errors: `{"error":{"cod
 | --- | --- | --- |
 | GET /v1/status | system.ping / system.capabilities | host/protocol/capability status |
 | GET /v1/workspaces | workspace.list | cmux workspaces |
-| GET /v1/sessions | vault.sessions + optional chat.sessions.dump | supported session descriptors, binding availability |
+| GET /v1/sessions | cmux-bound chat.sessions.dump / agent hooks, enriched by vault.sessions | cmux sessions only; external history excluded; known ended sessions read-only |
 | GET /v1/sessions/:id/history?before_seq=&limit= | local transcript, pinned upstream parser | messages, has_more, generation, clipped |
 | GET /v1/sessions/:id/preview | surface.read_text + prose extractor | replaceable preview, availability |
 | POST /v1/sessions/:id/send | mobile.chat.send or explicit terminal.paste | text and operation_id |
