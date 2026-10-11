@@ -102,7 +102,7 @@ public actor SessionService {
         guard !request.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, request.text.utf8.count <= 65_536 else { throw BridgeError("invalid_input", "Enter a prompt within the size limit.") }
         let signature = "send:\(id):\(request.text)"
         if let receipt = try existing(request.operationID, signature: signature) { return receipt }
-        let session = try await verifiedBinding(id)
+        let session = try await verifiedBinding(id, requiresEmptyPrompt: true)
         try begin(request.operationID, signature: signature)
         do {
             _ = try await cmux.request("mobile.chat.send", params: ["session_id": .string(session.id), "text": .string(request.text)])
@@ -113,7 +113,7 @@ public actor SessionService {
     public func interrupt(id: String, request: InterruptRequest) async throws -> MutationReceipt {
         let signature = "interrupt:\(id):\(request.hard)"
         if let receipt = try existing(request.operationID, signature: signature) { return receipt }
-        let session = try await verifiedBinding(id)
+        let session = try await verifiedBinding(id, requiresEmptyPrompt: false)
         try begin(request.operationID, signature: signature)
         do {
             _ = try await cmux.request("mobile.chat.interrupt", params: ["session_id": .string(session.id), "hard": .bool(request.hard)])
@@ -188,13 +188,14 @@ public actor SessionService {
         guard let record = records[id] else { throw BridgeError("session_not_found", "This conversation is no longer available.", status: 404) }
         return record
     }
-    private func verifiedBinding(_ id: String) async throws -> SessionDescriptor {
+    private func verifiedBinding(_ id: String, requiresEmptyPrompt: Bool) async throws -> SessionDescriptor {
         _ = try await sessions()
         let value = try await record(id).descriptor
         guard value.writable, let surface = value.surfaceID, let workspace = value.workspaceID else { throw BridgeError("read_only", "This historical conversation has no verified running terminal.", status: 409) }
         let state = try await cmux.request("surface.input_state", params: ["workspace_id": .string(workspace), "surface_id": .string(surface)])
         guard state["agent"].bool == true, state["workspace_id"].string?.lowercased() == workspace.lowercased(), state["surface_id"].string?.lowercased() == surface.lowercased() else { throw BridgeError("stale_binding", "The agent's terminal binding changed. Refresh the task.", status: 409) }
-        guard state["blocks_typing"].bool != true else { throw BridgeError("input_busy", "The desktop has a draft or an open question. Resolve it first.", status: 409) }
+        // Interrupt does not paste over a draft and must remain available during a dialog.
+        if requiresEmptyPrompt, state["blocks_typing"].bool == true { throw BridgeError("input_busy", "The desktop has a draft or an open question. Resolve it first.", status: 409) }
         return value
     }
     private func allowedTranscript(_ path: String?) -> String? {

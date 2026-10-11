@@ -14,6 +14,7 @@ public struct HTTPServer: Sendable {
         do {
             let server = try await ServerBootstrap(group: group)
                 .serverChannelOption(ChannelOptions.backlog, value: 128)
+                .serverChannelOption(ChannelOptions.socketOption(.so_reuseaddr), value: 1)
                 .childChannelInitializer { channel in
                     do {
                         // The bootstrap invokes this closure on the channel event loop.
