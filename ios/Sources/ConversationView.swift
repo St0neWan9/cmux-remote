@@ -48,6 +48,7 @@ struct ConversationView: View {
                         }
                 }.padding(.horizontal, 18).padding(.top, 12).padding(.bottom, 18)
             }
+            .clipped()
             .coordinateSpace(name: "chatTimeline")
             .onPreferenceChange(TimelineBottomPreferenceKey.self) { bottom in
                 latestVisible = bottom > 0 && bottom <= viewport.size.height + 32
@@ -61,7 +62,7 @@ struct ConversationView: View {
                 if !atLatest {
                     Button { atLatest = true; withAnimation { proxy.scrollTo("latest", anchor: .bottom) } } label: {
                         Image(systemName: "arrow.down").font(.system(size: 20, weight: .medium)).frame(width: 42, height: 42)
-                            .background(.regularMaterial, in: Circle()).shadow(color: .black.opacity(0.1), radius: 10, y: 4)
+                            .background(Color.white, in: Circle()).shadow(color: .black.opacity(0.1), radius: 10, y: 4)
                     }.buttonStyle(.plain).accessibilityLabel(String(localized: "chat.latest")).accessibilityIdentifier("chat.latest").padding(.bottom, 10)
                 }
             }
@@ -74,7 +75,7 @@ struct ConversationView: View {
             .onChange(of: model.jumpToLatest) { _, _ in atLatest = true; withAnimation { proxy.scrollTo("latest", anchor: .bottom) } }
         }
         }
-        .background(Color(uiColor: .systemBackground))
+        .background(Color.white.ignoresSafeArea())
         .toolbar(.hidden, for: .navigationBar)
         .safeAreaInset(edge: .top, spacing: 0) { header }
         .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -89,7 +90,6 @@ struct ConversationView: View {
                              send: { Task { await model.send() } }, stop: { Task { await model.interrupt() } },
                              showProject: { showProject = true }, showFeed: { showFeed = true })
             }.padding(.horizontal, 14).padding(.top, 14).padding(.bottom, 10)
-                .background(.regularMaterial)
         }
         .navigationDestination(isPresented: $showProject) { ProjectView(session: model.session, client: model.client).toolbar(.visible, for: .navigationBar) }
         .navigationDestination(isPresented: $showFeed) { FeedView(client: model.client).toolbar(.visible, for: .navigationBar) }
@@ -98,10 +98,11 @@ struct ConversationView: View {
             let ticker = RefreshTicker(); defer { ticker.stop() }
             for await _ in ticker.start() { guard !Task.isCancelled else { break }; await model.refresh() }
         }
+        .environment(\.colorScheme, .light)
     }
     private var header: some View {
         HStack(spacing: 12) {
-            Button { dismiss() } label: { Image(systemName: "chevron.left").font(.system(size: 20, weight: .medium)).frame(width: 44, height: 44).background(.regularMaterial, in: Circle()) }
+            Button { dismiss() } label: { Image(systemName: "chevron.left").font(.system(size: 20, weight: .medium)).frame(width: 44, height: 44).background(Color.white, in: Circle()).shadow(color: .black.opacity(0.07), radius: 10, y: 3) }
                 .buttonStyle(.plain).accessibilityLabel(String(localized: "chat.back")).accessibilityIdentifier("chat.back")
             VStack(alignment: .leading, spacing: 3) {
                 Text(model.session.title).font(.subheadline.weight(.semibold)).lineLimit(1)
@@ -112,8 +113,8 @@ struct ConversationView: View {
                 Button { showFeed = true } label: { Label(String(localized: "feed.title"), systemImage: "checkmark.bubble") }
                 Button { Task { await model.refresh() } } label: { Label(String(localized: "chat.refresh"), systemImage: "arrow.clockwise") }
                 if model.canSend { Button { Task { await model.interrupt() } } label: { Label(String(localized: "chat.stop"), systemImage: "stop.circle") } }
-            } label: { Image(systemName: "ellipsis").font(.system(size: 22, weight: .medium)).frame(width: 48, height: 44).background(.regularMaterial, in: Capsule()) }
+            } label: { Image(systemName: "ellipsis").font(.system(size: 22, weight: .medium)).frame(width: 48, height: 44).background(Color.white, in: Capsule()).shadow(color: .black.opacity(0.07), radius: 10, y: 3) }
                 .tint(.primary).accessibilityLabel(String(localized: "chat.more")).accessibilityIdentifier("chat.more")
-        }.padding(.horizontal, 14).padding(.vertical, 8).background(.regularMaterial)
+        }.padding(.horizontal, 14).padding(.vertical, 8)
     }
 }

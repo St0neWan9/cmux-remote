@@ -13,7 +13,7 @@ struct ChatComposer: View {
     @FocusState private var focused: Bool
     private var hasDraft: Bool { !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     var body: some View {
-        HStack(alignment: .bottom, spacing: 10) {
+        HStack(alignment: .center, spacing: 10) {
             Menu {
                 Button(action: showProject) { Label(String(localized: "project.title"), systemImage: "doc.text.magnifyingglass") }
                 Button(action: showFeed) { Label(String(localized: "feed.title"), systemImage: "checkmark.bubble") }
@@ -32,7 +32,7 @@ struct ChatComposer: View {
                 }.buttonStyle(.plain).accessibilityLabel(String(localized: "chat.send")).accessibilityIdentifier("chat.send").disabled(busy || !canSend || !hasDraft)
             }
         }.padding(.horizontal, 10).padding(.vertical, 7)
-            .background(Color(uiColor: .systemBackground), in: RoundedRectangle(cornerRadius: 30))
+            .background(Color.white, in: RoundedRectangle(cornerRadius: 30))
             .overlay(RoundedRectangle(cornerRadius: 30).stroke(Color.primary.opacity(0.055), lineWidth: 0.5))
             .shadow(color: .black.opacity(0.075), radius: 18, y: 5)
     }
