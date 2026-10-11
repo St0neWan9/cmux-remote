@@ -12,6 +12,11 @@ struct MessageRow: View {
             case .toolUse(let value): DisclosureGroup(value.summary) { Text(value.output ?? value.inputDetail ?? "").font(.system(.caption, design: .monospaced)).textSelection(.enabled) }
             case .terminal(let value): DisclosureGroup(value.command) { Text(value.output ?? "").font(.system(.caption, design: .monospaced)).textSelection(.enabled) }
             case .fileEdit(let value): DisclosureGroup(value.filePath) { Text(value.unifiedDiff ?? value.operation.rawValue).font(.system(.caption, design: .monospaced)).textSelection(.enabled) }
+            case .question(let value):
+                VStack(alignment: .leading) { Text(value.prompt); ForEach(value.options) { Text($0.label) } }
+            case .permissionRequest(let value):
+                VStack(alignment: .leading) { Text(value.title); Text(value.subject).font(.system(.caption, design: .monospaced)) }
+            case .status(let value): Text(value.detail ?? value.event.rawValue).font(.caption).foregroundStyle(.secondary)
             default: Text(String(localized: "chat.other")).font(.footnote).foregroundStyle(.secondary)
             }
         }.padding(.vertical, 6)

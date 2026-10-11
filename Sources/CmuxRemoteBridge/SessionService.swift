@@ -72,6 +72,9 @@ public actor SessionService {
         let state = name == "SessionEnd" ? "ended" : (name == "Stop" ? "idle" : "working")
         if liveBindings.count >= 512 { liveBindings.removeAll() }
         liveBindings[id] = .object(["workspace_id": .string(workspace), "surface_id": .string(surface), "state": .string(state)])
+        records[id]?.descriptor.workspaceID = state == "ended" ? nil : workspace
+        records[id]?.descriptor.surfaceID = state == "ended" ? nil : surface
+        records[id]?.descriptor.state = state
     }
     public func eventCursor() -> Int? { eventSequence }
 
@@ -83,6 +86,7 @@ public actor SessionService {
     }
 
     public func preview(id: String) async throws -> PreviewSnapshot {
+        _ = try await sessions()
         let record = try await record(id)
         guard record.descriptor.writable, let surface = record.descriptor.surfaceID else { return PreviewSnapshot(text: nil, available: false) }
         let snapshot = try await cmux.request("surface.read_text", params: ["surface_id": .string(surface)])
@@ -153,8 +157,14 @@ public actor SessionService {
     }
     public func diff(id: String, path: String?) async throws -> TextFileSnapshot {
         let cwd = try await project(id)
-        if let path { _ = try files.resolve(root: cwd, relativePath: path) }
-        let arguments = ["diff", "--no-ext-diff", "--no-textconv", "HEAD", "--"] + (path.map { [$0] } ?? [])
+        let allowed: [String]
+        if let path { _ = try files.resolve(root: cwd, relativePath: path); allowed = [path] }
+        else {
+            let paths = try await GitReader().run(directory: cwd, arguments: ["diff", "--no-ext-diff", "--no-textconv", "--name-only", "-z", "HEAD", "--"])
+            allowed = paths.split(separator: "\0").map(String.init).filter { (try? files.resolve(root: cwd, relativePath: $0)) != nil }
+        }
+        guard !allowed.isEmpty else { return TextFileSnapshot(path: path ?? "", text: "", truncated: false) }
+        let arguments = ["diff", "--no-ext-diff", "--no-textconv", "HEAD", "--"] + allowed
         let text = try await GitReader().run(directory: cwd, arguments: arguments)
         return TextFileSnapshot(path: path ?? "", text: text, truncated: false)
     }

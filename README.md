@@ -10,11 +10,12 @@ Requires macOS 14+ and Swift 6. The iPhone app requires iOS 17+.
 
 ```sh
 swift build
-.build/debug/cmux-remote init
-.build/debug/cmux-remote serve
+.build/debug/cmux-remote serve --pair
 ```
 
-`init` creates a private state directory, a random bearer credential and a self-signed TLS certificate. `serve` defaults to loopback. For your phone, use `serve --listen 0.0.0.0`, then run `pairing --host <your-Mac-LAN-IP>` locally and enter its pairing information in the app. Treat the pairing output as a password. The app pins the exact TLS certificate fingerprint before sending authenticated requests.
+`init` creates a private state directory, a random bearer credential and a self-signed TLS certificate. `serve` defaults to loopback. For your phone, use `serve --listen 0.0.0.0`, then run `pairing` in a second terminal. It automatically chooses an active private LAN address and displays a QR code. Tap **Scan pairing QR code** in the iPhone app; no host, token or fingerprint needs to be typed. Use `pairing --host <your-Mac-LAN-IP>` to override ambiguous network routing. Advanced settings and JSON import remain available; `pairing --format json` explicitly emits the old JSON format. Treat the QR as a password. The app pins the exact TLS certificate fingerprint before sending authenticated requests.
+
+The recommended `serve --pair` command performs first-time initialization, listens on the LAN, and displays the QR after the listener is ready. Ordinary `serve` remains loopback-only and never prints a credential. The QR option explicitly opts into displaying the device credential; do not redirect that output to public logs.
 
 The socket path can be overridden with `--socket <path>` or `CMUX_SOCKET_PATH`. The Bridge does not change cmux access settings. If its process is denied, enable an appropriate cmux automation/password policy explicitly. Pass a socket password through `CMUX_REMOTE_SOCKET_PASSWORD`; this is separate from the phone bearer credential.
 

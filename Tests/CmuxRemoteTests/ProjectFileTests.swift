@@ -28,6 +28,6 @@ import CmuxRemoteBridge
         defer { try? FileManager.default.removeItem(at: directory) }
         let secret = directory.appendingPathComponent(".env"); try Data("fixture-secret".utf8).write(to: secret)
         try FileManager.default.createSymbolicLink(at: directory.appendingPathComponent("public.txt"), withDestinationURL: secret)
-        #expect(throws: BridgeError.self) { try ProjectFilePolicy(home: directory.appendingPathComponent("home")).resolve(root: directory.path, relativePath: "public.txt") }
+        #expect(throws: BridgeError.self) { try ProjectFilePolicy(home: URL(fileURLWithPath: "/unrelated/home")).resolve(root: directory.path, relativePath: "public.txt") }
     }
 }

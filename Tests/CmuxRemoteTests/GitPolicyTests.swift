@@ -15,7 +15,7 @@ import CmuxRemoteBridge
         try git(directory, ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "--no-gpg-sign", "-qm", "baseline"])
         try Data("public-value".utf8).write(to: publicFile); try Data("fixture-private-value".utf8).write(to: secret)
         let cmux = DemoCmux(transcript: directory.appendingPathComponent("unused.jsonl").path, project: directory.path)
-        let service = SessionService(cmux: cmux, home: directory.appendingPathComponent("home"), transcriptRoots: [directory])
+        let service = SessionService(cmux: cmux, home: URL(fileURLWithPath: "/unrelated/home"), transcriptRoots: [directory])
         let diff = try await service.diff(id: "demo-session", path: nil)
         #expect(!diff.text.contains("fixture-private-value"))
         #expect(diff.text.contains("public-value"))

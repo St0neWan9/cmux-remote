@@ -43,15 +43,19 @@ resources = add('resources', f'isa = PBXResourcesBuildPhase; buildActionMask = 2
 frameworks_phase = add('frameworks', f'isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = ({", ".join(frameworks)}); runOnlyForDeploymentPostprocessing = 0;')
 project_configs, target_configs = [], []
 for config in ('Debug', 'Release'):
-    project_configs.append(add('project:' + config, f'isa = XCBuildConfiguration; name = {config}; buildSettings = {{ SDKROOT = iphoneos; IPHONEOS_DEPLOYMENT_TARGET = 17.0; SWIFT_VERSION = 6.0; CLANG_ENABLE_MODULES = YES; }};'))
+    debug_flags = 'SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)"; SWIFT_OPTIMIZATION_LEVEL = "-Onone";' if config == 'Debug' else 'SWIFT_OPTIMIZATION_LEVEL = "-O";'
+    project_configs.append(add('project:' + config, f'isa = XCBuildConfiguration; name = {config}; buildSettings = {{ SDKROOT = iphoneos; IPHONEOS_DEPLOYMENT_TARGET = 17.0; SWIFT_VERSION = 6.0; CLANG_ENABLE_MODULES = YES; {debug_flags} }};'))
     target_configs.append(add('target:' + config, f'''isa = XCBuildConfiguration; name = {config}; buildSettings = {{
         PRODUCT_NAME = "$(TARGET_NAME)"; PRODUCT_BUNDLE_IDENTIFIER = com.st0newan9.cmux-remote;
         GENERATE_INFOPLIST_FILE = YES; INFOPLIST_KEY_CFBundleDisplayName = "cmux remote";
+        CREATE_INFOPLIST_SECTION_IN_BINARY = YES;
         INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Connect to your paired cmux Bridge on your local network.";
+        INFOPLIST_KEY_NSCameraUsageDescription = "Scan your Mac Bridge pairing code.";
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
         INFOPLIST_KEY_UILaunchScreen_Generation = YES;
         SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; TARGETED_DEVICE_FAMILY = "1,2";
         CODE_SIGN_STYLE = Automatic; MARKETING_VERSION = 0.1.0; CURRENT_PROJECT_VERSION = 1;
+        CODE_SIGN_ENTITLEMENTS = CmuxRemote.entitlements;
         SWIFT_STRICT_CONCURRENCY = complete;
     }};'''))
 project_list = add('project-list', f'isa = XCConfigurationList; buildConfigurations = ({", ".join(project_configs)}); defaultConfigurationName = Release; defaultConfigurationIsVisible = 0;')

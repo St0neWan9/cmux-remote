@@ -5,6 +5,7 @@ struct ErrorPresentation {
     func message(_ error: any Error) -> String {
         let code = (error as? BridgeError)?.code
         switch code {
+        case "keychain_failed": return String(localized: "error.keychain")
         case "outcome_unknown": return String(localized: "error.outcome_unknown")
         case "read_only", "stale_binding": return String(localized: "error.read_only")
         case "input_busy": return String(localized: "error.input_busy")

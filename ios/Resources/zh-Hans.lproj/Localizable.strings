@@ -1,6 +1,6 @@
 "app.title" = "cmux remote";
 "pair.intro" = "在手机上使用你的 cmux";
-"pair.instructions" = "在 Mac 上启动 Bridge，然后输入它显示的配对信息。";
+"pair.instructions" = "在 Mac 上启动 Bridge，然后扫描它显示的配对二维码。";
 "pair.connection" = "连接";
 "pair.host" = "Mac 地址";
 "pair.port" = "端口";
@@ -41,3 +41,12 @@
 "error.file" = "此文件无法预览，或不允许从该项目分享。";
 "error.expired" = "此请求已不再等待处理，请刷新列表。";
 "error.connection" = "无法完成请求，请检查连接和配对证书指纹。";
+"pair.scan" = "扫描配对二维码";
+"pair.scan_instructions" = "在 Mac 上运行 cmux-remote pairing，扫描显示的二维码即可自动连接。";
+"pair.advanced" = "高级设置";
+"pair.cancel" = "取消";
+"pair.camera_unavailable" = "相机不可用，请在设置中允许相机访问，或使用高级配对。";
+"feed.custom" = "也可以输入答案";
+"feed.submit" = "提交答案";
+"pair.connecting" = "正在连接…";
+"error.keychain" = "连接成功，但无法保存设备凭证，请检查应用签名。";
