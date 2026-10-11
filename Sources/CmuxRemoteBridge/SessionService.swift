@@ -36,16 +36,21 @@ public actor SessionService {
         let vault = try await cmux.request("vault.sessions", params: ["limit": .number(200)])
         let dump = try? await cmux.request("chat.sessions.dump", params: [:])
         let authoritativeIDs = Set((dump?["sessions"].array ?? []).compactMap { $0["session_id"].string })
+        // Vault includes sessions started outside cmux. It enriches known bindings,
+        // never establishes which conversations belong in this companion.
+        let registeredIDs = Set((dump?["sessions"].array ?? []).filter { hasCmuxBinding($0) }.compactMap { $0["session_id"].string })
+        let hookedIDs = Set(liveBindings.filter { hasCmuxBinding($0.value) }.keys)
+        let cmuxIDs = registeredIDs.union(hookedIDs)
         var discovered: [String: Record] = [:]
         for item in vault["sessions"].array ?? [] {
-            guard let id = item["session_id"].string, let agent = item["agent"].string,
+            guard let id = item["session_id"].string, cmuxIDs.contains(id), let agent = item["agent"].string,
                   ["claude", "codex"].contains(agent) else { continue }
             let path = allowedTranscript(item["file"].string)
             let descriptor = SessionDescriptor(id: id, agent: agent, title: item["title"].string ?? id, cwd: item["cwd"].string, state: item["status"].string ?? "unknown")
             discovered[id] = Record(descriptor: descriptor, transcript: path)
         }
         for item in dump?["sessions"].array ?? [] {
-            guard let id = item["session_id"].string, let agent = item["agent"].string, ["claude", "codex"].contains(agent) else { continue }
+            guard let id = item["session_id"].string, cmuxIDs.contains(id), let agent = item["agent"].string, ["claude", "codex"].contains(agent) else { continue }
             var record = discovered[id] ?? Record(descriptor: SessionDescriptor(id: id, agent: agent, title: id, cwd: item["cwd"].string), transcript: allowedTranscript(item["transcript_path"].string))
             record.descriptor.workspaceID = item["workspace_id"].string
             record.descriptor.surfaceID = item["surface_id"].string
@@ -203,6 +208,11 @@ public actor SessionService {
         let url = URL(fileURLWithPath: path).resolvingSymlinksInPath().standardizedFileURL
         guard url.pathExtension == "jsonl", transcriptRoots.contains(where: { url.path.hasPrefix($0.path + "/") }) else { return nil }
         return url.path
+    }
+    private func hasCmuxBinding(_ item: JSONValue) -> Bool {
+        guard let workspace = item["workspace_id"].string, let surface = item["surface_id"].string else { return false }
+        return !workspace.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !surface.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
     private func existing(_ id: UUID, signature: String) throws -> MutationReceipt? {
         guard let entry = operations[id] else { return nil }
