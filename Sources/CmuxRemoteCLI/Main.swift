@@ -81,7 +81,10 @@ struct Main {
             } else { qr = nil }
             let advertisement: BonjourAdvertisement?
             if options.contains("no-discovery") { advertisement = nil }
-            else { advertisement = try BonjourAdvertisement(host: authority.host, port: port) }
+            else {
+                do { advertisement = try BonjourAdvertisement(host: authority.host, port: port) }
+                catch { advertisement = nil; print("LAN discovery is unavailable; HTTPS and QR enrollment remain enabled.") }
+            }
             defer { withExtendedLifetime(advertisement) {} }
             if options.contains("legacy") { print("Legacy shared-token access explicitly enabled; migrate devices to v2 enrollment.") }
             try await HTTPServer().run(host: options.value("listen") ?? (options.contains("pair") ? "0.0.0.0" : "127.0.0.1"), port: port, certificate: state.certificate, key: state.key, router: BridgeRouter(service: service, authority: authority, legacyToken: options.contains("legacy") ? try state.token() : nil), onListening: { _ in

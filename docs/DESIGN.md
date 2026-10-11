@@ -1,5 +1,7 @@
 # cmux-remote design
 
+This document describes the companion architecture. The implemented unified connection layer is specified in [Connection v2](CONNECTION-V2.md). Remaining continuity and mirror feasibility work are tracked in [the unified connection plan](UNIFIED-CONNECTION-PLAN.md).
+
 ## Scope
 
 One repository contains a Swift Mac CLI/Bridge, shared wire models, a Swift client, and a native SwiftUI iPhone app. The first backend is the installed official cmux Mac app. The phone and Mac are on a reachable LAN. No cloud account, public relay, provider API integration, terminal emulator on the phone, or modification of cmux is required.
@@ -14,13 +16,11 @@ Dependencies form a DAG: executable/server/client/UI -> Core -> upstream parsing
 
 ## Pairing and authority
 
-The Bridge initializes a 256-bit random credential and self-signed certificate in an owner-only state directory outside the checkout. A local `pairing` command emits host, port, credential and SHA-256 certificate fingerprint only when explicitly invoked. The phone accepts HTTPS only and stores its pairing in Keychain. The URLSession delegate accepts only the exact pinned certificate for the configured endpoint. A changed certificate requires pairing again; it never silently falls back to trusting an arbitrary certificate. TLS keys, bearer credentials and project content never enter logs or the repository.
+The Bridge maintains a persistent Ed25519 host identity and separately enrolled device identities. Version 2 QR codes bind an expiring enrollment window to the host public key, exact TLS certificate fingerprint, endpoint and owner-selected workspace IDs; they do not contain a permanent shared credential. Device requests prove possession of their key and need the Mac owner's explicit approval. Signed grants are persisted in an owner-only host registry. Each request proves its identity, exact content, nonce and fresh server epoch; scope and revocation are checked at the resource and final binding boundaries. See [Connection v2](CONNECTION-V2.md) for the cryptographic/wire contract and migration.
 
-All `/v1` routes require the bearer credential. There is no generic remote `rpc(method, params)` endpoint. Routes invoke a fixed list of cmux operations, with explicit IDs and fresh binding checks before terminal writes. No focus/selection RPC is used when browsing a task. Requests prefer the installed official CLI's `rpc` command, with JSON in private stdin, so cmux retains its own capability/password handling. A raw Unix transport is an explicit fallback. The separate raw event connection may be denied under a restrictive policy and then the Bridge relies on snapshots. The Bridge never enables `allowAll` itself.
+Bonjour is reachability metadata, not trust. The iPhone saves device-only Keychain identity and host trust, restores grants, and can relocate a known host after verifying the unchanged identity and TLS pin. Certificate changes require explicit enrollment; there is no unverified renewal shortcut. The local admin Unix socket is separate from HTTPS and owns approval/revocation. Legacy shared-token routes require an explicit `--legacy` opt-in.
 
-Under `cmuxOnly`, launch the Bridge inside a cmux terminal. The official CLI also undergoes process ancestry checks; an external Bridge cannot gain access merely by using it. This was verified against the installed official Mac app during live integration.
-
-Initial pairing uses a single device credential encoded in a versioned QR link with endpoint and certificate pin. The CLI picks a private LAN address; the phone validates and connects immediately after scanning. Manual fields remain under advanced settings. Per-device revocation and expiring enrollment tickets are future protocol extensions; `init --rotate` is not implemented and must not overwrite existing state implicitly. Access is the authority of the logged-in Mac user; network access still requires the separate Bridge credential.
+There is no generic remote cmux RPC proxy. No browsing operation selects or focuses a desktop workspace. Official CLI requests keep prompt data in private stdin. Under `cmuxOnly`, launch the Bridge inside a cmux terminal; using the bundled CLI does not bypass process ancestry checks. The Bridge never enables `allowAll`.
 
 ## Session discovery
 
@@ -52,7 +52,7 @@ Run Git directly with argument arrays, no shell interpolation, and use `--` for 
 
 ## API and phone UX
 
-Versioned HTTPS `/v1` endpoints return structured resources and stable errors. Pairing -> sessions -> conversation. Conversation shows prose/Markdown, collapsed tool/thought cards, file-edit diffs, live preview, composer, stop, and links to project changes. A separate pending-actions list renders supported questions, permission and plan decisions. Home refresh and reconnect do not change desktop focus. UI uses native NavigationStack/List/TextField and localized English/Simplified Chinese strings.
+Signed, scoped HTTPS `/v2` endpoints return structured resources and stable errors. Pairing -> sessions -> conversation. Conversation shows prose/Markdown, collapsed tool/thought cards, file-edit diffs, live preview, composer, stop, and links to project changes. A separate pending-actions list renders supported questions, permission and plan decisions. Home refresh and reconnect do not change desktop focus. The phone uses native NavigationStack, a selectable scrollable conversation, trailing user bubbles, full-width agent Markdown, collapsed activity groups, a latest-message jump button and a floating send/stop composer. Files and Feed actions remain in native menus. English/Simplified Chinese strings are localized.
 
 HIG references: https://developer.apple.com/design/human-interface-guidelines/navigation-and-search and https://developer.apple.com/design/human-interface-guidelines/text-fields. The web retrieval returned JavaScript-only pages in this environment; native components are used conservatively and a visual/device pass is required before distribution.
 
@@ -64,4 +64,4 @@ HIG references: https://developer.apple.com/design/human-interface-guidelines/na
 4. Exercise synthetic socket + HTTP + phone client integration, adversarial path/pinning/idempotency/history tests, and compile the Simulator app.
 5. Verify a real official cmux instance and a physical phone when available; disclose exact missing gates. No official cmux process is restarted or changed for this verification.
 
-Follow-ups: event-driven phone updates, durable receipt/session caching, multi-device credentials, physical-phone camera/network handoff, Windows/Linux backend adapters, Developer ID signing/notarization and release installers. None is reported complete merely because its interface is documented.
+Follow-ups: event-driven phone updates, durable receipt/session caching, physical-phone camera/network handoff, Windows/Linux backend adapters, Developer ID signing/notarization and release installers. The [unified connection plan](UNIFIED-CONNECTION-PLAN.md) sequences shared discovery/enrollment and the proposed Mac mirror feasibility gate. None is reported complete merely because its interface is documented.

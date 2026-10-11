@@ -12,8 +12,7 @@ final class ConversationModel {
     var messages: [ChatMessage] = []
     var timelineItems: [ConversationTimelineItem] = []
     var jumpToLatest = 0
-    private var interruptedState: String?
-    var working: Bool { session.state.hasPrefix("working") && interruptedState != session.state }
+    var working: Bool { session.state.hasPrefix("working") }
     var latestMessageText: String? {
         guard let message = messages.last else { return nil }
         if case .prose(let value) = message.kind { return value.text }; return nil
@@ -25,8 +24,10 @@ final class ConversationModel {
     var hasMore = false
     private var generation: String?
     init(session: SessionDescriptor, client: RemoteClient) { self.session = session; self.client = client }
-    func updateSession(_ current: SessionDescriptor) { session = current }
-    func markInterrupted() { interruptedState = session.state }
+    func updateSession(_ current: SessionDescriptor) {
+        session = current
+    }
+    func markInterrupted() { session.state = "idle" }
     func refresh() async {
         do {
             let descriptors = try await client.get("/v1/sessions", as: [SessionDescriptor].self)
@@ -63,7 +64,7 @@ final class ConversationModel {
         let input = draft
         do {
             _ = try await client.post("/v1/sessions/\(session.id)/send", body: SendRequest(text: input), as: MutationReceipt.self)
-            draft = ""; interruptedState = nil; await refresh(); jumpToLatest += 1
+            draft = ""; await refresh(); jumpToLatest += 1
         } catch { self.error = ErrorPresentation().message(error) }
     }
     func interrupt() async {

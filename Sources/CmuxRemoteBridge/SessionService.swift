@@ -90,7 +90,9 @@ public actor SessionService {
         let record = try await authorizedRecord(id, capability: .conversationRead, access: access)
         guard let path = record.transcript else { throw BridgeError("history_unavailable", "No readable conversation record is available.", status: 404) }
         let reader = reader; let agent = record.descriptor.agent
-        return try await reader.history(path: path, agent: agent, beforeSeq: beforeSeq, limit: limit)
+        let result = try await reader.history(path: path, agent: agent, beforeSeq: beforeSeq, limit: limit)
+        try await recheck(record, capability: .conversationRead, access: access)
+        return result
     }
 
     public func preview(id: String, access: SessionAccess? = nil) async throws -> PreviewSnapshot {
@@ -100,6 +102,7 @@ public actor SessionService {
         let snapshot = try await cmux.request("surface.read_text", params: ["surface_id": .string(surface)])
         let lines = (snapshot["text"].string ?? "").components(separatedBy: .newlines)
         let text = AgentChatProseScreenExtractor().extract(lines: lines, agentKind: ChatAgentKind(source: record.descriptor.agent))
+        try await recheck(record, capability: .conversationRead, access: access)
         return PreviewSnapshot(text: text, available: true)
     }
 
@@ -153,19 +156,24 @@ public actor SessionService {
     }
 
     public func file(id: String, path: String, access: SessionAccess? = nil) async throws -> TextFileSnapshot {
-        guard let cwd = try await authorizedRecord(id, capability: .projectRead, access: access).descriptor.cwd else { throw BridgeError("project_unavailable", "This conversation has no project directory.", status: 404) }
+        let record = try await authorizedRecord(id, capability: .projectRead, access: access)
+        guard let cwd = record.descriptor.cwd else { throw BridgeError("project_unavailable", "This conversation has no project directory.", status: 404) }
         let file = try files.resolve(root: cwd, relativePath: path)
         let data = try Data(contentsOf: file)
         guard !data.contains(0), let text = String(data: data, encoding: .utf8) else { throw BridgeError("unsupported_file", "The initial preview supports UTF-8 text files.", status: 415) }
+        try await recheck(record, capability: .projectRead, access: access)
         return TextFileSnapshot(path: path, text: text, truncated: false)
     }
     public func changes(id: String, access: SessionAccess? = nil) async throws -> JSONValue {
-        let cwd = try await project(id, access: access)
+        let record = try await authorizedRecord(id, capability: .projectRead, access: access)
+        let cwd = try projectRoot(record)
         let output = try await GitReader().run(directory: cwd, arguments: ["status", "--porcelain=v1", "-z", "--untracked-files=normal"])
+        try await recheck(record, capability: .projectRead, access: access)
         return .object(["entries": .array(output.split(separator: "\0").map { .string(String($0)) })])
     }
     public func diff(id: String, path: String?, access: SessionAccess? = nil) async throws -> TextFileSnapshot {
-        let cwd = try await project(id, access: access)
+        let record = try await authorizedRecord(id, capability: .projectRead, access: access)
+        let cwd = try projectRoot(record)
         let listed = try await GitReader().run(directory: cwd, arguments: ["diff", "--no-ext-diff", "--no-textconv", "--name-only", "-z", "HEAD", "--"])
         let changed = listed.split(separator: "\0").map(String.init)
         let permitted = Set(changed.filter { (try? files.resolveDiffPath(root: cwd, relativePath: $0)) != nil })
@@ -179,14 +187,16 @@ public actor SessionService {
         else {
             allowed = Array(safe).sorted()
         }
+        try await recheck(record, capability: .projectRead, access: access)
         guard !allowed.isEmpty else { return TextFileSnapshot(path: path ?? "", text: "", truncated: false) }
         let arguments = ["diff", "--no-ext-diff", "--no-textconv", "HEAD", "--"] + allowed
         let text = try await GitReader().run(directory: cwd, arguments: arguments)
+        try await recheck(record, capability: .projectRead, access: access)
         return TextFileSnapshot(path: path ?? "", text: text, truncated: false)
     }
 
-    private func project(_ id: String, access: SessionAccess?) async throws -> String {
-        guard let cwd = try await authorizedRecord(id, capability: .projectRead, access: access).descriptor.cwd, cwd != "/" else { throw BridgeError("project_unavailable", "This conversation has no project directory.", status: 404) }
+    private func projectRoot(_ record: Record) throws -> String {
+        guard let cwd = record.descriptor.cwd, cwd != "/" else { throw BridgeError("project_unavailable", "This conversation has no project directory.", status: 404) }
         return try files.projectRoot(cwd).path
     }
     private func record(_ id: String) async throws -> Record {
@@ -212,6 +222,11 @@ public actor SessionService {
         try await access?.require(capability, workspace: value.descriptor.workspaceID)
         guard records[id]?.descriptor.workspaceID == value.descriptor.workspaceID, records[id]?.descriptor.surfaceID == value.descriptor.surfaceID else { throw BridgeError("stale_binding", "The session changed while authorizing access.", status: 409) }
         return value
+    }
+    private func recheck(_ record: Record, capability: ClientCapability, access: SessionAccess?) async throws {
+        try await access?.require(capability, workspace: record.descriptor.workspaceID)
+        let current = records[record.descriptor.id]?.descriptor
+        guard current?.workspaceID == record.descriptor.workspaceID, current?.surfaceID == record.descriptor.surfaceID else { throw BridgeError("stale_binding", "The resource binding changed during its read.", status: 409) }
     }
     private func allowedTranscript(_ path: String?) -> String? {
         guard let path else { return nil }

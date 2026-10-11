@@ -12,6 +12,14 @@ Use English and Simplified Chinese localization in `ios/Resources`. Keep technic
 
 To refresh the vendored parsing library, copy only public upstream source, record its exact commit, preserve notices, inspect the diff and run all parser/history tests. Never copy personal transcript data into test fixtures. CI builds Swift package tests and the iPhone Simulator target on macOS.
 
+## Connection and phone UX status
+
+The shared connection phases in [the unified plan](UNIFIED-CONNECTION-PLAN.md)
+now use signed v2 enrollment, Bonjour reachability, explicit host trust, owner
+approval, scoped device grants and independent revocation. See
+[the wire contract](CONNECTION-V2.md). Phone subscriptions and durable mutation
+receipts/cursors remain future work. Mac mirror readiness is a separate gate.
+
 ## Live verification — 2026-10-12
 
 The installed official cmux app was tested with its existing `cmuxOnly` socket mode and Claude Code 2.1.296. The Bridge was launched in a dedicated cmux terminal. A second workspace ran Claude Code in this repository; no installed cmux files or socket settings were changed.
@@ -21,3 +29,29 @@ The task-owned `cmux-remote-verification` iPhone Simulator enrolled through the 
 Live sessions now appear before read-only history. The interrupt guard was repaired: sends still reject a desktop draft/dialog, while interrupts require the same fresh identity checks without the typing-only restriction. The regression failed with `input_busy` on commit `0d4193e` and passed after the repair using `swift test --jobs 6 --filter ServiceTests.interruptCanStopAnAgentWithBlockedTyping`.
 
 Immediate Bridge restart after an active HTTPS connection originally failed with `Address already in use`. Listener address reuse repairs this without changing the paired endpoint. The regression failed on commit `89780d0` and passed after the repair using `swift test --jobs 6 --filter HTTPSIntegrationTests.bridgeCanRestartImmediatelyOnItsPairedPort`. Final scoped verification passed 26 tests in 8 suites, the SwiftPM build, 52 matching English/Simplified Chinese localization keys and whitespace checks; the iOS generic Simulator build also passed.
+
+## Connection v2 and phone layout verification — 2026-10-12
+
+The task-owned iPhone Simulator enrolled a new device through the v2 bootstrap
+and owner-approved workspace scope. An actual Bonjour browse resolved the LAN
+endpoint, and the client relocated from loopback while retaining its identity
+and grant. The phone restored that grant after app and Bridge restarts.
+
+In the existing official cmux Claude session, phone sends produced real replies,
+read-only README tool activity appeared as a collapsed group, and stop was
+exercised on a long-running reply. The new interface was checked with a long
+history, user bubbles, selectable Markdown, activity expansion, menus and a
+floating send/stop composer. It keeps historical reading separate from following
+new messages and preserves unlabeled fenced code. The Simulator remains open.
+
+Scoped regressions cover permission changes during backend awaits, stale binding
+refresh, IPv6 endpoint formatting, interrupted turns and enrollment lifecycle.
+The actual iOS-model harness checks six behaviors, including a submission that
+finishes after scene pause and a later desktop turn with an unobserved idle
+transition. English and Simplified Chinese phone catalogs have 79 matching keys.
+The isolated connection/phone submission passes 41 package tests in 15 suites
+and all six actual-model checks; the generic iOS Simulator build passes. Camera scanning on a physical phone,
+physical device-only Keychain and Wi-Fi handoff still require device acceptance.
+Automated touch dragging did not yield a reliable Simulator acceptance result;
+inertial scrolling while replies grow and the iOS 17 gesture fallback remain
+explicit visual coverage gaps.

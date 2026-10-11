@@ -7,6 +7,8 @@ struct ConversationView: View {
     @Environment(\.scenePhase) private var phase
     @Environment(\.dismiss) private var dismiss
     @State private var atLatest = true
+    @State private var userScrolling = false
+    @State private var latestVisible = true
     @State private var initiallyScrolled = false
     @State private var showProject = false
     @State private var showFeed = false
@@ -15,9 +17,10 @@ struct ConversationView: View {
         _model = State(initialValue: ConversationModel(session: session, client: client)); self.hostName = hostName
     }
     var body: some View {
+        GeometryReader { viewport in
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 18) {
                     if model.hasMore { Button(String(localized: "chat.older")) { Task { await model.older() } }.font(.subheadline).foregroundStyle(.secondary).frame(maxWidth: .infinity).padding(.top, 12) }
                     if model.messages.isEmpty && model.error == nil {
                         ContentUnavailableView(String(localized: "chat.empty"), systemImage: "bubble.left.and.bubble.right")
@@ -37,14 +40,26 @@ struct ConversationView: View {
                             .frame(maxWidth: .infinity, alignment: .leading).background(Color.red.opacity(0.055), in: RoundedRectangle(cornerRadius: 14))
                     }
                     Color.clear.frame(height: 1).id("latest")
-                        .onAppear { atLatest = true }.onDisappear { atLatest = false }
+                        .background {
+                            GeometryReader { anchor in
+                                Color.clear.preference(key: TimelineBottomPreferenceKey.self,
+                                    value: anchor.frame(in: .named("chatTimeline")).maxY)
+                            }
+                        }
                 }.padding(.horizontal, 18).padding(.top, 12).padding(.bottom, 18)
             }
+            .coordinateSpace(name: "chatTimeline")
+            .onPreferenceChange(TimelineBottomPreferenceKey.self) { bottom in
+                latestVisible = bottom > 0 && bottom <= viewport.size.height + 32
+                if userScrolling || !atLatest { atLatest = latestVisible }
+                else if bottom.isFinite && !latestVisible { proxy.scrollTo("latest", anchor: .bottom) }
+            }
+            .modifier(TimelineScrollInteraction(userScrolling: $userScrolling, atLatest: $atLatest, latestVisible: latestVisible))
             .scrollDismissesKeyboard(.interactively)
             .refreshable { await model.refresh() }
             .overlay(alignment: .bottom) {
                 if !atLatest {
-                    Button { withAnimation { proxy.scrollTo("latest", anchor: .bottom) } } label: {
+                    Button { atLatest = true; withAnimation { proxy.scrollTo("latest", anchor: .bottom) } } label: {
                         Image(systemName: "arrow.down").font(.system(size: 20, weight: .medium)).frame(width: 42, height: 42)
                             .background(.regularMaterial, in: Circle()).shadow(color: .black.opacity(0.1), radius: 10, y: 4)
                     }.buttonStyle(.plain).accessibilityLabel(String(localized: "chat.latest")).accessibilityIdentifier("chat.latest").padding(.bottom, 10)
@@ -56,7 +71,8 @@ struct ConversationView: View {
             }
             .onChange(of: model.latestMessageText) { _, _ in if atLatest { proxy.scrollTo("latest", anchor: .bottom) } }
             .onChange(of: model.preview) { _, _ in if atLatest { proxy.scrollTo("latest", anchor: .bottom) } }
-            .onChange(of: model.jumpToLatest) { _, _ in withAnimation { proxy.scrollTo("latest", anchor: .bottom) } }
+            .onChange(of: model.jumpToLatest) { _, _ in atLatest = true; withAnimation { proxy.scrollTo("latest", anchor: .bottom) } }
+        }
         }
         .background(Color(uiColor: .systemBackground))
         .toolbar(.hidden, for: .navigationBar)

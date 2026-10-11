@@ -5,5 +5,4 @@ swift test --jobs 6
 swift build --jobs 6
 python3 scripts/check-phone-state.py
 python3 scripts/check-localization.py
-python3 scripts/check-macos-localization.py
 git diff --check

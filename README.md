@@ -13,11 +13,18 @@ swift build
 .build/debug/cmux-remote serve --pair
 ```
 
-`init` creates a private state directory, a random bearer credential and a self-signed TLS certificate. `serve` defaults to loopback. For your phone, use `serve --listen 0.0.0.0`, then run `pairing` in a second terminal. It automatically chooses an active private LAN address and displays a QR code. Tap **Scan pairing QR code** in the iPhone app; no host, token or fingerprint needs to be typed. Use `pairing --host <your-Mac-LAN-IP>` to override ambiguous network routing. Advanced settings and JSON import remain available; `pairing --format json` explicitly emits the old JSON format. Treat the QR as a password. The app pins the exact TLS certificate fingerprint before sending authenticated requests.
+`serve --pair` opens a short-lived enrollment window and displays a QR code. Scan it in the iPhone app, then approve that exact device on the Mac. The QR supplies host identity and certificate trust; it no longer contains a permanent shared token. The phone saves its own private identity and signed grant. Bonjour finds nearby Bridges, while QR and manual entry remain available when discovery is unavailable.
 
-The recommended `serve --pair` command performs first-time initialization, listens on the LAN, and displays the QR after the listener is ready. Ordinary `serve` remains loopback-only and never prints a credential. The QR option explicitly opts into displaying the device credential; do not redirect that output to public logs.
+```sh
+.build/debug/cmux-remote enrollment pending
+.build/debug/cmux-remote enrollment approve REQUEST_ID --workspace WORKSPACE_UUID --control
+.build/debug/cmux-remote clients list
+.build/debug/cmux-remote clients revoke CLIENT_ID
+```
 
-Open official cmux and run the Bridge command **inside a cmux terminal**. With the default `cmuxOnly` socket mode, processes launched outside cmux are denied, including the bundled CLI; using that CLI does not bypass the ancestry check. The socket path can be overridden with `--socket <path>` or `CMUX_SOCKET_PATH`. The Bridge prefers the bundled official CLI's `rpc` path, keeping cmux's CLI authentication/capability policy intact and prompt data in private stdin rather than argv. Use `--cli <path>` for another official installation. The separate event connection can fall back to snapshot discovery if cmux denies it. `--direct-socket` opts into raw socket transport; configure an appropriate automation/password policy explicitly if needed. The Bridge never changes access settings. `CMUX_REMOTE_SOCKET_PASSWORD` is the direct socket password, separate from the phone pairing credential.
+Each device has separately revocable access to explicitly approved workspaces. Omit `--control` for viewing-only access. The new protocol is documented in [Connection v2](docs/CONNECTION-V2.md), including bootstrap verification, owner commands, per-request signatures, endpoint relocation and legacy migration. `serve --legacy` is an explicit migration mode; ordinary v2 enrollment never promotes an old shared token.
+
+Open official cmux and run the Bridge **inside a cmux terminal**. The default `cmuxOnly` socket mode rejects processes started outside cmux, including the bundled CLI. `--socket`, `CMUX_SOCKET_PATH` and `--cli` can select the installed socket/CLI; they do not bypass its access policy. The Bridge never changes socket settings. Agent input uses the existing official cmux session, and no provider connection is created by this app.
 
 Generate and build the phone project:
 
@@ -34,6 +41,7 @@ Choose your own signing team to install on a physical iPhone. There is no depend
 - [Detailed design](docs/DESIGN.md)
 - [API and source mapping](docs/API.md)
 - [Development and validation](docs/DEVELOPMENT.md)
+- [Unified connection plan](docs/UNIFIED-CONNECTION-PLAN.md)
 
 Run `scripts/verify.sh` for package tests and build. The first implementation is a development baseline, not a promise of complete provider-version compatibility. Live screen extraction is a best-effort preview; transcript messages replace it when committed. Historical sessions without a verified live surface are read-only. Codex Feed actions only work when cmux exposes an actionable request.
 
