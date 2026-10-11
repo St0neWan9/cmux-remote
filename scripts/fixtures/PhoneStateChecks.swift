@@ -16,6 +16,7 @@ private actor FixtureEnrollment: DeviceEnrolling {
         }
         started.continuation.yield(()); return EnrollmentStatus(request: request.value, state: "pending")
     }
+    func succeedSubmission() { submitContinuation?.resume(returning: EnrollmentStatus(request: request.value, state: "pending")); submitContinuation = nil }
     func finishSubmission() { submitContinuation?.resume(throwing: URLError(.cancelled)); submitContinuation = nil }
     func status() async throws -> EnrollmentStatus {
         calls += 1; statusCalls.continuation.yield(calls)
@@ -56,6 +57,18 @@ private actor FixtureEnrollment: DeviceEnrolling {
         let secondCall = await calls.next(); deadline.cancel(); pending.pauseEnrollment()
         if secondCall != 2 { failures.append("One transient status failure permanently stopped enrollment") }
 
+        let pausedFixture = FixtureEnrollment(request: request, delaySubmission: true)
+        let pausedTicks = AsyncStream<Void>.makeStream()
+        let paused = AppModel(identityKey: { key }, makeEnrollment: { _, _, _ in pausedFixture }, enrollmentTicks: { (pausedTicks.stream, {}) })
+        let pausedSubmit = Task { @MainActor in await paused.enrollQR(qr) }
+        var pausedStarted = pausedFixture.started.stream.makeAsyncIterator(); _ = await pausedStarted.next()
+        paused.pauseEnrollment(); await pausedFixture.succeedSubmission(); await pausedSubmit.value
+        var pausedCalls = pausedFixture.statusCalls.stream.makeAsyncIterator()
+        pausedTicks.continuation.yield(())
+        let pausedDeadline = Task { try await ContinuousClock().sleep(for: .milliseconds(150)); pausedFixture.statusCalls.continuation.finish() }
+        if await pausedCalls.next() != nil { failures.append("Submission completion restarted polling after scene pause") }
+        pausedDeadline.cancel(); paused.pauseEnrollment()
+
         let client = RemoteClient(pairing: try PairingConfiguration(host: "localhost", port: 1, token: String(repeating: "0", count: 32), certificateSHA256: String(repeating: "0", count: 64)))
         defer { client.close() }
         let session = SessionDescriptor(id: "fixture", agent: "claude", title: "Fixture", cwd: nil, workspaceID: "workspace", surfaceID: "surface", state: "working")
@@ -64,8 +77,13 @@ private actor FixtureEnrollment: DeviceEnrolling {
         var updated = session; updated.state = "idle"; conversation.updateSession(updated)
         updated.state = "working"; conversation.updateSession(updated)
         if !conversation.working { failures.append("An earlier interrupt suppressed a later desktop turn") }
+        conversation.markInterrupted(); conversation.updateSession(session)
+        if !conversation.working { failures.append("Missed idle transition suppressed a later desktop turn") }
+        let bare = MarkdownBlock.parse("```\nls\npwd\n```").first
+        let labeled = MarkdownBlock.parse("```swift\nlet n = 1\n```").first
+        if bare?.text != "ls\npwd" || labeled?.text != "let n = 1" { failures.append("Fenced Markdown lost code content") }
 
         if !failures.isEmpty { print(failures.joined(separator: "\n")); exit(1) }
-        print("Phone state: 3 behavioral checks passed (cancel, transient reconnect, next-turn stop).")
+        print("Phone state: 6 behavioral checks passed (cancel, transient reconnect, foreground pause, observed and missed next-turn state, Markdown code).")
     }
 }
