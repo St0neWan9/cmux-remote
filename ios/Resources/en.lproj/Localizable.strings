@@ -1,6 +1,6 @@
 "app.title" = "cmux remote";
 "pair.intro" = "Your cmux, on your phone";
-"pair.instructions" = "Start the Bridge on your Mac and scan its pairing QR code.";
+"pair.instructions" = "Start the Bridge on your Mac. Scan its enrollment QR code or select a nearby Bridge, then approve this device on the Mac.";
 "pair.connection" = "Connection";
 "pair.host" = "Mac address";
 "pair.port" = "Port";
@@ -42,7 +42,7 @@
 "error.expired" = "This request is no longer pending. Refresh the list.";
 "error.connection" = "Could not complete the request. Check the connection and pairing fingerprint.";
 "pair.scan" = "Scan pairing QR code";
-"pair.scan_instructions" = "On your Mac, run cmux-remote pairing. Scan the displayed code to connect automatically.";
+"pair.scan_instructions" = "Run cmux-remote serve --pair on your Mac. Scanning requests enrollment; it does not grant access until the owner approves.";
 "pair.advanced" = "Advanced settings";
 "pair.cancel" = "Cancel";
 "pair.camera_unavailable" = "Camera access is unavailable. Allow camera access in Settings or use advanced pairing.";
@@ -50,3 +50,17 @@
 "feed.submit" = "Submit answers";
 "pair.connecting" = "Connecting…";
 "error.keychain" = "The connection succeeded, but device credentials could not be saved. Check app signing.";
+"pair.awaiting_owner" = "Waiting for Mac approval";
+"pair.owner_instructions" = "On the Mac, inspect enrollment pending and approve this exact request. Match the device identity below.";
+"pair.nearby" = "Nearby Bridges";
+"pair.searching" = "Searching the local network… QR pairing also works when discovery is unavailable.";
+"pair.trust_host" = "Confirm host identity";
+"pair.trust_instructions" = "Compare this identity with the Mac owner before requesting access. A Bonjour name alone does not establish trust.";
+"pair.confirm_identity" = "Identity matches; request access";
+"pair.import_enrollment" = "Use enrollment QR link";
+"pair.legacy_notice" = "Legacy shared-token pairing requires --legacy on the Bridge. It cannot become a separately revocable device authorization.";
+"pair.legacy_migration" = "Your old pairing uses a shared token. Scan a new enrollment QR to authorize this device separately.";
+"pair.enrollment_ended" = "Enrollment was denied, cancelled or expired. Open a new window on the Mac to try again.";
+"error.authorization" = "This device is revoked or not approved for this workspace or operation. Check its grant on the Mac.";
+"error.enrollment" = "Open an enrollment window on the Mac, then scan a fresh QR code.";
+"error.identity" = "Host or device identity verification failed. Compare identities and pair again explicitly.";

@@ -22,6 +22,20 @@ public struct BridgeState: Sendable {
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: key)
         try openssl(["x509", "-in", certificate, "-outform", "DER", "-out", directory.appendingPathComponent("server.der").path])
     }
+    public func authority(name: String) throws -> ConnectionAuthority {
+        let keyFile = directory.appendingPathComponent("host-identity.key")
+        let crypto = IdentityCryptography()
+        let privateKey: Data
+        if FileManager.default.fileExists(atPath: keyFile.path) { privateKey = try Data(contentsOf: keyFile) }
+        else {
+            privateKey = crypto.generatePrivateKey()
+            try privateKey.write(to: keyFile, options: .atomic)
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: keyFile.path)
+        }
+        let publicKey = try crypto.publicKey(privateKey: privateKey)
+        let host = HostIdentity(id: try crypto.identityID(publicKey: publicKey), publicKey: publicKey, certificateSHA256: crypto.digest(try Data(contentsOf: directory.appendingPathComponent("server.der"))), name: name)
+        return try ConnectionAuthority(host: host, privateKey: privateKey, registryFile: directory.appendingPathComponent("clients.json"))
+    }
     public func token() throws -> String { try String(contentsOf: directory.appendingPathComponent("token"), encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines) }
     public func pairing(host: String, port: Int) throws -> PairingConfiguration {
         let data = try Data(contentsOf: directory.appendingPathComponent("server.der"))

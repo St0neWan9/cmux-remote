@@ -16,7 +16,8 @@ let package = Package(
     ],
     targets: [
         .target(name: "CmuxRemoteCore", dependencies: [.product(name: "CmuxAgentChat", package: "CmuxAgentChat")]),
-        .target(name: "CmuxRemoteBridge", dependencies: ["CmuxRemoteCore", .product(name: "NIOCore", package: "swift-nio"), .product(name: "NIOPosix", package: "swift-nio"), .product(name: "NIOHTTP1", package: "swift-nio"), .product(name: "NIOSSL", package: "swift-nio-ssl")]),
+        .target(name: "CBridgeDiscovery"),
+        .target(name: "CmuxRemoteBridge", dependencies: ["CmuxRemoteCore", "CBridgeDiscovery", .product(name: "NIOCore", package: "swift-nio"), .product(name: "NIOPosix", package: "swift-nio"), .product(name: "NIOHTTP1", package: "swift-nio"), .product(name: "NIOSSL", package: "swift-nio-ssl")]),
         .target(name: "CmuxRemoteClient", dependencies: ["CmuxRemoteCore"]),
         .executableTarget(name: "CmuxRemoteCLI", dependencies: ["CmuxRemoteBridge"]),
         .testTarget(name: "CmuxRemoteTests", dependencies: ["CmuxRemoteCore", "CmuxRemoteBridge", "CmuxRemoteClient"])

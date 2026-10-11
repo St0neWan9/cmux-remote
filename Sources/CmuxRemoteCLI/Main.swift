@@ -16,6 +16,11 @@ struct Main {
         let port = Int(options.value("port") ?? "7740") ?? 7740
         switch command {
         case "init": try state.initialize(); print("Initialized private TLS and pairing state.")
+        case "enrollment", "clients": try await OwnerCommand().run(family: command, options: options, state: state, port: port)
+        case "pairing" where !options.contains("legacy"):
+            var args = ["open"] + options.args
+            if options.value("port") == nil { args += ["--port", String(port)] }
+            try await OwnerCommand().run(family: "enrollment", options: CLIOptions(args: args), state: state, port: port)
         case "pairing":
             let pairing = try state.pairing(host: options.value("host") ?? LANAddressResolver().address() ?? "localhost", port: port)
             if options.value("format") == "json" {
@@ -57,13 +62,30 @@ struct Main {
                 }
             }
             defer { events?.cancel() }
+            let lease = try BridgeRunLease(directory: state.directory)
+            defer { withExtendedLifetime(lease) {} }
+            let authority = try state.authority(name: options.value("name") ?? Host.current().localizedName ?? "cmux Bridge")
+            let ready = AsyncThrowingStream<Void, any Error>.makeStream()
+            let owner = Task {
+                do { try await OwnerControlServer().run(path: state.directory.appendingPathComponent("owner.sock").path, authority: authority, service: service, onListening: { ready.continuation.yield(()); ready.continuation.finish() }) }
+                catch { ready.continuation.finish(throwing: error); throw error }
+            }
+            defer { owner.cancel() }
+            var iterator = ready.stream.makeAsyncIterator(); _ = try await iterator.next()
             let qr: String?
             if options.contains("pair") {
                 guard let host = options.value("host") ?? LANAddressResolver().address() else { throw BridgeError("lan_unavailable", "No private LAN address was found. Connect to Wi-Fi or pass --host.") }
-                qr = try TerminalQRCode().render(PairingLinkCodec().encode(state.pairing(host: host, port: port)))
+                let workspaces = try await service.workspaces()["workspaces"].array?.compactMap { $0["id"].string } ?? []
+                let bootstrap = try await authority.open(endpoint: BridgeEndpoint(host: host, port: port), workspaces: workspaces)
+                qr = try TerminalQRCode().render(EnrollmentLinkCodec().encode(bootstrap))
             } else { qr = nil }
-            try await HTTPServer().run(host: options.value("listen") ?? (options.contains("pair") ? "0.0.0.0" : "127.0.0.1"), port: port, certificate: state.certificate, key: state.key, router: BridgeRouter(service: service, token: state.token()), onListening: { _ in
-                if let qr { print("Scan this pairing code on your iPhone. Keep it private."); print(qr) }
+            let advertisement: BonjourAdvertisement?
+            if options.contains("no-discovery") { advertisement = nil }
+            else { advertisement = try BonjourAdvertisement(host: authority.host, port: port) }
+            defer { withExtendedLifetime(advertisement) {} }
+            if options.contains("legacy") { print("Legacy shared-token access explicitly enabled; migrate devices to v2 enrollment.") }
+            try await HTTPServer().run(host: options.value("listen") ?? (options.contains("pair") ? "0.0.0.0" : "127.0.0.1"), port: port, certificate: state.certificate, key: state.key, router: BridgeRouter(service: service, authority: authority, legacyToken: options.contains("legacy") ? try state.token() : nil), onListening: { _ in
+                if let qr { print("Scan to request enrollment, then approve that exact device using enrollment pending/approve."); print(qr) }
             })
         case "doctor":
             let path = try SocketDiscovery().resolve(explicit: options.value("socket"), environment: ProcessInfo.processInfo.environment, home: home)
@@ -73,7 +95,7 @@ struct Main {
             else { client = UnixSocketClient(path: path, password: ProcessInfo.processInfo.environment["CMUX_REMOTE_SOCKET_PASSWORD"]) }
             _ = try await client.request("system.ping", params: [:]); print("cmux socket is reachable.")
         default:
-            print("cmux-remote init|serve|pairing|doctor [--pair] [--state PATH] [--socket PATH] [--cli PATH] [--direct-socket] [--listen HOST] [--host HOST] [--port PORT] [--format json] [--demo]")
+            print("cmux-remote init|serve|pairing|enrollment|clients|doctor [--pair] [--legacy] [--no-discovery] [--state PATH] [--socket PATH] [--cli PATH] [--direct-socket] [--listen HOST] [--host HOST] [--port PORT] [--format json] [--demo]")
         }
     }
 }
