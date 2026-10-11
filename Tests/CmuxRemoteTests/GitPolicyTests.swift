@@ -40,6 +40,21 @@ import CmuxRemoteBridge
         #expect(diff.text.contains("public-star-file"))
         #expect(!diff.text.contains("fixture-private-value"))
     }
+    @Test func deletedDirectoryIsNotAnExplicitFileDiff() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let old = directory.appendingPathComponent("old-dir")
+        try FileManager.default.createDirectory(at: old, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try git(directory, ["init", "-q"])
+        try Data("public".utf8).write(to: old.appendingPathComponent("public.txt"))
+        try Data("fixture-private-value".utf8).write(to: old.appendingPathComponent(".env"))
+        try git(directory, ["add", "--", "."])
+        try git(directory, ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "--no-gpg-sign", "-qm", "baseline"])
+        try FileManager.default.removeItem(at: old)
+        let service = SessionService(cmux: DemoCmux(transcript: directory.appendingPathComponent("unused.jsonl").path, project: directory.path), home: URL(fileURLWithPath: "/unrelated/home"), transcriptRoots: [directory])
+        do { _ = try await service.diff(id: "demo-session", path: "old-dir"); Issue.record("Directory diff must be rejected") }
+        catch { #expect(error is CmuxRemoteCore.BridgeError) }
+    }
     private func git(_ directory: URL, _ arguments: [String]) throws {
         let process = Process(); process.executableURL = URL(fileURLWithPath: "/usr/bin/git"); process.arguments = ["-C", directory.path] + arguments
         process.environment = ["PATH": "/usr/bin:/bin", "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1"]
