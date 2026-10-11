@@ -1,0 +1,11 @@
+name: Verify
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  swift-and-ios:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - run: scripts/verify.sh
+      - run: scripts/build-ios.sh
