@@ -6,13 +6,15 @@ import CmuxRemoteBridge
 private actor FakeCmux: CmuxControlling {
     var sendCount = 0
     var screenReadCount = 0
+    var ended = false
+    func markEnded() { ended = true }
     let validBinding: Bool
     let failSend: Bool
     init(validBinding: Bool = true, failSend: Bool = false) { self.validBinding = validBinding; self.failSend = failSend }
     func request(_ method: String, params: [String: JSONValue]) async throws -> JSONValue {
         switch method {
         case "vault.sessions": return .object(["sessions": .array([.object(["session_id": .string("session"), "agent": .string("claude"), "title": .string("Task")])])])
-        case "chat.sessions.dump": return .object(["sessions": .array([.object(["session_id": .string("session"), "agent": .string("claude"), "workspace_id": .string("workspace"), "surface_id": .string("surface"), "state": .string("idle")])])])
+        case "chat.sessions.dump": return .object(["sessions": .array([.object(["session_id": .string("session"), "agent": .string("claude"), "workspace_id": .string("workspace"), "surface_id": .string("surface"), "state": .string(ended ? "ended" : "idle")])])])
         case "surface.input_state": return .object(["agent": .bool(validBinding), "workspace_id": .string("workspace"), "surface_id": .string("surface"), "blocks_typing": .bool(false)])
         case "mobile.chat.send":
             sendCount += 1
@@ -59,6 +61,14 @@ private actor FakeCmux: CmuxControlling {
         let cmux = FakeCmux(); let service = SessionService(cmux: cmux, home: URL(fileURLWithPath: "/example/home"), transcriptRoots: [])
         _ = try await service.sessions()
         await service.acceptEvent(.object(["type": .string("event"), "category": .string("agent"), "workspace_id": .string("workspace"), "surface_id": .string("surface"), "payload": .object(["session_id": .string("session"), "hook_event_name": .string("SessionEnd")])]))
+        let preview = try await service.preview(id: "session")
+        #expect(!preview.available)
+        #expect(await cmux.screenReadCount == 0)
+    }
+    @Test func authoritativeProcessExitWinsOverOldStopHook() async throws {
+        let cmux = FakeCmux(); let service = SessionService(cmux: cmux, home: URL(fileURLWithPath: "/example/home"), transcriptRoots: [])
+        await service.acceptEvent(.object(["type": .string("event"), "category": .string("agent"), "workspace_id": .string("workspace"), "surface_id": .string("surface"), "payload": .object(["session_id": .string("session"), "hook_event_name": .string("Stop")])]))
+        await cmux.markEnded()
         let preview = try await service.preview(id: "session")
         #expect(!preview.available)
         #expect(await cmux.screenReadCount == 0)
