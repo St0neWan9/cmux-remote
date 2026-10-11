@@ -67,7 +67,10 @@ struct Main {
             })
         case "doctor":
             let path = try SocketDiscovery().resolve(explicit: options.value("socket"), environment: ProcessInfo.processInfo.environment, home: home)
-            let client = UnixSocketClient(path: path, password: ProcessInfo.processInfo.environment["CMUX_REMOTE_SOCKET_PASSWORD"])
+            let client: any CmuxControlling
+            let cli = options.value("cli") ?? "/Applications/cmux.app/Contents/Resources/bin/cmux"
+            if !options.contains("direct-socket"), FileManager.default.isExecutableFile(atPath: cli) { client = CLIControlClient(executable: URL(fileURLWithPath: cli), socketPath: path) }
+            else { client = UnixSocketClient(path: path, password: ProcessInfo.processInfo.environment["CMUX_REMOTE_SOCKET_PASSWORD"]) }
             _ = try await client.request("system.ping", params: [:]); print("cmux socket is reachable.")
         default:
             print("cmux-remote init|serve|pairing|doctor [--pair] [--state PATH] [--socket PATH] [--cli PATH] [--direct-socket] [--listen HOST] [--host HOST] [--port PORT] [--format json] [--demo]")
