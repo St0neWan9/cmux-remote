@@ -81,3 +81,16 @@
 "sessions.projects" = "项目";
 "sessions.other" = "其他会话";
 "sessions.options" = "连接选项";
+"page.back" = "返回";
+"chat.copy" = "复制回复";
+"chat.copied" = "已复制";
+"chat.share" = "分享回复";
+"chat.quote" = "引用到跟进";
+"chat.response_time" = "回复时间";
+"chat.ran_duration" = "已运行 %@";
+"chat.estimated_duration" = "响应耗时约 %@";
+"chat.timing" = "对话时间";
+"chat.recorded_turns" = "已记录 %ld 轮回复的运行时间。";
+"chat.no_timing" = "暂无已记录的运行时长。";
+"chat.timing_note" = "已记录的运行时间不包含轮次之间的空闲时间。缺失的时长不计入累计；响应耗时估算使用会话记录的时间戳。";
+"chat.elapsed_duration" = "本轮已进行 %@";

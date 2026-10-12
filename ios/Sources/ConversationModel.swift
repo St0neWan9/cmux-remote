@@ -11,10 +11,21 @@ final class ConversationModel {
     var canSend: Bool { session.writable && client.canControlConversations }
     var messages: [ChatMessage] = []
     var timelineItems: [ConversationTimelineItem] = []
+    var responses: [ConversationResponse] = []
+    var recordedRunSeconds: Double?
+    var recordedTurnCount = 0
+    var currentTurnStartedAt: Date?
+    var currentTurnCompleted = false
     var jumpToLatest = 0
     var stopRequested = false
     private var interruptedUserID: String?
     var working: Bool { session.state.hasPrefix("working") }
+    var hasActiveResponse: Bool { working && !stopRequested && !currentTurnCompleted }
+    var runningSince: Date? { hasActiveResponse ? currentTurnStartedAt : nil }
+    func responseText(_ response: ConversationResponse) -> String {
+        messages.filter { $0.seq == response.lastSeq && $0.role == .agent }
+            .compactMap { message -> String? in if case .prose(let value) = message.kind { return value.text }; return nil }.joined(separator: "\n\n")
+    }
     var latestMessageText: String? {
         guard let message = messages.last else { return nil }
         if case .prose(let value) = message.kind { return value.text }; return nil
@@ -48,8 +59,15 @@ final class ConversationModel {
                     else { next.append(message) }
                 }
                 messages = next.sorted { $0.seq < $1.seq }
-            } else { messages = history.messages; generation = history.generation; hasMore = history.hasMore }
+            } else { messages = history.messages; responses = []; generation = history.generation; hasMore = history.hasMore }
             if stopRequested, messages.last(where: { $0.role == .user })?.id != interruptedUserID { stopRequested = false }
+            if generation == history.generation {
+                let incoming = history.responses ?? []
+                let anchors = Set(incoming.map(\.firstMessageID))
+                responses = responses.filter { !anchors.contains($0.firstMessageID) } + incoming
+            }
+            recordedRunSeconds = history.recordedRunSeconds; recordedTurnCount = history.recordedTurnCount ?? 0
+            currentTurnStartedAt = history.currentTurnStartedAt; currentTurnCompleted = history.currentTurnCompleted ?? false
             timelineItems = ConversationTimeline().items(from: messages)
             let committed = messages.reversed().compactMap { message -> String? in
                 if message.role == .agent, case .prose(let value) = message.kind { return value.text }; return nil
@@ -62,6 +80,7 @@ final class ConversationModel {
         do {
             let page = try await client.get("/v1/sessions/\(session.id)/history", query: ["before_seq": String(seq)], as: ConversationSnapshot.self)
             guard page.generation == generation else { await refresh(); return }
+            let responseIDs = Set(responses.map(\.firstMessageID)); responses.insert(contentsOf: (page.responses ?? []).filter { !responseIDs.contains($0.firstMessageID) }, at: 0)
             let existing = Set(messages.map(\.id)); messages.insert(contentsOf: page.messages.filter { !existing.contains($0.id) }, at: 0); timelineItems = ConversationTimeline().items(from: messages); hasMore = page.hasMore
         } catch { self.error = ErrorPresentation().message(error) }
     }

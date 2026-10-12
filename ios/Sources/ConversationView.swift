@@ -12,6 +12,7 @@ struct ConversationView: View {
     @State private var initiallyScrolled = false
     @State private var showProject = false
     @State private var showFeed = false
+    @State private var showTiming = false
     private let hostName: String
     init(session: SessionDescriptor, client: RemoteClient, hostName: String = "") {
         _model = State(initialValue: ConversationModel(session: session, client: client)); self.hostName = hostName
@@ -26,9 +27,18 @@ struct ConversationView: View {
                         ContentUnavailableView(String(localized: "chat.empty"), systemImage: "bubble.left.and.bubble.right")
                     }
                     ForEach(model.timelineItems) { item in
-                        Group {
+                        VStack(alignment: .leading, spacing: 12) {
+                            if let response = model.responses.first(where: { $0.firstMessageID == item.id }), let seconds = response.durationSeconds {
+                                ResponseRunLabel(seconds: seconds, recorded: response.recordedDuration)
+                            }
                             if item.isActivity { ActivityGroupView(item: item) }
                             else { MessageRow(message: item.first) }
+                            if let response = model.responses.first(where: { $0.lastMessageID == item.id }), response.completed, case .prose = item.first.kind {
+                                ResponseFooter(response: response, text: model.responseText(response)) { text in
+                                    let quoted = text.split(separator: "\n", omittingEmptySubsequences: false).map { "> " + $0 }.joined(separator: "\n")
+                                    model.draft = quoted + "\n\n" + model.draft
+                                }
+                            }
                         }.modifier(HeaderContentEffect())
                     }
                     if let preview = model.preview {
@@ -85,8 +95,13 @@ struct ConversationView: View {
             VStack(spacing: 12) {
                 if model.stopRequested {
                     Label(String(localized: "chat.stop_requested"), systemImage: "checkmark.circle").font(.footnote).foregroundStyle(.secondary)
-                } else if model.working {
-                    HStack(spacing: 7) { ProgressView().controlSize(.mini); Text(String(localized: "chat.working")).font(.footnote); Spacer(); Label(model.session.agent.capitalized, systemImage: "sparkles").font(.caption) }
+                } else if model.hasActiveResponse {
+                    HStack(spacing: 7) { ProgressView().controlSize(.mini); if let start = model.runningSince {
+                        TimelineView(.periodic(from: .now, by: 1)) { context in
+                            let elapsed = Duration.seconds(max(0, context.date.timeIntervalSince(start))).formatted(.units(allowed: [.hours, .minutes, .seconds], width: .wide, maximumUnitCount: 2))
+                            Text(String.localizedStringWithFormat(String(localized: "chat.elapsed_duration"), elapsed)).font(.footnote).monospacedDigit()
+                        }
+                    } else { Text(String(localized: "chat.working")).font(.footnote) }; Spacer(); Label(model.session.agent.capitalized, systemImage: "sparkles").font(.caption) }
                         .foregroundStyle(.secondary).padding(.horizontal, 12)
                 } else if !model.canSend { Text(String(localized: "sessions.read_only")).font(.caption).foregroundStyle(.secondary) }
                 ChatComposer(draft: $model.draft, canSend: model.canSend, busy: model.busy, working: model.working,
@@ -94,8 +109,22 @@ struct ConversationView: View {
                              showProject: { showProject = true }, showFeed: { showFeed = true })
             }.padding(.horizontal, 14).padding(.top, 14).padding(.bottom, 10)
         }
-        .navigationDestination(isPresented: $showProject) { ProjectView(session: model.session, client: model.client).toolbar(.visible, for: .navigationBar) }
-        .navigationDestination(isPresented: $showFeed) { FeedView(client: model.client).toolbar(.visible, for: .navigationBar) }
+        .navigationDestination(isPresented: $showProject) { ProjectView(session: model.session, client: model.client) }
+        .navigationDestination(isPresented: $showFeed) { FeedView(client: model.client) }
+        .sheet(isPresented: $showTiming) {
+            NavigationStack {
+                WhitePage(title: String(localized: "chat.timing")) {
+                    VStack(alignment: .leading, spacing: 18) {
+                        if let seconds = model.recordedRunSeconds {
+                            ResponseRunLabel(seconds: seconds, recorded: true)
+                            Text(String.localizedStringWithFormat(String(localized: "chat.recorded_turns"), model.recordedTurnCount)).font(.footnote).foregroundStyle(.secondary)
+                        } else { Text(String(localized: "chat.no_timing")).foregroundStyle(.secondary) }
+                        Text(String(localized: "chat.timing_note")).font(.footnote).foregroundStyle(.secondary)
+                        Spacer()
+                    }.padding(24).frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+        }
         .task(id: phase) {
             guard phase == .active else { return }; await model.refresh()
             let ticker = RefreshTicker(); defer { ticker.stop() }
@@ -112,6 +141,7 @@ struct ConversationView: View {
                 Text(hostName.isEmpty ? model.session.agent.capitalized : model.session.agent.capitalized + " · " + hostName).font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }.frame(maxWidth: .infinity, alignment: .leading)
             Menu {
+                Button { showTiming = true } label: { Label(String(localized: "chat.timing"), systemImage: "clock") }
                 Button { showProject = true } label: { Label(String(localized: "project.title"), systemImage: "doc.text.magnifyingglass") }
                 Button { showFeed = true } label: { Label(String(localized: "feed.title"), systemImage: "checkmark.bubble") }
                 Button { Task { await model.refresh() } } label: { Label(String(localized: "chat.refresh"), systemImage: "arrow.clockwise") }

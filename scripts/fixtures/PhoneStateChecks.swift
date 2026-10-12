@@ -1,6 +1,7 @@
 import Foundation
 import CmuxRemoteCore
 import CmuxRemoteClient
+import CmuxAgentChat
 
 private actor FixtureEnrollment: DeviceEnrolling {
     nonisolated let request: SignedValue<EnrollmentRequest>
@@ -79,11 +80,26 @@ private actor FixtureEnrollment: DeviceEnrolling {
         if !conversation.working { failures.append("An earlier interrupt suppressed a later desktop turn") }
         conversation.markInterrupted(); conversation.updateSession(session)
         if !conversation.working { failures.append("Missed idle transition suppressed a later desktop turn") }
+        conversation.stopRequested = false
+        conversation.messages = [ChatMessage(id: "answer", seq: 150, role: .agent, timestamp: Date(timeIntervalSince1970: 120), kind: .prose(ChatProse(text: "Answer")))]
+        conversation.responses = [ConversationResponse(firstMessageID: "first", lastMessageID: "answer", startedAt: Date(timeIntervalSince1970: 100), completedAt: nil, durationSeconds: nil, recordedDuration: false, firstSeq: 1, lastSeq: 150)]
+        conversation.currentTurnStartedAt = Date(timeIntervalSince1970: 100)
+        if conversation.runningSince != Date(timeIntervalSince1970: 100) { failures.append("Pagination hid an active turn whose prompt is not loaded") }
+        conversation.currentTurnStartedAt = nil
+        if conversation.runningSince != nil || !conversation.hasActiveResponse { failures.append("Missing source prompt timestamp lost working fallback or inherited a timestamp") }
+        conversation.currentTurnCompleted = true
+        if conversation.hasActiveResponse { failures.append("Recorded completion left a stale working banner") }
+        let response = ConversationResponse(firstMessageID: "earlier", lastMessageID: "final2", startedAt: nil, completedAt: nil, durationSeconds: nil, recordedDuration: false, completed: true, firstSeq: 1, lastSeq: 150)
+        conversation.messages = [
+            ChatMessage(id: "earlier", seq: 1, role: .agent, timestamp: .distantPast, kind: .prose(ChatProse(text: "Progress"))),
+            ChatMessage(id: "final1", seq: 150, role: .agent, timestamp: .distantPast, kind: .prose(ChatProse(text: "First block"))),
+            ChatMessage(id: "final2", seq: 150, role: .agent, timestamp: .distantPast, kind: .prose(ChatProse(text: "Second block")))]
+        if conversation.responseText(response) != "First block\n\nSecond block" { failures.append("Reply actions mixed in progress text or omitted a final-record block") }
         let bare = MarkdownBlock.parse("```\nls\npwd\n```").first
         let labeled = MarkdownBlock.parse("```swift\nlet n = 1\n```").first
         if bare?.text != "ls\npwd" || labeled?.text != "let n = 1" { failures.append("Fenced Markdown lost code content") }
 
         if !failures.isEmpty { print(failures.joined(separator: "\n")); exit(1) }
-        print("Phone state: 6 behavioral checks passed (cancel, transient reconnect, foreground pause, observed and missed next-turn state, Markdown code).")
+        print("Phone state: 10 behavioral checks passed (enrollment cancellation/recovery/pause, interrupt state, paginated and unknown turn timing, completed banner, full final-record action text, Markdown).")
     }
 }
