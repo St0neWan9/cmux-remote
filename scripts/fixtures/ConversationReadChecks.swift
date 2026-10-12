@@ -105,6 +105,12 @@ struct ConversationReadChecks {
         var feedStarted = feedFixture.started.stream.makeAsyncIterator(); _ = await feedStarted.next()
         feed.suspendReads(); await feedFixture.finish(); await feedTask.value
         check(feed.items.isEmpty && !feed.loading, "A backgrounded Feed page published a late snapshot")
+        let slowPage = HeldConversationHistory(old: sameGeneration, new: new, holdOlder: true)
+        let paging = model(slowPage); await paging.refresh()
+        let slowPageTask = Task { @MainActor in await paging.older() }
+        var slowPageStarted = slowPage.started.stream.makeAsyncIterator(); _ = await slowPageStarted.next()
+        await paging.refresh(); await slowPage.finish(); await slowPageTask.value
+        check(paging.messages.map(\.id) == ["cancelled-page", "new"], "A periodic refresh cancelled an older page from the unchanged transcript generation")
         return (count, failures)
     }
 }
