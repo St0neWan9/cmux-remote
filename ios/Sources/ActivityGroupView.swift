@@ -6,6 +6,8 @@ struct ActivityGroupView: View {
     let item: ConversationTimelineItem
     var projectRoot: String?
     var openFile: ((String) -> Void)?
+    var images: [ConversationImageReference] = []
+    var openImage: ((ConversationImageReference) -> Void)?
     var openDetail: ((String, String) -> Void)?
     @State private var expanded = false
     var body: some View {
@@ -20,7 +22,7 @@ struct ActivityGroupView: View {
                 }.font(.subheadline).foregroundStyle(.secondary).frame(maxWidth: .infinity, minHeight: 36, alignment: .leading).contentShape(Rectangle())
             }.buttonStyle(.plain).accessibilityIdentifier("activity." + item.id).accessibilityValue(expanded ? String(localized: "chat.expanded") : String(localized: "chat.collapsed"))
             if expanded {
-                VStack(alignment: .leading, spacing: 14) { ForEach(item.messages) { message in MessageRow(message: message, projectRoot: projectRoot, openFile: openFile, openDetail: openDetail) } }
+                VStack(alignment: .leading, spacing: 14) { ForEach(item.messages) { message in MessageRow(message: message, projectRoot: projectRoot, openFile: openFile, images: images, openImage: openImage, openDetail: openDetail) } }
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }.padding(.vertical, 4)

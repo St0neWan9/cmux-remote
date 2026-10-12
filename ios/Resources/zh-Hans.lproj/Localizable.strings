@@ -208,3 +208,6 @@
 "tool.detail.changed" = "记录已更新，请刷新后查看当前内容。";
 
 "tool.detail.unavailable" = "此 Bridge 尚不支持完整工具记录，请更新 Bridge 后重试。";
+
+"image.history.open" = "查看图片";
+"error.image_unavailable" = "这张历史图片已不可用，或超出预览限制。";

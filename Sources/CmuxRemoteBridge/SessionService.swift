@@ -117,6 +117,30 @@ public actor SessionService {
         return result
     }
 
+    /// Reads only a transcript-bound image; project bytes additionally require project-read authority.
+    public func image(id: String, referenceID: String, generation: String, access: SessionAccess? = nil) async throws -> Data {
+        let record = try await authorizedRecord(id, capability: .conversationRead, access: access)
+        guard let path = record.transcript else { throw BridgeError("image_unavailable", "No recorded image is available.", status: 404) }
+        let image = try await reader.image(path: path, agent: record.descriptor.agent, referenceID: referenceID, generation: generation)
+        let bytes: Data
+        switch image.source {
+        case .recorded(let data): bytes = data
+        case .projectPath(let referenced):
+            try await access?.require(.projectRead, workspace: record.descriptor.workspaceID)
+            guard let root = record.descriptor.cwd else { throw BridgeError("file_forbidden", "No approved project is available.", status: 403) }
+            let policy = files
+            let reading = Task.detached { try ProjectImageReader(policy: policy).read(root: root, referencedPath: referenced) }
+            bytes = try await withTaskCancellationHandler { try await reading.value } onCancel: { reading.cancel() }
+            try await recheck(record, capability: .projectRead, access: access)
+        }
+        let decoding = Task.detached { try HistoricalImageProjection().preview(bytes) }
+        let result = try await withTaskCancellationHandler { try await decoding.value } onCancel: { decoding.cancel() }
+        _ = try await reader.image(path: path, agent: record.descriptor.agent, referenceID: referenceID, generation: generation)
+        try await recheck(record, capability: .conversationRead, access: access)
+        try Task.checkCancellation()
+        return result
+    }
+
     public func preview(id: String, access: SessionAccess? = nil) async throws -> PreviewSnapshot {
         _ = try await sessions()
         let record = try await authorizedRecord(id, capability: .conversationRead, access: access)

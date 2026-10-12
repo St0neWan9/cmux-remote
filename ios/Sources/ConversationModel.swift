@@ -10,6 +10,7 @@ final class ConversationModel {
     let client: RemoteClient
     var canSend: Bool { session.writable && client.canControlConversations }
     var messages: [ChatMessage] = []
+    var images: [ConversationImageReference] = []
     var timelineItems: [ConversationTimelineItem] = []
     var responses: [ConversationResponse] = []
     var recordedRunSeconds: Double?
@@ -110,6 +111,8 @@ final class ConversationModel {
                 }
                 messages = next.sorted { $0.seq < $1.seq }
             } else { olderReads.suspend(); loadingOlder = false; messages = history.messages; responses = []; generation = history.generation; hasMore = history.hasMore }
+            let updatedIDs = Set(history.messages.map(\.id))
+            images = images.filter { $0.generation == history.generation && !updatedIDs.contains($0.messageID) } + (history.images ?? [])
             if stopRequested, messages.last(where: { $0.role == .user })?.id != interruptedUserID { stopRequested = false }
             if generation == history.generation {
                 let incoming = history.responses ?? []
@@ -139,6 +142,7 @@ final class ConversationModel {
                 responses.insert(contentsOf: (page.responses ?? []).filter { !responseIDs.contains($0.firstMessageID) }, at: 0)
                 let existing = Set(messages.map(\.id))
                 messages.insert(contentsOf: page.messages.filter { !existing.contains($0.id) }, at: 0)
+                let imageIDs = Set(images.map(\.id)); images += (page.images ?? []).filter { !imageIDs.contains($0.id) }
                 timelineItems = ConversationTimeline().items(from: messages); hasMore = page.hasMore
             } catch { if olderReads.isCurrent(request), generation == sourceGeneration { self.error = ErrorPresentation().message(error) } }
         }

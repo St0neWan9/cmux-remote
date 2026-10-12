@@ -208,3 +208,6 @@
 "tool.detail.changed" = "This record has changed. Refresh to read the current version.";
 
 "tool.detail.unavailable" = "This Bridge does not support full tool records yet. Update the Bridge and retry.";
+
+"image.history.open" = "Open image";
+"error.image_unavailable" = "This recorded image is unavailable or exceeds preview limits.";
