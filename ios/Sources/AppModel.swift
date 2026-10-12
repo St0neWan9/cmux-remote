@@ -199,5 +199,5 @@ final class AppModel {
         conversationModels[key] = model
         return model
     }
-    func unpair() { conversationModels.removeAll(); refreshGeneration = UUID(); loading = false; enrollmentGeneration = UUID(); stopEnrollmentMonitor(); client?.close(); client = nil; saved = nil; sessions = []; workspaces = []; store.remove(); store.removeConnection(); store.disableLegacy() }
+    func unpair() { for model in conversationModels.values { model.suspendReads() }; conversationModels.removeAll(); refreshGeneration = UUID(); loading = false; enrollmentGeneration = UUID(); stopEnrollmentMonitor(); client?.close(); client = nil; saved = nil; sessions = []; workspaces = []; store.remove(); store.removeConnection(); store.disableLegacy() }
 }

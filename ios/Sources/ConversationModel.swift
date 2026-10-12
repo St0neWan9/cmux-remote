@@ -47,6 +47,10 @@ final class ConversationModel {
     private let readSessions: @Sendable () async throws -> [SessionDescriptor]
     private let readHistory: @Sendable (Int?) async throws -> ConversationSnapshot
     private let readPreview: @Sendable () async throws -> PreviewSnapshot
+    private let refreshReads = ReadRequestOwner()
+    private let olderReads = ReadRequestOwner()
+    private var readsEnabled = true
+    private(set) var loadingOlder = false
     var busy = false
     var hasMore = false
     private var generation: String?
@@ -78,15 +82,27 @@ final class ConversationModel {
         stopRequested = true
         interruptedUserID = messages.last(where: { $0.role == .user })?.id
     }
+    /// Suspending reads leaves durable mutations and their captured drafts intact.
+    func suspendReads() { readsEnabled = false; refreshReads.suspend(); olderReads.suspend(); loadingOlder = false }
+    func resumeReads() { readsEnabled = true }
     func refresh() async {
+        guard readsEnabled, !Task.isCancelled else { return }
+        olderReads.suspend(); loadingOlder = false
+        await refreshReads.run { [self] request in await readLatest(request) }
+    }
+    private func readLatest(_ request: UUID) async {
         do {
             do { try await restorePendingSend() }
-            catch { mutationWarning = ErrorPresentation().message(error) }
+            catch { if refreshReads.isCurrent(request) { mutationWarning = ErrorPresentation().message(error) } }
+            guard refreshReads.isCurrent(request) else { return }
             let descriptors = try await readSessions()
+            guard refreshReads.isCurrent(request) else { return }
             guard let current = descriptors.first(where: { $0.id == session.id }) else { throw BridgeError("read_only", "The cmux session is no longer available.", status: 404) }
-            updateSession(current)
             let history = try await readHistory(nil)
+            guard refreshReads.isCurrent(request) else { return }
             let live = try? await readPreview()
+            guard refreshReads.isCurrent(request) else { return }
+            updateSession(current)
             if generation == history.generation {
                 var next = messages
                 for message in history.messages {
@@ -108,16 +124,27 @@ final class ConversationModel {
                 if message.role == .agent, case .prose(let value) = message.kind { return value.text }; return nil
             }.first
             preview = live?.text == committed ? nil : live?.text; error = mutationWarning
-        } catch { if !Task.isCancelled { self.error = ErrorPresentation().message(error) } }
+        } catch { if refreshReads.isCurrent(request) { self.error = ErrorPresentation().message(error) } }
     }
     func older() async {
-        guard let seq = messages.first?.seq else { return }
-        do {
-            let page = try await readHistory(seq)
-            guard page.generation == generation else { await refresh(); return }
-            let responseIDs = Set(responses.map(\.firstMessageID)); responses.insert(contentsOf: (page.responses ?? []).filter { !responseIDs.contains($0.firstMessageID) }, at: 0)
-            let existing = Set(messages.map(\.id)); messages.insert(contentsOf: page.messages.filter { !existing.contains($0.id) }, at: 0); timelineItems = ConversationTimeline().items(from: messages); hasMore = page.hasMore
-        } catch { self.error = ErrorPresentation().message(error) }
+        guard readsEnabled, !Task.isCancelled, let seq = messages.first?.seq, let sourceGeneration = generation else { return }
+        let refreshRevision = refreshReads.revision
+        var reanchor = false
+        await olderReads.run { [self] request in
+            loadingOlder = true
+            defer { if olderReads.revision == request { loadingOlder = false } }
+            do {
+                let page = try await readHistory(seq)
+                guard olderReads.isCurrent(request), refreshReads.revision == refreshRevision, generation == sourceGeneration else { return }
+                guard page.generation == sourceGeneration else { reanchor = true; return }
+                let responseIDs = Set(responses.map(\.firstMessageID))
+                responses.insert(contentsOf: (page.responses ?? []).filter { !responseIDs.contains($0.firstMessageID) }, at: 0)
+                let existing = Set(messages.map(\.id))
+                messages.insert(contentsOf: page.messages.filter { !existing.contains($0.id) }, at: 0)
+                timelineItems = ConversationTimeline().items(from: messages); hasMore = page.hasMore
+            } catch { if olderReads.isCurrent(request), refreshReads.revision == refreshRevision { self.error = ErrorPresentation().message(error) } }
+        }
+        if reanchor, readsEnabled, !Task.isCancelled, refreshReads.revision == refreshRevision { await refresh() }
     }
     func send() async {
         guard canSend, !busy, !imageDraft.loading, pendingSend == nil,
