@@ -269,4 +269,16 @@ private actor MirrorTestLocal: CmuxControlling {
         #expect(await cmux.inputs == 1)
     }
 
+    @Test func producerReplacementDuringAuthorizationNeverReceivesEarlierInput() async throws {
+        let cmux = MirrorTestCmux(); let service = RemoteMirrorService(cmux: cmux)
+        let request = MirrorInputRequest(runtimeEpoch: "producer-1", text: "belongs to original producer")
+        do {
+            _ = try await service.input(workspaceID: cmux.workspaceID, surfaceID: cmux.surfaceID, clientID: "client", request: request) {
+                await cmux.setEpoch("replacement-producer")
+            }
+            Issue.record("Input reached a replacement producer after authorization suspended")
+        } catch { #expect((error as? BridgeError)?.code == "stale_binding") }
+        #expect(await cmux.inputs == 0)
+    }
+
 }
