@@ -38,13 +38,13 @@ struct FeedQuestionView: View {
                     TextField(String(localized: "feed.custom"), text: Binding(get: { drafts[index]?.customText ?? "" }, set: { text in
                         var draft = drafts[index] ?? FeedQuestionDraft(); draft.typeCustom(text); drafts[index] = draft
                     }), axis: .vertical).lineLimit(1...4)
-                        .padding(12).overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.black.opacity(0.1), lineWidth: 0.5))
+                        .modifier(FloatingInput())
                         .disabled(busy).accessibilityIdentifier("feed.question.custom." + String(index))
                 }
             }
-            HStack {
+            ActionRow {
             Button(String(localized: "feed.submit")) { submit(answers) }
-                .buttonStyle(.borderedProminent).buttonBorderShape(.capsule)
+                .buttonStyle(FloatingButtonStyle(prominent: true))
                 .disabled(busy || (answers.isEmpty && !(!questions.isEmpty && questions.allSatisfy { ($0["options"].array ?? []).isEmpty })))
                 .accessibilityIdentifier("feed.question.submit")
             Button(String(localized: "feed.skip_questions")) { submit([]) }.buttonStyle(FloatingButtonStyle()).disabled(busy || questions.isEmpty)

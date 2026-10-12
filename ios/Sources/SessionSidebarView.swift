@@ -28,9 +28,9 @@ struct SessionSidebarView: View {
                     Image(systemName: "magnifyingglass").font(.system(size: 21)).frame(width: 44, height: 44)
                 }.buttonStyle(.plain).accessibilityLabel(String(localized: "sessions.search"))
                     .accessibilityIdentifier("sidebar.search")
-            }.padding(.horizontal, 24).padding(.top, 8).padding(.bottom, 14)
+            }.padding(.horizontal, MobileDesign.pageInset).padding(.top, 8).padding(.bottom, 14)
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 26) {
+                LazyVStack(alignment: .leading, spacing: MobileDesign.sectionGap) {
                     if showSearch || !query.isEmpty { SessionSearchField(query: $query) }
                     Text(String(localized: "sessions.projects")).font(.headline)
                     ForEach(groups) { group in
@@ -62,7 +62,7 @@ struct SessionSidebarView: View {
                     if groups.isEmpty { Text(String(localized: "sessions.no_matches")).foregroundStyle(.secondary) }
                     if canReadFeed { Button(action: showFeed) { Label(String(localized: "feed.title"), systemImage: "checkmark.bubble") }.buttonStyle(FloatingButtonStyle()) }
                     Button(action: refresh) { Label(String(localized: "chat.refresh"), systemImage: "arrow.clockwise") }.buttonStyle(FloatingButtonStyle())
-                }.padding(.horizontal, 24).padding(.top, 16).padding(.bottom, 28)
+                }.padding(.horizontal, MobileDesign.pageInset).padding(.top, 16).padding(.bottom, 28)
             }.onChange(of: query) { _, value in if !value.isEmpty { expanded.formUnion(groups.map(\.id)) } }
             Button(action: showConnection) {
                 HStack(spacing: 12) {
@@ -72,7 +72,7 @@ struct SessionSidebarView: View {
                         .background(Color.white, in: Circle()).shadow(color: .black.opacity(0.07), radius: 12, y: 3)
                 }.contentShape(Rectangle())
             }.buttonStyle(.plain).accessibilityIdentifier("sidebar.connection")
-                .padding(.horizontal, 24).padding(.vertical, 12)
+                .padding(.horizontal, MobileDesign.pageInset).padding(.vertical, 12)
         }.background(Color.white.ignoresSafeArea())
             .onChange(of: groups.map(\.id)) { _, ids in
                 if !initializedExpansion, let first = ids.first { expanded.insert(first); initializedExpansion = true }

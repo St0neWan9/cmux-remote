@@ -95,8 +95,17 @@ private actor PhoneUIBackend: CmuxControlling {
         }
         let transcript = root.appendingPathComponent("chat.jsonl")
         if !FileManager.default.fileExists(atPath: transcript.path) {
+            let icon = URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent("ios/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon-v3.png")
+            let sample = (try? Data(contentsOf: icon)) ?? Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aD1cAAAAASUVORK5CYII=")!
+            let read: [String: Any] = ["type": "assistant", "uuid": "design-tool", "timestamp": "2026-10-12T01:00:02Z", "message": ["content": [["type": "tool_use", "id": "design-read", "name": "Read", "input": ["file_path": file.path]]]]]
+            let image: [String: Any] = ["type": "user", "uuid": "design-image", "timestamp": "2026-10-12T01:00:04Z", "message": ["content": [["type": "image", "source": ["type": "base64", "media_type": "image/png", "data": sample.base64EncodedString()]]]]]
+            let readText = String(decoding: try JSONSerialization.data(withJSONObject: read), as: UTF8.self)
+            let imageText = String(decoding: try JSONSerialization.data(withJSONObject: image), as: UTF8.self)
             let rows = [
                 #"{"type":"user","uuid":"u","timestamp":"2026-10-12T01:00:00Z","message":{"content":"检查本地连接和页面样式"}}"#,
+                readText,
+                ##"{"type":"user","uuid":"design-result","timestamp":"2026-10-12T01:00:03Z","message":{"content":[{"type":"tool_result","tool_use_id":"design-read","content":"# UI fixture project\n\nLeft aligned file contents.\n"}]}}"##,
+                imageText,
                 #"{"type":"assistant","uuid":"a","timestamp":"2026-10-12T01:00:05Z","message":{"content":[{"type":"text","text":"页面使用白色背景，按钮和输入框悬浮显示。这个测试环境不会启动智能体，也不会更改真实权限。"}]}}"#,
                 #"{"type":"system","subtype":"turn_duration","durationMs":5000,"timestamp":"2026-10-12T01:00:06Z"}"#]
             try Data((rows.joined(separator: "\n") + "\n").utf8).write(to: transcript)

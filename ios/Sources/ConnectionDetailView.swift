@@ -16,16 +16,16 @@ struct ConnectionDetailView: View {
     var body: some View {
         WhitePage(title: String(localized: "connection.title")) {
             ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
-                    Label(host, systemImage: "laptopcomputer").font(.title3.weight(.semibold))
+                VStack(alignment: .leading, spacing: MobileDesign.sectionGap) {
+                    Label(host, systemImage: "laptopcomputer").font(.title3.weight(.semibold)).fixedSize(horizontal: false, vertical: true)
                     if loading { ProgressView(String(localized: "pair.connecting")) }
                     if status != nil { Label(String(localized: "connection.reachable"), systemImage: "checkmark.shield").foregroundStyle(.green) }
                     if let error { Text(error).foregroundStyle(.red) }
                     VStack(alignment: .leading, spacing: 12) {
-                        if let endpoint { LabeledContent(String(localized: "connection.endpoint"), value: endpoint) }
-                        if let protocolName = status?["protocol"].string { LabeledContent(String(localized: "connection.protocol"), value: protocolName) }
-                        if let identity { Text(String(localized: "connection.identity")).font(.headline); Text(identity).font(.caption.monospaced()).textSelection(.enabled) }
-                        if let certificate { Text(String(localized: "pair.fingerprint")).font(.headline); Text(certificate).font(.caption.monospaced()).textSelection(.enabled) }
+                        if let endpoint { detail(String(localized: "connection.endpoint"), value: endpoint) }
+                        if let protocolName = status?["protocol"].string { detail(String(localized: "connection.protocol"), value: protocolName) }
+                        if let identity { detail(String(localized: "connection.identity"), value: identity, monospaced: true) }
+                        if let certificate { detail(String(localized: "pair.fingerprint"), value: certificate, monospaced: true) }
                     }.modifier(FloatingSurface())
                     VStack(alignment: .leading, spacing: 12) {
                         Text(String(localized: "connection.permissions")).font(.headline)
@@ -34,13 +34,21 @@ struct ConnectionDetailView: View {
                         }
                         Text(String(localized: identity == nil ? "pair.legacy_notice" : "connection.owner_managed")).font(.footnote).foregroundStyle(.secondary)
                     }.modifier(FloatingSurface())
-                    HStack {
-                        Button(String(localized: "chat.refresh")) { Task { await refresh() } }
+                    VStack(spacing: MobileDesign.rowGap) {
+                        Button(String(localized: "chat.refresh")) { Task { await refresh() } }.disabled(loading)
                         Button(String(localized: "pair.disconnect"), role: .destructive, action: disconnect)
-                    }.buttonStyle(FloatingButtonStyle())
-                }.padding(24).frame(maxWidth: .infinity, alignment: .leading)
+                    }.buttonStyle(FloatingButtonStyle(fullWidth: true))
+                }.frame(maxWidth: .infinity, alignment: .leading).padding(MobileDesign.pageInset)
             }.refreshable { await refresh() }
         }.task { await refresh() }
+    }
+    private func detail(_ title: String, value: String, monospaced: Bool = false) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title).font(.subheadline.weight(.semibold))
+            Text(value).font(monospaced ? .caption.monospaced() : .callout)
+                .foregroundStyle(.secondary).textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, alignment: .leading)
+        }
     }
     private func refresh() async {
         guard !loading else { return }; loading = true; status = nil; defer { loading = false }

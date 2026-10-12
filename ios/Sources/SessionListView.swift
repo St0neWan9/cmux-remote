@@ -10,7 +10,6 @@ struct SessionListView: View {
     @State private var showFeed = false
     @State private var showConversation = false
     @State private var selectedConversation: ConversationModel?
-    @State private var drawerAvailable = true
     @State private var query = ""
     @State private var filter = SessionFilter.all
     @State private var workspaceID: String?
@@ -23,11 +22,12 @@ struct SessionListView: View {
         let loading = model.loading
         let error = model.error
         let host = model.host
-        SideDrawer(isPresented: $showSidebar, allowsEdgeOpening: drawerAvailable) {
-        NavigationStack {
+        SideDrawer(isPresented: $showSidebar, allowsEdgeOpening: !showConversation && !showConnection && !showFeed) {
+        AppNavigationStack {
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 26) {
+                LazyVStack(alignment: .leading, spacing: MobileDesign.sectionGap) {
                     if showSearch || !query.isEmpty { SessionSearchField(query: $query) }
+                    ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 10) {
                         ForEach(SessionFilter.allCases, id: \.rawValue) { value in
                             Button { filter = value } label: {
@@ -39,6 +39,7 @@ struct SessionListView: View {
                             }.buttonStyle(.plain).accessibilityIdentifier("sessions.filter." + value.rawValue)
                                 .accessibilityAddTraits(filter == value ? .isSelected : [])
                         }
+                    }
                     }
                     Menu {
                         Button(String(localized: "sessions.all_workspaces")) { workspaceID = nil }
@@ -70,7 +71,7 @@ struct SessionListView: View {
                     }
                     if let error { Text(error).font(.footnote).foregroundStyle(.red) }
                 }.frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 24).padding(.top, 20).padding(.bottom, 24)
+                    .padding(.horizontal, MobileDesign.pageInset).padding(.top, 20).padding(.bottom, 24)
             }
             .clipped()
             .background(Color.white.ignoresSafeArea())
@@ -79,8 +80,7 @@ struct SessionListView: View {
             .onChange(of: workspaces.map(\.id)) { _, ids in if let workspaceID, !ids.contains(workspaceID) { self.workspaceID = nil } }
             .refreshable { await model.refresh() }
             .task { await model.refresh() }
-            .onAppear { drawerAvailable = true }
-            .onDisappear { drawerAvailable = false; showSidebar = false }
+            .onDisappear { showSidebar = false }
             .overlay { if loading && sessions.isEmpty { ProgressView() } }
             .navigationDestination(isPresented: $showConversation) { if let selectedConversation { ConversationView(model: selectedConversation, hostName: host) } }
             .navigationDestination(isPresented: $showConnection) { if let client { ConnectionDetailView(client: client, host: host, identity: model.hostIdentity, certificate: model.hostCertificate, endpoint: model.endpoint) { model.unpair() } } }
@@ -114,16 +114,13 @@ struct SessionListView: View {
     private var header: some View {
         HStack(spacing: 12) {
             Button { showSidebar = true } label: {
-                Image(systemName: "line.3.horizontal").font(.system(size: 20, weight: .medium))
-                    .frame(width: 44, height: 44).background(Color.white, in: Circle())
-                    .shadow(color: .black.opacity(0.07), radius: 12, y: 3)
-            }.buttonStyle(.plain).accessibilityLabel(String(localized: "sessions.sidebar")).accessibilityIdentifier("sessions.sidebar")
+                Image(systemName: "line.3.horizontal")
+            }.buttonStyle(FloatingIconStyle()).accessibilityLabel(String(localized: "sessions.sidebar")).accessibilityIdentifier("sessions.sidebar")
             Text(String(localized: "sessions.title")).font(.headline).frame(maxWidth: .infinity)
             Button { if showSearch || !query.isEmpty { showSearch = false; query = "" } else { showSearch = true } } label: {
-                Image(systemName: "magnifyingglass").font(.system(size: 20, weight: .medium)).frame(width: 44, height: 44)
-                    .background(Color.white, in: Circle()).shadow(color: .black.opacity(0.07), radius: 12, y: 3)
-            }.buttonStyle(.plain).accessibilityLabel(String(localized: "sessions.search")).accessibilityIdentifier("sessions.search")
+                Image(systemName: "magnifyingglass")
+            }.buttonStyle(FloatingIconStyle()).accessibilityLabel(String(localized: "sessions.search")).accessibilityIdentifier("sessions.search")
 
-        }.padding(.horizontal, 20).padding(.vertical, 10)
+        }.padding(.horizontal, MobileDesign.pageInset).padding(.vertical, 10)
     }
 }

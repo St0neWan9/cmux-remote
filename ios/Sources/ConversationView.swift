@@ -100,6 +100,7 @@ struct ConversationView: View {
         }
         }
         .background(Color.white.ignoresSafeArea())
+        .background(InteractivePopInstaller())
         .toolbar(.hidden, for: .navigationBar)
         .safeAreaInset(edge: .top, spacing: 0) { header }
         .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -165,14 +166,13 @@ struct ConversationView: View {
         } message: { Text(String(localized: "operation.inspect_note")) }
         .navigationDestination(isPresented: $showProject) { ProjectView(session: model.session, client: model.client, initialPath: selectedFile) }
         .navigationDestination(isPresented: $showFeed) { FeedView(client: model.client) }
-        .sheet(item: $selectedImage) { reference in
-            HistoricalImageView(reference: reference, sessionID: model.session.id, client: model.client)
+        .navigationDestination(isPresented: Binding(get: { selectedImage != nil }, set: { if !$0 { selectedImage = nil } })) {
+            if let reference = selectedImage { HistoricalImageView(reference: reference, sessionID: model.session.id, client: model.client) }
         }
-        .sheet(item: $selectedToolDetail) { reference in
-            ToolDetailView(reference: reference, sessionID: model.session.id, client: model.client)
+        .navigationDestination(isPresented: Binding(get: { selectedToolDetail != nil }, set: { if !$0 { selectedToolDetail = nil } })) {
+            if let reference = selectedToolDetail { ToolDetailView(reference: reference, sessionID: model.session.id, client: model.client) }
         }
-        .sheet(isPresented: $showTiming) {
-            NavigationStack {
+        .navigationDestination(isPresented: $showTiming) {
                 WhitePage(title: String(localized: "chat.timing")) {
                     VStack(alignment: .leading, spacing: 18) {
                         if let seconds = model.recordedRunSeconds {
@@ -181,9 +181,8 @@ struct ConversationView: View {
                         } else { Text(String(localized: "chat.no_timing")).foregroundStyle(.secondary) }
                         Text(String(localized: "chat.timing_note")).font(.footnote).foregroundStyle(.secondary)
                         Spacer()
-                    }.padding(24).frame(maxWidth: .infinity, alignment: .leading)
+                    }.frame(maxWidth: .infinity, alignment: .leading).padding(MobileDesign.pageInset)
                 }
-            }
         }
         .alert(String(localized: "chat.hard_stop"), isPresented: $confirmHardStop) {
             Button(String(localized: "chat.hard_stop"), role: .destructive) { Task { await model.interrupt(hard: true) } }
@@ -195,6 +194,7 @@ struct ConversationView: View {
             for await _ in ticker.start() { guard !Task.isCancelled else { break }; await model.refresh() }
         }
         .environment(\.colorScheme, .light)
+        .accessibilityAction(.escape) { dismiss() }
     }
     private func openToolDetail(_ messageID: String, _ field: String) {
         guard let generation = model.historyGeneration else { return }
@@ -202,16 +202,16 @@ struct ConversationView: View {
     }
     private var header: some View {
         HStack(spacing: 12) {
-            Button { dismiss() } label: { Image(systemName: "chevron.left").font(.system(size: 20, weight: .medium)).frame(width: 44, height: 44).background(Color.white, in: Circle()).shadow(color: .black.opacity(0.07), radius: 10, y: 3) }
-                .buttonStyle(.plain).accessibilityLabel(String(localized: "chat.back")).accessibilityIdentifier("chat.back")
+            Button { dismiss() } label: { Image(systemName: "chevron.left") }
+                .buttonStyle(FloatingIconStyle()).accessibilityLabel(String(localized: "chat.back")).accessibilityIdentifier("chat.back")
             VStack(alignment: .leading, spacing: 3) {
                 Text(model.session.title).font(.subheadline.weight(.semibold)).lineLimit(1)
                 Text(hostName.isEmpty ? model.session.agent.capitalized : model.session.agent.capitalized + " · " + hostName).font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }.frame(maxWidth: .infinity, alignment: .leading)
             Menu {
-                Button { showTiming = true } label: { Label(String(localized: "chat.timing"), systemImage: "clock") }
-                if model.client.allows(.projectRead) { Button { selectedFile = ""; showProject = true } label: { Label(String(localized: "project.title"), systemImage: "doc.text.magnifyingglass") } }
-                if model.client.allows(.feedRead) { Button { showFeed = true } label: { Label(String(localized: "feed.title"), systemImage: "checkmark.bubble") } }
+                Button { showTiming = true } label: { Label(String(localized: "chat.timing"), systemImage: "clock") }.accessibilityIdentifier("chat.timing")
+                if model.client.allows(.projectRead) { Button { selectedFile = ""; showProject = true } label: { Label(String(localized: "project.title"), systemImage: "doc.text.magnifyingglass") }.accessibilityIdentifier("chat.project") }
+                if model.client.allows(.feedRead) { Button { showFeed = true } label: { Label(String(localized: "feed.title"), systemImage: "checkmark.bubble") }.accessibilityIdentifier("chat.feed") }
                 Button { Task { await model.refresh() } } label: { Label(String(localized: "chat.refresh"), systemImage: "arrow.clockwise") }
                 if model.canSend {
                     Button { Task { await model.interrupt() } } label: { Label(String(localized: "chat.stop"), systemImage: "stop.circle") }
@@ -219,6 +219,6 @@ struct ConversationView: View {
                 }
             } label: { Image(systemName: "ellipsis").font(.system(size: 22, weight: .medium)).frame(width: 48, height: 44).background(Color.white, in: Capsule()).shadow(color: .black.opacity(0.07), radius: 10, y: 3) }
                 .tint(.primary).accessibilityLabel(String(localized: "chat.more")).accessibilityIdentifier("chat.more")
-        }.padding(.horizontal, 14).padding(.vertical, 8)
+        }.padding(.horizontal, MobileDesign.pageInset).padding(.vertical, 8)
     }
 }

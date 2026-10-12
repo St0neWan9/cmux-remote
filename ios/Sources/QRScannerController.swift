@@ -38,8 +38,8 @@ final class QRScannerController: UIViewController, @preconcurrency AVCaptureMeta
     }
     func stop() { stopped = true; CameraSessionWorker(session: capture).stop() }
     private func showUnavailable() {
-        let label = UILabel(); label.text = String(localized: "pair.camera_unavailable"); label.textColor = .secondaryLabel; label.numberOfLines = 0; label.textAlignment = .center
+        let label = UILabel(); label.text = String(localized: "pair.camera_unavailable"); label.textColor = .secondaryLabel; label.font = .preferredFont(forTextStyle: .body); label.adjustsFontForContentSizeCategory = true; label.numberOfLines = 0; label.textAlignment = .center
         label.translatesAutoresizingMaskIntoConstraints = false; view.addSubview(label)
-        NSLayoutConstraint.activate([label.centerYAnchor.constraint(equalTo: view.centerYAnchor), label.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24), label.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24)])
+        NSLayoutConstraint.activate([label.centerYAnchor.constraint(equalTo: view.centerYAnchor), label.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: MobileDesign.pageInset), label.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -MobileDesign.pageInset)])
     }
 }

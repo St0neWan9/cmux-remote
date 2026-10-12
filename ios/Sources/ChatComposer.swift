@@ -30,7 +30,7 @@ struct ChatComposer: View {
                 if let showImageFiles { Button(action: showImageFiles) { Label(String(localized: "image.select_file"), systemImage: "folder") }.disabled(busy || !canSend || sendBlocked) }
                 if canReadProject { Button(action: showProject) { Label(String(localized: "project.title"), systemImage: "doc.text.magnifyingglass") } }
                 if canReadFeed { Button(action: showFeed) { Label(String(localized: "feed.title"), systemImage: "checkmark.bubble") } }
-            } label: { Image(systemName: "plus").font(.system(size: 23, weight: .medium)).frame(width: 36, height: 42) }
+            } label: { Image(systemName: "plus").font(.system(size: 23, weight: .medium)).frame(width: MobileDesign.controlHeight, height: MobileDesign.controlHeight) }
                 .tint(.primary).accessibilityLabel(String(localized: "chat.actions")).accessibilityIdentifier("chat.actions")
             TextField(String(localized: "chat.follow_up"), text: $draft, axis: .vertical)
                 .font(.body).lineLimit(1...6).focused($focused).padding(.vertical, 11)
@@ -38,7 +38,7 @@ struct ChatComposer: View {
                 .accessibilityIdentifier("chat.composer")
             if let startVoice {
                 Button { if dictating { finishVoice?() } else { focused = false; startVoice() } } label: {
-                    Image(systemName: dictating ? "waveform" : "mic").font(.system(size: 21)).foregroundStyle(dictating ? Color.accentColor : Color.primary).frame(width: 36, height: 42)
+                    Image(systemName: dictating ? "waveform" : "mic").font(.system(size: 21)).foregroundStyle(dictating ? Color.accentColor : Color.primary).frame(width: MobileDesign.controlHeight, height: MobileDesign.controlHeight)
                 }.buttonStyle(.plain).accessibilityLabel(String(localized: dictating ? "voice.finish" : "voice.start")).accessibilityIdentifier("voice.microphone").disabled(busy || !canSend || (sendBlocked && !dictating))
             }
             if working && !hasDraft {
@@ -48,7 +48,7 @@ struct ChatComposer: View {
                 Button { focused = false; send() } label: {
                     Image(systemName: "arrow.up").font(.system(size: 20, weight: .semibold)).foregroundStyle(hasDraft && canSend ? Color.white : Color.secondary)
                         .frame(width: 40, height: 40).background(hasDraft && canSend ? Color.accentColor : Color(uiColor: .tertiarySystemFill), in: Circle())
-                }.buttonStyle(.plain).accessibilityLabel(String(localized: "chat.send")).accessibilityIdentifier("chat.send").disabled(busy || !canSend || !hasDraft || sendBlocked)
+                }.frame(width: MobileDesign.controlHeight, height: MobileDesign.controlHeight).contentShape(Rectangle()).buttonStyle(.plain).accessibilityLabel(String(localized: "chat.send")).accessibilityIdentifier("chat.send").disabled(busy || !canSend || !hasDraft || sendBlocked)
             }
         }.padding(.horizontal, 10).padding(.vertical, 7)
             .background(Color.white, in: RoundedRectangle(cornerRadius: 30))

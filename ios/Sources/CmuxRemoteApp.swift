@@ -16,7 +16,7 @@ struct CmuxRemoteApp: App {
             Group {
                 if model.client == nil { PairingView(model: model) }
                 else { SessionListView(model: model) }
-            }.environment(\.colorScheme, .light).task(id: phase) {
+            }.environment(\.colorScheme, .light).tint(MobileDesign.accent).task(id: phase) {
                 model.restorePairing()
                 if phase == .active { model.resumeEnrollment(); await model.discover() }
                 else { model.pauseEnrollment() }
