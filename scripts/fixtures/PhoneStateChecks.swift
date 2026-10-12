@@ -319,6 +319,32 @@ private actor UncertainImageSend {
         let ownedConversation = owner.conversation(session: session, client: client)
         ownedConversation.draft = "Retain navigation draft"
         checkMedia(owner.conversation(session: session, client: client) === ownedConversation && ownedConversation.draft == "Retain navigation draft", "App navigation recreated an in-flight conversation owner")
+        try await pendingStore.save(savedRequest, scope: "corruption", sessionID: "one")
+        let corruptFiles = try FileManager.default.contentsOfDirectory(at: recoveryRoot, includingPropertiesForKeys: nil)
+        try Data("corrupt".utf8).write(to: corruptFiles[0])
+        let inspectedMessage = ChatMessage(id: "inspection", seq: 1, role: .agent, timestamp: .distantPast, kind: .prose(ChatProse(text: "Inspect this authoritative history")))
+        let corruptChat = ConversationModel(session: session, client: client,
+            loadRecovery: { try await pendingStore.load(scope: "corruption", sessionID: "one") },
+            saveRecovery: { try await pendingStore.save($0, scope: "corruption", sessionID: "one") },
+            readSessions: { [session] },
+            readHistory: { _ in ConversationSnapshot(messages: [inspectedMessage], hasMore: false, generation: "inspection", clipped: false) },
+            readPreview: { PreviewSnapshot(text: nil, available: false) })
+        await corruptChat.refresh()
+        checkMedia(corruptChat.messages.map(\.id) == ["inspection"] && corruptChat.recoveryBlocked && corruptChat.error != nil, "Corrupt recovery storage blocked authorized history inspection")
+        await corruptChat.acknowledgePendingSend(); await corruptChat.refresh()
+        checkMedia(!corruptChat.recoveryBlocked && corruptChat.error == nil, "Explicit inspection did not recover corrupt local storage")
+        let cacheSession = SessionDescriptor(id: "cache", agent: "claude", title: "Cache", cwd: nil, workspaceID: "workspace", surfaceID: "surface", state: "idle")
+        try await pendingStore.save(savedRequest, scope: client.operationRecoveryScope, sessionID: cacheSession.id)
+        let cacheOwner = AppModel(pendingSends: pendingStore)
+        let cached = cacheOwner.conversation(session: cacheSession, client: client); await cached.refresh()
+        cached.draft = "Later caption"; cached.imageDraft.images.append(newPhoto)
+        for index in 0..<33 {
+            _ = cacheOwner.conversation(session: SessionDescriptor(id: "cache-\(index)", agent: "claude", title: "Other", cwd: nil), client: client)
+        }
+        let cachedAgain = cacheOwner.conversation(session: cacheSession, client: client); await cachedAgain.refresh()
+        checkMedia(cachedAgain === cached && cachedAgain.draft == "Later caption" && cachedAgain.imageDraft.images.map(\.id).contains(newPhoto.id), "Cache pressure erased later edits on an unresolved send")
+        await cachedAgain.acknowledgePendingSend()
+
         let navigationLoss = UncertainImageSend()
         let navigationSession = SessionDescriptor(id: "reopen-" + UUID().uuidString, agent: "claude", title: "Recovery", cwd: nil, workspaceID: "workspace", surfaceID: "surface", state: "working")
         func reopenConversation() -> ConversationModel {
