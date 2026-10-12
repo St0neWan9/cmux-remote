@@ -7,15 +7,16 @@ import CmuxRemoteCore
 public struct CmuxEventClient: Sendable {
     private let path: String
     private let password: String?
-    public init(path: String, password: String? = nil) { self.path = path; self.password = password }
+    private let capability: String?
+    public init(path: String, password: String? = nil, capability: String? = nil) { self.path = path; self.password = password; self.capability = capability }
     public func consume(afterSequence: Int?, onFrame: @escaping @Sendable (JSONValue) async throws -> Void) async throws {
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
         let frames = AsyncThrowingStream<JSONValue, any Error>.makeStream(bufferingPolicy: .bufferingOldest(256))
-        let password = password
+        let password = password; let capability = capability
         let subscription: JSONValue = .object(["id": .string(UUID().uuidString), "method": .string("events.stream"), "params": .object(["categories": .array(["workspace", "surface", "agent", "feed"].map(JSONValue.string)), "after_seq": afterSequence.map { .number(Double($0)) } ?? .null])])
         do {
             let channel = try await ClientBootstrap(group: group).connectTimeout(.seconds(5)).channelInitializer { channel in
-                channel.pipeline.addHandler(CmuxEventHandler(subscription: subscription, password: password, continuation: frames.continuation))
+                channel.pipeline.addHandler(CmuxEventHandler(subscription: subscription, password: password, capability: capability, continuation: frames.continuation))
             }.connect(unixDomainSocketPath: path).get()
             do {
                 try await withTaskCancellationHandler {

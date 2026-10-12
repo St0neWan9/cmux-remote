@@ -6,10 +6,11 @@ import CmuxRemoteCore
 public struct UnixSocketClient: CmuxControlling {
     private let path: String
     private let password: String?
-    public init(path: String, password: String? = nil) { self.path = path; self.password = password }
+    private let capability: String?
+    public init(path: String, password: String? = nil, capability: String? = nil) { self.path = path; self.password = password; self.capability = capability }
 
     public func request(_ method: String, params: [String: JSONValue] = [:]) async throws -> JSONValue {
-        let path = path; let password = password
+        let path = path; let password = password; let capability = capability
         return try await Task.detached {
             let fd = socket(AF_UNIX, SOCK_STREAM, 0)
             guard fd >= 0 else { throw BridgeError("socket_unavailable", "Could not open the cmux socket.", status: 503) }
@@ -36,7 +37,7 @@ public struct UnixSocketClient: CmuxControlling {
                 let reply = try Self.readLine(fd: fd)
                 guard String(decoding: reply, as: UTF8.self).hasPrefix("OK") else { throw BridgeError("socket_denied", "cmux rejected socket authentication.", status: 403) }
             }
-            try Self.write(.object(["id": .string(UUID().uuidString), "method": .string(method), "params": .object(params)]), fd: fd)
+            try Self.write(.object(["id": .string(UUID().uuidString), "method": .string(method), "params": .object(params)]), fd: fd, capability: capability)
             let reply = try Self.read(fd: fd)
             guard reply["ok"].bool == true else {
                 throw BridgeError(reply["error"]["code"].string ?? "socket_denied", "cmux could not complete this operation.", status: 502)
@@ -45,8 +46,13 @@ public struct UnixSocketClient: CmuxControlling {
         }.value
     }
 
-    private static func write(_ value: JSONValue, fd: Int32) throws {
-        var data = try JSONEncoder().encode(value); data.append(10)
+    private static func write(_ value: JSONValue, fd: Int32, capability: String? = nil) throws {
+        var data = try JSONEncoder().encode(value)
+        if let capability {
+            guard !capability.isEmpty, !capability.contains(where: { $0.isWhitespace }), capability.utf8.count <= 8192 else { throw BridgeError("setup_storage", "The local connection capability is invalid.") }
+            data = Data(("_cmux_capability_v1 " + capability + " ").utf8) + data
+        }
+        data.append(10)
         try writeData(data, fd: fd)
     }
     private static func writeData(_ data: Data, fd: Int32) throws {

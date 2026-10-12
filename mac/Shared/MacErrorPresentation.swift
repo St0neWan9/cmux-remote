@@ -4,6 +4,14 @@ import Foundation
 struct MacErrorPresentation {
     static func message(_ code: String) -> String {
         switch code {
+        case "setup_required": return String(localized: "mac.error.setup")
+        case "setup_storage": return String(localized: "mac.error.setupStorage")
+        case "resident_starting", "sharing_busy": return String(localized: "mac.error.starting")
+        case "resident_missing", "resident_failed": return String(localized: "mac.error.resident")
+        case "sharing_start_failed", "sharing_stopped", "invalid_endpoint": return String(localized: "mac.error.sharing")
+        case "sharing_unsupported", "not_found": return String(localized: "mac.error.sharingUpgrade")
+        case "pairing_selection": return String(localized: "mac.error.pairingSelection")
+        case "invalid_state_path": return String(localized: "mac.error.statePath")
         case "socket_unavailable", "owner_socket_exists": return String(localized: "mac.error.localBridge")
         case "mirror_remote_unavailable": return String(localized: "mac.error.remoteBridge")
         case "sidebar_permission": return String(localized: "mac.error.permission")

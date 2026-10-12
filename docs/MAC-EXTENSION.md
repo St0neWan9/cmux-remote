@@ -1,5 +1,10 @@
 # Native Remote groups and workspace mirrors
 
+The new Mac entry point is a unified menu bar application. See
+[the Mac application guide](MAC-APP.md) and [design system](DESIGN-SYSTEM.md) for
+graphical sharing, pairing/approval, saved hosts and mirroring. The CLI flows
+below remain supported for automation and existing installations.
+
 The Mac Companion and resident `cmux-remote` Bridge integrate with the official
 cmux **Default Workspaces** sidebar. Local workspaces keep their original rows,
 menus, selection and appearance. The Bridge places remote projections in a native
