@@ -34,7 +34,10 @@ scripts/build-ios.sh
 open ios/CmuxRemote.xcodeproj
 ```
 
-Choose your own signing team to install on a physical iPhone. There is no dependency on cmux's iOS app or signing identity.
+The project defaults to the owner's Apple team; choose your own signing team for
+a fork or physical iPhone installation. There is no dependency on cmux's iOS app
+or signing identity. [TestFlight packaging](docs/TESTFLIGHT.md) covers the signed
+IPA and manual GitHub Actions upload workflow.
 
 ## Design and verification
 

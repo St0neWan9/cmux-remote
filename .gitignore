@@ -11,3 +11,11 @@ xcuserdata/
 .env
 state/
 *.log
+
+*.p8
+.env.*
+ios/vendor/bundle/
+ios/.bundle/
+ios/fastlane/report.xml
+ios/fastlane/README.md
+__pycache__/

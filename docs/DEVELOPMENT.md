@@ -181,3 +181,20 @@ and fades message pixels beneath the floating controls; it does not add a tinted
 backdrop. The iOS target compiles `ConversationHeader.metal` into its default
 shader library. `scripts/build-ios.sh` checks the Metal compiler and downloads
 Apple's official Metal Toolchain component if the active Xcode lacks it.
+
+## TestFlight packaging
+
+The iOS release configuration follows the adjacent Valuz Fastlane flow, using
+its public team ID with cmux-remote's independent Bundle ID and App Store
+profile. A manually dispatched GitHub workflow imports an existing distribution
+certificate into a temporary keychain, exports an IPA, and uploads only when
+requested. Signing secrets and the App Store Connect app record are not copied
+from Valuz. See [TestFlight setup](TESTFLIGHT.md).
+
+Local verification passed 200 package tests, 90 phone behavioral checks, seven
+release checks, the SwiftPM build, both localization audits (212 phone and 39
+Mac keys), the iOS Simulator build and an unsigned device Release archive. The
+archive's Bundle ID/version/build, AppIcon and privacy manifest were inspected;
+Fastlane's build/upload lanes load with the locked dependencies. No signed IPA
+export or Apple upload was performed: this repository currently has no signing
+secrets configured, and this app's Apple record/access remains to be verified.
