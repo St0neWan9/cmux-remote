@@ -5,11 +5,12 @@ import CmuxRemoteCore
 public struct CLIControlClient: CmuxControlling {
     private let executable: URL
     private let socketPath: String
-    public init(executable: URL, socketPath: String) { self.executable = executable; self.socketPath = socketPath }
+    private let environment: [String: String]?
+    public init(executable: URL, socketPath: String, environment: [String: String]? = nil) { self.executable = executable; self.socketPath = socketPath; self.environment = environment }
     public func request(_ method: String, params: [String: JSONValue]) async throws -> JSONValue {
         let input = try JSONEncoder().encode(JSONValue.object(params))
         guard input.count <= 1_048_576 else { throw BridgeError("too_large", "The request is too large.", status: 413) }
-        let executable = executable; let socketPath = socketPath
+        let executable = executable; let socketPath = socketPath; let environment = environment
         return try await Task.detached {
             // A private inherited stdin file avoids putting prompt contents in argv or pipe races.
             let temporary = FileManager.default.temporaryDirectory.appendingPathComponent("cmux-remote-rpc-" + UUID().uuidString)
@@ -21,6 +22,7 @@ public struct CLIControlClient: CmuxControlling {
             let source = try FileHandle(forReadingFrom: inputURL); defer { try? source.close() }
             let process = Process(); let output = Pipe(); let errors = Pipe()
             process.executableURL = executable; process.arguments = ["--socket", socketPath, "--json", "rpc", method, "-"]
+            process.environment = environment
             process.standardInput = source; process.standardOutput = output; process.standardError = errors
             let completion = AsyncStream<Int32>.makeStream(bufferingPolicy: .bufferingNewest(1))
             process.terminationHandler = { child in completion.continuation.yield(child.terminationStatus); completion.continuation.finish() }

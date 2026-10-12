@@ -9,6 +9,30 @@ AA60E62D3E7BAEF305ADABEA = { isa = XCBuildConfiguration; name = Debug; buildSett
 7D4B675C103B3FAC32C6C73A = { isa = PBXBuildFile; fileRef = 368C1384D12440AB11706C72; };
 F52DB6FE7ACE9471B6655C3D = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Companion/HostTrustSheet.swift"; sourceTree = "<group>"; };
 455809C1BA5393EA88931A2E = { isa = PBXBuildFile; fileRef = F52DB6FE7ACE9471B6655C3D; };
+60D3877B747E6E5B0C196995 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Companion/MacAppModel.swift"; sourceTree = "<group>"; };
+0D3AC853E851168B43D5D5CD = { isa = PBXBuildFile; fileRef = 60D3877B747E6E5B0C196995; };
+8046851E5AC2323D9BEA8DD4 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Companion/MacDesignTokens.swift"; sourceTree = "<group>"; };
+E17D6F087CF0BCE6126728C8 = { isa = PBXBuildFile; fileRef = 8046851E5AC2323D9BEA8DD4; };
+47D6BE2620C0FC411AE1F153 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Companion/MacDetailsDisclosure.swift"; sourceTree = "<group>"; };
+19F5E058FCE73C6F4E32E08F = { isa = PBXBuildFile; fileRef = 47D6BE2620C0FC411AE1F153; };
+713C2D1462BF3D442304709D = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Companion/MacPreferenceAppearance.swift"; sourceTree = "<group>"; };
+2888BCE54C97270C527EB120 = { isa = PBXBuildFile; fileRef = 713C2D1462BF3D442304709D; };
+DC2EE8F2BA7475B8DD2FFB34 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Companion/MacSettingsRow.swift"; sourceTree = "<group>"; };
+599CAB023950CB2F1CC26B39 = { isa = PBXBuildFile; fileRef = DC2EE8F2BA7475B8DD2FFB34; };
+E0B13275579A6574F8595FB5 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Companion/PairingQRCodeView.swift"; sourceTree = "<group>"; };
+5066C75E85C3727DFCA1FB77 = { isa = PBXBuildFile; fileRef = E0B13275579A6574F8595FB5; };
+5EEB1CBFA9A82B88B94CDE91 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Companion/RemoteAppDelegate.swift"; sourceTree = "<group>"; };
+E728EA5A72C519A24042C14A = { isa = PBXBuildFile; fileRef = 5EEB1CBFA9A82B88B94CDE91; };
+94DA8444EE1A832574083A00 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Companion/RemoteSettingsToolbar.swift"; sourceTree = "<group>"; };
+AA85CB1D4E67F453FF951A6D = { isa = PBXBuildFile; fileRef = 94DA8444EE1A832574083A00; };
+3C28662618C2FA25E972DDBB = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Companion/RemoteSettingsView.swift"; sourceTree = "<group>"; };
+05328A7B7C1202C0F4B4A411 = { isa = PBXBuildFile; fileRef = 3C28662618C2FA25E972DDBB; };
+70003E252B9E38ABD2D0F687 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Companion/RemoteStatusMenu.swift"; sourceTree = "<group>"; };
+E002D027DB9CB1FFD5CEB5C8 = { isa = PBXBuildFile; fileRef = 70003E252B9E38ABD2D0F687; };
+B7278B0A754964A4046CD6EF = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Companion/SharingSettingsView.swift"; sourceTree = "<group>"; };
+B6657F4E6D0701F4CDFA57E1 = { isa = PBXBuildFile; fileRef = B7278B0A754964A4046CD6EF; };
+F4232441BA6E9E88891981CA = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Shared/MacCapabilityPresentation.swift"; sourceTree = "<group>"; };
+1B7593310839812868DCDE4B = { isa = PBXBuildFile; fileRef = F4232441BA6E9E88891981CA; };
 680F04C0968D5791178DE2A3 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Shared/MacErrorPresentation.swift"; sourceTree = "<group>"; };
 346543AF092C04D18B186DF2 = { isa = PBXBuildFile; fileRef = 680F04C0968D5791178DE2A3; };
 780F7AE1D5946892EA5CB48F = { isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "en"; path = "Resources/en.lproj/Localizable.strings"; sourceTree = "<group>"; };
@@ -28,7 +52,7 @@ E8251676715DB4F9ACAEA347 = { isa = XCSwiftPackageProductDependency; productName 
 823B6C870C69A07307C25792 = { isa = PBXBuildFile; productRef = 96ADDC1A765D0F3C61A0D0D0; };
 FC97CDC5F9AE2D93722C07B9 = { isa = XCSwiftPackageProductDependency; productName = CmuxRemoteCore; };
 9572E0E62792B4E05B94B175 = { isa = PBXBuildFile; productRef = FC97CDC5F9AE2D93722C07B9; };
-2EDDFF2D557BD60D62D62AD5 = { isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (46A3A23E75684DD5F7CF8C39, 7D4B675C103B3FAC32C6C73A, 455809C1BA5393EA88931A2E, 346543AF092C04D18B186DF2); runOnlyForDeploymentPostprocessing = 0; };
+2EDDFF2D557BD60D62D62AD5 = { isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (46A3A23E75684DD5F7CF8C39, 7D4B675C103B3FAC32C6C73A, 455809C1BA5393EA88931A2E, 0D3AC853E851168B43D5D5CD, E17D6F087CF0BCE6126728C8, 19F5E058FCE73C6F4E32E08F, 2888BCE54C97270C527EB120, 599CAB023950CB2F1CC26B39, 5066C75E85C3727DFCA1FB77, E728EA5A72C519A24042C14A, AA85CB1D4E67F453FF951A6D, 05328A7B7C1202C0F4B4A411, E002D027DB9CB1FFD5CEB5C8, B6657F4E6D0701F4CDFA57E1, 1B7593310839812868DCDE4B, 346543AF092C04D18B186DF2); runOnlyForDeploymentPostprocessing = 0; };
 88B99844EB3C6D573DCA9C08 = { isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (5534A6B74771C620B9A12024, 198DA14D6BB464EECFCAE1FC); runOnlyForDeploymentPostprocessing = 0; };
 72DA26753829FAF66DBEF795 = { isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (D978A13A3CE7186CBEE302DA, 7DD3E8C3F0015A72B9A0DAAA, 823B6C870C69A07307C25792, 9572E0E62792B4E05B94B175); runOnlyForDeploymentPostprocessing = 0; };
 DA583200155F64410FA1C674 = { isa = XCBuildConfiguration; name = Debug; buildSettings = { PRODUCT_NAME = "$(TARGET_NAME)"; PRODUCT_BUNDLE_IDENTIFIER = "com.st0newan9.cmux-remote.mac"; GENERATE_INFOPLIST_FILE = YES; INFOPLIST_FILE = Companion/Info.plist; INFOPLIST_KEY_CFBundleDisplayName = "cmux Remote"; CODE_SIGN_STYLE = Manual; CODE_SIGN_IDENTITY = "-"; CREATE_INFOPLIST_SECTION_IN_BINARY = YES; SWIFT_STRICT_CONCURRENCY = complete; MARKETING_VERSION = 0.1.0; CURRENT_PROJECT_VERSION = 1; ENABLE_APP_SANDBOX = NO; PRODUCT_MODULE_NAME = CmuxRemoteCompanionApp; }; };
@@ -36,7 +60,7 @@ DA583200155F64410FA1C674 = { isa = XCBuildConfiguration; name = Debug; buildSett
 E75F2D0F30D6BF1ADBFD9C7D = { isa = XCConfigurationList; buildConfigurations = (DA583200155F64410FA1C674, 5B41206A9593EC56BA2ADDC9); defaultConfigurationName = Release; defaultConfigurationIsVisible = 0; };
 5B8E6FF5B0324779E60DD026 = { isa = PBXNativeTarget; name = CmuxRemoteMac; productName = CmuxRemoteMac; productType = "com.apple.product-type.application"; productReference = 7EBFA890A27B6C74492A0C2D; buildConfigurationList = E75F2D0F30D6BF1ADBFD9C7D; buildPhases = (2EDDFF2D557BD60D62D62AD5, 72DA26753829FAF66DBEF795, 88B99844EB3C6D573DCA9C08); buildRules = (); dependencies = (); packageProductDependencies = (E0F741E76E11022C666DEE4A, E8251676715DB4F9ACAEA347, 96ADDC1A765D0F3C61A0D0D0, FC97CDC5F9AE2D93722C07B9); };
 FBDC4F23F93125BBEEAE800C = { isa = PBXGroup; children = (7EBFA890A27B6C74492A0C2D); name = Products; sourceTree = "<group>"; };
-B28B7AF69320201D1CF206EB = { isa = PBXGroup; children = (3F107D3DB813928A5B7EEAD7, 368C1384D12440AB11706C72, F52DB6FE7ACE9471B6655C3D, 680F04C0968D5791178DE2A3, B4F9001FEF5406956D64F3DB, 81C7B96EA3173C0C3B4C8FDC, FBDC4F23F93125BBEEAE800C); sourceTree = "<group>"; };
+B28B7AF69320201D1CF206EB = { isa = PBXGroup; children = (3F107D3DB813928A5B7EEAD7, 368C1384D12440AB11706C72, F52DB6FE7ACE9471B6655C3D, 60D3877B747E6E5B0C196995, 8046851E5AC2323D9BEA8DD4, 47D6BE2620C0FC411AE1F153, 713C2D1462BF3D442304709D, DC2EE8F2BA7475B8DD2FFB34, E0B13275579A6574F8595FB5, 5EEB1CBFA9A82B88B94CDE91, 94DA8444EE1A832574083A00, 3C28662618C2FA25E972DDBB, 70003E252B9E38ABD2D0F687, B7278B0A754964A4046CD6EF, F4232441BA6E9E88891981CA, 680F04C0968D5791178DE2A3, B4F9001FEF5406956D64F3DB, 81C7B96EA3173C0C3B4C8FDC, FBDC4F23F93125BBEEAE800C); sourceTree = "<group>"; };
 90061A5F4E19D1411B425E01 = { isa = XCConfigurationList; buildConfigurations = (AA60E62D3E7BAEF305ADABEA, 3D553B551D2688E2E7A15153); defaultConfigurationName = Release; defaultConfigurationIsVisible = 0; };
 98F54143AB4E86B28C3AFEE0 = { isa = PBXProject; attributes = { LastUpgradeCheck = 2660; }; buildConfigurationList = 90061A5F4E19D1411B425E01; compatibilityVersion = "Xcode 14.0"; developmentRegion = en; knownRegions = (en, "zh-Hans", Base); mainGroup = B28B7AF69320201D1CF206EB; productRefGroup = FBDC4F23F93125BBEEAE800C; projectDirPath = ""; projectRoot = ""; packageReferences = (582681C2EAE02B3F3D399C0C); targets = (5B8E6FF5B0324779E60DD026); };
 }; rootObject = 98F54143AB4E86B28C3AFEE0; }

@@ -45,6 +45,8 @@ public actor NativeWorkspaceCatalog {
         let localSnapshot = entries.values.contains(where: { $0.hostID == host.id }) ? try await localWindows() : [:]
         let available = Set(workspaces.map { $0.id.lowercased() })
         for id in entries.keys where entries[id]?.hostID == host.id && !available.contains(entries[id]!.workspaceID) {
+            // Missing metadata must not erase an in-flight or uncertain local write.
+            if ["creating", "attaching"].contains(entries[id]!.state) || entries[id]?.errorCode == "outcome_unknown" { continue }
             entries[id]?.state = "unavailable"; entries[id]?.errorCode = "not_found"
             waiters.removeValue(forKey: id)?.1.finish()
         }
@@ -128,7 +130,8 @@ public actor NativeWorkspaceCatalog {
         // Read the complete local window inventory again; moving a workspace
         // between windows cannot be mistaken for closing it.
         guard try await localWindows()[seed.workspaceID] == nil else { throw BridgeError("mirror_busy", "The native workspace moved during inspection.", status: 409) }
-        guard entry.errorCode != "outcome_unknown", entry.state == "attached" || entry.state == "pending" || entry.state == "paused" else {
+        let returnedConfirmedRow = entry.state == "unavailable" && entry.errorCode == "not_found"
+        guard entry.errorCode != "outcome_unknown", entry.state == "attached" || entry.state == "pending" || entry.state == "paused" || returnedConfirmedRow else {
             throw BridgeError("outcome_unknown", "Inspect the prior native operation before creating another row.", status: 409)
         }
         let (host, remote) = try await authorize(hostID, entry.workspaceID)
