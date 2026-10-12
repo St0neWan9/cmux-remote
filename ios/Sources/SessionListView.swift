@@ -1,5 +1,6 @@
 import SwiftUI
 import CmuxRemoteCore
+import CmuxRemoteClient
 
 struct SessionListView: View {
     @Bindable var model: AppModel
@@ -8,7 +9,7 @@ struct SessionListView: View {
     @State private var showConnection = false
     @State private var showFeed = false
     @State private var showConversation = false
-    @State private var selectedSession: SessionDescriptor?
+    @State private var selectedConversation: ConversationModel?
     @State private var drawerAvailable = true
     @State private var query = ""
     @State private var filter = SessionFilter.all
@@ -57,9 +58,7 @@ struct SessionListView: View {
                                 Label(group.name ?? String(localized: "sessions.other"), systemImage: "folder")
                                     .font(.body.weight(.semibold)).accessibilityAddTraits(.isHeader)
                                 ForEach(group.sessions) { session in
-                                    NavigationLink {
-                                        ConversationView(session: session, client: client, hostName: host)
-                                    } label: { sessionRow(session) }
+                                    Button { openConversation(session, client: client) } label: { sessionRow(session) }
                                     .buttonStyle(.plain).accessibilityIdentifier("session." + session.id)
                                     .padding(.leading, 34)
                                 }
@@ -83,17 +82,21 @@ struct SessionListView: View {
             .onAppear { drawerAvailable = true }
             .onDisappear { drawerAvailable = false; showSidebar = false }
             .overlay { if loading && sessions.isEmpty { ProgressView() } }
-            .navigationDestination(isPresented: $showConversation) { if let selectedSession, let client { ConversationView(session: selectedSession, client: client, hostName: host) } }
+            .navigationDestination(isPresented: $showConversation) { if let selectedConversation { ConversationView(model: selectedConversation, hostName: host) } }
             .navigationDestination(isPresented: $showConnection) { if let client { ConnectionDetailView(client: client, host: host, identity: model.hostIdentity, certificate: model.hostCertificate, endpoint: model.endpoint) { model.unpair() } } }
             .navigationDestination(isPresented: $showFeed) { if let client { FeedView(client: client) } }
         }
         } drawer: {
             SessionSidebarView(groups: groups, host: host, canReadFeed: client?.allows(.feedRead) ?? false, query: $query,
-                select: { session in selectedSession = session; showSidebar = false; showConversation = true },
+                select: { session in showSidebar = false; if let client { openConversation(session, client: client) } },
                 showConnection: { showSidebar = false; showConnection = true },
                 showFeed: { showSidebar = false; showFeed = true },
                 refresh: { Task { await model.refresh() } })
         }.environment(\.colorScheme, .light)
+    }
+    private func openConversation(_ session: SessionDescriptor, client: RemoteClient) {
+        selectedConversation = model.conversation(session: session, client: client)
+        showConversation = true
     }
     private func sessionRow(_ session: SessionDescriptor) -> some View {
         HStack(spacing: 12) {

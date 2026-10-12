@@ -184,3 +184,9 @@
 "error.image_load" = "图片无法载入，请重新选择。";
 
 "sidebar.close" = "收起侧边栏";
+
+"error.draft_storage" = "待确认的发送无法保存或恢复。请先检查对话，再决定是否重新发送。";
+
+"tool.card.shell" = "Shell";
+
+"tool.card.success" = "成功";

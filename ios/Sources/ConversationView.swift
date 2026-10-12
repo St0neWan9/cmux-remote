@@ -23,8 +23,8 @@ struct ConversationView: View {
     @State private var photoLoadTask: Task<Void, Never>?
     @State private var confirmPendingReset = false
     private let hostName: String
-    init(session: SessionDescriptor, client: RemoteClient, hostName: String = "") {
-        _model = State(initialValue: ConversationModel(session: session, client: client)); self.hostName = hostName
+    init(model: ConversationModel, hostName: String = "") {
+        _model = State(initialValue: model); self.hostName = hostName
     }
     var body: some View {
         GeometryReader { viewport in
@@ -127,7 +127,7 @@ struct ConversationView: View {
                 ChatComposer(draft: $model.draft, canSend: model.canSend, busy: model.busy, working: model.hasActiveResponse,
                              send: { Task { await model.send() } }, stop: { Task { await model.interrupt() } },
                              canReadProject: model.client.allows(.projectRead), canReadFeed: model.client.allows(.feedRead), showProject: { selectedFile = ""; showProject = true }, showFeed: { showFeed = true },
-                             hasImages: !model.imageDraft.images.isEmpty, sendBlocked: model.pendingSend != nil || model.imageDraft.loading, showPhotos: {
+                             hasImages: !model.imageDraft.images.isEmpty, sendBlocked: model.recoveryBlocked || model.imageDraft.loading, showPhotos: {
                                  guard model.imageDraft.images.count < 4 else { model.imageDraft.error = String(localized: "error.image"); return }
                                  photoItems = []; showingPhotos = true
                              }, showImageFiles: { showingImageFiles = true })
@@ -148,8 +148,8 @@ struct ConversationView: View {
             photoLoadTask?.cancel(); model.imageDraft.cancelLoading()
             let selections = selected.enumerated().map { index, item in
                 ImageSelection(name: "Image-\(index + 1).jpg", load: {
-                    guard let data = try await item.loadTransferable(type: Data.self) else { throw BridgeError("invalid_image", "The selected image is unavailable.", status: 422) }
-                    return data
+                    guard let data = try await item.loadTransferable(type: PhotoSelectionFile.self) else { throw BridgeError("invalid_image", "The selected image is unavailable.", status: 422) }
+                    return data.data
                 })
             }
             photoLoadTask = Task { await model.imageDraft.load(selections, encode: ImageAttachmentEncoder().encode) }
@@ -157,7 +157,7 @@ struct ConversationView: View {
         .onDisappear { photoLoadTask?.cancel(); model.imageDraft.cancelLoading() }
         .onChange(of: phase) { _, value in if value != .active { photoLoadTask?.cancel(); model.imageDraft.cancelLoading() } }
         .alert(String(localized: "operation.inspected"), isPresented: $confirmPendingReset) {
-            Button(String(localized: "operation.release")) { model.acknowledgePendingSend() }
+            Button(String(localized: "operation.release")) { Task { await model.acknowledgePendingSend() } }
             Button(String(localized: "pair.cancel"), role: .cancel) {}
         } message: { Text(String(localized: "operation.inspect_note")) }
         .navigationDestination(isPresented: $showProject) { ProjectView(session: model.session, client: model.client, initialPath: selectedFile) }
