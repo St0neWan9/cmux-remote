@@ -423,7 +423,9 @@ private actor DeferredToolPage {
         await incorrectPage.load()
         checkDetail(incorrectPage.page == nil && incorrectPage.error != nil, "A different tool's returned bytes were accepted as this detail")
 
+        let readChecks = await ConversationReadChecks.run(client: client)
+        failures += readChecks.failures
         if !failures.isEmpty { print(failures.joined(separator: "\n")); exit(1) }
-        print("Phone state: 17 existing behavioral checks, \(mediaChecks) image/draft/receipt checks and \(detailChecks) tool-detail checks passed.")
+        print("Phone state: 17 existing behavioral checks, \(mediaChecks) image/draft/receipt checks and \(detailChecks) tool-detail checks, \(readChecks.count) conversation read checks passed.")
     }
 }
