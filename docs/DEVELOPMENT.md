@@ -14,7 +14,11 @@ Supported first backend: official cmux on macOS, via its owner-controlled local 
 
 Use English and Simplified Chinese localization in `ios/Resources`. Keep technical machine error codes stable and map them in the UI. Keep local development credentials in a state directory outside the repository.
 
-To refresh the vendored parsing library, copy only public upstream source, record its exact commit, preserve notices, inspect the diff and run all parser/history tests. Never copy personal transcript data into test fixtures. CI builds Swift package tests and the iPhone Simulator target on macOS.
+To refresh the vendored parsing library, copy only public upstream source, record its exact commit, preserve notices, inspect the diff and run all parser/history tests. Never copy personal transcript data into test fixtures.
+
+For packaging, manually run the **Package verification** workflow in GitHub
+Actions. It runs the package/model checks and builds the iPhone Simulator and Mac
+Companion targets on macOS. Commits, pull requests and merges do not trigger CI.
 
 ## Connection and phone UX status
 
@@ -181,3 +185,35 @@ and fades message pixels beneath the floating controls; it does not add a tinted
 backdrop. The iOS target compiles `ConversationHeader.metal` into its default
 shader library. `scripts/build-ios.sh` checks the Metal compiler and downloads
 Apple's official Metal Toolchain component if the active Xcode lacks it.
+
+## Mac B LAN verification — 2026-10-12
+
+The physical client Mac (`thunderfoot`, macOS 26.6.2 / arm64) connected to the
+dedicated `cmux Alpha Remote` service on Valuz-Studio over Bonjour and pinned
+HTTPS. Both official cmux apps stayed running. The client used a new window and
+received only workspace/terminal read and terminal input access to the dedicated
+source acceptance workspace. Companion discovery, first-use trust, host approval,
+saved-host restoration, native Remote grouping, three panes/six tabs, ordinary
+and hidden-tab input, and repeated open were exercised. The mirror was opened
+through the documented CLI; the UI automation tool could not click Mirror here,
+so that button's physical-client journey is not claimed verified.
+
+One local Bridge restart and a remote Bridge restart retained all six binding
+IDs, viewer PIDs and producer epochs. A 20-second suspension of only the dedicated
+remote Bridge produced `reconnecting`, then `watching` and advancing TUI frames
+with the original source PID. Reusing one confirmed input operation before and
+after the remote restart produced one source acknowledgement. Ctrl-] detached one
+local viewer; closing and explicitly reopening the test mirror restored all six
+original producer epochs. Existing Claude/Codex sessions were not controlled;
+their acceptance gate remains pending.
+
+Testing `main` at `95fb435` exposed an incorrect `system.tree` parameter: `all`
+left the inventory scoped to the current window and could cause another window's
+mirror to be mistaken for closed. `all_windows` repairs both inventory reads.
+The unfocused-window regression failed before the repair and passed afterward.
+The phone-model harness also now uses SwiftPM's reported product directory and
+supports both native and Swift Build module objects. Final `scripts/verify.sh`
+passed 201 package tests, 90 actual phone-model checks and both localization
+catalog checks; the Mac wrapper build and installed signature checks passed.
+Receipts are in `.build/verification/mac-b-lan-20261012/`, outside Git. The tested
+baseline was `95fb435`, with the inventory and harness repairs described above.
