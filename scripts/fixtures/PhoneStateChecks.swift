@@ -288,6 +288,26 @@ private actor UncertainImageSend {
         readonlyPhoto.imageDraft.images = [photo]; await readonlyPhoto.send()
         checkMedia(await lost.requests.count == beforeInspection, "Read-only image conversation invoked send")
 
+        let navigationLoss = UncertainImageSend()
+        let navigationSession = SessionDescriptor(id: "reopen-" + UUID().uuidString, agent: "claude", title: "Recovery", cwd: nil, workspaceID: "workspace", surfaceID: "surface", state: "working")
+        func reopenConversation() -> ConversationModel {
+            let descriptor = navigationSession
+            return ConversationModel(session: descriptor, client: client,
+                sendRequest: { try await navigationLoss.send($0) }, getOperation: { await navigationLoss.status($0) },
+                readSessions: { [descriptor] },
+                readHistory: { _ in ConversationSnapshot(messages: [], hasMore: false, generation: "reopen", clipped: false) },
+                readPreview: { PreviewSnapshot(text: nil, available: false) })
+        }
+        let beforeNavigation = reopenConversation()
+        beforeNavigation.draft = "Keep this uncertain send"; beforeNavigation.imageDraft.images = [photo]
+        await beforeNavigation.send(); let navigationOperation = beforeNavigation.pendingSend?.operationID
+        let afterNavigation = reopenConversation(); await afterNavigation.refresh()
+        checkMedia(navigationOperation != nil && afterNavigation.pendingSend?.operationID == navigationOperation && afterNavigation.imageDraft.images.map(\.id) == [photo.id] && afterNavigation.draft == "Keep this uncertain send", "Reopening the conversation discarded the unknown operation and its captured draft")
+        afterNavigation.draft = "Keep this uncertain send"; afterNavigation.imageDraft.images = [photo]
+        await afterNavigation.send()
+        checkMedia(await navigationLoss.requests.count == 1, "Reopening dispatched the same uncertain input under a fresh UUID")
+        afterNavigation.acknowledgePendingSend()
+
         if !failures.isEmpty { print(failures.joined(separator: "\n")); exit(1) }
         print("Phone state: 17 existing behavioral checks and \(mediaChecks) executed image/draft/receipt checks passed.")
     }
