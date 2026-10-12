@@ -20,7 +20,7 @@ struct ActivityGroupView: View {
             }.buttonStyle(.plain).accessibilityIdentifier("activity." + item.id).accessibilityValue(expanded ? String(localized: "chat.expanded") : String(localized: "chat.collapsed"))
             if expanded {
                 VStack(alignment: .leading, spacing: 14) { ForEach(item.messages) { message in MessageRow(message: message, projectRoot: projectRoot, openFile: openFile) } }
-                    .modifier(FloatingSurface())
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
         }.padding(.vertical, 4)
     }

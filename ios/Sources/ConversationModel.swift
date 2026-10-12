@@ -36,6 +36,11 @@ final class ConversationModel {
     let imageDraft = ImageDraftModel()
     private(set) var pendingSend: SendRequest?
     private var mutationWarning: String?
+    private let loadRecovery: @Sendable () async throws -> SendRequest?
+    private let saveRecovery: @Sendable (SendRequest?) async throws -> Void
+    private var recoveryTask: Task<SendRequest?, any Error>?
+    private var recoveryReady = false
+    var recoveryBlocked: Bool { !recoveryReady || pendingSend != nil }
     private let sendRequest: @Sendable (SendRequest) async throws -> MutationReceipt
     private let getOperation: @Sendable (UUID) async throws -> OperationStatus
     private let readSessions: @Sendable () async throws -> [SessionDescriptor]
@@ -45,6 +50,8 @@ final class ConversationModel {
     var hasMore = false
     private var generation: String?
     init(session: SessionDescriptor, client: RemoteClient,
+         loadRecovery: (@Sendable () async throws -> SendRequest?)? = nil,
+         saveRecovery: (@Sendable (SendRequest?) async throws -> Void)? = nil,
          sendRequest: (@Sendable (SendRequest) async throws -> MutationReceipt)? = nil,
          getOperation: (@Sendable (UUID) async throws -> OperationStatus)? = nil,
          readSessions: (@Sendable () async throws -> [SessionDescriptor])? = nil,
@@ -52,6 +59,9 @@ final class ConversationModel {
          readPreview: (@Sendable () async throws -> PreviewSnapshot)? = nil) {
         self.session = session; self.client = client
         let id = session.id
+        let recovery = PendingSendStore(); let scope = client.operationRecoveryScope
+        self.loadRecovery = loadRecovery ?? { try await recovery.load(scope: scope, sessionID: id) }
+        self.saveRecovery = saveRecovery ?? { try await recovery.save($0, scope: scope, sessionID: id) }
         self.sendRequest = sendRequest ?? { try await client.post("/v1/sessions/\(id)/send", body: $0, as: MutationReceipt.self) }
         self.getOperation = getOperation ?? { try await client.get("/v1/operations/\($0.uuidString)", as: OperationStatus.self) }
         self.readSessions = readSessions ?? { try await client.get("/v1/sessions", as: [SessionDescriptor].self) }
@@ -68,6 +78,7 @@ final class ConversationModel {
     }
     func refresh() async {
         do {
+            try await restorePendingSend()
             let descriptors = try await readSessions()
             guard let current = descriptors.first(where: { $0.id == session.id }) else { throw BridgeError("read_only", "The cmux session is no longer available.", status: 404) }
             updateSession(current)
@@ -109,15 +120,21 @@ final class ConversationModel {
         guard canSend, !busy, !imageDraft.loading, pendingSend == nil,
               !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !imageDraft.images.isEmpty else { return }
         busy = true; defer { busy = false }
-        let request = SendRequest(text: draft, attachments: imageDraft.images)
-        pendingSend = request
         do {
+            try await restorePendingSend()
+            guard pendingSend == nil else { return }
+            let request = SendRequest(text: draft, attachments: imageDraft.images)
+            pendingSend = request
+            try await saveRecovery(request)
             let receipt = try await sendRequest(request)
             guard receipt.accepted, receipt.operationID == request.operationID else { throw BridgeError("outcome_unknown", "The send receipt could not be verified.", status: 504) }
-            confirmSend(request); await refresh(); jumpToLatest += 1
+            try await confirmSend(request); await refresh(); jumpToLatest += 1
         } catch {
             let safeRejections = ["unauthorized", "scope_denied", "read_only", "stale_binding", "input_busy", "invalid_image", "invalid_input", "too_large", "journal_unavailable", "receipt_capacity"]
-            if let failure = error as? BridgeError, safeRejections.contains(failure.code) { pendingSend = nil; mutationWarning = nil }
+            if let failure = error as? BridgeError, safeRejections.contains(failure.code) {
+                do { try await saveRecovery(nil); pendingSend = nil; mutationWarning = nil }
+                catch { mutationWarning = ErrorPresentation().message(error) }
+            }
             else { mutationWarning = ErrorPresentation().message(error) }
             self.error = ErrorPresentation().message(error)
         }
@@ -128,13 +145,33 @@ final class ConversationModel {
         do {
             let status = try await getOperation(request.operationID)
             guard status.operationID == request.operationID else { throw BridgeError("invalid_response", "The operation identity changed.", status: 502) }
-            if status.state == .accepted { confirmSend(request); await refresh(); jumpToLatest += 1 }
+            if status.state == .accepted { try await confirmSend(request); await refresh(); jumpToLatest += 1 }
             else { mutationWarning = String(localized: "error.outcome_unknown"); error = mutationWarning }
         } catch { mutationWarning = ErrorPresentation().message(error); self.error = mutationWarning }
     }
     /// An explicit inspection acknowledgement releases the draft; it never sends it.
-    func acknowledgePendingSend() { pendingSend = nil; mutationWarning = nil; error = nil }
-    private func confirmSend(_ request: SendRequest) {
+    func acknowledgePendingSend() async {
+        guard !busy else { return }; busy = true; defer { busy = false }
+        do { try await saveRecovery(nil); pendingSend = nil; mutationWarning = nil; error = nil }
+        catch { mutationWarning = ErrorPresentation().message(error); self.error = mutationWarning }
+    }
+    private func restorePendingSend() async throws {
+        guard !recoveryReady else { return }
+        if recoveryTask == nil { let load = loadRecovery; recoveryTask = Task { try await load() } }
+        do {
+            let pending = try await recoveryTask?.value
+            guard !recoveryReady else { return }
+            pendingSend = pending
+            if let pending {
+                if draft.isEmpty { draft = pending.text }
+                if imageDraft.images.isEmpty { imageDraft.images = pending.attachments }
+                mutationWarning = String(localized: "error.outcome_unknown"); error = mutationWarning
+            }
+            recoveryReady = true; recoveryTask = nil
+        } catch { recoveryTask = nil; throw error }
+    }
+    private func confirmSend(_ request: SendRequest) async throws {
+        try await saveRecovery(nil)
         if draft == request.text { draft = "" }
         imageDraft.removeSubmitted(Set(request.attachments.map(\.id)))
         pendingSend = nil; mutationWarning = nil; error = nil; stopRequested = false

@@ -184,3 +184,9 @@
 "error.image_load" = "The image could not be loaded. Choose it again.";
 
 "sidebar.close" = "Close sidebar";
+
+"error.draft_storage" = "The pending send could not be saved or restored. Inspect the conversation before sending again.";
+
+"tool.card.shell" = "Shell";
+
+"tool.card.success" = "Succeeded";

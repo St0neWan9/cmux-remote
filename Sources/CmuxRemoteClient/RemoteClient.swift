@@ -4,16 +4,20 @@ import CmuxRemoteCore
 /// A stable shared client object; relocation changes transport without stranding open views.
 public final class RemoteClient: Sendable {
     private let runtime: RemoteClientRuntime
+    /// Host and device namespace for private pending operations; relocation keeps it stable.
+    public let operationRecoveryScope: String
     public let canControlConversations: Bool
     public let canReplyFeed: Bool
     private let capabilities: Set<ClientCapability>
     public func allows(_ capability: ClientCapability) -> Bool { capabilities.contains(capability) }
     /// Explicit legacy mode; the owner must separately enable it on the Bridge.
     public init(pairing: PairingConfiguration) {
+        operationRecoveryScope = IdentityCryptography().digest(Data((pairing.certificateSHA256 + ":" + pairing.token).utf8))
         runtime = RemoteClientRuntime(pairing: pairing, connection: nil); canControlConversations = true; canReplyFeed = true; capabilities = Set(ClientCapability.allCases)
     }
     public init(connection: AuthorizedConnection) throws {
         try connection.validate()
+        operationRecoveryScope = IdentityCryptography().digest(try JSONEncoder().encode([connection.host.id, connection.grant.value.clientID]))
         let pairing = try PairingConfiguration(host: connection.endpoint.host, port: connection.endpoint.port, token: String(repeating: "0", count: 32), certificateSHA256: connection.host.certificateSHA256)
         runtime = RemoteClientRuntime(pairing: pairing, connection: connection)
         capabilities = Set(connection.grant.value.scope.capabilities)

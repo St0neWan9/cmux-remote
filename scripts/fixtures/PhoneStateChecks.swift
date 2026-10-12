@@ -252,7 +252,7 @@ private actor UncertainImageSend {
         func makePhotoChat(sender: @escaping @Sendable (SendRequest) async throws -> MutationReceipt,
                            status: (@Sendable (UUID) async throws -> OperationStatus)? = nil,
                            descriptor: SessionDescriptor = session) -> ConversationModel {
-            ConversationModel(session: descriptor, client: client, sendRequest: sender, getOperation: status,
+            ConversationModel(session: descriptor, client: client, loadRecovery: { nil }, saveRecovery: { _ in }, sendRequest: sender, getOperation: status,
                               readSessions: { [descriptor] },
                               readHistory: { _ in ConversationSnapshot(messages: [], hasMore: false, generation: "photo-fixture", clipped: false) },
                               readPreview: { PreviewSnapshot(text: nil, available: false) })
@@ -280,7 +280,7 @@ private actor UncertainImageSend {
         checkMedia(await lost.requests.count == 1, "Receipt reconciliation resent the images")
         let inspect = makePhotoChat(sender: { try await lost.send($0) }, status: { await lost.status($0) })
         inspect.imageDraft.images = [photo]; inspect.draft = "Keep this"
-        await inspect.send(); let beforeInspection = await lost.requests.count; inspect.acknowledgePendingSend()
+        await inspect.send(); let beforeInspection = await lost.requests.count; await inspect.acknowledgePendingSend()
         let afterInspection = await lost.requests.count
         checkMedia(inspect.pendingSend == nil && inspect.draft == "Keep this" && inspect.imageDraft.images.count == 1 && afterInspection == beforeInspection, "Inspection acknowledgement sent or erased the preserved draft")
         var ended = session; ended.state = "ended"
@@ -288,6 +288,37 @@ private actor UncertainImageSend {
         readonlyPhoto.imageDraft.images = [photo]; await readonlyPhoto.send()
         checkMedia(await lost.requests.count == beforeInspection, "Read-only image conversation invoked send")
 
+        let recoveryRoot = fileRoot.appendingPathComponent("pending")
+        let pendingStore = PendingSendStore(directory: recoveryRoot)
+        let savedRequest = SendRequest(text: "Private pending fixture", attachments: [photo])
+        try await pendingStore.save(savedRequest, scope: "host-device", sessionID: "one")
+        let restartedStore = PendingSendStore(directory: recoveryRoot)
+        let restoredRequest = try await restartedStore.load(scope: "host-device", sessionID: "one")
+        checkMedia(restoredRequest?.operationID == savedRequest.operationID && restoredRequest?.attachments.map(\.id) == [photo.id], "Restarted device store lost pending request identity or images")
+        let otherScope = try await restartedStore.load(scope: "other-device", sessionID: "one")
+        let otherSession = try await restartedStore.load(scope: "host-device", sessionID: "two")
+        checkMedia(otherScope == nil && otherSession == nil, "Pending draft crossed its host/device or session namespace")
+        let pendingFile = try FileManager.default.contentsOfDirectory(at: recoveryRoot, includingPropertiesForKeys: nil)[0]
+        let permissions = (try FileManager.default.attributesOfItem(atPath: pendingFile.path))[.posixPermissions] as? NSNumber
+        checkMedia(permissions?.intValue == 0o600, "Pending draft was not stored owner-only")
+        try Data("corrupt".utf8).write(to: pendingFile)
+        var corruptPendingRejected = false
+        do { _ = try await restartedStore.load(scope: "host-device", sessionID: "one") }
+        catch { corruptPendingRejected = (error as? BridgeError)?.code == "draft_storage_failed" }
+        checkMedia(corruptPendingRejected, "Corrupt pending storage was treated as an empty safe draft")
+        try await pendingStore.save(nil, scope: "host-device", sessionID: "one")
+        let clearedPending = try await restartedStore.load(scope: "host-device", sessionID: "one")
+        checkMedia(clearedPending == nil, "Explicit acknowledgement did not clear the saved pending record")
+        let deniedPreparation = UncertainImageSend()
+        let preparationModel = ConversationModel(session: session, client: client,
+            loadRecovery: { nil }, saveRecovery: { _ in throw BridgeError("draft_storage_failed", "Fixture cannot persist") },
+            sendRequest: { try await deniedPreparation.send($0) })
+        preparationModel.draft = "Never dispatch without a saved identity"; await preparationModel.send()
+        checkMedia(await deniedPreparation.requests.isEmpty && preparationModel.error != nil, "A pending storage failure still dispatched to the agent")
+        let owner = AppModel(pendingSends: pendingStore)
+        let ownedConversation = owner.conversation(session: session, client: client)
+        ownedConversation.draft = "Retain navigation draft"
+        checkMedia(owner.conversation(session: session, client: client) === ownedConversation && ownedConversation.draft == "Retain navigation draft", "App navigation recreated an in-flight conversation owner")
         let navigationLoss = UncertainImageSend()
         let navigationSession = SessionDescriptor(id: "reopen-" + UUID().uuidString, agent: "claude", title: "Recovery", cwd: nil, workspaceID: "workspace", surfaceID: "surface", state: "working")
         func reopenConversation() -> ConversationModel {
@@ -306,7 +337,7 @@ private actor UncertainImageSend {
         afterNavigation.draft = "Keep this uncertain send"; afterNavigation.imageDraft.images = [photo]
         await afterNavigation.send()
         checkMedia(await navigationLoss.requests.count == 1, "Reopening dispatched the same uncertain input under a fresh UUID")
-        afterNavigation.acknowledgePendingSend()
+        await afterNavigation.acknowledgePendingSend()
 
         if !failures.isEmpty { print(failures.joined(separator: "\n")); exit(1) }
         print("Phone state: 17 existing behavioral checks and \(mediaChecks) executed image/draft/receipt checks passed.")
