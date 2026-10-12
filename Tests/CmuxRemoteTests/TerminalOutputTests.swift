@@ -27,20 +27,24 @@ import CmuxRemoteCore
         defer { Darwin.close(readerFD) }
         _ = fcntl(writerFD, F_SETFL, fcntl(writerFD, F_GETFL) | O_NONBLOCK)
         let payload = Data(repeating: 0x61, count: 1_048_576)
-        let reader = Task.detached {
+        let drained = AsyncStream<Data>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        // Start the drain outside the cooperative pool before this test blocks on writing.
+        DispatchQueue.global(qos: .userInitiated).async {
             var received = Data(), chunk = [UInt8](repeating: 0, count: 64)
             while true {
                 let count = Darwin.read(readerFD, &chunk, chunk.count)
+                if count < 0 && errno == EINTR { continue }
                 if count <= 0 { break }
                 received.append(contentsOf: chunk.prefix(count))
             }
-            return received
+            drained.continuation.yield(received); drained.continuation.finish()
         }
         var failure: (any Error)?
         do { try TerminalOutputWriter(descriptor: writerFD).write(payload) }
         catch { failure = error }
         Darwin.close(writerFD)
-        let received = await reader.value
+        var iterator = drained.stream.makeAsyncIterator()
+        let received = await iterator.next()
         if let failure { throw failure }
         #expect(received == payload)
     }
