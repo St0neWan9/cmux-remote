@@ -1,48 +1,26 @@
 import SwiftUI
-import AppKit
 
+/// One settings window; the preference toolbar selects a page and the window fits that page's height.
 struct RemoteSettingsView: View {
-    @Bindable var app: MacAppModel
+    let app: MacAppModel
     let sectionChanged: () -> Void
-    private let design = MacDesignTokens()
     var body: some View {
-        VStack(spacing: 0) {
-            if let code = app.serviceError {
-                MacSettingsRow(title: String(localized: "mac.setup.title")) {
-                    Label(MacErrorPresentation.message(code), systemImage: "exclamationmark.circle").font(.callout)
-                    Text(String(localized: "mac.setup.instructions")).font(.caption).foregroundStyle(.secondary)
-                    Text(app.setupCommand).font(.caption.monospaced()).textSelection(.enabled)
-                    HStack {
-                        Button(String(localized: "mac.setup.copy")) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(app.setupCommand, forType: .string) }
-                        Button(String(localized: "mac.setup.retry")) { Task { await app.reconnect() } }.disabled(app.starting)
-                    }
-                }.padding(design.pagePadding)
-            }
-            if app.section == "share" { SharingSettingsView(model: app.sharing) }
-            else { CompanionView(model: app.remote) }
-            Divider()
-            if app.section == "share" {
-                MacSettingsRow(title: "") { advanced }
-                    .frame(maxWidth: design.contentWidth).padding(.horizontal, design.pagePadding).padding(.vertical, 14).frame(maxWidth: .infinity)
+        Group {
+            if app.serviceError != nil && app.section != "advanced" {
+                MacPreferencePage { MacSetupRows(app: app) }
             } else {
-                HStack(spacing: 0) {
-                    Color.clear.frame(width: design.sidebarWidth)
-                    advanced.frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, design.pagePadding)
-                }.fixedSize(horizontal: false, vertical: true).padding(.vertical, 14)
-            }
-        }.background(Color(nsColor: MacPreferenceAppearance.background))
-            .font(.system(size: 13)).controlSize(.regular)
-            .frame(minWidth: 680, minHeight: 360)
-            .onChange(of: app.section) { sectionChanged() }
-    }
-    private var advanced: some View {
-        MacDetailsDisclosure(title: String(localized: "mac.advanced")) {
-            Text(String(localized: "mac.stateDirectory")).font(.caption).foregroundStyle(.secondary)
-            HStack(spacing: 8) {
-                TextField(String(localized: "mac.stateDirectory"), text: $app.statePath).textFieldStyle(.roundedBorder)
-                Button(String(localized: "mac.apply")) { Task { await app.applyStatePath() } }.disabled(app.starting).fixedSize()
+                switch app.section {
+                case "pairing": PairingSettingsView(model: app.sharing)
+                case "devices": DevicesSettingsView(model: app.sharing)
+                case "connect": CompanionView(model: app.remote)
+                case "advanced": MacAdvancedView(app: app)
+                default: SharingSettingsView(model: app.sharing)
+                }
             }
         }
+        // Rebuilding the page tree re-reads every localized string after a language change.
+        .id(app.language).environment(\.locale, app.language.locale)
+        .fixedSize()
+        .onChange(of: app.section) { sectionChanged() }
     }
-
 }
