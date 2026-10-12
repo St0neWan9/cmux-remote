@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// First-use identity confirmation with a copyable, unhyphenated certificate fingerprint.
+/// Confirms the destination before requesting the remote owner's approval.
 struct HostTrustSheet: View {
     let name: String
     let fingerprint: String
@@ -11,6 +11,7 @@ struct HostTrustSheet: View {
             Label(String(localized: "mac.trustTitle", bundle: .interface), systemImage: "lock.shield").font(.title2)
             Text(String(localized: "mac.trustMessage", bundle: .interface))
             Text(name).font(.headline)
+            Text(String(localized: "mac.certificateFingerprint", bundle: .interface)).font(.caption).foregroundStyle(.secondary)
             Text(fingerprint).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
             HStack {
