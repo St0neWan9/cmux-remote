@@ -19,7 +19,9 @@ struct ResponseFooter: View {
             Button { quote(text) } label: { Image(systemName: "text.quote").frame(width: 30, height: 44) }
                 .accessibilityLabel(String(localized: "chat.quote")).accessibilityIdentifier("response.quote")
             if let date = response.completedAt {
-                Text(date, format: .dateTime.month(.twoDigits).day(.twoDigits).hour().minute())
+                Text(date, format: Calendar.current.isDateInToday(date)
+                     ? .dateTime.hour().minute()
+                     : .dateTime.month(.twoDigits).day(.twoDigits).hour().minute())
                     .font(.caption).monospacedDigit()
                     .accessibilityLabel(String(localized: "chat.response_time") + " " + date.formatted())
             }
