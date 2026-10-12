@@ -8,11 +8,12 @@ final class CmuxEventHandler: ChannelInboundHandler, @unchecked Sendable {
     typealias OutboundOut = ByteBuffer
     private let subscription: JSONValue
     private let password: String?
+    private let capability: String?
     private let continuation: AsyncThrowingStream<JSONValue, any Error>.Continuation
     private var buffer = Data()
     private var awaitingPassword: Bool
-    init(subscription: JSONValue, password: String?, continuation: AsyncThrowingStream<JSONValue, any Error>.Continuation) {
-        self.subscription = subscription; self.password = password; self.continuation = continuation; self.awaitingPassword = password != nil
+    init(subscription: JSONValue, password: String?, capability: String? = nil, continuation: AsyncThrowingStream<JSONValue, any Error>.Continuation) {
+        self.subscription = subscription; self.password = password; self.capability = capability; self.continuation = continuation; self.awaitingPassword = password != nil
     }
     func channelActive(context: ChannelHandlerContext) {
         if let password {
@@ -38,6 +39,10 @@ final class CmuxEventHandler: ChannelInboundHandler, @unchecked Sendable {
     func errorCaught(context: ChannelHandlerContext, error: any Error) { fail(context) }
     private func subscribe(_ context: ChannelHandlerContext) {
         guard var payload = try? JSONEncoder().encode(subscription) else { fail(context); return }
+        if let capability {
+            guard !capability.isEmpty, !capability.contains(where: { $0.isWhitespace }), capability.utf8.count <= 8192 else { fail(context); return }
+            payload = Data(("_cmux_capability_v1 " + capability + " ").utf8) + payload
+        }
         payload.append(10); write(payload, context: context)
     }
     private func write(_ data: Data, context: ChannelHandlerContext) {
