@@ -9,9 +9,7 @@ struct SessionListView: View {
     @State private var showFeed = false
     @State private var showConversation = false
     @State private var selectedSession: SessionDescriptor?
-    @State private var pendingConnection = false
-    @State private var pendingFeed = false
-    @State private var pendingSession: SessionDescriptor?
+    @State private var drawerAvailable = true
     @State private var query = ""
     @State private var filter = SessionFilter.all
     @State private var workspaceID: String?
@@ -24,6 +22,7 @@ struct SessionListView: View {
         let loading = model.loading
         let error = model.error
         let host = model.host
+        SideDrawer(isPresented: $showSidebar, allowsEdgeOpening: drawerAvailable) {
         NavigationStack {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 26) {
@@ -81,22 +80,19 @@ struct SessionListView: View {
             .onChange(of: workspaces.map(\.id)) { _, ids in if let workspaceID, !ids.contains(workspaceID) { self.workspaceID = nil } }
             .refreshable { await model.refresh() }
             .task { await model.refresh() }
+            .onAppear { drawerAvailable = true }
+            .onDisappear { drawerAvailable = false; showSidebar = false }
             .overlay { if loading && sessions.isEmpty { ProgressView() } }
             .navigationDestination(isPresented: $showConversation) { if let selectedSession, let client { ConversationView(session: selectedSession, client: client, hostName: host) } }
             .navigationDestination(isPresented: $showConnection) { if let client { ConnectionDetailView(client: client, host: host, identity: model.hostIdentity, certificate: model.hostCertificate, endpoint: model.endpoint) { model.unpair() } } }
             .navigationDestination(isPresented: $showFeed) { if let client { FeedView(client: client) } }
-            .fullScreenCover(isPresented: $showSidebar, onDismiss: {
-                if let pendingSession { selectedSession = pendingSession; self.pendingSession = nil; showConversation = true }
-                else if pendingConnection { pendingConnection = false; showConnection = true }
-                else if pendingFeed { pendingFeed = false; showFeed = true }
-            }) {
-                NavigationStack {
-                    SessionSidebarView(groups: groups, host: host, canReadFeed: client?.allows(.feedRead) ?? false, query: $query,
-                        select: { pendingSession = $0; showSidebar = false },
-                        showConnection: { pendingConnection = true; showSidebar = false }, showFeed: { pendingFeed = true; showSidebar = false },
-                        refresh: { Task { await model.refresh() } })
-                }.presentationBackground(.white).presentationDragIndicator(.hidden)
-            }
+        }
+        } drawer: {
+            SessionSidebarView(groups: groups, host: host, canReadFeed: client?.allows(.feedRead) ?? false, query: $query,
+                select: { session in selectedSession = session; showSidebar = false; showConversation = true },
+                showConnection: { showSidebar = false; showConnection = true },
+                showFeed: { showSidebar = false; showFeed = true },
+                refresh: { Task { await model.refresh() } })
         }.environment(\.colorScheme, .light)
     }
     private func sessionRow(_ session: SessionDescriptor) -> some View {

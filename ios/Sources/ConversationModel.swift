@@ -33,10 +33,31 @@ final class ConversationModel {
     var preview: String?
     var error: String?
     var draft = ""
+    let imageDraft = ImageDraftModel()
+    private(set) var pendingSend: SendRequest?
+    private var mutationWarning: String?
+    private let sendRequest: @Sendable (SendRequest) async throws -> MutationReceipt
+    private let getOperation: @Sendable (UUID) async throws -> OperationStatus
+    private let readSessions: @Sendable () async throws -> [SessionDescriptor]
+    private let readHistory: @Sendable (Int?) async throws -> ConversationSnapshot
+    private let readPreview: @Sendable () async throws -> PreviewSnapshot
     var busy = false
     var hasMore = false
     private var generation: String?
-    init(session: SessionDescriptor, client: RemoteClient) { self.session = session; self.client = client }
+    init(session: SessionDescriptor, client: RemoteClient,
+         sendRequest: (@Sendable (SendRequest) async throws -> MutationReceipt)? = nil,
+         getOperation: (@Sendable (UUID) async throws -> OperationStatus)? = nil,
+         readSessions: (@Sendable () async throws -> [SessionDescriptor])? = nil,
+         readHistory: (@Sendable (Int?) async throws -> ConversationSnapshot)? = nil,
+         readPreview: (@Sendable () async throws -> PreviewSnapshot)? = nil) {
+        self.session = session; self.client = client
+        let id = session.id
+        self.sendRequest = sendRequest ?? { try await client.post("/v1/sessions/\(id)/send", body: $0, as: MutationReceipt.self) }
+        self.getOperation = getOperation ?? { try await client.get("/v1/operations/\($0.uuidString)", as: OperationStatus.self) }
+        self.readSessions = readSessions ?? { try await client.get("/v1/sessions", as: [SessionDescriptor].self) }
+        self.readHistory = readHistory ?? { before in try await client.get("/v1/sessions/\(id)/history", query: before.map { ["before_seq": String($0)] } ?? [:], as: ConversationSnapshot.self) }
+        self.readPreview = readPreview ?? { try await client.get("/v1/sessions/\(id)/preview", as: PreviewSnapshot.self) }
+    }
     func updateSession(_ current: SessionDescriptor) {
         if current.state != session.state { stopRequested = false }
         session = current
@@ -47,11 +68,11 @@ final class ConversationModel {
     }
     func refresh() async {
         do {
-            let descriptors = try await client.get("/v1/sessions", as: [SessionDescriptor].self)
+            let descriptors = try await readSessions()
             guard let current = descriptors.first(where: { $0.id == session.id }) else { throw BridgeError("read_only", "The cmux session is no longer available.", status: 404) }
             updateSession(current)
-            let history = try await client.get("/v1/sessions/\(session.id)/history", as: ConversationSnapshot.self)
-            let live = try? await client.get("/v1/sessions/\(session.id)/preview", as: PreviewSnapshot.self)
+            let history = try await readHistory(nil)
+            let live = try? await readPreview()
             if generation == history.generation {
                 var next = messages
                 for message in history.messages {
@@ -72,26 +93,51 @@ final class ConversationModel {
             let committed = messages.reversed().compactMap { message -> String? in
                 if message.role == .agent, case .prose(let value) = message.kind { return value.text }; return nil
             }.first
-            preview = live?.text == committed ? nil : live?.text; error = nil
+            preview = live?.text == committed ? nil : live?.text; error = mutationWarning
         } catch { if !Task.isCancelled { self.error = ErrorPresentation().message(error) } }
     }
     func older() async {
         guard let seq = messages.first?.seq else { return }
         do {
-            let page = try await client.get("/v1/sessions/\(session.id)/history", query: ["before_seq": String(seq)], as: ConversationSnapshot.self)
+            let page = try await readHistory(seq)
             guard page.generation == generation else { await refresh(); return }
             let responseIDs = Set(responses.map(\.firstMessageID)); responses.insert(contentsOf: (page.responses ?? []).filter { !responseIDs.contains($0.firstMessageID) }, at: 0)
             let existing = Set(messages.map(\.id)); messages.insert(contentsOf: page.messages.filter { !existing.contains($0.id) }, at: 0); timelineItems = ConversationTimeline().items(from: messages); hasMore = page.hasMore
         } catch { self.error = ErrorPresentation().message(error) }
     }
     func send() async {
-        guard !busy, !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        guard canSend, !busy, !imageDraft.loading, pendingSend == nil,
+              !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !imageDraft.images.isEmpty else { return }
         busy = true; defer { busy = false }
-        let input = draft
+        let request = SendRequest(text: draft, attachments: imageDraft.images)
+        pendingSend = request
         do {
-            _ = try await client.post("/v1/sessions/\(session.id)/send", body: SendRequest(text: input), as: MutationReceipt.self)
-            draft = ""; stopRequested = false; await refresh(); jumpToLatest += 1
-        } catch { self.error = ErrorPresentation().message(error) }
+            let receipt = try await sendRequest(request)
+            guard receipt.accepted, receipt.operationID == request.operationID else { throw BridgeError("outcome_unknown", "The send receipt could not be verified.", status: 504) }
+            confirmSend(request); await refresh(); jumpToLatest += 1
+        } catch {
+            let safeRejections = ["unauthorized", "scope_denied", "read_only", "stale_binding", "input_busy", "invalid_image", "invalid_input", "too_large", "journal_unavailable", "receipt_capacity"]
+            if let failure = error as? BridgeError, safeRejections.contains(failure.code) { pendingSend = nil; mutationWarning = nil }
+            else { mutationWarning = ErrorPresentation().message(error) }
+            self.error = ErrorPresentation().message(error)
+        }
+    }
+    func checkPendingSend() async {
+        guard !busy, let request = pendingSend else { return }
+        busy = true; defer { busy = false }
+        do {
+            let status = try await getOperation(request.operationID)
+            guard status.operationID == request.operationID else { throw BridgeError("invalid_response", "The operation identity changed.", status: 502) }
+            if status.state == .accepted { confirmSend(request); await refresh(); jumpToLatest += 1 }
+            else { mutationWarning = String(localized: "error.outcome_unknown"); error = mutationWarning }
+        } catch { mutationWarning = ErrorPresentation().message(error); self.error = mutationWarning }
+    }
+    /// An explicit inspection acknowledgement releases the draft; it never sends it.
+    func acknowledgePendingSend() { pendingSend = nil; mutationWarning = nil; error = nil }
+    private func confirmSend(_ request: SendRequest) {
+        if draft == request.text { draft = "" }
+        imageDraft.removeSubmitted(Set(request.attachments.map(\.id)))
+        pendingSend = nil; mutationWarning = nil; error = nil; stopRequested = false
     }
     func interrupt(hard: Bool = false) async {
         guard !busy else { return }; busy = true; defer { busy = false }

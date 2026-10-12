@@ -23,6 +23,7 @@ struct ErrorPresentation {
         case "journal_unavailable": return String(localized: "error.journal")
         case "operation_not_found": return String(localized: "error.operation_missing")
         case "invalid_image": return String(localized: "error.image")
+        case "image_load_failed": return String(localized: "error.image_load")
         case "request_expired": return String(localized: "error.expired")
         default: return String(localized: "error.connection")
         }

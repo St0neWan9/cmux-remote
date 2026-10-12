@@ -1,4 +1,6 @@
 import SwiftUI
+import PhotosUI
+import UniformTypeIdentifiers
 import CmuxRemoteCore
 import CmuxRemoteClient
 
@@ -15,6 +17,11 @@ struct ConversationView: View {
     @State private var showFeed = false
     @State private var showTiming = false
     @State private var confirmHardStop = false
+    @State private var showingPhotos = false
+    @State private var showingImageFiles = false
+    @State private var photoItems: [PhotosPickerItem] = []
+    @State private var photoLoadTask: Task<Void, Never>?
+    @State private var confirmPendingReset = false
     private let hostName: String
     init(session: SessionDescriptor, client: RemoteClient, hostName: String = "") {
         _model = State(initialValue: ConversationModel(session: session, client: client)); self.hostName = hostName
@@ -95,6 +102,17 @@ struct ConversationView: View {
         .safeAreaInset(edge: .top, spacing: 0) { header }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: 12) {
+                if !model.imageDraft.images.isEmpty {
+                    ImageDraftStrip(images: model.imageDraft.images, remove: model.imageDraft.remove).equatable()
+                }
+                if model.imageDraft.loading { ProgressView(String(localized: "image.preparing")) }
+                if let error = model.imageDraft.error { Text(error).font(.footnote).foregroundStyle(.red) }
+                if model.pendingSend != nil && !model.busy {
+                    HStack {
+                        Button(String(localized: "operation.check")) { Task { await model.checkPendingSend() } }.disabled(model.busy)
+                        Button(String(localized: "operation.inspected")) { confirmPendingReset = true }.disabled(model.busy)
+                    }.font(.footnote).buttonStyle(FloatingButtonStyle())
+                }
                 if model.stopRequested {
                     Label(String(localized: "chat.stop_requested"), systemImage: "checkmark.circle").font(.footnote).foregroundStyle(.secondary)
                 } else if model.hasActiveResponse {
@@ -108,9 +126,40 @@ struct ConversationView: View {
                 } else if !model.canSend { Text(String(localized: "sessions.read_only")).font(.caption).foregroundStyle(.secondary) }
                 ChatComposer(draft: $model.draft, canSend: model.canSend, busy: model.busy, working: model.hasActiveResponse,
                              send: { Task { await model.send() } }, stop: { Task { await model.interrupt() } },
-                             canReadProject: model.client.allows(.projectRead), canReadFeed: model.client.allows(.feedRead), showProject: { selectedFile = ""; showProject = true }, showFeed: { showFeed = true })
+                             canReadProject: model.client.allows(.projectRead), canReadFeed: model.client.allows(.feedRead), showProject: { selectedFile = ""; showProject = true }, showFeed: { showFeed = true },
+                             hasImages: !model.imageDraft.images.isEmpty, sendBlocked: model.pendingSend != nil || model.imageDraft.loading, showPhotos: {
+                                 guard model.imageDraft.images.count < 4 else { model.imageDraft.error = String(localized: "error.image"); return }
+                                 photoItems = []; showingPhotos = true
+                             }, showImageFiles: { showingImageFiles = true })
             }.padding(.horizontal, 14).padding(.top, 14).padding(.bottom, 10)
         }
+        .photosPicker(isPresented: $showingPhotos, selection: $photoItems, maxSelectionCount: max(1, 4 - model.imageDraft.images.count), selectionBehavior: .ordered, matching: .images)
+        .fileImporter(isPresented: $showingImageFiles, allowedContentTypes: [.image], allowsMultipleSelection: true) { result in
+            switch result {
+            case .success(let urls):
+                photoLoadTask?.cancel(); model.imageDraft.cancelLoading()
+                let selections = urls.map { url in ImageSelection(name: url.lastPathComponent, load: { try await ImageFileLoader().load(url) }) }
+                photoLoadTask = Task { await model.imageDraft.load(selections, encode: ImageAttachmentEncoder().encode) }
+            case .failure(let error):
+                if (error as NSError).code != CocoaError.userCancelled.rawValue { model.imageDraft.error = String(localized: "error.image_load") }
+            }
+        }
+        .onChange(of: photoItems) { _, selected in
+            photoLoadTask?.cancel(); model.imageDraft.cancelLoading()
+            let selections = selected.enumerated().map { index, item in
+                ImageSelection(name: "Image-\(index + 1).jpg", load: {
+                    guard let data = try await item.loadTransferable(type: Data.self) else { throw BridgeError("invalid_image", "The selected image is unavailable.", status: 422) }
+                    return data
+                })
+            }
+            photoLoadTask = Task { await model.imageDraft.load(selections, encode: ImageAttachmentEncoder().encode) }
+        }
+        .onDisappear { photoLoadTask?.cancel(); model.imageDraft.cancelLoading() }
+        .onChange(of: phase) { _, value in if value != .active { photoLoadTask?.cancel(); model.imageDraft.cancelLoading() } }
+        .alert(String(localized: "operation.inspected"), isPresented: $confirmPendingReset) {
+            Button(String(localized: "operation.release")) { model.acknowledgePendingSend() }
+            Button(String(localized: "pair.cancel"), role: .cancel) {}
+        } message: { Text(String(localized: "operation.inspect_note")) }
         .navigationDestination(isPresented: $showProject) { ProjectView(session: model.session, client: model.client, initialPath: selectedFile) }
         .navigationDestination(isPresented: $showFeed) { FeedView(client: model.client) }
         .sheet(isPresented: $showTiming) {
