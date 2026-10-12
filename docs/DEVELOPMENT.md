@@ -14,7 +14,11 @@ Supported first backend: official cmux on macOS, via its owner-controlled local 
 
 Use English and Simplified Chinese localization in `ios/Resources`. Keep technical machine error codes stable and map them in the UI. Keep local development credentials in a state directory outside the repository.
 
-To refresh the vendored parsing library, copy only public upstream source, record its exact commit, preserve notices, inspect the diff and run all parser/history tests. Never copy personal transcript data into test fixtures. CI builds Swift package tests and the iPhone Simulator target on macOS.
+To refresh the vendored parsing library, copy only public upstream source, record its exact commit, preserve notices, inspect the diff and run all parser/history tests. Never copy personal transcript data into test fixtures.
+
+For packaging, manually run the **Package verification** workflow in GitHub
+Actions. It runs the package/model checks and builds the iPhone Simulator and Mac
+Companion targets on macOS. Commits, pull requests and merges do not trigger CI.
 
 ## Connection and phone UX status
 
