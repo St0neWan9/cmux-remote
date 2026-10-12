@@ -24,12 +24,18 @@ jobs:
     environment: testflight
     env:
       CMUX_REMOTE_IOS_VERSION: ${{ inputs.version }}
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
       FASTLANE_SKIP_UPDATE_CHECK: '1'
       FASTLANE_HIDE_CHANGELOG: '1'
       FASTLANE_DISABLE_COLORS: '1'
       FASTLANE_OPT_OUT_USAGE: '1'
     steps:
       - uses: actions/checkout@v4
+      - name: Validate release Xcode
+        run: |
+          test -d "$DEVELOPER_DIR"
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
       - uses: ruby/setup-ruby@v1
         with:
           ruby-version: '3.3.12'
