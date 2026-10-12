@@ -12,6 +12,20 @@ import CmuxRemoteCore
     }
     private let user = #"{"type":"user","uuid":"u","timestamp":"2026-10-12T00:00:00Z","message":{"content":"Hello"}}"#
     private let reply = #"{"type":"assistant","uuid":"a","timestamp":"2026-10-12T00:00:10Z","message":{"content":[{"type":"text","text":"Reply"}]}}"#
+    @Test func claudeInterruptionEndsCurrentTurnWithoutStartingASyntheticPrompt() async throws {
+        let interrupted = #"{"type":"user","uuid":"interrupted","isSidechain":false,"timestamp":"2026-10-12T00:00:12Z","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user]"}]}}"#
+        let snapshot = try await page([user, reply, interrupted])
+        #expect(snapshot.currentTurnCompleted == true)
+        #expect(snapshot.currentTurnStartedAt == ISO8601DateFormatter().date(from: "2026-10-12T00:00:00Z"))
+        #expect(snapshot.responses?.first?.completed == true)
+        #expect(snapshot.responses?.first?.durationSeconds == 12)
+        #expect(snapshot.responses?.first?.recordedDuration == false)
+        #expect(snapshot.recordedRunSeconds == nil)
+        let next = #"{"type":"user","uuid":"next","timestamp":"2026-10-12T00:01:00Z","message":{"content":"Continue"}}"#
+        #expect(try await page([user, reply, interrupted, next]).currentTurnCompleted == false)
+        let quoted = #"{"type":"user","uuid":"quoted","timestamp":"2026-10-12T00:01:00Z","message":{"content":"Explain [Request interrupted by user]"}}"#
+        #expect(try await page([user, reply, quoted]).currentTurnCompleted == false)
+    }
     @Test func recordedClaudeDurationExcludesIdleAndIgnoresSidechain() async throws {
         let snapshot = try await page([user, reply,
             #"{"type":"system","subtype":"turn_duration","isSidechain":true,"durationMs":999999,"timestamp":"2026-10-12T00:00:11Z"}"#,

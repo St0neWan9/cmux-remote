@@ -166,6 +166,7 @@
 "error.input_value" = "Check the input and its size.";
 "error.project" = "This session has no shareable project directory.";
 "error.operation_conflict" = "This action conflicts with an earlier request. Inspect the conversation before trying again.";
-"error.receipt_capacity" = "The Bridge operation cache is full. Inspect pending actions before asking the Mac owner to restart the Bridge.";
+"error.receipt_capacity" = "The Bridge operation records are full. Ask the Mac owner to inspect and manage them; restarting does not clear these records.";
+"error.receipt_storage" = "The Bridge could not safely store this action. Check storage on the Mac before continuing.";
 "feed.skip_questions" = "Skip questions";
 "sessions.no_read_grant" = "This device is not granted conversation access.";

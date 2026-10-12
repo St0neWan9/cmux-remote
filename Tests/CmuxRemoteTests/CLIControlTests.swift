@@ -4,6 +4,19 @@ import CmuxRemoteCore
 import CmuxRemoteBridge
 
 @Suite struct CLIControlTests {
+    @Test(arguments: ["workspace.create", "surface.create", "surface.move", "surface.split_off", "surface.reorder", "surface.close"])
+    func lostMirrorWorkspaceCreateIsOutcomeUnknown(method: String) async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let executable = directory.appendingPathComponent("fixture-cli")
+        try Data("#!/bin/sh\n/bin/cat >/dev/null\nexit 42\n".utf8).write(to: executable)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
+        do {
+            _ = try await CLIControlClient(executable: executable, socketPath: "/example/cmux.sock").request(method, params: [:])
+            Issue.record("Expected an unknown mutation outcome")
+        } catch { #expect((error as? BridgeError)?.code == "outcome_unknown") }
+    }
     @Test func officialRPCUsesPrivateStdinAndDecodesPlainResults() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

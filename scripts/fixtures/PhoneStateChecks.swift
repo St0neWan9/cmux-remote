@@ -129,6 +129,13 @@ private actor DeferredSessionRead {
         let bare = MarkdownBlock.parse("```\nls\npwd\n```").first
         let labeled = MarkdownBlock.parse("```swift\nlet n = 1\n```").first
         if bare?.text != "ls\npwd" || labeled?.text != "let n = 1" { failures.append("Fenced Markdown lost code content") }
+        let structured = MarkdownBlock.parse("## Phone heading\n\n- First item\n- Second item\n\n```swift\nlet marker = \"PHONE_MARKDOWN_OK_1012\"\nprint(marker)\n```")
+        if structured.first?.headingLevel != 2 || structured.first?.text != "Phone heading" || structured.filter({ $0.listMarker != nil }).map(\.text) != ["First item", "Second item"] {
+            failures.append("Markdown headings and list markers remained literal paragraph text")
+        }
+        if structured.last?.code != true || structured.last?.text != "let marker = \"PHONE_MARKDOWN_OK_1012\"\nprint(marker)" {
+            failures.append("Structured Markdown lost its code block")
+        }
 
         let deferred = DeferredProjectRead()
         let project = ProjectModel(initialPath: " file with trailing space ", read: { resource, query in
@@ -142,6 +149,16 @@ private actor DeferredSessionRead {
         if project.content != "New diff" || !project.truncated || project.busy { failures.append("An older file read replaced the current diff or filename spaces were lost") }
         await project.load(.changes)
         if project.entries.first?.path != "source.swift" || !project.content.isEmpty { failures.append("Changes view retained previous file content") }
+        let deniedFile = ProjectModel(initialPath: "README.md", read: { _, query in
+            if query["path"] == "README.md" { return TextFileSnapshot(path: "README.md", text: "Earlier file", truncated: true) }
+            throw BridgeError("file_forbidden", "Outside the project")
+        }, list: { [] })
+        await deniedFile.load(.file)
+        deniedFile.filePath = "../outside-acceptance.txt"
+        await deniedFile.load(.file)
+        if !deniedFile.content.isEmpty || deniedFile.truncated || deniedFile.error == nil || deniedFile.busy {
+            failures.append("A denied file read left earlier content available for copying or sharing under another path")
+        }
         let feedFixture = FeedModelFixture()
         let feed = FeedModel(fetch: { await feedFixture.load() }, send: { _, body in try await feedFixture.send(body) })
         await feed.refresh()
@@ -173,6 +190,6 @@ private actor DeferredSessionRead {
         if feedOnly.error != nil || feedOnly.workspaces.first?.id != "allowed" || !feedOnly.sessions.isEmpty { failures.append("A Feed-only grant tried to read conversations or lost its workspace list") }
 
         if !failures.isEmpty { print(failures.joined(separator: "\n")); exit(1) }
-        print("Phone state: 17 behavioral checks passed (enrollment, interrupt/turn timing, reply text, Markdown, project read races, decision warnings/feedback, discovery races and Feed-only grant).")
+        print("Phone state: 20 behavioral checks passed (enrollment, interrupt/turn timing, reply text, structured Markdown, project read races and denied-read cleanup, decision warnings/feedback, discovery races and Feed-only grant).")
     }
 }

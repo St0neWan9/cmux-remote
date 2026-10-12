@@ -51,4 +51,16 @@ private actor DiscoveryCmux: CmuxControlling {
         #expect(sessions.map(\.id) == ["hook-managed"])
         #expect(sessions.first?.writable == false)
     }
+    @Test func disconnectedEventBindingsCannotKeepAReusedTerminalWritable() async throws {
+        let service = SessionService(cmux: DiscoveryCmux(dumpAvailable: false), home: URL(fileURLWithPath: "/example/home"), transcriptRoots: [])
+        await service.acceptEvent(.object(["type": .string("event"), "category": .string("agent"), "workspace_id": .string("workspace"),
+            "surface_id": .string("surface"), "seq": .number(10), "boot_id": .string("boot-a"),
+            "payload": .object(["session_id": .string("hook-managed"), "hook_event_name": .string("SessionStart")])]))
+        #expect(try await service.sessions().first?.writable == true)
+        await service.invalidateEventBindings()
+        #expect(try await service.sessions().isEmpty)
+        #expect(await service.eventCursor() == nil)
+        await #expect(throws: BridgeError.self) { _ = try await service.send(id: "hook-managed", request: .init(text: "must not target the old surface")) }
+    }
+
 }

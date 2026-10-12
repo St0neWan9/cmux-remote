@@ -1,6 +1,8 @@
 import Foundation
 import CmuxRemoteCore
 import CmuxRemoteBridge
+import CmuxRemoteMac
+import CmuxRemoteClient
 
 @main
 struct Main {
@@ -15,6 +17,8 @@ struct Main {
         let state = BridgeState(directory: URL(fileURLWithPath: options.value("state") ?? home.appendingPathComponent(".local/state/cmux-remote").path))
         let port = Int(options.value("port") ?? "7740") ?? 7740
         switch command {
+        case "discover", "connect": try await ConnectionCommand().run(command: command, options: options, state: state)
+        case "mirror": try await MirrorCommand().run(options: options, state: state)
         case "init": try state.initialize(); print("Initialized private TLS and pairing state.")
         case "enrollment", "clients": try await OwnerCommand().run(family: command, options: options, state: state, port: port)
         case "pairing" where !options.contains("legacy"):
@@ -50,28 +54,49 @@ struct Main {
                 else { cmux = UnixSocketClient(path: socket, password: ProcessInfo.processInfo.environment["CMUX_REMOTE_SOCKET_PASSWORD"]) }
                 roots = [URL(fileURLWithPath: ProcessInfo.processInfo.environment["CLAUDE_CONFIG_DIR"] ?? home.appendingPathComponent(".claude").path), URL(fileURLWithPath: ProcessInfo.processInfo.environment["CODEX_HOME"] ?? home.appendingPathComponent(".codex").path)]
             }
-            let service = SessionService(cmux: cmux, home: home, transcriptRoots: roots)
+            let mutations = MutationLedger(directory: state.directory)
+            let service = SessionService(cmux: cmux, home: home, transcriptRoots: roots, mutations: mutations)
+            let lease = try BridgeRunLease(directory: state.directory)
+            defer { withExtendedLifetime(lease) {} }
             let events: Task<Void, Never>?
             if options.contains("demo") { events = nil }
             else {
                 let socket = try SocketDiscovery().resolve(explicit: options.value("socket"), environment: ProcessInfo.processInfo.environment, home: home)
                 let client = CmuxEventClient(path: socket, password: ProcessInfo.processInfo.environment["CMUX_REMOTE_SOCKET_PASSWORD"])
-                events = Task {
-                    // A disconnected stream degrades to snapshots. Explicit restart reconnects it.
-                    try? await client.consume(afterSequence: await service.eventCursor()) { await service.acceptEvent($0) }
-                }
+                let monitor = CmuxEventMonitor(repository: CmuxEventCursorRepository(directory: state.directory),
+                    consume: { after, frame in try await client.consume(afterSequence: after, onFrame: frame) },
+                    invalidate: { await service.invalidateEventBindings() }, refresh: { _ = try await service.sessions() },
+                    accept: { await service.acceptEvent($0) })
+                events = Task { await monitor.run() }
             }
             defer { events?.cancel() }
-            let lease = try BridgeRunLease(directory: state.directory)
-            defer { withExtendedLifetime(lease) {} }
             let authority = try state.authority(name: options.value("name") ?? Host.current().localizedName ?? "cmux Bridge")
+            let discovery = ResidentMacDiscovery(discovery: await MainActor.run { BridgeDiscovery() }, excludingHostID: authority.host.id, enabled: !options.contains("no-discovery"))
+            await discovery.start()
+            let connections = MacConnectionRepository(directory: state.directory)
+            let nativeGroup = NativeRemoteWorkspaceGroup(local: cmux)
+            let executable = URL(fileURLWithPath: CommandLine.arguments[0])
+            let mirrors = WorkspaceMirrorCoordinator(local: cmux, executable: executable, stateDirectory: state.directory, nativeGroup: nativeGroup,
+                checkpoints: MirrorCheckpointRepository(directory: state.directory))
+            let authorize: @Sendable (String, String) async throws -> (HostIdentity, any MirrorRemoteControlling) = { host, workspace in
+                let connection = try await connections.connection(hostID: host)
+                guard connection.grant.value.scope.workspaces.contains(workspace.lowercased()), connection.grant.value.scope.capabilities.contains(.terminalRead) else {
+                    throw BridgeError("scope_denied", "Approve this workspace for terminal viewing first.", status: 403)
+                }
+                return (connection.host, try RemoteMirrorClient(connection: connection))
+            }
+            _ = try await mirrors.restore(authorize: authorize)
+            let catalog = NativeWorkspaceCatalog(local: cmux, repository: NativeWorkspaceRepository(directory: state.directory), mirrors: mirrors,
+                grouping: nativeGroup, executable: executable, stateDirectory: state.directory, authorize: authorize)
+            let mac = MacCompanionService(repository: connections, mirrors: mirrors, discovery: discovery, catalog: catalog)
             let ready = AsyncThrowingStream<Void, any Error>.makeStream()
             let owner = Task {
-                do { try await OwnerControlServer().run(path: state.directory.appendingPathComponent("owner.sock").path, authority: authority, service: service, onListening: { ready.continuation.yield(()); ready.continuation.finish() }) }
+                do { try await OwnerControlServer().run(path: state.directory.appendingPathComponent("owner.sock").path, authority: authority, service: service, mac: mac, onListening: { ready.continuation.yield(()); ready.continuation.finish() }) }
                 catch { ready.continuation.finish(throwing: error); throw error }
             }
             defer { owner.cancel() }
             var iterator = ready.stream.makeAsyncIterator(); _ = try await iterator.next()
+            await mac.start()
             let qr: String?
             if options.contains("pair") {
                 guard let host = options.value("host") ?? LANAddressResolver().address() else { throw BridgeError("lan_unavailable", "No private LAN address was found. Connect to Wi-Fi or pass --host.") }
@@ -87,7 +112,7 @@ struct Main {
             }
             defer { withExtendedLifetime(advertisement) {} }
             if options.contains("legacy") { print("Legacy shared-token access explicitly enabled; migrate devices to v2 enrollment.") }
-            try await HTTPServer().run(host: options.value("listen") ?? (options.contains("pair") ? "0.0.0.0" : "127.0.0.1"), port: port, certificate: state.certificate, key: state.key, router: BridgeRouter(service: service, authority: authority, legacyToken: options.contains("legacy") ? try state.token() : nil), onListening: { _ in
+            try await HTTPServer().run(host: options.value("listen") ?? (options.contains("pair") ? "0.0.0.0" : "127.0.0.1"), port: port, certificate: state.certificate, key: state.key, router: BridgeRouter(service: service, authority: authority, legacyToken: options.contains("legacy") ? try state.token() : nil, mirrors: RemoteMirrorService(cmux: cmux, mutations: mutations)), onListening: { _ in
                 if let qr { print("Scan to request enrollment, then approve that exact device using enrollment pending/approve."); print(qr) }
             })
         case "doctor":
@@ -98,7 +123,7 @@ struct Main {
             else { client = UnixSocketClient(path: path, password: ProcessInfo.processInfo.environment["CMUX_REMOTE_SOCKET_PASSWORD"]) }
             _ = try await client.request("system.ping", params: [:]); print("cmux socket is reachable.")
         default:
-            print("cmux-remote init|serve|pairing|enrollment|clients|doctor [--pair] [--legacy] [--no-discovery] [--state PATH] [--socket PATH] [--cli PATH] [--direct-socket] [--listen HOST] [--host HOST] [--port PORT] [--format json] [--demo]")
+            print("cmux-remote init|serve|pairing|enrollment|clients|discover|connect|mirror|doctor [--pair] [--legacy] [--no-discovery] [--state PATH] [--socket PATH] [--cli PATH] [--direct-socket] [--listen HOST] [--host HOST] [--port PORT] [--format json] [--demo]")
         }
     }
 }

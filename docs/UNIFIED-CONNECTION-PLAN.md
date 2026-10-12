@@ -70,8 +70,8 @@ must be specified with their implementation.
 | `pairing` | Explicit enrollment bootstrap/QR entry, including an explicitly selected legacy fallback. | Existing baseline with enrollment migration in progress. |
 | `enrollment open/pending/approve/deny/close` | Owner-only control of pending client enrollment. | Present in ongoing implementation; completion depends on verification. |
 | `clients list/revoke` | Owner-only inventory and revocation of enrolled clients. | Present in ongoing implementation; completion depends on verification. |
-| `discover` | List advertised LAN Bridges as reachability candidates. | Planned CLI entrypoint over shared discovery code. |
-| `connect <device>` | Request enrollment or restore a saved authorized remote connection. | Planned Mac client entrypoint. |
+| `discover` | List advertised LAN Bridges as reachability candidates. | Implemented over private resident discovery; actual CLI discovery checked. |
+| `connect <device>` | Request enrollment or restore a saved authorized remote connection. | Implemented with exact first-use certificate confirmation, status/cancel/forget and shared saved state. |
 | `mirror workspace <device> <workspace>` | Ask the local resident service to create an initial local workspace projection. | Snapshot prototype implemented; see the Mac guide for live verification gaps. |
 | `mirror view ...` | Run in one local cmux terminal, display one authorized remote terminal, and forward input. | Snapshot prototype implemented; native/lossless parity is not claimed. |
 
@@ -149,7 +149,9 @@ the extension UI or a user's cmux instance.
 The normal user flow is:
 
 1. The host owner starts the Bridge and opens enrollment when adding a device.
-2. The iPhone app or Mac extension discovers reachable Bridges and selects one.
+2. The iPhone app or Mac Companion discovers reachable Bridges and selects one.
+   On Mac, the resident local Bridge performs the browse; the Companion reads
+   public hints over the private owner channel, while the sidebar opens that picker.
 3. That client requests enrollment with its own public identity and a fresh nonce.
 4. The host owner approves or denies the exact pending client in the Companion UI
    or an explicit local CLI workflow.
@@ -232,8 +234,11 @@ IDs and never acquire automatic retries merely because reconnect succeeded.
 Use bounded queues and subscriptions that stop on cancellation, backgrounding,
 disconnect, or revocation. A chat preview may replace an older preview. Committed
 messages and mutation results cannot be silently dropped under that policy.
-Reconnection to cmux's local event stream and durable receipt/cursor persistence
-are new implementation work, not behavior supplied by current phone polling.
+Durable per-device mutation intents/receipts are now implemented separately from
+phone polling. The dedicated cmux event reader now reconnects and persists its
+own boot/sequence cursor; its native cursor creation and focused unit recovery
+checks are recorded in ACCEPTANCE.md. Phone subscriptions and their independent
+durable cursors remain implementation work.
 
 Existing QR pairings may be offered as an explicit legacy mode during migration.
 A shared legacy token cannot be silently promoted into independently revocable
