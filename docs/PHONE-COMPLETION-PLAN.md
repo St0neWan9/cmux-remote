@@ -274,3 +274,24 @@ remain unproven: another task changed Simulator's selected window during that
 action. No second Simulator, foreign process or official cmux was restarted.
 Full R03 streaming, R07 speech, remaining native tours and physical camera/LAN
 acceptance remain open.
+
+### M1 milestone freeze — 2026-10-12
+
+At the owner's request this implementation now converges into a reviewable
+existing-session iOS milestone. R07 adds native on-device speech as a confirmed
+local draft source, never as an audio upload or realtime agent call. Permission,
+availability, partial/final/cancel, stale completion, background draft retention,
+60-second capture and five-second finalization deadlines, 8 KiB text limits and
+no-auto-send/typed-text preservation are exercised in 12 actual-model checks.
+R08 remains explicitly unavailable as a voice conversation.
+
+Speech source `ee060fb` (tree `78c44428`) passes 104 package tests, 87 phone-model
+checks, 211 matching locale keys and the iOS build. Four privacy descriptions are
+present in the compiled app, with matching English/Chinese InfoPlist resources.
+Two independent reviews found no verified P0–P2 defect on that exact tree.
+Physical microphone recognition remains untested; no simulator pass replaces it.
+
+The milestone scope and remaining R01–R11 gaps are recorded in
+[PHONE-MILESTONE-2026-10-12.md](PHONE-MILESTONE-2026-10-12.md). No realtime phone
+streaming work is added in this freeze. The full goal is unfinished; the milestone
+provides a stable code/review point for deciding the next work package.
