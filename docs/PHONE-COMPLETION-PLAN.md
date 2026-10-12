@@ -223,3 +223,24 @@ fully accepted.
   streaming/reconnect, speech and physical-device gates remain pending. Other
   tasks intermittently switch Simulator's selected window; no foreign device or
   official cmux process was stopped or restarted.
+
+### Read lifecycle and recovery boundaries — 2026-10-12
+
+R02 now owns and cancels read tasks across conversation, Feed and project views.
+Superseded/cancelled completions are rejected after each suspended boundary;
+navigation and background suspend reads without cancelling durable mutations.
+Same-generation slow pagination survives ordinary latest refreshes, while actual
+transcript replacement invalidates old pages. Foreground reload preserves the
+selected project resource rather than inferring it again from an edited path.
+
+Regression `56a5265` reproduced three stale/cancelled publication failures. Two
+independent reviewers then found pagination starvation and Changes-to-File
+foreground switching. `47cfec5` fails the deterministic slow-page discriminator;
+`1818426` (tree `72ca76c5`) repairs both findings and passes 95 package tests,
+17 existing phone checks, 31 media/recovery checks, 8 tool-detail checks and
+13 read-lifecycle checks. All 197 locale keys match and the iOS build passes.
+Fresh independent repair review found no verified P0–P2 defect on that exact tree.
+Native scene/navigation acceptance and physical restart/LAN acceptance remain
+pending. Installed local chat/terminal artifact thumbnail methods were also
+probed with the owned test session and return `method_not_found`; a transcript-
+authorized Bridge image projection is still required for R06.
