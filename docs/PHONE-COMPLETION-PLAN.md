@@ -196,3 +196,30 @@ partial JSONL results, content/generation invalidation, fixed supported fields
 and final scope revocation. Current deployed live Bridge still needs updating to
 this candidate and native full-record acceptance before the correction is marked
 fully accepted.
+
+### Tool-record verification and live Bridge update — 2026-10-12
+
+- Read's hidden input was reproduced in the native Simulator card and is now
+  visibly rendered/wrapped under the conversation's own scroll. The captured
+  image Read has no textual result; binary history preview remains R06 work.
+- Independent review reproduced three paging defects: an oversized Unicode
+  grapheme exceeded the transport byte limit, refresh reused an obsolete
+  generation, and a failed field switch retained the previous field's page.
+  Regression commit `2385b18` fails two resource expectations and two actual-model
+  checks. The repair uses bounded Unicode-scalar budgets/pages, explicit
+  first-page `generation=current` re-anchoring, and field-specific page clearing.
+  Fresh review at tree `3b738465` found no verified remaining repair defect.
+- Current source passes 95 tests in 22 suites, 17 existing phone checks,
+  31 media/recovery checks and 8 tool-detail checks; 197 locale keys match, and
+  the iOS build passes. The original paired Simulator remains the only device
+  used by this task.
+- The task-owned live Bridge on port 7740 was updated inside its existing cmux
+  helper terminal. Its host state/certificate/device grants were retained.
+  The actual shared client restored the retained Simulator phone grant, verified
+  the exact certificate pin and host identity, and retrieved two real README
+  Read input/output records through the new signed endpoint. This is live HTTPS
+  read evidence, not a claim of native full-record sheet/paging acceptance.
+- Native full-record sheet/paging, complete auxiliary tours, image upload/history,
+  streaming/reconnect, speech and physical-device gates remain pending. Other
+  tasks intermittently switch Simulator's selected window; no foreign device or
+  official cmux process was stopped or restarted.
