@@ -107,9 +107,9 @@ struct ConversationView: View {
                 }
                 if model.imageDraft.loading { ProgressView(String(localized: "image.preparing")) }
                 if let error = model.imageDraft.error { Text(error).font(.footnote).foregroundStyle(.red) }
-                if model.pendingSend != nil && !model.busy {
+                if (model.pendingSend != nil || model.recoveryFailed) && !model.busy {
                     HStack {
-                        Button(String(localized: "operation.check")) { Task { await model.checkPendingSend() } }.disabled(model.busy)
+                        if model.pendingSend != nil { Button(String(localized: "operation.check")) { Task { await model.checkPendingSend() } }.disabled(model.busy) }
                         Button(String(localized: "operation.inspected")) { confirmPendingReset = true }.disabled(model.busy)
                     }.font(.footnote).buttonStyle(FloatingButtonStyle())
                 }
