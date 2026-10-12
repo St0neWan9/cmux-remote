@@ -77,16 +77,21 @@ private actor BoundFeedFixture: CmuxControlling {
         #expect(value["items"].array?.count == 1)
         #expect(value["items"].array?.first?["request_id"].string == "owned")
         #expect(value["items"].array?.first?["workspace_id"].string == workspace)
-        let data = try JSONEncoder().encode(JSONValue.object(["operation_id": .string(UUID().uuidString), "kind": .string("permissionRequest"), "mode": .string("all")]))
+        func decision() throws -> Data { try JSONEncoder().encode(JSONValue.object(["operation_id": .string(UUID().uuidString), "kind": .string("permissionRequest"), "mode": .string("all")])) }
+        let data = try decision()
         #expect(try await request("POST", "/v2/feed/owned/reply", body: data).0 == 200)
-        #expect(try await request("POST", "/v2/feed/other/reply", body: data).0 == 403)
-        #expect(try await request("POST", "/v2/feed/unregistered/reply", body: data).0 == 403)
+        #expect(try await request("POST", "/v2/feed/other/reply", body: decision()).0 == 403)
+        #expect(try await request("POST", "/v2/feed/unregistered/reply", body: decision()).0 == 403)
         #expect(await fixture.replies == 1)
         await fixture.setMoveOnRead()
         let movedResponse = try await request("GET", "/v2/feed")
         #expect(movedResponse.0 == 200)
         #expect(try JSONDecoder().decode(JSONValue.self, from: movedResponse.1)["items"].array?.isEmpty == true)
-        #expect(try await request("POST", "/v2/feed/owned/reply", body: data).0 == 403)
+        #expect(try await request("POST", "/v2/feed/owned/reply", body: decision()).0 == 403)
+        // A saved receipt remains readable under its original approved scope;
+        // this returns metadata and does not reply to the moved target again.
+        #expect(try await request("POST", "/v2/feed/owned/reply", body: data).0 == 200)
+        #expect(await fixture.replies == 1)
         await fixture.setAfterRead { try await authority.revoke(clientID: deviceID) }
         // Grant was valid at router entry, but revoked while the backend snapshot awaited.
         #expect(try await request("GET", "/v2/feed").0 == 401)

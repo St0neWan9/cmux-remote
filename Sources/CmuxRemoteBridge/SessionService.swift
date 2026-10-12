@@ -131,7 +131,8 @@ public actor SessionService {
         try journal.begin(id: request.operationID, signature: signature, principal: access?.principalID ?? "legacy",
                           resource: "session:\(id)", workspace: workspace, capability: .conversationControl)
         do {
-            _ = try await cmux.request("mobile.chat.send", params: params)
+            let response = try await cmux.request("mobile.chat.send", params: params)
+            guard response["submitted"].bool != false else { throw BridgeError("outcome_unknown", "cmux did not confirm prompt submission. Inspect the desktop draft before sending again.", status: 504) }
             return try journal.complete(id: request.operationID)
         } catch { journal.uncertain(id: request.operationID); throw mutationError(error) }
     }
@@ -239,6 +240,10 @@ public actor SessionService {
         _ = try await sessions()
         let value = try await record(id).descriptor
         guard value.writable, let surface = value.surfaceID, let workspace = value.workspaceID else { throw BridgeError("read_only", "This historical conversation has no verified running terminal.", status: 409) }
+        // Receipt replay uses saved scope; a fresh mutation authorizes the live
+        // workspace before reading its terminal state and again before dispatch.
+        try await access?.require(.conversationControl, workspace: workspace)
+        guard records[id]?.descriptor.workspaceID == workspace, records[id]?.descriptor.surfaceID == surface, records[id]?.descriptor.writable == true else { throw BridgeError("stale_binding", "The terminal changed while authorizing access.", status: 409) }
         let state = try await cmux.request("surface.input_state", params: ["workspace_id": .string(workspace), "surface_id": .string(surface)])
         guard state["agent"].bool == true, state["workspace_id"].string?.lowercased() == workspace.lowercased(), state["surface_id"].string?.lowercased() == surface.lowercased() else { throw BridgeError("stale_binding", "The agent's terminal binding changed. Refresh the task.", status: 409) }
         // Interrupt does not paste over a draft and must remain available during a dialog.
