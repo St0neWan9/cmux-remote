@@ -1,0 +1,5 @@
+require "json"
+# Appfile is evaluated without a filename, with fastlane/ as its current directory.
+defaults = JSON.parse(File.read(File.expand_path("../Release.json", Dir.pwd)))
+app_identifier(ENV.fetch("CMUX_REMOTE_IOS_BUNDLE_ID", defaults.fetch("bundle_id")))
+team_id(ENV.fetch("CMUX_REMOTE_IOS_TEAM_ID", defaults.fetch("team_id")))

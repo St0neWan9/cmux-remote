@@ -217,3 +217,20 @@ passed 201 package tests, 90 actual phone-model checks and both localization
 catalog checks; the Mac wrapper build and installed signature checks passed.
 Receipts are in `.build/verification/mac-b-lan-20261012/`, outside Git. The tested
 baseline was `95fb435`, with the inventory and harness repairs described above.
+
+## TestFlight packaging
+
+The iOS release configuration follows the adjacent Valuz Fastlane flow, using
+its public team ID with cmux-remote's independent Bundle ID and App Store
+profile. A manually dispatched GitHub workflow imports an existing distribution
+certificate into a temporary keychain, exports an IPA, and uploads only when
+requested. Signing secrets and the App Store Connect app record are not copied
+from Valuz. See [TestFlight setup](TESTFLIGHT.md).
+
+Local verification passed 201 package tests, 90 phone behavioral checks, seven
+release checks, the SwiftPM build, both localization audits (212 phone and 39
+Mac keys), the iOS Simulator build and an unsigned device Release archive. The
+archive's Bundle ID/version/build, AppIcon and privacy manifest were inspected;
+Fastlane's build/upload lanes load with the locked dependencies. No signed IPA
+export or Apple upload was performed: this repository currently has no signing
+secrets configured, and this app's Apple record/access remains to be verified.
