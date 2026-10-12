@@ -53,7 +53,7 @@ struct MessageRow: View {
         case .prose(let value): MarkdownMessageView(text: value.text)
         case .thought(let value): DisclosureGroup(String(localized: "chat.thought")) { MarkdownMessageView(text: value.text) }
         case .toolUse(let value):
-            ToolDisclosure(title: value.summary, symbol: value.toolName.lowercased().contains("read") ? "book" : "magnifyingglass") {
+            ToolDisclosure(title: value.summary, symbol: value.toolName.lowercased().contains("read") ? "book" : "magnifyingglass", identifier: "tool.disclosure." + message.id) {
                 ToolDetailCard(title: value.toolName, status: value.status == .succeeded ? String(localized: "tool.card.success") : value.status.localizedTitle, failed: value.status == .failed) {
                     VStack(alignment: .leading, spacing: 12) {
                         if let input = value.inputDetail, !input.isEmpty { ToolCodeBlock(text: input) }
@@ -64,7 +64,7 @@ struct MessageRow: View {
                 }
             }
         case .terminal(let value):
-            ToolDisclosure(title: value.command, symbol: "terminal") {
+            ToolDisclosure(title: value.command, symbol: "terminal", identifier: "tool.disclosure." + message.id) {
                 ToolDetailCard(title: String(localized: "tool.card.shell"),
                                status: value.exitCode.map { $0 == 0 ? String(localized: "tool.card.success") : String.localizedStringWithFormat(String(localized: "chat.exit_code"), $0) } ?? String(localized: "chat.tool.running"),
                                failed: value.exitCode.map { $0 != 0 } ?? false) {
@@ -77,7 +77,7 @@ struct MessageRow: View {
                 }
             }
         case .fileEdit(let value):
-            ToolDisclosure(title: value.filePath, symbol: "doc.text") {
+            ToolDisclosure(title: value.filePath, symbol: "doc.text", identifier: "tool.disclosure." + message.id) {
                 ToolDetailCard(title: String(localized: "project.diff")) {
                     VStack(alignment: .leading, spacing: 12) {
                         if let diff = value.unifiedDiff, !diff.isEmpty { ToolCodeBlock(text: diff) }
