@@ -51,6 +51,36 @@ final class MobileGestureUITests: XCTestCase {
         swipeBack(app)
         XCTAssertTrue(app.buttons["sessions.sidebar"].waitForExistence(timeout: 5))
     }
+    func testDrawerRepeatedEdgeSwipesAndTapDismissal() throws {
+        guard let pairingPath = ProcessInfo.processInfo.environment["CMUX_REMOTE_TEST_PAIRING_PATH"] else {
+            throw XCTSkip("Supply an isolated fixture pairing file")
+        }
+        let app = XCUIApplication(bundleIdentifier: "com.st0newan9.cmux-remote")
+        app.launchEnvironment["CMUX_REMOTE_TEST_PAIRING_PATH"] = pairingPath
+        app.launchArguments = ["-AppleLanguages", "(zh-Hans)"]
+        app.launch()
+        XCTAssertTrue(app.buttons["sessions.sidebar"].waitForExistence(timeout: 10))
+        let window = app.windows.firstMatch
+        for index in 0..<3 {
+            window.coordinate(withNormalizedOffset: CGVector(dx: 0.02, dy: 0.5))
+                .press(forDuration: 0.1, thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.62, dy: 0.5)))
+            XCTAssertTrue(app.buttons["sidebar.close"].waitForExistence(timeout: 5))
+            if index == 0 { capture(app, "drawer-open") }
+            if index == 1 {
+                app.buttons["sidebar.close"].tap()
+            } else {
+                window.coordinate(withNormalizedOffset: CGVector(dx: 0.55, dy: 0.5))
+                    .press(forDuration: 0.1, thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.03, dy: 0.5)))
+            }
+            XCTAssertTrue(app.buttons["sessions.sidebar"].waitForExistence(timeout: 5))
+        }
+        app.buttons["sessions.sidebar"].tap()
+        XCTAssertTrue(app.buttons["sidebar.close"].waitForExistence(timeout: 5))
+        app.buttons["sidebar.connection"].tap()
+        XCTAssertTrue(app.buttons["page.back"].waitForExistence(timeout: 5))
+        swipeBack(app)
+        XCTAssertTrue(app.buttons["sessions.sidebar"].waitForExistence(timeout: 5))
+    }
     private func capture(_ app: XCUIApplication, _ name: String) {
         let attachment = XCTAttachment(screenshot: app.screenshot())
         attachment.name = name; attachment.lifetime = .keepAlways; add(attachment)

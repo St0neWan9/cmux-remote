@@ -27,7 +27,7 @@ Cmux Remote 使用全白画布和悬浮控件，沿用已确定的 Codex 手机�
 - 每个入口由 `AppNavigationStack` 创建一个原生 NavigationStack，内部详情页复用这个栈，不再各自嵌套栈。
 - 会话、连接详情、项目文件/差异、待处理事项、工具完整内容、历史图片、运行时间、扫码页都使用 push。头部返回、屏幕左边缘拖动和 VoiceOver escape 回到同一个上级页面。
 - 入口和每个详情页显示时，`InteractivePopInstaller` 仅替换本栈 interactivePopGestureRecognizer 的 delegate，以及 iOS 26 的 interactiveContentPopGestureRecognizer delegate。使用 UIKit 原生交互转场，不用覆盖整页的 DragGesture 假装返回；根页和转场中不能再开始 pop。移除对应页面时恢复原 delegate；已由另一个可见页面接管时不覆盖它。
-- 主页的左边缘打开抽屉；进入详情后关闭抽屉手势，避免争抢返回。抽屉仍支持滑动关闭。
+- 主页的左边缘打开抽屉；进入详情后关闭抽屉手势，避免争抢返回。抽屉仍支持滑动关闭。手势位移和展开状态在同一事务中提交，松手不先归零再展开；背景和阴影覆盖完整屏幕，正文保留安全区域。
 - 系统照片选择器、文件选择器、授权确认保留系统交互。详情页不使用伪装成返回按钮的模态关闭。
 - 原有读请求、图片加载、语音和轮询的离开页面取消规则保留；取消返回手势时页面继续展示。
 
