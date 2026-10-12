@@ -28,11 +28,11 @@ struct ImageDraftStrip: View, Equatable {
                 }
             }.padding(.horizontal, 10).padding(.vertical, 8)
         }
-        .sheet(item: $preview) { image in
-            NavigationStack {
+        .navigationDestination(isPresented: Binding(get: { preview != nil }, set: { if !$0 { preview = nil } })) {
+            if let image = preview {
                 WhitePage(title: String(localized: "image.preview")) {
                     if let data = Data(base64Encoded: image.dataBase64), let decoded = UIImage(data: data) {
-                        Image(uiImage: decoded).resizable().scaledToFit().padding(18)
+                        Image(uiImage: decoded).resizable().scaledToFit().padding(MobileDesign.pageInset)
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
                 }

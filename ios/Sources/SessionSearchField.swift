@@ -11,8 +11,6 @@ struct SessionSearchField: View {
                 Button { query = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
                     .accessibilityLabel(String(localized: "sessions.clear_search"))
             }
-        }.padding(.horizontal, 16).padding(.vertical, 14)
-            .background(Color.white, in: Capsule()).overlay(Capsule().stroke(Color.black.opacity(0.05), lineWidth: 0.5))
-            .shadow(color: .black.opacity(0.06), radius: 12, y: 3)
+        }.modifier(FloatingInput())
     }
 }

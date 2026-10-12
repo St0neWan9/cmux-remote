@@ -12,10 +12,10 @@ struct FeedDecisionControls: View {
         VStack(alignment: .leading, spacing: 12) {
             if item["kind"].string == "exitPlan" {
                 TextField(String(localized: "feed.feedback"), text: $feedback, axis: .vertical).lineLimit(1...4)
-                    .padding(12).overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.black.opacity(0.1), lineWidth: 0.5)).disabled(busy)
+                    .modifier(FloatingInput()).disabled(busy)
             }
             let modes = FeedDecisionPolicy().modes(for: item)
-            HStack {
+            ActionRow {
                 if let primary = modes.first(where: { $0 == .once || $0 == .manual }) {
                     Button(primary.localizedTitle) { submit(primary, feedback) }
                 }
