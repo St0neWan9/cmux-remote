@@ -21,6 +21,19 @@ actor RemoteClientRuntime {
         transport = PinnedTransport(pairing: endpoint); pairing = endpoint; connection = updated
     }
     func request<T: Decodable & Sendable>(_ path: String, method: String, query: [String: String], body: Data?, as type: T.Type) async throws -> T {
+        let request = try await authorized(path, method: method)
+        do { return try await request.transport.request(request.path, method: method, query: query, body: body, authorization: request.authorization, as: type) }
+        catch {
+            if method == "POST", !(error is BridgeError) { throw BridgeError("outcome_unknown", "Inspect the task before repeating this operation.", status: 504) }
+            throw error
+        }
+    }
+    func image(sessionID: String, reference: ConversationImageReference) async throws -> Data {
+        let path = "/v1/sessions/\(sessionID)/image"
+        let request = try await authorized(path, method: "GET")
+        return try await request.transport.image(request.path, query: ["reference_id": reference.id, "generation": reference.generation], authorization: request.authorization)
+    }
+    private func authorized(_ path: String, method: String) async throws -> AuthorizedRequest {
         guard !closed else { throw URLError(.cancelled) }
         guard path.hasPrefix("/v1/") else { throw BridgeError("invalid_route", "Invalid resource path.") }
         let transport = transport; let connection = connection; let pairing = pairing
@@ -30,21 +43,13 @@ actor RemoteClientRuntime {
             guard announcement.value.version == 2, announcement.value.host.id == connection.host.id,
                   announcement.value.host.publicKey == connection.host.publicKey, announcement.value.host.certificateSHA256 == connection.host.certificateSHA256,
                   UUID(uuidString: announcement.value.epoch) != nil else { throw BridgeError("host_changed", "The host identity changed. Pair again explicitly.") }
-            do {
-                return try await transport.request("/v2/" + path.dropFirst(4), method: method, query: query, body: body, authorization: { uri, bytes in
-                    let proof = RequestProof(epoch: announcement.value.epoch, hostID: connection.host.id, clientID: connection.grant.value.clientID, method: method, uri: uri, bodySHA256: crypto.digest(bytes), nonce: UUID().uuidString, timestamp: Int(Date().timeIntervalSince1970))
-                    return "CmuxV2 " + (try JSONEncoder().encode(crypto.sign(proof, domain: "request", privateKey: connection.privateKey))).base64EncodedString()
-                }, as: type)
-            } catch {
-                if method == "POST", !(error is BridgeError) { throw BridgeError("outcome_unknown", "Inspect the task before repeating this operation.", status: 504) }
-                throw error
-            }
+            try Task.checkCancellation()
+            return AuthorizedRequest(transport: transport, path: "/v2/" + path.dropFirst(4), authorization: { uri, bytes in
+                let proof = RequestProof(epoch: announcement.value.epoch, hostID: connection.host.id, clientID: connection.grant.value.clientID, method: method, uri: uri, bodySHA256: crypto.digest(bytes), nonce: UUID().uuidString, timestamp: Int(Date().timeIntervalSince1970))
+                return "CmuxV2 " + (try JSONEncoder().encode(crypto.sign(proof, domain: "request", privateKey: connection.privateKey))).base64EncodedString()
+            })
         }
         let token = pairing.token
-        do { return try await transport.request(path, method: method, query: query, body: body, authorization: { _, _ in "Bearer " + token }, as: type) }
-        catch {
-            if method == "POST", !(error is BridgeError) { throw BridgeError("outcome_unknown", "Inspect the task before repeating this operation.", status: 504) }
-            throw error
-        }
+        return AuthorizedRequest(transport: transport, path: path, authorization: { _, _ in "Bearer " + token })
     }
 }

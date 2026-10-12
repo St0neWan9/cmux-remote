@@ -13,7 +13,8 @@ final class FeedModel {
     private var readError: String?
     private var writeError: String?
     var error: String? { writeError ?? readError }
-    private var generation = UUID()
+    private let reads = ReadRequestOwner()
+    private var readsEnabled = true
     private let fetch: @Sendable () async throws -> [JSONValue]
     private let send: @Sendable (String, JSONValue) async throws -> MutationReceipt
     init(fetch: @escaping @Sendable () async throws -> [JSONValue], send: @escaping @Sendable (String, JSONValue) async throws -> MutationReceipt) { self.fetch = fetch; self.send = send }
@@ -22,11 +23,16 @@ final class FeedModel {
             try await client.post("/v1/feed/\(id)/reply", body: body, as: MutationReceipt.self)
         })
     }
+    func suspendReads() { readsEnabled = false; reads.suspend(); loading = false }
+    func resumeReads() { readsEnabled = true }
     func refresh() async {
-        let request = UUID(); generation = request; loading = true
-        defer { if generation == request { loading = false } }
-        do { let snapshot = try await fetch(); guard generation == request, !Task.isCancelled else { return }; items = snapshot; readError = nil }
-        catch { if generation == request, !Task.isCancelled { readError = ErrorPresentation().message(error) } }
+        guard readsEnabled else { return }
+        await reads.run { [self] request in
+            loading = true
+            defer { if reads.revision == request { loading = false } }
+            do { let snapshot = try await fetch(); guard reads.isCurrent(request) else { return }; items = snapshot; readError = nil }
+            catch { if reads.isCurrent(request) { readError = ErrorPresentation().message(error) } }
+        }
     }
     func reply(_ item: JSONValue, mode: FeedDecisionMode? = nil, feedback: String? = nil, selections: [String]? = nil) async {
         guard let id = item["request_id"].string, item["status"].string == "pending", !busy else { return }

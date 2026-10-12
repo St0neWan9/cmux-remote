@@ -170,3 +170,59 @@
 "error.receipt_storage" = "The Bridge could not safely store this action. Check storage on the Mac before continuing.";
 "feed.skip_questions" = "Skip questions";
 "sessions.no_read_grant" = "This device is not granted conversation access.";
+"error.journal" = "The Mac cannot safely save this operation. Ask its owner to check the Bridge state.";
+"error.operation_missing" = "No operation record was found. Inspect the conversation before sending again.";
+"error.image" = "Select up to four valid PNG or JPEG images within the upload limits.";
+"image.select" = "Choose photos";
+"image.preview" = "Image preview";
+"image.remove" = "Remove image";
+"image.preparing" = "Preparing images…";
+"operation.check" = "Check send result";
+"operation.inspected" = "I inspected the conversation";
+"operation.release" = "Keep draft and continue";
+"operation.inspect_note" = "Confirm you inspected the conversation and desktop draft. This releases the pending check without sending anything. Sending again may repeat an operation whose result is unknown.";
+"image.select_file" = "Choose image files";
+"error.image_load" = "The image could not be loaded. Choose it again.";
+
+"sidebar.close" = "Close sidebar";
+
+"error.draft_storage" = "The pending send could not be saved or restored. Inspect the conversation before sending again.";
+
+"tool.card.shell" = "Shell";
+
+"tool.card.success" = "Succeeded";
+
+"tool.detail.open" = "View full record";
+
+"tool.detail.title" = "Tool details";
+
+"tool.detail.input" = "Input";
+
+"tool.detail.output" = "Output";
+
+"tool.detail.empty" = "No text has been recorded for this field.";
+
+"tool.detail.previous" = "Previous";
+
+"tool.detail.next" = "Next";
+
+"tool.detail.changed" = "This record has changed. Refresh to read the current version.";
+
+"tool.detail.unavailable" = "This Bridge does not support full tool records yet. Update the Bridge and retry.";
+
+"image.history.open" = "Open image";
+"error.image_unavailable" = "This recorded image is unavailable or exceeds preview limits.";
+
+"image.close" = "Close";
+
+"voice.preparing" = "Preparing dictation…";
+"voice.finishing" = "Finishing recognition…";
+"voice.listening" = "Listening on this device";
+"voice.draft" = "Dictated draft";
+"voice.start" = "Dictate a draft";
+"voice.finish" = "Finish dictation";
+"voice.use" = "Use text";
+"voice.permission" = "Allow Microphone and Speech Recognition in Settings to dictate.";
+"voice.unavailable" = "On-device recognition is unavailable for this language or device. You can type instead.";
+"voice.too_long" = "The dictated text exceeds the draft limit. Finish and use a shorter passage.";
+"voice.no_speech" = "No speech was recognized. Try again or type your message.";

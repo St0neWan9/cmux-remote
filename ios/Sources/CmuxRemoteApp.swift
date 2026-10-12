@@ -1,9 +1,16 @@
 import SwiftUI
+import AVFAudio
 
 @main
 struct CmuxRemoteApp: App {
     @Environment(\.scenePhase) private var phase
-    @State private var model = AppModel()
+    @State private var model: AppModel
+    init() {
+        let speechFactory: @MainActor () -> any SpeechInputServing = {
+            SpeechInputService(audio: AVAudioSession.sharedInstance(), locale: .current)
+        }
+        _model = State(initialValue: AppModel(makeSpeechInput: speechFactory))
+    }
     var body: some Scene {
         WindowGroup {
             Group {
