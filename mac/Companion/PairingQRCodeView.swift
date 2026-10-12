@@ -4,12 +4,13 @@ import CoreImage.CIFilterBuiltins
 /// A real encoded bootstrap QR with a white quiet zone in both appearance modes.
 struct PairingQRCodeView: View {
     let link: String
+    private let design = MacDesignTokens()
     var body: some View {
         if let image = qrImage {
             Image(decorative: image, scale: 1).interpolation(.none).resizable().scaledToFit()
-                .frame(width: 256, height: 256).padding(20).background(.white)
+                .frame(width: design.qrCodeSize, height: design.qrCodeSize).padding(design.qrQuietZone).background(.white)
                 .accessibilityHidden(false)
-                .accessibilityLabel(String(localized: "mac.pairing.qr"))
+                .accessibilityLabel(String(localized: "mac.pairing.qr", bundle: .interface))
         }
     }
     private var qrImage: CGImage? {
