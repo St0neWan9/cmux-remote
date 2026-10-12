@@ -140,3 +140,29 @@ The screenshot sequence `alpha-01` through `alpha-05` records saved/discovered
 hosts, authorized workspaces, open confirmation, post-restart saved access and
 the native Remote mirror. This proves the upgraded paired flow on one Mac;
 it does not prove fresh enrollment or installation on a second physical Mac.
+
+## Dedicated remote host handoff
+
+The owner elected to operate Mac B manually. This Mac A now runs a dedicated
+frozen-candidate Bridge at `https://10.20.0.59:7780`, advertised as cmux Alpha
+Remote, with a separate private source state and no cloud account. A temporary
+LAN-only download service on 7781 serves only the review package/checksum and
+Chinese test guide. The guide is [LAN-ALPHA-TEST.zh-CN.md](LAN-ALPHA-TEST.zh-CN.md).
+
+The exact new source host passed fresh scoped enrollment, six replay viewers,
+real fixture input and duplicate receipt reads before/after a source process
+restart. The source acknowledged the operation once. View IDs, viewer PIDs,
+source producer epochs and official cmux PID were preserved. Its scoped inventory
+returned only the approved test workspace; another existing workspace was denied.
+Anonymous protected resource/owner paths were denied. Actual downloads matched
+the package and guide; documented install commands were syntax checked and run
+against an isolated fresh/upgrade directory, followed by signature verification
+and CLI execution.
+
+Receipts: `.build/verification/lan-alpha/source-host-precheck.json`,
+`source-scope-and-download.json`, `document-command-checks.json`;
+screenshot `source-alpha-native-precheck.png`.
+Two physical Macs and real Agent interaction remain pending Mac B feedback.
+No phone work was performed. The shared checkout began a concurrent merge and
+contains unrelated conflict markers; this handoff uses immutable verified
+artifacts, not a rebuild or a claim that the present source checkout is green.

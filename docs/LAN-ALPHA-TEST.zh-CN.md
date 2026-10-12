@@ -15,6 +15,7 @@
 
 | 项目 | 值 |
 | --- | --- |
+| A 的官方 cmux 版本 | `0.65.0`（build `108`） |
 | 发现列表中的名称 | **cmux Alpha Remote** |
 | Bridge HTTPS 地址 | `https://10.20.0.59:7780` |
 | 安装包下载地址 | `http://10.20.0.59:7781/mac-alpha-candidate-20261012.zip` |
@@ -32,7 +33,7 @@
 ## 1. B：确认环境和网络
 
 本次冻结包是 **Apple Silicon / arm64** 的 ad-hoc Debug 包，无需 Xcode 编译。
-B 已经安装官方 cmux，并使用 Default Workspaces 侧栏。
+B 需要 macOS 14.0 或更新版本，已经安装官方 cmux，并使用 Default Workspaces 侧栏。
 
 在 B 的终端执行：
 
@@ -261,7 +262,8 @@ B 的实机通过标准：发现并批准 → 原生 Remote 分组 → 同一源
 
 A 已对**本文专用服务**完成本机独立客户端预检：首次配对、6 个终端 replay、
 受控输入、同一 operation 的重复提交只产生一个源端确认，以及远端 Bridge 重启后
-保留原 6 个 viewer 和源进程。证据在
+保留原 6 个 viewer 和源进程。重启后再提交同一 operation，仍返回原 receipt，
+源端确认次数保持 1。证据在
 `.build/verification/lan-alpha/source-host-precheck.json`。
 安装包的解压、签名和 CLI 执行也已实际验证。
 

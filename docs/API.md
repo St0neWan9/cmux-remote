@@ -160,3 +160,16 @@ conversation with the agent.
 
 Implementation references: [Apple on-device recognition](https://developer.apple.com/documentation/speech/sfspeechrecognitionrequest/requiresondevicerecognition)
 and [on-device support](https://developer.apple.com/documentation/speech/sfspeechrecognizer/supportsondevicerecognition).
+
+## Combined milestone storage
+
+Production chat, Feed and Mac terminal mutations use one shared MutationLedger.
+On first access under the Bridge run lease, existing owner-only `operations.json`
+phone records are imported into the bounded append-only ledger. Confirmed receipts
+remain confirmed; prepared/uncertain records remain unknown and cannot dispatch.
+Import is flushed, restartable and does not delete the prior file. Corruption,
+conflicting metadata or capacity exhaustion blocks writes. Receipt lookup keeps
+current device/workspace/capability authorization and never requires a vanished
+session to become live again. Injected standalone phone journals remain available
+for compatibility checks. Production fingerprint checks accept the recorded old
+phone format only for an identical request; new content still conflicts.

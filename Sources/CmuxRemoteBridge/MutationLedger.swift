@@ -94,6 +94,7 @@ public actor MutationLedger {
         if FileManager.default.fileExists(atPath: legacyFile.path) {
             let legacy = try MutationJournal(file: legacyFile)
             for entry in legacy.exportedEntries() {
+                guard [.conversationControl, .feedReply, .terminalInput].contains(entry.capability) else { throw BridgeError("invalid_state", "Legacy record has an unsupported mutation capability.") }
                 let principal = entry.principal == "legacy" ? "owner" : entry.principal
                 let imported = Entry(key: try key(principal, entry.id), operationID: entry.id, fingerprint: entry.digest,
                     workspaceID: entry.workspace.lowercased(), capability: entry.capability,

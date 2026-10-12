@@ -21,7 +21,7 @@ public actor SessionService {
 
     public init(cmux: any CmuxControlling, home: URL, transcriptRoots: [URL], mutations: MutationLedger? = nil, journal: MutationJournal? = nil) {
         self.cmux = cmux; self.transcriptRoots = transcriptRoots.map { $0.resolvingSymlinksInPath().standardizedFileURL }
-        self.files = ProjectFilePolicy(home: home); self.mutations = mutations ?? MutationLedger()
+        self.files = ProjectFilePolicy(home: home); self.mutations = mutations ?? MutationLedger(); self.journal = journal
     }
 
     public func status() async throws -> JSONValue {
