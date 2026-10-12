@@ -13,15 +13,15 @@ public actor SessionService {
     private let files: ProjectFilePolicy
     private let reader = TranscriptReader()
     private var records: [String: Record] = [:]
-    private var operations: [UUID: (String, MutationReceipt?)] = [:]
-    private var failedOperations = Set<UUID>()
+    private var journal: MutationJournal
     private var liveBindings: [String: JSONValue] = [:]
     private var eventBoot: String?
     private var eventSequence: Int?
 
-    public init(cmux: any CmuxControlling, home: URL, transcriptRoots: [URL]) {
+    public init(cmux: any CmuxControlling, home: URL, transcriptRoots: [URL], journal: MutationJournal = MutationJournal()) {
         self.cmux = cmux; self.transcriptRoots = transcriptRoots.map { $0.resolvingSymlinksInPath().standardizedFileURL }
         self.files = ProjectFilePolicy(home: home)
+        self.journal = journal
     }
 
     public func status() async throws -> JSONValue {
@@ -118,26 +118,35 @@ public actor SessionService {
     }
 
     public func send(id: String, request: SendRequest, access: SessionAccess? = nil) async throws -> MutationReceipt {
-        guard !request.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, request.text.utf8.count <= 65_536 else { throw BridgeError("invalid_input", "Enter a prompt within the size limit.") }
-        let signature = "send:\(id):\(request.text)"
-        if let receipt = try existing(request.operationID, signature: signature) { return receipt }
+        guard (!request.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !request.attachments.isEmpty), request.text.utf8.count <= 65_536 else { throw BridgeError("invalid_input", "Enter a prompt or select an image within the size limit.") }
+        let attachments = try ChatImagePolicy().attachments(request.attachments)
+        var params: [String: JSONValue] = ["session_id": .string(id), "text": .string(request.text)]
+        if !attachments.isEmpty { params["attachments"] = .array(attachments) }
+        guard try JSONEncoder().encode(JSONValue.object(params)).count <= 1_048_576 else { throw BridgeError("too_large", "The image and text request exceeds the transport limit.", status: 413) }
+        let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+        let signature = request.attachments.isEmpty ? "send:\(id):\(request.text)" : "send:\(id):\(String(decoding: try encoder.encode(request), as: UTF8.self))"
+        if let receipt = try await existing(request.operationID, signature: signature, access: access) { return receipt }
         let session = try await verifiedBinding(id, requiresEmptyPrompt: true, access: access)
-        try begin(request.operationID, signature: signature)
+        guard let workspace = session.workspaceID else { throw BridgeError("stale_binding", "The session has no current workspace.", status: 409) }
+        try journal.begin(id: request.operationID, signature: signature, principal: access?.principalID ?? "legacy",
+                          resource: "session:\(id)", workspace: workspace, capability: .conversationControl)
         do {
-            _ = try await cmux.request("mobile.chat.send", params: ["session_id": .string(session.id), "text": .string(request.text)])
-            return complete(request.operationID)
-        } catch { failedOperations.insert(request.operationID); throw mutationError(error) }
+            _ = try await cmux.request("mobile.chat.send", params: params)
+            return try journal.complete(id: request.operationID)
+        } catch { journal.uncertain(id: request.operationID); throw mutationError(error) }
     }
 
     public func interrupt(id: String, request: InterruptRequest, access: SessionAccess? = nil) async throws -> MutationReceipt {
         let signature = "interrupt:\(id):\(request.hard)"
-        if let receipt = try existing(request.operationID, signature: signature) { return receipt }
+        if let receipt = try await existing(request.operationID, signature: signature, access: access) { return receipt }
         let session = try await verifiedBinding(id, requiresEmptyPrompt: false, access: access)
-        try begin(request.operationID, signature: signature)
+        guard let workspace = session.workspaceID else { throw BridgeError("stale_binding", "The session has no current workspace.", status: 409) }
+        try journal.begin(id: request.operationID, signature: signature, principal: access?.principalID ?? "legacy",
+                          resource: "session:\(id)", workspace: workspace, capability: .conversationControl)
         do {
             _ = try await cmux.request("mobile.chat.interrupt", params: ["session_id": .string(session.id), "hard": .bool(request.hard)])
-            return complete(request.operationID)
-        } catch { failedOperations.insert(request.operationID); throw mutationError(error) }
+            return try journal.complete(id: request.operationID)
+        } catch { journal.uncertain(id: request.operationID); throw mutationError(error) }
     }
 
     public func reply(requestID: String, body: JSONValue, access: SessionAccess? = nil) async throws -> MutationReceipt {
@@ -145,7 +154,7 @@ public actor SessionService {
         let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
         let serialized = String(decoding: try encoder.encode(body), as: UTF8.self)
         let signature = "reply:\(requestID):\(serialized)"
-        if let receipt = try existing(operation, signature: signature) { return receipt }
+        if let receipt = try await existing(operation, signature: signature, access: access) { return receipt }
         let items = try await feed()["items"].array ?? []
         guard let pending = items.first(where: { $0["request_id"].string == requestID && $0["status"].string == "pending" }), pending["kind"].string == kind else { throw BridgeError("request_expired", "This request is no longer waiting for a decision.", status: 409) }
         try await access?.require(.feedReply, workspace: pending["workspace_id"].string)
@@ -171,9 +180,10 @@ public actor SessionService {
             method = "feed.question.reply"; params["selections"] = .array(choices)
         default: throw BridgeError("unsupported", "cmux does not expose this decision.", status: 422)
         }
-        try begin(operation, signature: signature)
-        do { _ = try await cmux.request(method, params: params); return complete(operation) }
-        catch { failedOperations.insert(operation); throw mutationError(error) }
+        try journal.begin(id: operation, signature: signature, principal: access?.principalID ?? "legacy",
+                          resource: "feed:\(requestID)", workspace: pending["workspace_id"].string ?? "legacy", capability: .feedReply)
+        do { _ = try await cmux.request(method, params: params); return try journal.complete(id: operation) }
+        catch { journal.uncertain(id: operation); throw mutationError(error) }
     }
 
     public func file(id: String, path: String, access: SessionAccess? = nil) async throws -> TextFileSnapshot {
@@ -260,24 +270,22 @@ public actor SessionService {
         return !workspace.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && !surface.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
-    private func existing(_ id: UUID, signature: String) throws -> MutationReceipt? {
-        guard let entry = operations[id] else { return nil }
-        guard entry.0 == signature else { throw BridgeError("operation_conflict", "This operation identity was already used for different input.", status: 409) }
-        guard !failedOperations.contains(id), let receipt = entry.1 else { throw BridgeError("outcome_unknown", "Inspect the task before repeating this operation.", status: 409) }
-        return receipt
+    public func operationStatus(id: UUID, access: SessionAccess? = nil) async throws -> OperationStatus {
+        let principal = access?.principalID ?? "legacy"
+        guard let entry = try journal.entry(id: id, principal: principal) else { throw BridgeError("operation_not_found", "No operation record was found.", status: 404) }
+        try await access?.require(entry.capability, workspace: entry.workspace)
+        guard let current = try journal.entry(id: id, principal: principal) else { throw BridgeError("operation_not_found", "No operation record was found.", status: 404) }
+        return current.status
     }
-    private func begin(_ id: UUID, signature: String) throws {
-        // The actor may suspend during fresh binding checks. Claim again before I/O.
-        guard operations[id] == nil else { throw BridgeError("operation_conflict", "This operation is already in progress.", status: 409) }
-        guard operations.count < 512 else { throw BridgeError("receipt_capacity", "Restart the Bridge after checking pending operations.", status: 503) }
-        operations[id] = (signature, nil)
-    }
-    private func complete(_ id: UUID) -> MutationReceipt {
-        let receipt = MutationReceipt(operationID: id, accepted: true)
-        operations[id]?.1 = receipt
-        return receipt
+    private func existing(_ id: UUID, signature: String, access: SessionAccess?) async throws -> MutationReceipt? {
+        let principal = access?.principalID ?? "legacy"
+        guard let entry = try journal.existing(id: id, signature: signature, principal: principal) else { return nil }
+        try await access?.require(entry.capability, workspace: entry.workspace)
+        guard try journal.entry(id: id, principal: principal)?.state == .accepted else { throw BridgeError("outcome_unknown", "Inspect the task before repeating this operation.", status: 409) }
+        return MutationReceipt(operationID: id, accepted: true)
     }
     private func mutationError(_ error: any Error) -> BridgeError {
-        (error as? BridgeError) ?? BridgeError("outcome_unknown", "The result is unknown; inspect the task before trying again.", status: 504)
+        if (error as? BridgeError)?.code == "journal_unavailable" { return BridgeError("outcome_unknown", "cmux may have executed the operation, but its receipt could not be saved. Inspect the task.", status: 504) }
+        return (error as? BridgeError) ?? BridgeError("outcome_unknown", "The result is unknown; inspect the task before trying again.", status: 504)
     }
 }

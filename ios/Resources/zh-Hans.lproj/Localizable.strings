@@ -169,3 +169,6 @@
 "error.receipt_capacity" = "Bridge 操作记录已满。请先检查未完成的操作，再由 Mac 主人重启 Bridge。";
 "feed.skip_questions" = "跳过问题";
 "sessions.no_read_grant" = "此设备未获准读取对话。";
+"error.journal" = "Mac 无法安全保存这次操作。请让主人检查 Bridge 的本地状态。";
+"error.operation_missing" = "未找到这次操作的记录。再次发送前，请先检查对话。";
+"error.image" = "请选择不超过四张、符合上传大小限制的 PNG 或 JPEG 图片。";

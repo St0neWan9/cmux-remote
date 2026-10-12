@@ -50,7 +50,10 @@ struct Main {
                 else { cmux = UnixSocketClient(path: socket, password: ProcessInfo.processInfo.environment["CMUX_REMOTE_SOCKET_PASSWORD"]) }
                 roots = [URL(fileURLWithPath: ProcessInfo.processInfo.environment["CLAUDE_CONFIG_DIR"] ?? home.appendingPathComponent(".claude").path), URL(fileURLWithPath: ProcessInfo.processInfo.environment["CODEX_HOME"] ?? home.appendingPathComponent(".codex").path)]
             }
-            let service = SessionService(cmux: cmux, home: home, transcriptRoots: roots)
+            let lease = try BridgeRunLease(directory: state.directory)
+            defer { withExtendedLifetime(lease) {} }
+            let journal = try MutationJournal(file: state.directory.appendingPathComponent("operations.json"))
+            let service = SessionService(cmux: cmux, home: home, transcriptRoots: roots, journal: journal)
             let events: Task<Void, Never>?
             if options.contains("demo") { events = nil }
             else {
@@ -62,8 +65,6 @@ struct Main {
                 }
             }
             defer { events?.cancel() }
-            let lease = try BridgeRunLease(directory: state.directory)
-            defer { withExtendedLifetime(lease) {} }
             let authority = try state.authority(name: options.value("name") ?? Host.current().localizedName ?? "cmux Bridge")
             let ready = AsyncThrowingStream<Void, any Error>.makeStream()
             let owner = Task {
