@@ -14,12 +14,11 @@ struct SpeechDraftStrip: View {
                 }
                 if !model.text.isEmpty { Text(model.text).font(.callout).lineLimit(4).textSelection(.enabled) }
                 if let error = model.error { Text(error).font(.footnote).foregroundStyle(.red) }
-                HStack {
+                ActionRow {
                     if model.state == .recording { Button(String(localized: "voice.finish")) { model.finish() } }
-                    if !model.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { Button(String(localized: "voice.use"), action: useText) }
+                    if !model.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { Button(String(localized: "voice.use"), action: useText).buttonStyle(FloatingButtonStyle(prominent: true)) }
                 }.font(.footnote).buttonStyle(FloatingButtonStyle())
-            }.padding(14).frame(maxWidth: .infinity, alignment: .leading).background(Color.white, in: RoundedRectangle(cornerRadius: 20))
-                .shadow(color: .black.opacity(0.055), radius: 12, y: 3).accessibilityIdentifier("voice.draft")
+            }.modifier(FloatingSurface()).accessibilityIdentifier("voice.draft")
         }
     }
 }

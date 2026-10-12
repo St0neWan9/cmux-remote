@@ -7,16 +7,15 @@ struct HistoricalImageView: View {
     @State private var model: HistoricalImageModel
     @State private var image: UIImage?
     @Environment(\.scenePhase) private var phase
-    @Environment(\.dismiss) private var dismiss
     init(reference: ConversationImageReference, sessionID: String, client: RemoteClient) {
         _model = State(initialValue: HistoricalImageModel(reference: reference, fetch: { try await client.image(sessionID: sessionID, reference: reference) }))
     }
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 24) {
+        WhitePage(title: model.reference.name) {
+            VStack(spacing: MobileDesign.sectionGap) {
                 if let image {
                     Image(uiImage: image).resizable().scaledToFit().frame(maxWidth: .infinity, maxHeight: .infinity).accessibilityLabel(model.reference.name)
-                    HStack {
+                    ActionRow {
                         Button { UIPasteboard.general.image = image } label: { Label(String(localized: "project.copy"), systemImage: "doc.on.doc") }
                         ShareLink(item: Image(uiImage: image), preview: SharePreview(model.reference.name, image: Image(uiImage: image))) { Label(String(localized: "project.share"), systemImage: "square.and.arrow.up") }
                     }.buttonStyle(FloatingButtonStyle())
@@ -25,9 +24,7 @@ struct HistoricalImageView: View {
                     Text(error).foregroundStyle(.secondary)
                     Button(String(localized: "chat.refresh")) { Task { await model.load() } }.buttonStyle(FloatingButtonStyle())
                 }
-            }.padding(20).frame(maxWidth: .infinity, maxHeight: .infinity).background(Color.white)
-                .navigationTitle(model.reference.name).navigationBarTitleDisplayMode(.inline)
-                .toolbar { ToolbarItem(placement: .confirmationAction) { Button(String(localized: "image.close")) { dismiss() } } }
+            }.frame(maxWidth: .infinity, maxHeight: .infinity).padding(MobileDesign.pageInset)
         }.environment(\.colorScheme, .light)
         .onChange(of: model.data) { _, value in image = value.flatMap(UIImage.init(data:)) }
         .onDisappear { model.suspend() }

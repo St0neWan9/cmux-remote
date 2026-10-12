@@ -12,34 +12,34 @@ struct ToolDetailView: View {
         }))
     }
     var body: some View {
-        NavigationStack {
-            WhitePage(title: String(localized: "tool.detail.title")) {
-                VStack(alignment: .leading, spacing: 16) {
-                    if model.reference.fields.count > 1 {
-                        Picker(String(localized: "tool.detail.title"), selection: $model.field) {
-                            ForEach(model.reference.fields, id: \.self) { field in Text(title(field)).tag(field) }
-                        }.pickerStyle(.segmented).disabled(model.busy)
-                    }
-                    if let error = model.error { Text(error).font(.footnote).foregroundStyle(.red) }
-                    if let page = model.page, page.field == model.field {
-                        ScrollView {
-                            if page.text.isEmpty { Text(String(localized: "tool.detail.empty")).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading) }
-                            else { ToolCodeBlock(text: page.text) }
-                        }.id(page.contentID + ":" + String(page.offset)).frame(maxWidth: .infinity, maxHeight: .infinity)
-                        HStack {
-                            Button(String(localized: "tool.detail.previous")) { load(max(0, page.offset - 16_384), preserving: true) }.disabled(page.offset == 0 || model.busy)
-                            Spacer()
-                            Button(String(localized: "chat.refresh")) { load() }.disabled(model.busy)
-                            Spacer()
-                            Button(String(localized: "tool.detail.next")) { if let next = page.nextOffset { load(next, preserving: true) } }.disabled(page.nextOffset == nil || model.busy)
-                        }.font(.subheadline).buttonStyle(FloatingButtonStyle())
-                    } else {
-                        if model.busy { ProgressView() }
-                        else { Button(String(localized: "chat.refresh")) { load() }.buttonStyle(FloatingButtonStyle()) }
-                        Spacer()
-                    }
-                }.padding(20)
-            }
+        WhitePage(title: String(localized: "tool.detail.title")) {
+            VStack(alignment: .leading, spacing: 16) {
+                if model.reference.fields.count > 1 {
+                    ActionRow {
+                        ForEach(model.reference.fields, id: \.self) { field in
+                            Button(title(field)) { model.field = field }
+                                .buttonStyle(FloatingButtonStyle(prominent: model.field == field))
+                                .accessibilityAddTraits(model.field == field ? .isSelected : [])
+                        }
+                    }.disabled(model.busy)
+                }
+                if let error = model.error { Text(error).font(.footnote).foregroundStyle(.red) }
+                if let page = model.page, page.field == model.field {
+                    ScrollView {
+                        if page.text.isEmpty { Text(String(localized: "tool.detail.empty")).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading) }
+                        else { ToolCodeBlock(text: page.text) }
+                    }.id(page.contentID + ":" + String(page.offset)).frame(maxWidth: .infinity, maxHeight: .infinity)
+                    ActionRow {
+                        Button(String(localized: "tool.detail.previous")) { load(max(0, page.offset - 16_384), preserving: true) }.disabled(page.offset == 0 || model.busy)
+                        Button(String(localized: "chat.refresh")) { load() }.disabled(model.busy)
+                        Button(String(localized: "tool.detail.next")) { if let next = page.nextOffset { load(next, preserving: true) } }.disabled(page.nextOffset == nil || model.busy)
+                    }.font(.subheadline).buttonStyle(FloatingButtonStyle())
+                } else {
+                    if model.busy { ProgressView() }
+                    else { Button(String(localized: "chat.refresh")) { load() }.buttonStyle(FloatingButtonStyle()) }
+                    Spacer()
+                }
+            }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).padding(MobileDesign.pageInset)
         }
         .onChange(of: model.field) { _, _ in load() }
         .task(id: phase) {
