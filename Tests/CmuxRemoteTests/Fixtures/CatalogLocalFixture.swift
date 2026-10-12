@@ -16,6 +16,8 @@ actor CatalogLocalFixture: CmuxControlling {
     var nextTreeDelay = 0
     var hiddenWorkspace: String?
     var treeDelay = 0
+    var currentWindow: String?
+    func focusWindow(_ id: String) { currentWindow = id }
     func delayNextTreePublication(reads: Int) { nextTreeDelay = reads }
     func allowExplicitSelection() { explicitSelection = true }
     func close(_ id: String) { surfaces[id] = nil; workspaceWindows[id] = nil }
@@ -37,7 +39,9 @@ actor CatalogLocalFixture: CmuxControlling {
         case "system.tree":
             let hidden = treeDelay > 0 ? hiddenWorkspace : nil
             if treeDelay > 0 { treeDelay -= 1 }
-            let windows = Set(workspaceWindows.values)
+            let windows = Set(workspaceWindows.values).filter {
+                currentWindow == nil || params["all_windows"]?.bool == true || $0 == currentWindow
+            }
             return .object(["windows": .array(windows.map { w in .object(["id": .string(w), "workspaces": .array(surfaces.keys.filter { workspaceWindows[$0] == w && $0 != hidden }.map { .object(["id": .string($0)]) })]) })])
         case "workspace.list": return .object(["window_id": .string(window), "workspaces": .array(surfaces.keys.filter { params["window_id"]?.string == nil || workspaceWindows[$0] == params["window_id"]?.string }.map { .object(["id": .string($0), "selected": .bool($0 == selected)]) })])
         case "surface.list":
