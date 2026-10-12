@@ -31,10 +31,10 @@ struct MessageRow: View {
             DisclosureGroup(value.filePath) { Text(value.unifiedDiff ?? value.operation.rawValue).font(.system(.callout, design: .monospaced)).textSelection(.enabled) }
         case .question(let value):
             VStack(alignment: .leading, spacing: 8) { Label(String(localized: "feed.title"), systemImage: "questionmark.bubble").font(.caption).foregroundStyle(.secondary); Text(value.prompt); ForEach(value.options) { Text($0.label) } }
-                .padding(14).background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 16))
+                .modifier(FloatingSurface())
         case .permissionRequest(let value):
             VStack(alignment: .leading, spacing: 8) { Label(value.title, systemImage: "hand.raised"); Text(value.subject).font(.system(.callout, design: .monospaced)) }
-                .padding(14).background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 16))
+                .modifier(FloatingSurface())
         case .status(let value): Text(value.detail ?? value.event.rawValue).font(.footnote).foregroundStyle(.secondary)
         default: Text(String(localized: "chat.other")).font(.footnote).foregroundStyle(.secondary)
         }

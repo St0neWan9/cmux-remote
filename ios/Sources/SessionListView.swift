@@ -76,7 +76,7 @@ struct SessionListView: View {
             }.tint(.primary).accessibilityLabel(String(localized: "sessions.options")).accessibilityIdentifier("sessions.options")
             Text(String(localized: "sessions.title")).font(.headline).frame(maxWidth: .infinity)
             if let client = model.client {
-                NavigationLink { FeedView(client: client).toolbar(.visible, for: .navigationBar) } label: {
+                NavigationLink { FeedView(client: client) } label: {
                     Image(systemName: "checkmark.bubble").font(.system(size: 20, weight: .medium))
                         .frame(width: 44, height: 44).background(Color.white, in: Circle())
                         .shadow(color: .black.opacity(0.07), radius: 12, y: 3)

@@ -33,8 +33,9 @@ struct FeedQuestionView: View {
                     }.buttonStyle(.borderless).disabled(busy)
                 }
                 TextField(String(localized: "feed.custom"), text: Binding(get: { custom[index] ?? "" }, set: { custom[index] = $0 }))
+                    .padding(12).overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.black.opacity(0.1), lineWidth: 0.5))
             }
-            Button(String(localized: "feed.submit")) { submit(answers) }.buttonStyle(.borderedProminent).disabled(busy || answers.count != questions.count)
+            Button(String(localized: "feed.submit")) { submit(answers) }.buttonStyle(.borderedProminent).buttonBorderShape(.capsule).disabled(busy || answers.count != questions.count)
         }
     }
 }

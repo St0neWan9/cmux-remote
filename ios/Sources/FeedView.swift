@@ -8,7 +8,9 @@ struct FeedView: View {
     @State private var error: String?
     @State private var busy = false
     var body: some View {
-        List {
+        WhitePage(title: String(localized: "feed.title")) {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
             if items.isEmpty { Text(String(localized: "feed.empty")).foregroundStyle(.secondary) }
             ForEach(Array(items.enumerated()), id: \.offset) { _, item in
                 VStack(alignment: .leading, spacing: 10) {
@@ -21,14 +23,16 @@ struct FeedView: View {
                         HStack {
                             Button(String(localized: "feed.allow")) { Task { await reply(item, mode: kind == "permissionRequest" ? "once" : "manual") } }
                             Button(String(localized: "feed.deny"), role: .destructive) { Task { await reply(item, mode: "deny") } }
-                        }.buttonStyle(.bordered).disabled(busy || !client.canReplyFeed)
+                        }.buttonStyle(FloatingButtonStyle()).disabled(busy || !client.canReplyFeed)
                     } else if kind == "question" {
                         FeedQuestionView(questions: item["questions"].array ?? [], busy: busy || !client.canReplyFeed) { answers in Task { await reply(item, selections: answers) } }
                     }
-                }
+                }.frame(maxWidth: .infinity, alignment: .leading).modifier(FloatingSurface())
             }
             if let error { Text(error).foregroundStyle(.red) }
-        }.navigationTitle(String(localized: "feed.title")).task { await refresh() }.refreshable { await refresh() }
+            }.padding(20).frame(maxWidth: .infinity, alignment: .leading)
+        }.refreshable { await refresh() }
+        }.task { await refresh() }
     }
     private func refresh() async {
         do { let result = try await client.get("/v1/feed", as: JSONValue.self); items = (result["items"].array ?? []).filter { $0["status"].string == "pending" }; error = nil }

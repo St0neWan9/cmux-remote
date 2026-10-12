@@ -81,3 +81,16 @@
 "sessions.projects" = "Projects";
 "sessions.other" = "Other conversations";
 "sessions.options" = "Connection options";
+"page.back" = "Back";
+"chat.copy" = "Copy reply";
+"chat.copied" = "Copied";
+"chat.share" = "Share reply";
+"chat.quote" = "Quote in follow-up";
+"chat.response_time" = "Reply time";
+"chat.ran_duration" = "Ran for %@";
+"chat.estimated_duration" = "Response took approximately %@";
+"chat.timing" = "Conversation time";
+"chat.recorded_turns" = "Recorded duration from %ld completed turns.";
+"chat.no_timing" = "No recorded running duration is available.";
+"chat.timing_note" = "Recorded running time excludes gaps between turns. Missing durations are not counted; response estimates use transcript timestamps.";
+"chat.elapsed_duration" = "Turn in progress for %@";
