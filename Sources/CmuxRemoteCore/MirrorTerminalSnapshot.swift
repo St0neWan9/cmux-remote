@@ -12,6 +12,10 @@ public struct MirrorTerminalSnapshot: Codable, Sendable {
     public var presentationKey: String?
     /// An optional repaint that keeps the established terminal screen intact.
     public var repaintBytes: Data?
+    /// Optional validated cells for fitting a desktop viewer without resizing the producer.
+    public var renderGrid: JSONValue?
+    /// Peers without this flag must not receive bracketed-paste payloads.
+    public var pasteSupported: Bool?
     public var allowsInput = false
     public init(workspaceID: String, surfaceID: String, runtimeEpoch: String, columns: Int, rows: Int, bytes: Data) {
         self.workspaceID = workspaceID; self.surfaceID = surfaceID; self.runtimeEpoch = runtimeEpoch

@@ -6,7 +6,8 @@ import CmuxTerminalReplay
 /// Validates full character-grid replays before producing terminal presentation bytes.
 public struct TerminalSnapshotRenderer: Sendable {
     public init() {}
-    public func render(_ payload: JSONValue, workspaceID: String, surfaceID: String) throws -> MirrorTerminalSnapshot {
+    public func render(_ payload: JSONValue, workspaceID: String, surfaceID: String,
+                       viewportColumns: Int? = nil, viewportRows: Int? = nil) throws -> MirrorTerminalSnapshot {
         guard payload["workspace_id"].string?.lowercased() == workspaceID.lowercased(),
               payload["surface_id"].string?.lowercased() == surfaceID.lowercased(), payload["render_grid"].object != nil else {
             throw BridgeError("mirror_unsupported", "This cmux version did not return a matching character-grid replay.", status: 422)
@@ -25,6 +26,12 @@ public struct TerminalSnapshotRenderer: Sendable {
         // behalf of the producer. Its coordinates and focus are local only.
         // The upstream full replay resets these modes before restoring modes.
         frame.modes.removeAll { !$0.ansi && [9, 1000, 1002, 1003, 1004, 1005, 1006, 1015, 1016].contains($0.code) }
+        if let columns = viewportColumns, let rows = viewportRows {
+            guard (1...1000).contains(columns), (1...500).contains(rows) else { throw BridgeError("invalid_input", "Invalid local terminal dimensions.") }
+            frame = MobileTerminalGridViewport().fit(frame, columns: columns, rows: rows)
+        } else if viewportColumns != nil || viewportRows != nil {
+            throw BridgeError("invalid_input", "Specify both local terminal dimensions.")
+        }
         let bytes = TerminalPresentationFrame().bytes(for: presentationBytes(frame))
         guard bytes.count <= 4_194_304 else { throw BridgeError("too_large", "Terminal replay exceeds the transfer limit.", status: 413) }
         var snapshot = MirrorTerminalSnapshot(workspaceID: workspaceID.lowercased(), surfaceID: surfaceID.lowercased(), runtimeEpoch: frame.renderEpoch,
@@ -40,7 +47,9 @@ public struct TerminalSnapshotRenderer: Sendable {
             paint.scrolledRows = 0; paint.scrollbackRows = 0; paint.scrollbackSpans = []
             snapshot.repaintBytes = TerminalPresentationFrame().bytes(for: MobileTerminalRenderGridReplay(paint).patchBytes())
         }
-        guard bytes.count + (snapshot.repaintBytes?.count ?? 0) <= 4_194_304 else {
+        let cells = try JSONEncoder().encode(frame)
+        snapshot.renderGrid = try JSONDecoder().decode(JSONValue.self, from: cells)
+        guard bytes.count + (snapshot.repaintBytes?.count ?? 0) + cells.count <= 4_194_304 else {
             throw BridgeError("too_large", "Terminal presentation exceeds the transfer limit.", status: 413)
         }
         return snapshot
