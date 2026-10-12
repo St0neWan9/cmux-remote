@@ -191,7 +191,7 @@ final class AppModel {
     func conversation(session: SessionDescriptor, client: RemoteClient) -> ConversationModel {
         let key = client.operationRecoveryScope + ":" + session.id
         if let existing = conversationModels[key] { return existing }
-        if conversationModels.count >= 32 { conversationModels = conversationModels.filter { $0.value.busy } }
+        if conversationModels.count >= 32 { conversationModels = conversationModels.filter { $0.value.busy || $0.value.pendingSend != nil } }
         let store = pendingSends; let scope = client.operationRecoveryScope; let id = session.id
         let model = ConversationModel(session: session, client: client,
             loadRecovery: { try await store.load(scope: scope, sessionID: id) },

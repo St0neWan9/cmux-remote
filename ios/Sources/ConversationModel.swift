@@ -40,6 +40,7 @@ final class ConversationModel {
     private let saveRecovery: @Sendable (SendRequest?) async throws -> Void
     private var recoveryTask: Task<SendRequest?, any Error>?
     private var recoveryReady = false
+    private(set) var recoveryFailed = false
     var recoveryBlocked: Bool { !recoveryReady || pendingSend != nil }
     private let sendRequest: @Sendable (SendRequest) async throws -> MutationReceipt
     private let getOperation: @Sendable (UUID) async throws -> OperationStatus
@@ -78,7 +79,8 @@ final class ConversationModel {
     }
     func refresh() async {
         do {
-            try await restorePendingSend()
+            do { try await restorePendingSend() }
+            catch { mutationWarning = ErrorPresentation().message(error) }
             let descriptors = try await readSessions()
             guard let current = descriptors.first(where: { $0.id == session.id }) else { throw BridgeError("read_only", "The cmux session is no longer available.", status: 404) }
             updateSession(current)
@@ -152,7 +154,7 @@ final class ConversationModel {
     /// An explicit inspection acknowledgement releases the draft; it never sends it.
     func acknowledgePendingSend() async {
         guard !busy else { return }; busy = true; defer { busy = false }
-        do { try await saveRecovery(nil); pendingSend = nil; mutationWarning = nil; error = nil }
+        do { try await saveRecovery(nil); pendingSend = nil; recoveryReady = true; recoveryFailed = false; recoveryTask = nil; mutationWarning = nil; error = nil }
         catch { mutationWarning = ErrorPresentation().message(error); self.error = mutationWarning }
     }
     private func restorePendingSend() async throws {
@@ -167,8 +169,8 @@ final class ConversationModel {
                 if imageDraft.images.isEmpty { imageDraft.images = pending.attachments }
                 mutationWarning = String(localized: "error.outcome_unknown"); error = mutationWarning
             }
-            recoveryReady = true; recoveryTask = nil
-        } catch { recoveryTask = nil; throw error }
+            recoveryReady = true; recoveryFailed = false; recoveryTask = nil
+        } catch { recoveryTask = nil; recoveryFailed = true; throw error }
     }
     private func confirmSend(_ request: SendRequest) async throws {
         try await saveRecovery(nil)
