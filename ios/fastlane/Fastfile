@@ -39,7 +39,7 @@ platform :ios do
       "--team-id", config.team_id)
     options = { api_key: connect_key, app_identifier: config.bundle_id, ipa: ipa,
       skip_waiting_for_build_processing: true, distribute_external: false, notify_external_testers: false }
-    app_id = ENV["CMUX_REMOTE_IOS_APP_STORE_APP_ID"]
+    app_id = config.app_store_app_id
     options[:apple_id] = app_id unless app_id.to_s.empty?
     upload_to_testflight(**options)
   end

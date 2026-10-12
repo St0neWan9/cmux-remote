@@ -163,7 +163,7 @@ BCE16DD0260827ECF338C787 = { isa = PBXSourcesBuildPhase; buildActionMask = 21474
 AB52CB08E0FDF02BF6C67C33 = { isa = XCBuildConfiguration; name = Debug; buildSettings = { SDKROOT = iphoneos; IPHONEOS_DEPLOYMENT_TARGET = 17.0; SWIFT_VERSION = 6.0; CLANG_ENABLE_MODULES = YES; SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)"; SWIFT_OPTIMIZATION_LEVEL = "-Onone"; }; };
 59E1BEE911F66DA37FEBACDC = { isa = XCBuildConfiguration; name = Debug; buildSettings = {
         PRODUCT_NAME = "$(TARGET_NAME)"; PRODUCT_BUNDLE_IDENTIFIER = com.st0newan9.cmux-remote;
-        GENERATE_INFOPLIST_FILE = YES; INFOPLIST_FILE = Info.plist; INFOPLIST_KEY_CFBundleDisplayName = "cmux remote";
+        GENERATE_INFOPLIST_FILE = YES; INFOPLIST_FILE = Info.plist; INFOPLIST_KEY_CFBundleDisplayName = "Cmux Remote";
         CREATE_INFOPLIST_SECTION_IN_BINARY = YES;
         INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Connect to your paired cmux Bridge on your local network.";
         INFOPLIST_KEY_NSCameraUsageDescription = "Scan your Mac Bridge pairing code.";
@@ -179,7 +179,7 @@ AB52CB08E0FDF02BF6C67C33 = { isa = XCBuildConfiguration; name = Debug; buildSett
 5283471FF90C511CFE244FFF = { isa = XCBuildConfiguration; name = Release; buildSettings = { SDKROOT = iphoneos; IPHONEOS_DEPLOYMENT_TARGET = 17.0; SWIFT_VERSION = 6.0; CLANG_ENABLE_MODULES = YES; SWIFT_OPTIMIZATION_LEVEL = "-O"; }; };
 F4C425279CD5DDD18FD6DC6D = { isa = XCBuildConfiguration; name = Release; buildSettings = {
         PRODUCT_NAME = "$(TARGET_NAME)"; PRODUCT_BUNDLE_IDENTIFIER = com.st0newan9.cmux-remote;
-        GENERATE_INFOPLIST_FILE = YES; INFOPLIST_FILE = Info.plist; INFOPLIST_KEY_CFBundleDisplayName = "cmux remote";
+        GENERATE_INFOPLIST_FILE = YES; INFOPLIST_FILE = Info.plist; INFOPLIST_KEY_CFBundleDisplayName = "Cmux Remote";
         CREATE_INFOPLIST_SECTION_IN_BINARY = YES;
         INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Connect to your paired cmux Bridge on your local network.";
         INFOPLIST_KEY_NSCameraUsageDescription = "Scan your Mac Bridge pairing code.";
