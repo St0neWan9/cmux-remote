@@ -10,7 +10,6 @@ private actor AuthorizationRaceCmux: CmuxControlling {
     let authority: ConnectionAuthority
     let clientID: String
     let revokeDuringRefresh: Bool
-    var dumps = 0
     var sends = 0
     init(authority: ConnectionAuthority, clientID: String, revokeDuringRefresh: Bool) {
         self.authority = authority; self.clientID = clientID; self.revokeDuringRefresh = revokeDuringRefresh
@@ -19,11 +18,12 @@ private actor AuthorizationRaceCmux: CmuxControlling {
         switch method {
         case "vault.sessions": return .object(["sessions": .array([.object(["session_id": .string("session"), "agent": .string("claude"), "title": .string("Session")])])])
         case "chat.sessions.dump":
-            dumps += 1
-            if dumps == 2, revokeDuringRefresh { try await authority.revoke(clientID: clientID) }
-            let workspace = dumps > 1 && !revokeDuringRefresh ? forbidden : allowed
-            return .object(["sessions": .array([.object(["session_id": .string("session"), "agent": .string("claude"), "workspace_id": .string(workspace), "surface_id": .string(surface), "state": .string("idle")])])])
-        case "surface.input_state": return .object(["agent": .bool(true), "workspace_id": params["workspace_id"] ?? .null, "surface_id": params["surface_id"] ?? .null, "blocks_typing": .bool(false)])
+            return .object(["sessions": .array([.object(["session_id": .string("session"), "agent": .string("claude"), "workspace_id": .string(allowed), "surface_id": .string(surface), "state": .string("idle")])])])
+        case "surface.input_state":
+            // Mutate during the actual backend read, independent of how many
+            // preliminary discovery requests a router happens to perform.
+            if revokeDuringRefresh { try await authority.revoke(clientID: clientID) }
+            return .object(["agent": .bool(true), "workspace_id": revokeDuringRefresh ? (params["workspace_id"] ?? .null) : .string(forbidden), "surface_id": params["surface_id"] ?? .null, "blocks_typing": .bool(false)])
         case "mobile.chat.send": sends += 1; return .object(["submitted": .bool(true)])
         default: return .object([:])
         }
@@ -56,7 +56,7 @@ private actor AuthorizationRaceCmux: CmuxControlling {
     }
     @Test func movedSessionMustBeDeniedBeforeWrite() async throws {
         let (status, sends, _) = try await exercise(revoke: false)
-        #expect(status == 403)
+        #expect(status == 409)
         #expect(sends == 0)
     }
     @Test func revokedDeviceMustBeDeniedBeforeWrite() async throws {

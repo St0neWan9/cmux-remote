@@ -122,6 +122,16 @@ prove the new image, stream, durable-record or hardware behavior.
   returned image content and its final reply identified the color as blue.
   This Claude directory-policy approval did not appear in the phone Feed, so the
   evidence does **not** establish phone handling of every terminal policy dialog.
-- The isolated candidate passes 88 tests in 21 suites, 17 actual phone-model
+- The initial isolated candidate passed 88 tests in 21 suites, 17 actual phone-model
   checks and 174 matching localized keys. The iOS Simulator build passes. These
   checks do not complete R01–R11 or replace physical-device acceptance.
+
+Independent review reproduced two defects: a successful RPC envelope with
+`submitted:false` became an accepted image receipt, and signed replay depended on
+the original session/Feed item still being listed. The dedicated regression commit
+`dd67c02` fails both tests with six expectations. The repair retains an unknown
+record for unconfirmed submission and authorizes cached receipts against stored
+scope; fresh mutations still authorize/check live targets. Tests now inject
+rebind/revocation at an actual backend await rather than an incidental discovery
+call count. The repaired candidate passes 89 tests in 21 suites plus the same
+17 actual-model checks and 174 locale keys. Fresh repair review remains pending.

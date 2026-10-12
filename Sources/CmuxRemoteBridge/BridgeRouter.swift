@@ -73,7 +73,9 @@ public struct BridgeRouter: Sendable {
             } else if path.count == 4, path[0...1] == ["v1", "sessions"] {
                 let id = path[2]
                 let capability: ClientCapability = method == "POST" ? .conversationControl : (["changes", "diff", "file"].contains(path[3]) ? .projectRead : .conversationRead)
-                if let client {
+                if method == "POST" {
+                    try await require(client, capability)
+                } else if let client {
                     let sessions = try await service.sessions()
                     guard let session = sessions.first(where: { $0.id == id }), let workspace = session.workspaceID else { throw BridgeError("scope_denied", "This session is outside this device's approved workspaces.", status: 403) }
                     try await require(client, capability, workspace: workspace)
@@ -91,11 +93,9 @@ public struct BridgeRouter: Sendable {
                 default: throw BridgeError("not_found", "This resource is not available.", status: 404)
                 }
             } else if method == "POST", path.count == 4, path[0...1] == ["v1", "feed"], path[3] == "reply" {
-                if let client {
-                    let items = try await service.feed()["items"].array ?? []
-                    guard let item = items.first(where: { $0["request_id"].string == path[2] }), let workspace = item["workspace_id"].string else { throw BridgeError("scope_denied", "This decision is outside this device's approved workspaces.", status: 403) }
-                    try await require(client, .feedReply, workspace: workspace)
-                }
+                // Stored receipts authorize their original scope inside the service;
+                // fresh decisions still require a currently pending, scoped target.
+                try await require(client, .feedReply)
                 data = try encode(await service.reply(requestID: path[2], body: JSONDecoder().decode(JSONValue.self, from: body), access: access))
             } else { throw BridgeError("not_found", "This resource is not available.", status: 404) }
             return (200, data)

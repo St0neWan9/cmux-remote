@@ -42,7 +42,8 @@ Production `serve` persists `operations.json` beneath its owner-only state
 directory. Records bind operation ID, device, workspace/capability, resource and
 payload digest. Prompt text and image bytes are not persisted there. A prepared
 record is flushed before cmux dispatch; only a confirmed and persisted response
-becomes accepted. Prepared or uncertain records survive restart and refuse
+becomes accepted. A send result with `submitted:false` remains uncertain rather
+than confirming an unsubmitted image/prompt. Prepared or uncertain records survive restart and refuse
 automatic replay. The journal is bounded to 4096 operations and 4 MiB, failing
 closed on corruption, unsafe permissions, write failure or capacity exhaustion.
 Restart does not clear deduplication or capacity; no automatic eviction silently
@@ -51,6 +52,8 @@ forgets an uncertain operation.
 `GET /v2/operations/:operation_id` returns `operation_id`, `state` (`accepted` or
 `outcome_unknown`) and ISO-8601 `recorded_at`. It requires the original device's
 current capability and workspace grant. Another device cannot inspect or replay
-the record. An absent record returns `operation_not_found`; absence is not proof
+the record. Identical accepted replay returns its saved receipt even after the
+original session or Feed item disappears; this does not issue another mutation.
+Fresh operations still need a current authorized target. An absent record returns `operation_not_found`; absence is not proof
 that an earlier request never executed. Persistence does not provide exactly-once
 execution across the cmux/Bridge boundary.
