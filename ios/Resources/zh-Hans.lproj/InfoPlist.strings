@@ -1,3 +1,4 @@
+"CFBundleDisplayName" = "Cmux Remote";
 "NSLocalNetworkUsageDescription" = "连接同一局域网中已配对的 cmux Bridge。";
 "NSCameraUsageDescription" = "扫描 Mac Bridge 的配对二维码。";
 "NSMicrophoneUsageDescription" = "在本机录音，将识别文字保存为可编辑的对话草稿。";

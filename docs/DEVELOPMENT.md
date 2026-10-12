@@ -234,3 +234,24 @@ archive's Bundle ID/version/build, AppIcon and privacy manifest were inspected;
 Fastlane's build/upload lanes load with the locked dependencies. No signed IPA
 export or Apple upload was performed: this repository currently has no signing
 secrets configured, and this app's Apple record/access remains to be verified.
+
+## First signed iPhone package — 2026-10-12
+
+The owner account registered `com.st0newan9.cmux-remote` and created the separate
+App Store Connect record **Cmux Remote Companion**, Apple ID `6821932840`.
+The phone's invariant display name is **Cmux Remote** in English and Simplified
+Chinese. Its new opaque 1024-pixel icon incorporates cmux's cyan-to-violet
+chevron reference; the generation prompts and upstream provenance are recorded
+in `ios/Resources/APP-ICON.md`.
+
+A dedicated App Store profile was generated with the owner's existing Apple
+Distribution certificate. A real device Release archive and signed IPA export
+for `0.1.0 (1)` passed. The upload guard verified the actual IPA identity,
+version/build, nonexpired App Store profile and deep/strict code signature.
+The actual bundle display name and both localized InfoPlist catalogs (five
+matching keys) were checked. The package suite (201 tests), 90 phone checks,
+seven release guards, SwiftPM build, both ordinary localization audits and the
+iOS Simulator build passed. The signed IPA is in `.build/ios-release/dist/`,
+outside Git. TestFlight upload is pending approval to generate a dedicated
+Developer API key and store the signing credentials in the repository's
+TestFlight environment Secrets; the prepared key has not been generated.
