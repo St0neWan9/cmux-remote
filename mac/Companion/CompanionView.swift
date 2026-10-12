@@ -1,10 +1,13 @@
 import SwiftUI
 import CmuxRemoteMac
+import CmuxRemoteClient
 
 /// Two fixed alignment columns; terminal work remains in the native cmux workspace.
 struct CompanionView: View {
     @Bindable var model: MacCompanionModel
     private let design = MacDesignTokens()
+    private var savedHostIDs: Set<String> { Set(model.connections.compactMap { $0["id"].string }) }
+    private var unpairedHosts: [DiscoveredBridge] { model.devices.filter { !savedHostIDs.contains($0.host.id) } }
     var body: some View {
         HStack(spacing: 0) {
             ScrollView {
@@ -13,9 +16,12 @@ struct CompanionView: View {
                         VStack(alignment: .leading, spacing: 8) {
                             sectionTitle("mac.connected")
                             ForEach(Array(model.connections.enumerated()), id: \.offset) { _, connection in
-                                deviceRow(name: connection["name"].string ?? String(localized: "mac.untitled"), selected: connection["id"].string == model.selectedHostID, symbol: "checkmark.shield") {
+                                HostConnectionRow(name: connection["name"].string ?? String(localized: "mac.unnamedHost"),
+                                    subtitle: model.devices.contains { $0.host.id == connection["id"].string }
+                                        ? String(localized: "mac.savedNearby") : String(localized: "mac.savedNotDiscovered"),
+                                    systemImage: "checkmark.shield", selected: connection["id"].string == model.selectedHostID) {
                                     if let id = connection["id"].string { Task { await model.open(hostID: id) } }
-                                }.contextMenu {
+                                }.disabled(model.busy).contextMenu {
                                     Button(String(localized: "mac.forgetHost")) {
                                         if let id = connection["id"].string { Task { await model.forget(hostID: id) } }
                                     }.disabled(model.busy)
@@ -25,19 +31,22 @@ struct CompanionView: View {
                     }
                     VStack(alignment: .leading, spacing: 8) {
                         sectionTitle("mac.nearby")
-                        ForEach(model.devices) { device in
-                            deviceRow(name: device.host.name, selected: device.host.id == model.selectedHostID, symbol: "desktopcomputer") {
+                        ForEach(unpairedHosts) { device in
+                            HostConnectionRow(name: device.host.name, subtitle: String(localized: "mac.needsPairing"),
+                                systemImage: "desktopcomputer", selected: device.host.id == model.selectedHostID) {
                                 Task { await model.select(device) }
-                            }
+                            }.disabled(model.busy)
                         }
-                        if model.devices.isEmpty { Text(String(localized: "mac.noDevices")).font(.caption).foregroundStyle(.secondary).padding(.horizontal, 10) }
+                        if unpairedHosts.isEmpty { Text(String(localized: "mac.noDevices")).font(.caption).foregroundStyle(.secondary).padding(.horizontal, 10) }
                     }
+                    Text(String(localized: "mac.hostListHint")).font(.caption).foregroundStyle(.secondary)
                 }.padding(.horizontal, 12).padding(.vertical, 24)
             }.frame(width: design.sidebarWidth)
             Divider()
             ScrollView {
                 VStack(alignment: .leading, spacing: design.groupSpacing) {
                     Text(selectedHostName ?? String(localized: "mac.workspaces")).font(.system(size: 13, weight: .semibold)).lineLimit(1).help(selectedHostName ?? "")
+                    Text(String(localized: "mac.workflowHint")).font(.caption).foregroundStyle(.secondary)
                     if model.pendingRequestID != nil {
                         VStack(alignment: .leading, spacing: 8) {
                             Label(String(localized: "mac.awaitApproval"), systemImage: "clock").font(.callout)
@@ -47,29 +56,25 @@ struct CompanionView: View {
                     }
                     if let code = model.mirrorErrorCode ?? model.errorCode {
                         VStack(alignment: .leading, spacing: 8) {
-                            Label(MacErrorPresentation.message(code), systemImage: "exclamationmark.circle").font(.callout).foregroundStyle(.red)
+                            Label(MacErrorPresentation.message(code, forWorkspace: true), systemImage: "exclamationmark.circle").font(.callout).foregroundStyle(.red)
                             Text(String(localized: "mac.bridgeHint")).font(.caption).foregroundStyle(.secondary)
                         }
                     }
                     if model.selectedHostID == nil {
-                        Text(String(localized: "mac.selectHost")).font(.callout).foregroundStyle(.secondary)
+                        Text(String(localized: "mac.selectHostMessage")).font(.callout).foregroundStyle(.secondary)
                     } else if !model.workspaces.isEmpty {
                         Text(String(localized: "mac.workspaces")).font(.callout)
                         List(Array(model.workspaces.enumerated()), id: \.offset) { _, workspace in
-                            HStack(spacing: 12) {
-                                Text(workspace["title"].string ?? String(localized: "mac.untitled")).lineLimit(1).help(workspace["title"].string ?? "")
-                                Spacer(minLength: 12)
-                                Button(String(localized: "mac.mirror")) {
-                                    if let id = workspace["id"].string { Task { await model.mirror(workspaceID: id) } }
-                                }.fixedSize().disabled(model.busy)
-                            }.frame(minHeight: 28)
-                        }.listStyle(.bordered).frame(height: max(88, min(240, CGFloat(model.workspaces.count) * 40 + 12)))
+                            RemoteWorkspaceRow(title: workspace["title"].string ?? String(localized: "mac.untitled")) {
+                                if let id = workspace["id"].string { Task { await model.mirror(workspaceID: id) } }
+                            }.disabled(model.busy)
+                        }.listStyle(.bordered).frame(height: max(88, min(240, CGFloat(model.workspaces.count) * 56 + 12)))
                         if model.mirroredWorkspaceID != nil {
                             Label(String(localized: "mac.mirrored"), systemImage: "checkmark.circle.fill").font(.callout).foregroundStyle(.green)
                         }
                         Text(String(localized: "mac.snapshotNote")).font(.caption).foregroundStyle(.secondary)
                     } else if !model.busy && model.pendingRequestID == nil && model.errorCode == nil {
-                        Text(String(localized: "mac.workspaces.empty")).font(.callout).foregroundStyle(.secondary)
+                        Text(String(localized: "mac.noWorkspacesMessage")).font(.callout).foregroundStyle(.secondary)
                     }
                     HStack {
                         Button(String(localized: "mac.refresh")) { Task { await model.refresh() } }.disabled(model.busy)
@@ -91,16 +96,5 @@ struct CompanionView: View {
     }
     private func sectionTitle(_ key: String) -> some View {
         Text(String(localized: String.LocalizationValue(key))).font(.system(size: 12, weight: .semibold)).foregroundStyle(.secondary).lineLimit(1)
-    }
-    private func deviceRow(name: String, selected: Bool, symbol: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 8) {
-                Image(systemName: symbol).frame(width: 18)
-                Text(name).lineLimit(1).truncationMode(.tail)
-                Spacer(minLength: 0)
-            }.padding(.horizontal, 10).frame(height: 36).frame(maxWidth: .infinity)
-                .background(selected ? Color.accentColor.opacity(0.12) : Color.clear, in: RoundedRectangle(cornerRadius: 6))
-                .contentShape(Rectangle())
-        }.buttonStyle(.plain).help(name).disabled(model.busy)
     }
 }
