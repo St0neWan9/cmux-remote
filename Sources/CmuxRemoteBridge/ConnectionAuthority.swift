@@ -120,6 +120,13 @@ public actor ConnectionAuthority {
         guard client.scope.capabilities.contains(capability), workspace.map({ client.scope.workspaces.contains($0.lowercased()) }) ?? true else { throw BridgeError("scope_denied", "This device is not approved for this operation or workspace.", status: 403) }
         return client
     }
+    /// Validates the entire capability set against one current grant snapshot.
+    public func require(_ clientID: String, capabilities: [ClientCapability], workspace: String? = nil) throws -> EnrolledClient {
+        guard let first = capabilities.first else { throw BridgeError("scope_denied", "An operation capability is required.", status: 403) }
+        let current = try require(clientID, capability: first, workspace: workspace)
+        guard capabilities.allSatisfy({ current.scope.capabilities.contains($0) }) else { throw BridgeError("scope_denied", "This device lacks a required operation capability.", status: 403) }
+        return current
+    }
     private func verifyRequest(_ signed: SignedValue<EnrollmentRequest>, allowExpired: Bool = false) throws {
         let request = signed.value
         guard request.hostID == host.id, try crypto.identityID(publicKey: request.clientPublicKey) == request.clientID,

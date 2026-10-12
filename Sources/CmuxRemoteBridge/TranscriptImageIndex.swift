@@ -9,7 +9,7 @@ struct TranscriptImageIndex {
         var records: [TranscriptImageRecord] = []
         var supplemental: [ChatMessage] = []
         var calls: [String: ChatMessage] = [:]
-        var recordedPaths: [String: Data] = [:]
+        var recordedPaths: [(path: String, seq: Int, data: Data)] = []
         let known = Set(messages.map(\.id))
         for (seq, line) in lines.enumerated() {
             try Task.checkCancellation()
@@ -28,21 +28,23 @@ struct TranscriptImageIndex {
                         for image in (block["content"].array ?? []).filter({ $0["type"].string == "image" }).prefix(4) {
                             if let data = imageData(image["source"]) {
                                 records.append(TranscriptImageRecord(messageID: tool.id, name: "Image.jpg", source: .recorded(data)))
-                                if case .toolUse(let value) = tool.kind, value.toolName == "Read", let path = value.referencedPaths?.first { recordedPaths[path] = data }
+                                if case .toolUse(let value) = tool.kind, value.toolName == "Read", let path = value.referencedPaths?.first { recordedPaths.append((path, tool.seq, data)) }
                             }
                         }
-                    } else if block["type"].string == "image", let data = imageData(block["source"]) {
+                    } else if block["type"].string == "image", records.count < 512, supplemental.filter({ $0.seq == seq }).count < 4, let data = imageData(block["source"]) {
                         appendUserImage(data, seq: seq, slot: slot, identity: root["uuid"].string ?? "line-\(seq)", messages: messages, records: &records, supplemental: &supplemental)
                     }
                 }
             } else if root["type"].string == "response_item", root["payload"]["type"].string == "message", root["payload"]["role"].string == "user" {
                 for (slot, block) in (root["payload"]["content"].array ?? []).enumerated() where block["type"].string == "input_image" {
-                    if let url = block["image_url"].string, let data = dataURL(url) { appendUserImage(data, seq: seq, slot: slot, identity: "line-\(seq)", messages: messages, records: &records, supplemental: &supplemental) }
+                    if records.count < 512, supplemental.filter({ $0.seq == seq }).count < 4, let url = block["image_url"].string, let data = dataURL(url) { appendUserImage(data, seq: seq, slot: slot, identity: "line-\(seq)", messages: messages, records: &records, supplemental: &supplemental) }
                 }
             }
             if records.count > 512 { records = Array(records.prefix(512)); break }
         }
+        let userSequences = Array(Set((messages + supplemental).filter { $0.role == .user }.map(\.seq))).sorted()
         for message in messages {
+            if records.count >= 512 { break }
             if case .toolUse(let tool) = message.kind {
                 for path in (tool.referencedPaths ?? []).prefix(4) where ["png", "jpg", "jpeg"].contains(URL(fileURLWithPath: path).pathExtension.lowercased()) {
                     if !records.contains(where: { $0.messageID == message.id }) {
@@ -51,12 +53,19 @@ struct TranscriptImageIndex {
                 }
             }
             if case .attachment(let value) = message.kind, value.media == .image, let path = value.hostPath {
-                records.append(TranscriptImageRecord(messageID: message.id, name: String((value.displayName ?? URL(fileURLWithPath: path).lastPathComponent).prefix(255)), source: recordedPaths[path].map(TranscriptImageRecord.Source.recorded) ?? .projectPath(path)))
+                let nextTurn = nextUserSequence(after: message.seq, sequences: userSequences)
+                let matching = recordedPaths.filter { $0.path == path && $0.seq >= message.seq && $0.seq < nextTurn }.min { $0.seq < $1.seq }
+                records.append(TranscriptImageRecord(messageID: message.id, name: String((value.displayName ?? URL(fileURLWithPath: path).lastPathComponent).prefix(255)), source: matching.map { TranscriptImageRecord.Source.recorded($0.data) } ?? .projectPath(path)))
             }
         }
         var ids = Set<String>()
         records = records.filter { ids.insert($0.reference(generation: "deduplicate").id).inserted }
         return Result(records: Array(records.prefix(512)), supplementalMessages: supplemental)
+    }
+    private func nextUserSequence(after seq: Int, sequences: [Int]) -> Int {
+        var low = 0; var high = sequences.count
+        while low < high { let middle = (low + high) / 2; if sequences[middle] <= seq { low = middle + 1 } else { high = middle } }
+        return low < sequences.count ? sequences[low] : Int.max
     }
     private func imageData(_ source: JSONValue) -> Data? {
         guard source["type"].string == "base64", ["image/png", "image/jpeg"].contains(source["media_type"].string ?? ""),

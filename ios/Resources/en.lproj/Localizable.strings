@@ -211,3 +211,5 @@
 
 "image.history.open" = "Open image";
 "error.image_unavailable" = "This recorded image is unavailable or exceeds preview limits.";
+
+"image.close" = "Close";

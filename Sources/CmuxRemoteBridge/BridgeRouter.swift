@@ -42,7 +42,7 @@ public struct BridgeRouter: Sendable {
             }
             let access: SessionAccess?
             if let client, let authority {
-                access = SessionAccess(principalID: client.id) { capability, workspace in _ = try await authority.require(client.id, capability: capability, workspace: workspace) }
+                access = SessionAccess(principalID: client.id, checkAll: { capabilities, workspace in _ = try await authority.require(client.id, capabilities: capabilities, workspace: workspace) }) { capability, workspace in _ = try await authority.require(client.id, capability: capability, workspace: workspace) }
             } else { access = nil }
             let data: Data
             var image = false

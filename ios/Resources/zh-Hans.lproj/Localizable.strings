@@ -211,3 +211,5 @@
 
 "image.history.open" = "查看图片";
 "error.image_unavailable" = "这张历史图片已不可用，或超出预览限制。";
+
+"image.close" = "关闭";
