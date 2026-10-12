@@ -135,3 +135,46 @@ scope; fresh mutations still authorize/check live targets. Tests now inject
 rebind/revocation at an actual backend await rather than an incidental discovery
 call count. The repaired candidate passes 89 tests in 21 suites plus the same
 17 actual-model checks and 174 locale keys. Fresh independent review at `a180433` (tree `17e7333`) found no verified remaining backend defect and independently passed 40 focused tests across six suites. This does not complete the remaining phone/hardware requirements.
+
+### Phone media, drawer and tool details — 2026-10-12
+
+- R05 phone implementation now includes system photo/file selection, bounded
+  file-backed importing and off-main JPEG preparation, image preview/removal,
+  captured send inputs and visible receipt/inspection actions. Actual image
+  encoding, bounded file imports, cancellation, later draft edits and no-resend
+  recovery are exercised in the phone-model harness. Native picker/preview/send
+  acceptance is still pending; the retained live Bridge must be updated to this
+  candidate before claiming the phone upload flow works end to end.
+- R04 phone pending requests are prepared in owner-only, bounded device-local
+  storage before dispatch. Physical iOS files use data protection and are excluded
+  from backup. The scope binds host/device and session; endpoint relocation does
+  not change it. Restoring a request blocks sending until a confirmed receipt or
+  explicit inspection. Tests recreate models/stores and exercise corrupt storage,
+  failed preparation, private permissions and cross-scope isolation. Physical
+  protection, production-process restart and native receipt actions remain pending.
+- R01 session sidebar now reveals a left drawer while the main page slides right
+  with rounded corners and shadow. Opening, closing via the exposed-page control,
+  project expansion and conversation selection were exercised on the original
+  retained paired Simulator. Edge swipe and VoiceOver acceptance remain pending.
+  Expanded tool details now use pale rounded cards, leading titles/code/output,
+  horizontal/vertical overflow scrolling and a quiet trailing result. Native tool
+  card visual acceptance remains pending.
+- The original paired Simulator is retained; the extra task-owned UI Simulator
+  was shut down. Other tasks' devices and the installed official cmux are untouched.
+
+Independent review reproduced loss of unknown-send state on conversation
+recreation; commit `81f1ff0` fails two expectations before the persistent repair.
+A file-backed photo representation also removes the previous whole-asset Data
+allocation before its input-size check; actual system-picker behavior still needs
+native acceptance. Fresh review then reproduced blocked history/hidden inspection
+for corrupt storage and cache eviction of later edits on an unresolved send.
+Commit `28ee2a1` fails those two expectations. The final repair preserves authorized
+history and reachable inspection while sends stay blocked, and retains unresolved
+models during cache pruning. Fresh repair review at tree `b761fea` found no concrete
+repair defect and independently confirmed the same red/green discriminator.
+
+Current candidate passes 89 package tests in 21 suites, 17 existing phone checks
+and 31 executed media/draft/recovery checks, 188 matching locale keys, and the iOS
+Simulator build. These results cover this slice only. R02/R03/R06/R07, complete
+auxiliary/native tours and physical R09/R10 acceptance remain pending; the full
+R01–R11 goal is not complete.
