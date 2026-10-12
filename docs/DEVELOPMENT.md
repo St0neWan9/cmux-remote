@@ -1,5 +1,9 @@
 # Development
 
+Mac Companion and extension builds use `scripts/build-macos.sh`; installation and
+the current snapshot-mirror limits are in [MAC-EXTENSION.md](MAC-EXTENSION.md).
+`scripts/verify.sh` also checks the separate Mac localization catalog.
+
 Run `scripts/verify.sh` before publishing. Tests use temporary files, synthetic transcripts and fake cmux responders; they do not type into a user's terminal. `scripts/build-ios.sh` generates an Xcode project and compiles the iPhone app for an isolated generic Simulator destination without signing. A build proves compilation, not touch behavior or physical-phone connectivity.
 
 The Mac CLI is built with SwiftPM and requires no paid developer account for local use. Public binary releases need a separate Developer ID signing/notarization workflow. Signing requirements do not depend on Swift versus Go/Rust. The iPhone target uses its own bundle ID and signing team; do not reuse cmux's production identity.
@@ -30,7 +34,116 @@ Live sessions now appear before read-only history. The interrupt guard was repai
 
 Immediate Bridge restart after an active HTTPS connection originally failed with `Address already in use`. Listener address reuse repairs this without changing the paired endpoint. The regression failed on commit `89780d0` and passed after the repair using `swift test --jobs 6 --filter HTTPSIntegrationTests.bridgeCanRestartImmediatelyOnItsPairedPort`. Final scoped verification passed 26 tests in 8 suites, the SwiftPM build, 52 matching English/Simplified Chinese localization keys and whitespace checks; the iOS generic Simulator build also passed.
 
+## Mac extension verification — 2026-10-12
+
+The independent Mac containing app and public sidebar extension compile with the
+Swift 6 toolchain on Apple Silicon. Deep/strict code-signature checks pass and
+`pluginkit` registers one `com.st0newan9.cmux-remote.mac.sidebar` extension under
+the official production extension point. Official cmux was not modified,
+restarted, or re-signed; its selected sidebar was not changed.
+
+The Companion was launched and visually inspected. Bonjour returned a nearby
+Bridge, and selecting it displayed explicit first-use identity confirmation.
+The test request was cancelled; no network grant was approved by this check.
+The updated UI was relaunched after installation. Mac English/Simplified Chinese
+resources contain 27 matching keys, and the iPhone compatibility build passes.
+
+Package verification passes 51 behavior tests in 17 suites, including signed TLS
+replay/input, scope denial before cmux access, hibernation rejection, changed
+producer epochs, duplicate/unknown input, independent detach, and first-use trust
+gating. These tests use isolated synthetic responders, not user Agents.
+
+The focused command `swift test --jobs 6 --filter CLIControlTests.lostMirrorWorkspaceCreateIsOutcomeUnknown`
+failed with `socket_unavailable` before mirror-create operations were classified
+as mutations, then passed after returning `outcome_unknown` instead. No create
+is retried automatically after a lost response.
+
+A direct `cmux-remote doctor` from this agent process did not obtain the installed
+cmux socket authority. The implementation does not relax socket mode to work
+around that denial. Real replay, interactive typing, full workspace layout and
+physical two-Mac acceptance remain unverified; run those from an authorized local
+Bridge and selected test workspace before claiming native mirror readiness.
+
+### Continued live mirror acceptance — 2026-10-12
+
+Two isolated resident Bridges were started inside a newly created official-cmux
+test workspace, retaining the original `cmuxOnly` policy. A second test workspace
+ran two plain Python processes in a horizontal split. The Mac client enrolled
+through the real signed HTTPS protocol and was approved only for that source
+workspace with `workspaceRead`, `terminalRead` and `terminalInput` capabilities.
+No existing Agent session was used for mirror input.
+
+The local mirror created two viewer panels with the same split orientation and
+displayed the existing source processes' increasing counters. Typing
+`CMUX_MIRROR_INPUT_OK_1012` into the local viewer produced the exact
+`SOURCE_RECEIVED CMUX_MIRROR_INPUT_OK_1012` response from the original source
+process. Ctrl-] exited that viewer while the other viewer kept updating and both
+source process PIDs remained alive. This establishes actual terminal replay,
+input routing and independent detach through official cmux, with two Bridges on
+one Mac. It does not establish physical two-Mac networking, exact layout ratios,
+full scrollback or native/lossless mirroring.
+
+The first real viewer exited on a large frame: setting raw input nonblocking also
+affected stdout's shared tty descriptor, and `EAGAIN` was mistaken for a closed
+output. The focused `swift test --jobs 6 --filter TerminalOutputTests` failed with
+`terminal_unavailable` before the repair and passed afterward. The shared writer
+now handles partial writes, `EINTR` and `EAGAIN`, using a bounded cancellable
+readiness wait. A saved-host entry was also added to the Companion UI so a valid
+grant remains usable with an empty discovery list; its behavior test passes.
+
+The installed Companion's Bonjour list remained empty during this continuation,
+although a separate Network-framework browse and DNS-SD browse saw all live test
+services. Saved-host selection, workspace loading and the **Mirror here** button
+were visually verified; the button created a fresh two-panel mirror after the
+previous local viewer workspace was closed.
+The official cmux Extensions beta gate was disabled, hiding its puzzle button;
+enabling that setting was requested from the user and is not claimed completed.
+System registration still does not establish actual ExtensionKit loading in cmux.
+
+Final verification passed 53 package tests in 18 suites, all six phone-state
+checks, 28 matching Mac localization keys and the Mac/iOS build wrappers. An
+additional focused writer check covers a stalled output descriptor's deadline.
+English/Simplified Chinese catalogs were audited and no temporary discovery
+logging remains in the client source.
+
 ## Connection v2 and phone layout verification — 2026-10-12
+
+### Extension loading and Mac discovery continuation
+
+At the user's request, Extensions beta was enabled in official cmux Settings.
+The installed public sidebar extension loaded through ExtensionKit, displayed
+its local workspace list after metadata/selection access was approved, and
+selected the task-owned Bridge workspace through the SDK. Official cmux was
+neither restarted nor modified. Installation now unregisters this project's
+Xcode build product so the system extension picker shows only the installed copy.
+
+The Companion now reads Bonjour hints and resolves observed peers through the
+private local Bridge (`mac.discovery.list/resolve`). The GUI's earlier direct
+browse remained empty; no system-wide network/privacy protection was relaxed.
+The underlying shared Network-framework browser runs in the resident cmux-spawned
+CLI process. The actual Companion UI displayed both test-host services, omitted
+the local Bridge itself, and selected its saved source host directly from the
+discovered list with the existing host identity, TLS pin and grant intact.
+Identity confirmation for an unpaired host was displayed and cancelled without
+creating a grant. Behavior tests cover owner-channel discovery, rejection of
+unobserved resolutions, refreshing discovery, and saved-host selection.
+
+Development signing is selectable but defaults to ad-hoc. A trial Apple-issued
+development identity triggered an existing sandbox-container ACL approval during
+startup. The UI tool refused access to that system approval window, so final live
+verification uses the independent `.sidebar.local` development identity with a
+new empty sandbox. The existing container was preserved. The official sidebar
+selection was updated from the obsolete extension ID to that installed development
+ID; cmux's current picker otherwise kept selecting the no-longer-installed ID.
+No installed cmux code or system security protection was changed.
+Mac screenshots are saved under `.build/verification/ui-flow` outside Git.
+
+The final verification passes 58 package tests in 18 suites, all six phone-state
+checks, 28 matching Mac localization keys and 83 phone localization keys. Mac and
+iOS wrapper builds and deep/strict signatures pass. After the final update, the
+actual UI again discovered two hosts, loaded the approved workspace, created its
+two-panel mirror and showed the running extension's workspace list. The tests
+also verify that disabled discovery stays disabled when refreshed.
 
 The task-owned iPhone Simulator enrolled a new device through the v2 bootstrap
 and owner-approved workspace scope. An actual Bonjour browse resolved the LAN

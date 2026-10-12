@@ -7,15 +7,17 @@ final class OwnerControlHandler: ChannelInboundHandler, @unchecked Sendable {
     typealias InboundIn = ByteBuffer
     private var buffer = Data()
     private let router: OwnerControlRouter
+    private var responseTask: Task<Void, Never>?
     init(router: OwnerControlRouter) { self.router = router }
     func channelRead(context: ChannelHandlerContext, data: NIOAny) {
+        guard responseTask == nil else { context.close(promise: nil); return }
         var bytes = unwrapInboundIn(data)
         guard let read = bytes.readBytes(length: bytes.readableBytes), buffer.count + read.count <= 65_536 else { context.close(promise: nil); return }
         buffer.append(contentsOf: read)
         guard let newline = buffer.firstIndex(of: 10) else { return }
         guard let request = try? JSONDecoder().decode(JSONValue.self, from: buffer.prefix(upTo: newline)) else { context.close(promise: nil); return }
         buffer.removeAll(); let router = router; let channel = context.channel
-        Task {
+        responseTask = Task {
             let response = await router.respond(request)
             if var data = try? JSONEncoder().encode(response) {
                 data.append(10); var output = channel.allocator.buffer(capacity: data.count); output.writeBytes(data)
@@ -23,5 +25,9 @@ final class OwnerControlHandler: ChannelInboundHandler, @unchecked Sendable {
             }
             try? await channel.close().get()
         }
+    }
+    func channelInactive(context: ChannelHandlerContext) {
+        responseTask?.cancel(); responseTask = nil; buffer.removeAll()
+        context.fireChannelInactive()
     }
 }

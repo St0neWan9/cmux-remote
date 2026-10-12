@@ -20,6 +20,7 @@ struct ErrorPresentation {
         case "session_not_found": return String(localized: "error.read_only")
         case "operation_conflict": return String(localized: "error.operation_conflict")
         case "receipt_capacity": return String(localized: "error.receipt_capacity")
+        case "receipt_storage", "invalid_state": return String(localized: "error.receipt_storage")
         case "request_expired": return String(localized: "error.expired")
         default: return String(localized: "error.connection")
         }

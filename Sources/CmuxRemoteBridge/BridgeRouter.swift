@@ -6,10 +6,11 @@ public struct BridgeRouter: Sendable {
     private let service: SessionService
     private let legacyToken: String?
     private let authority: ConnectionAuthority?
+    private let mirrors: RemoteMirrorService?
     /// An explicitly selected legacy router, retained for migration and fixtures.
-    public init(service: SessionService, token: String) { self.service = service; legacyToken = token; authority = nil }
-    public init(service: SessionService, authority: ConnectionAuthority, legacyToken: String? = nil) {
-        self.service = service; self.authority = authority; self.legacyToken = legacyToken
+    public init(service: SessionService, token: String) { self.service = service; legacyToken = token; authority = nil; mirrors = nil }
+    public init(service: SessionService, authority: ConnectionAuthority, legacyToken: String? = nil, mirrors: RemoteMirrorService? = nil) {
+        self.service = service; self.authority = authority; self.legacyToken = legacyToken; self.mirrors = mirrors
     }
     public func respond(method: String, uri: String, authorization: String?, body: Data) async -> (Int, Data) {
         do {
@@ -38,9 +39,36 @@ public struct BridgeRouter: Sendable {
             }
             let access: SessionAccess?
             if let client, let authority {
-                access = SessionAccess { capability, workspace in _ = try await authority.require(client.id, capability: capability, workspace: workspace) }
+                access = SessionAccess(clientID: client.id) { capability, workspace in _ = try await authority.require(client.id, capability: capability, workspace: workspace) }
             } else { access = nil }
             let data: Data
+            if path.count == 4, path[0...1] == ["v1", "workspaces"], path[3] == "mirror", method == "GET" {
+                guard let client, let authority, let mirrors else { throw BridgeError("mirror_unsupported", "Terminal mirroring requires scoped v2 enrollment and a mirror-enabled Bridge.", status: 422) }
+                _ = try await authority.require(client.id, capability: .terminalRead, workspace: path[2])
+                let snapshot = try await mirrors.workspace(id: path[2])
+                _ = try await authority.require(client.id, capability: .terminalRead, workspace: path[2])
+                return (200, try encode(snapshot))
+            }
+            if path.count == 6, path[0...1] == ["v1", "workspaces"], path[3] == "terminals" {
+                guard let client, let authority, let mirrors else { throw BridgeError("mirror_unsupported", "Terminal mirroring requires scoped v2 enrollment and a mirror-enabled Bridge.", status: 422) }
+                let workspace = path[2]; let surface = path[4]
+                if method == "GET", path[5] == "replay" {
+                    _ = try await authority.require(client.id, capability: .terminalRead, workspace: workspace)
+                    var snapshot = try await mirrors.replay(workspaceID: workspace, surfaceID: surface)
+                    let approved = try await authority.require(client.id, capability: .terminalRead, workspace: workspace)
+                    snapshot.allowsInput = approved.scope.capabilities.contains(.terminalInput)
+                    return (200, try encode(snapshot))
+                }
+                if method == "POST", path[5] == "input" {
+                    _ = try await authority.require(client.id, capability: .terminalInput, workspace: workspace)
+                    let input = try JSONDecoder().decode(MirrorInputRequest.self, from: body)
+                    let receipt = try await mirrors.input(workspaceID: workspace, surfaceID: surface, clientID: client.id, request: input) {
+                        _ = try await authority.require(client.id, capability: .terminalInput, workspace: workspace)
+                    }
+                    return (200, try encode(receipt))
+                }
+                throw BridgeError("not_found", "Unknown terminal mirror operation.", status: 404)
+            }
             if method == "GET", path == ["v1", "status"] {
                 if let client, let authority {
                     let approved = try await authority.require(client.id, capability: .workspaceRead)

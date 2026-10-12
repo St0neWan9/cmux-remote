@@ -1,6 +1,6 @@
 # cmux-remote design
 
-This document describes the companion architecture. The implemented unified connection layer is specified in [Connection v2](CONNECTION-V2.md). Remaining continuity and mirror feasibility work are tracked in [the unified connection plan](UNIFIED-CONNECTION-PLAN.md).
+This document describes the companion architecture. The implemented unified connection layer is specified in [Connection v2](CONNECTION-V2.md). The development Mac sidebar/snapshot-mirror implementation is described in [the Mac guide](MAC-EXTENSION.md); live acceptance and remaining continuity work are tracked in [the unified connection plan](UNIFIED-CONNECTION-PLAN.md).
 
 ## Scope
 
@@ -13,6 +13,32 @@ The Bridge reads local transcript/project data to fill holes in the official loc
 `CmuxRemoteCore` contains Sendable Codable DTOs, JSON values and pure policies. It reuses the pinned `CmuxAgentChat` parsing/model library. `CmuxRemoteBridge` owns socket I/O, the local session registry, transcript reads, constrained project file access, Git queries and TLS HTTP serving. `CmuxRemoteClient` owns HTTPS, certificate pinning and response decoding. `CmuxRemoteCLI` is the composition root. `ios/` owns observable app state and SwiftUI screens.
 
 Dependencies form a DAG: executable/server/client/UI -> Core -> upstream parsing/model code. No AppKit or Ghostty dependency enters the phone. The HTTP API is language-neutral; future backends implement the same domain operations with explicit capability differences.
+
+Mac mirrors keep a local ownership registry for their projected surface IDs and
+remote producer epochs. A bounded metadata watcher reconciles source split/tab
+changes through fixed local `surface.move`, `surface.split_off`, `surface.reorder`,
+creation and close operations. It preserves existing viewer processes and never
+issues remote structural mutations. Local membership changes and unknown write
+outcomes pause the transaction for inspection; no blind layout retry occurs.
+Detached producer records are retained only for owned projection cleanup and
+cannot receive input. Manual detach pauses updates; a disappeared source may be
+removed from the mirror, while a replaced source requires explicit attachment.
+
+The requested Mac navigation preserves the official native sidebar and adds a
+native Remote group below local workspaces. It uses local workspace-group APIs;
+ExtensionKit replacement sidebars are not the product integration. Default Mac
+builds no longer embed that prototype. Native rows use cmux's own styling and
+interaction handlers. Scoped metadata creates pending native rows using a fixed
+local viewer command. A bounded private owner-channel wait observes native
+selection; selection then rechecks the saved grant and local binding before
+attaching into that same workspace. Inventory refresh never reads terminal
+contents or changes focus. Creation and attachment intents are persisted before
+native mutations; unknown results pause without blind retries. Completed
+attachments persist bounded owner-only topology/producer metadata without
+credentials or terminal content. Restart recovery verifies fresh host authority,
+local membership and producer epochs before publishing the same view IDs.
+A partial layout transaction removes its recovery checkpoint before writes;
+unknown outcomes are not automatically resumed.
 
 ## Pairing and authority
 
@@ -36,11 +62,20 @@ The local socket cannot supply official `chat.message` streaming previews. For a
 
 `events.stream` uses a separate cmux connection from ordinary RPC. Its boot ID and sequence support reconnect/catch-up. Redacted event payloads trigger snapshot reads; they do not replace chat history. Slow-consumer/replay gaps trigger resynchronization. Do not route chat/project bodies into cmux's telemetry log.
 
-The first event monitor retains explicit live bindings while connected; a dropped stream falls back to diagnostic/snapshot discovery until Bridge restart. Automatic reconnect and durable event cursors remain follow-up work. Phone history polling continues independently of this monitor.
+The event monitor reconnects its dedicated cmux connection with bounded backoff.
+It invalidates hook-derived writable bindings on disconnect, refreshes snapshots,
+and resumes from a private boot/sequence cursor. Boot changes and replay gaps
+clear that cursor and require a fresh snapshot. Cursor persistence follows event
+acceptance; no event bodies or credentials enter the cursor file. A cold
+subscription refreshes after acknowledgement to cover its snapshot/subscription
+boundary. Phone history polling remains independent; bounded phone subscriptions
+and their own cursors are still follow-up work.
 
 ## Writes and idempotency
 
-The phone generates one operation UUID per logical send, interrupt or decision. The Bridge deduplicates requests in its process. It never blindly retries a cmux mutation after disconnect/timeout: a lost response may follow a successful action. The response reports `outcome_unknown`; the UI asks the user to inspect the conversation before sending again. The initial dedup cache is process-local, bounded, and does not establish exactly-once execution across Bridge restart. Durable write receipts are a follow-up before broader distribution.
+The phone generates one operation UUID per logical send, interrupt or decision. Chat, Feed and terminal input share a durable owner-only mutation ledger keyed by approved device identity and operation UUID. Before backend execution, the Bridge appends and flushes an intent containing only a canonical payload digest, target workspace and required capability. Confirmation appends and flushes its receipt. Restart reloads completed receipts; unfinished or outcome-unknown intents remain unknown and are never executed again under the same key. Reading a cached receipt still rechecks current scope/revocation. Different payloads under the same device/operation key are rejected.
+
+The journal is bounded to 16,384 operation keys and 16 MiB, with no automatic eviction that would make old mutations executable again. Full, corrupted, truncated or unavailable storage stops writes. Prompts, terminal input and credentials are not stored in it. No automatic POST retry is added. This is durable protection against repeated attempts, not an atomic exactly-once transaction with cmux or proof that an Agent processed input. Explicit negative backend acknowledgements remain unknown; a lost completion write also retains an unknown intent. Old versions' in-memory receipts cannot be reconstructed by this implementation.
 
 Feed replies require a currently pending matching request and its supported kind. Ordinary Codex hook telemetry cannot be upgraded into an actionable approval by the Bridge. Unsupported actions remain visibly unsupported; numeric-key answering is not presented as a reliable generic approval adapter.
 

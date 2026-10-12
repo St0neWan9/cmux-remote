@@ -62,7 +62,11 @@ public struct UnixSocketClient: CmuxControlling {
     }
 
     private static func read(fd: Int32) throws -> JSONValue {
-        guard let value = try? JSONDecoder().decode(JSONValue.self, from: readLine(fd: fd)) else {
+        // Preserve transport failure so read-only callers can reconnect. Only a
+        // received, undecodable response is invalid_response; writes still have
+        // unknown outcomes and must not acquire an automatic retry.
+        let data = try readLine(fd: fd)
+        guard let value = try? JSONDecoder().decode(JSONValue.self, from: data) else {
             throw BridgeError("invalid_response", "cmux returned an invalid response.", status: 502)
         }
         return value

@@ -41,7 +41,14 @@ Choose your own signing team to install on a physical iPhone. There is no depend
 - [Detailed design](docs/DESIGN.md)
 - [API and source mapping](docs/API.md)
 - [Development and validation](docs/DEVELOPMENT.md)
-- [Unified connection plan](docs/UNIFIED-CONNECTION-PLAN.md)
+- [Native Remote groups and terminal mirrors](docs/MAC-EXTENSION.md)
+- [Planned shared discovery, enrollment, and Mac mirroring](docs/UNIFIED-CONNECTION-PLAN.md)
+
+LAN discovery and per-client authorization are shared by the iPhone client and
+the Mac Companion. A public sidebar extension and snapshot-based terminal mirror
+are available as a development implementation; see the Mac guide for build,
+enrollment and capability requirements. Native/lossless mirror parity and a
+physical two-Mac acceptance run are not established by the package tests.
 
 Run `scripts/verify.sh` for package tests and build. The first implementation is a development baseline, not a promise of complete provider-version compatibility. Live screen extraction is a best-effort preview; transcript messages replace it when committed. Historical sessions without a verified live surface are read-only. Codex Feed actions only work when cmux exposes an actionable request.
 

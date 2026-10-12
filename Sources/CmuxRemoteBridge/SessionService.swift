@@ -13,15 +13,14 @@ public actor SessionService {
     private let files: ProjectFilePolicy
     private let reader = TranscriptReader()
     private var records: [String: Record] = [:]
-    private var operations: [UUID: (String, MutationReceipt?)] = [:]
-    private var failedOperations = Set<UUID>()
+    private let mutations: MutationLedger
     private var liveBindings: [String: JSONValue] = [:]
     private var eventBoot: String?
     private var eventSequence: Int?
 
-    public init(cmux: any CmuxControlling, home: URL, transcriptRoots: [URL]) {
+    public init(cmux: any CmuxControlling, home: URL, transcriptRoots: [URL], mutations: MutationLedger? = nil) {
         self.cmux = cmux; self.transcriptRoots = transcriptRoots.map { $0.resolvingSymlinksInPath().standardizedFileURL }
-        self.files = ProjectFilePolicy(home: home)
+        self.files = ProjectFilePolicy(home: home); self.mutations = mutations ?? MutationLedger()
     }
 
     public func status() async throws -> JSONValue {
@@ -96,6 +95,10 @@ public actor SessionService {
         records[id]?.descriptor.state = state
     }
     public func eventCursor() -> Int? { eventSequence }
+    /// A disconnected/gapped stream cannot keep hook-derived targets writable.
+    public func invalidateEventBindings() {
+        liveBindings.removeAll(); records.removeAll(); eventSequence = nil; eventBoot = nil
+    }
 
     public func history(id: String, beforeSeq: Int?, limit: Int, access: SessionAccess? = nil) async throws -> ConversationSnapshot {
         let record = try await authorizedRecord(id, capability: .conversationRead, access: access)
@@ -119,33 +122,36 @@ public actor SessionService {
 
     public func send(id: String, request: SendRequest, access: SessionAccess? = nil) async throws -> MutationReceipt {
         guard !request.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, request.text.utf8.count <= 65_536 else { throw BridgeError("invalid_input", "Enter a prompt within the size limit.") }
-        let signature = "send:\(id):\(request.text)"
-        if let receipt = try existing(request.operationID, signature: signature) { return receipt }
+        let signature = try MutationLedger.fingerprint(action: "send", resource: id, payload: .string(request.text))
+        if let receipt = try await existing(request.operationID, signature: signature, access: access) { return receipt }
         let session = try await verifiedBinding(id, requiresEmptyPrompt: true, access: access)
-        try begin(request.operationID, signature: signature)
+        if let receipt = try await begin(request.operationID, signature: signature, workspace: session.workspaceID, capability: .conversationControl, access: access) { return receipt }
+        try await validateMutationBinding(session, access: access)
         do {
-            _ = try await cmux.request("mobile.chat.send", params: ["session_id": .string(session.id), "text": .string(request.text)])
-            return complete(request.operationID)
-        } catch { failedOperations.insert(request.operationID); throw mutationError(error) }
+            let result = try await cmux.request("mobile.chat.send", params: ["session_id": .string(session.id), "text": .string(request.text)])
+            guard result["submitted"].bool != false else { throw BridgeError("outcome_unknown", "cmux did not confirm prompt submission; inspect its draft before retrying.", status: 409) }
+            return try await mutations.complete(clientID: access?.clientID ?? "owner", operationID: request.operationID)
+        } catch { throw mutationError(error) }
     }
 
     public func interrupt(id: String, request: InterruptRequest, access: SessionAccess? = nil) async throws -> MutationReceipt {
-        let signature = "interrupt:\(id):\(request.hard)"
-        if let receipt = try existing(request.operationID, signature: signature) { return receipt }
+        let signature = try MutationLedger.fingerprint(action: "interrupt", resource: id, payload: .bool(request.hard))
+        if let receipt = try await existing(request.operationID, signature: signature, access: access) { return receipt }
         let session = try await verifiedBinding(id, requiresEmptyPrompt: false, access: access)
-        try begin(request.operationID, signature: signature)
+        if let receipt = try await begin(request.operationID, signature: signature, workspace: session.workspaceID, capability: .conversationControl, access: access) { return receipt }
+        try await validateMutationBinding(session, access: access)
         do {
-            _ = try await cmux.request("mobile.chat.interrupt", params: ["session_id": .string(session.id), "hard": .bool(request.hard)])
-            return complete(request.operationID)
-        } catch { failedOperations.insert(request.operationID); throw mutationError(error) }
+            let result = try await cmux.request("mobile.chat.interrupt", params: ["session_id": .string(session.id), "hard": .bool(request.hard)])
+            guard result["interrupted"].bool != false else { throw BridgeError("outcome_unknown", "cmux did not confirm interruption.", status: 409) }
+            return try await mutations.complete(clientID: access?.clientID ?? "owner", operationID: request.operationID)
+        } catch { throw mutationError(error) }
     }
 
     public func reply(requestID: String, body: JSONValue, access: SessionAccess? = nil) async throws -> MutationReceipt {
         guard let rawID = body["operation_id"].string, let operation = UUID(uuidString: rawID), let kind = body["kind"].string else { throw BridgeError("invalid_input", "A decision identity and kind are required.") }
-        let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
-        let serialized = String(decoding: try encoder.encode(body), as: UTF8.self)
-        let signature = "reply:\(requestID):\(serialized)"
-        if let receipt = try existing(operation, signature: signature) { return receipt }
+        var payload = body.object ?? [:]; payload["operation_id"] = nil
+        let signature = try MutationLedger.fingerprint(action: "reply", resource: requestID, payload: .object(payload))
+        if let receipt = try await existing(operation, signature: signature, access: access) { return receipt }
         let items = try await feed()["items"].array ?? []
         guard let pending = items.first(where: { $0["request_id"].string == requestID && $0["status"].string == "pending" }), pending["kind"].string == kind else { throw BridgeError("request_expired", "This request is no longer waiting for a decision.", status: 409) }
         try await access?.require(.feedReply, workspace: pending["workspace_id"].string)
@@ -171,9 +177,18 @@ public actor SessionService {
             method = "feed.question.reply"; params["selections"] = .array(choices)
         default: throw BridgeError("unsupported", "cmux does not expose this decision.", status: 422)
         }
-        try begin(operation, signature: signature)
-        do { _ = try await cmux.request(method, params: params); return complete(operation) }
-        catch { failedOperations.insert(operation); throw mutationError(error) }
+        if let receipt = try await begin(operation, signature: signature, workspace: pending["workspace_id"].string, capability: .feedReply, access: access) { return receipt }
+        try await access?.require(.feedReply, workspace: pending["workspace_id"].string)
+        if pending["workstream_id"].string != nil {
+            let current = FeedWorkspaceBinding().workspace(for: pending, sessions: records.values.map(\.descriptor).filter(\.writable))
+            guard current != nil, current == pending["workspace_id"].string?.lowercased() else { throw BridgeError("stale_binding", "The Feed binding changed before execution.", status: 409) }
+        }
+        do {
+            let result = try await cmux.request(method, params: params)
+            guard result["delivered"].bool != false, result["accepted"].bool != false else { throw BridgeError("outcome_unknown", "cmux did not confirm the decision.", status: 409) }
+            return try await mutations.complete(clientID: access?.clientID ?? "owner", operationID: operation)
+        }
+        catch { throw mutationError(error) }
     }
 
     public func file(id: String, path: String, access: SessionAccess? = nil) async throws -> TextFileSnapshot {
@@ -260,22 +275,27 @@ public actor SessionService {
         return !workspace.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && !surface.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
-    private func existing(_ id: UUID, signature: String) throws -> MutationReceipt? {
-        guard let entry = operations[id] else { return nil }
-        guard entry.0 == signature else { throw BridgeError("operation_conflict", "This operation identity was already used for different input.", status: 409) }
-        guard !failedOperations.contains(id), let receipt = entry.1 else { throw BridgeError("outcome_unknown", "Inspect the task before repeating this operation.", status: 409) }
+    private func existing(_ id: UUID, signature: String, access: SessionAccess?) async throws -> MutationReceipt? {
+        guard let entry = try await mutations.prior(clientID: access?.clientID ?? "owner", operationID: id, fingerprint: signature) else { return nil }
+        return try await checkedReceipt(entry, access: access)
+    }
+    private func begin(_ id: UUID, signature: String, workspace: String?, capability: ClientCapability, access: SessionAccess?) async throws -> MutationReceipt? {
+        guard let workspace else { throw BridgeError("stale_binding", "Mutation target has no workspace.", status: 409) }
+        guard let prior = try await mutations.begin(clientID: access?.clientID ?? "owner", operationID: id, fingerprint: signature,
+                                                    workspaceID: workspace, capability: capability) else { return nil }
+        return try await checkedReceipt(prior, access: access)
+    }
+    private func checkedReceipt(_ entry: MutationLedger.Entry, access: SessionAccess?) async throws -> MutationReceipt {
+        try await access?.require(entry.capability, workspace: entry.workspaceID)
+        guard let receipt = entry.receipt else { throw BridgeError("outcome_unknown", "Inspect the task before repeating this operation.", status: 409) }
         return receipt
     }
-    private func begin(_ id: UUID, signature: String) throws {
-        // The actor may suspend during fresh binding checks. Claim again before I/O.
-        guard operations[id] == nil else { throw BridgeError("operation_conflict", "This operation is already in progress.", status: 409) }
-        guard operations.count < 512 else { throw BridgeError("receipt_capacity", "Restart the Bridge after checking pending operations.", status: 503) }
-        operations[id] = (signature, nil)
-    }
-    private func complete(_ id: UUID) -> MutationReceipt {
-        let receipt = MutationReceipt(operationID: id, accepted: true)
-        operations[id]?.1 = receipt
-        return receipt
+    private func validateMutationBinding(_ session: SessionDescriptor, access: SessionAccess?) async throws {
+        try await access?.require(.conversationControl, workspace: session.workspaceID)
+        let current = records[session.id]?.descriptor
+        guard current?.writable == true, current?.workspaceID == session.workspaceID, current?.surfaceID == session.surfaceID else {
+            throw BridgeError("stale_binding", "The terminal changed before executing the action.", status: 409)
+        }
     }
     private func mutationError(_ error: any Error) -> BridgeError {
         (error as? BridgeError) ?? BridgeError("outcome_unknown", "The result is unknown; inspect the task before trying again.", status: 504)

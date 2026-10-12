@@ -41,6 +41,12 @@ struct TranscriptResponseReader {
             guard let data = line.data(using: .utf8), let root = try? decoder.decode(JSONValue.self, from: data), root.object != nil, root["isSidechain"].bool != true else { continue }
             let stamp = root["timestamp"].string.flatMap { fractional.date(from: $0) ?? plain.date(from: $0) }.flatMap(valid)
             let rowMessages = grouped[seq] ?? []
+            if agent == "claude", isInterruption(root) {
+                // Claude writes its interruption as a synthetic user message.
+                // It closes the existing turn; it does not start a new request.
+                finish(at: stamp, duration: nil, recorded: false)
+                continue
+            }
             if rowMessages.contains(where: { $0.role == .user }) {
                 finish(at: lastResponseStamp, duration: nil, recorded: false)
                 response = []; start = stamp; lastResponseStamp = nil; finished = false
@@ -66,5 +72,13 @@ struct TranscriptResponseReader {
         // An unfinished response has no fabricated completion time or running duration.
         finish(at: nil, duration: nil, recorded: false, completed: false)
         return result
+    }
+    private func isInterruption(_ root: JSONValue) -> Bool {
+        guard root["type"].string == "user" else { return false }
+        let content = root["message"]["content"]
+        let marker = "[Request interrupted by user]"
+        if let text = content.string { return text == marker }
+        guard let blocks = content.array, blocks.count == 1 else { return false }
+        return blocks[0]["type"].string == "text" && blocks[0]["text"].string == marker
     }
 }

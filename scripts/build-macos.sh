@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$0")/.."
+python3 scripts/generate-macos-project.py
+# Remove only this task's generated app product so old PlugIns embedding cannot
+# survive a transition to ExtensionKit's Extensions directory.
+rm -rf "$PWD/.build/macos/Build/Products/Debug/CmuxRemoteMac.app"
+xcodebuild -project mac/CmuxRemoteMac.xcodeproj -scheme CmuxRemoteMac \
+  -configuration Debug -destination 'platform=macOS' -derivedDataPath .build/macos \
+  CODE_SIGN_IDENTITY="${CMUX_REMOTE_MAC_SIGNING_IDENTITY:--}" CODE_SIGN_STYLE=Manual CODE_SIGNING_ALLOWED=YES ONLY_ACTIVE_ARCH=YES build

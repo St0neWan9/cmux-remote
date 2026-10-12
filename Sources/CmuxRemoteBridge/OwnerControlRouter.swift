@@ -5,6 +5,7 @@ import CmuxRemoteCore
 struct OwnerControlRouter: Sendable {
     let authority: ConnectionAuthority
     let service: SessionService
+    var mac: (any LocalMacControlling)? = nil
     func respond(_ request: JSONValue) async -> JSONValue {
         let id = request["id"]
         do {
@@ -34,11 +35,20 @@ struct OwnerControlRouter: Sendable {
             case "clients.revoke":
                 guard let clientID = params["client_id"].string else { throw BridgeError("invalid_input", "Choose an exact client.") }
                 try await authority.revoke(clientID: clientID); value = .object(["revoked": .bool(true)])
-            default: throw BridgeError("not_found", "Unknown owner operation.", status: 404)
+            default:
+                guard let method = request["method"].string, method.hasPrefix("mac.") || method.hasPrefix("mirror."), let mac else {
+                    throw BridgeError("not_found", "Unknown owner operation.", status: 404)
+                }
+                value = try await mac.request(method, params: params)
             }
             return .object(["id": id, "ok": .bool(true), "result": value])
         } catch {
-            let failure = (error as? BridgeError) ?? BridgeError("invalid_request", "The owner request could not be processed.")
+            var failure = (error as? BridgeError) ?? BridgeError("invalid_request", "The owner request could not be processed.")
+            if request["method"].string == "mirror.replay", failure.code == "mirror_remote_unavailable" {
+                // Existing viewers recognize this read-only reconnect code.
+                // Preserve them across a Bridge upgrade; never alias writes.
+                failure = BridgeError("socket_unavailable", failure.message, status: 503)
+            }
             return .object(["id": id, "ok": .bool(false), "error": .object(["code": .string(failure.code), "message": .string(failure.message)])])
         }
     }

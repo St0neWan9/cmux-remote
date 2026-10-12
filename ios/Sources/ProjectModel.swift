@@ -30,6 +30,9 @@ final class ProjectModel {
     func load(_ resource: Resource) async {
         let request = UUID(); generation = request; busy = true; error = nil
         let path = filePath
+        // The new path/resource owns the presentation immediately. A rejected
+        // read must not leave another file's content available under this path.
+        self.resource = resource; content = ""; entries = []; truncated = false
         defer { if generation == request { busy = false } }
         do {
             switch resource {
