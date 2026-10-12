@@ -4,6 +4,7 @@ import CmuxRemoteClient
 
 struct ProjectView: View {
     @State private var model: ProjectModel
+    @Environment(\.scenePhase) private var phase
     init(session: SessionDescriptor, client: RemoteClient, initialPath: String = "") {
         _model = State(initialValue: ProjectModel(session: session, client: client, initialPath: initialPath))
     }
@@ -56,6 +57,11 @@ struct ProjectView: View {
                     }
                 }.padding(20)
             }
-        }.task { await model.load(model.filePath.isEmpty ? .changes : .file) }
+        }.onDisappear { model.suspendReads() }
+        .onChange(of: phase) { _, value in if value != .active { model.suspendReads() } }
+        .task(id: phase) {
+            guard phase == .active else { model.suspendReads(); return }
+            model.resumeReads(); await model.load(model.filePath.isEmpty && model.resource == .changes ? .changes : model.resource == .changes ? .file : model.resource)
+        }
     }
 }

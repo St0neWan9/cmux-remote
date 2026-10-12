@@ -32,7 +32,7 @@ struct ConversationView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
-                    if model.hasMore { Button(String(localized: "chat.older")) { Task { await model.older() } }.font(.subheadline).foregroundStyle(.secondary).frame(maxWidth: .infinity).padding(.top, 12) }
+                    if model.hasMore { Button(String(localized: "chat.older")) { Task { await model.older() } }.disabled(model.loadingOlder).font(.subheadline).foregroundStyle(.secondary).frame(maxWidth: .infinity).padding(.top, 12) }
                     if model.messages.isEmpty && model.error == nil {
                         ContentUnavailableView(String(localized: "chat.empty"), systemImage: "bubble.left.and.bubble.right")
                     }
@@ -155,8 +155,8 @@ struct ConversationView: View {
             }
             photoLoadTask = Task { await model.imageDraft.load(selections, encode: ImageAttachmentEncoder().encode) }
         }
-        .onDisappear { photoLoadTask?.cancel(); model.imageDraft.cancelLoading() }
-        .onChange(of: phase) { _, value in if value != .active { photoLoadTask?.cancel(); model.imageDraft.cancelLoading() } }
+        .onDisappear { model.suspendReads(); photoLoadTask?.cancel(); model.imageDraft.cancelLoading() }
+        .onChange(of: phase) { _, value in if value != .active { model.suspendReads(); photoLoadTask?.cancel(); model.imageDraft.cancelLoading() } }
         .alert(String(localized: "operation.inspected"), isPresented: $confirmPendingReset) {
             Button(String(localized: "operation.release")) { Task { await model.acknowledgePendingSend() } }
             Button(String(localized: "pair.cancel"), role: .cancel) {}
@@ -185,7 +185,7 @@ struct ConversationView: View {
             Button(String(localized: "pair.cancel"), role: .cancel) {}
         } message: { Text(String(localized: "chat.hard_stop_note")) }
         .task(id: phase) {
-            guard phase == .active else { return }; await model.refresh()
+            guard phase == .active else { model.suspendReads(); return }; model.resumeReads(); await model.refresh()
             let ticker = RefreshTicker(); defer { ticker.stop() }
             for await _ in ticker.start() { guard !Task.isCancelled else { break }; await model.refresh() }
         }
