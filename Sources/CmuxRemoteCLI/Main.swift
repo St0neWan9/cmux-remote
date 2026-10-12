@@ -54,10 +54,10 @@ struct Main {
                 else { cmux = UnixSocketClient(path: socket, password: ProcessInfo.processInfo.environment["CMUX_REMOTE_SOCKET_PASSWORD"]) }
                 roots = [URL(fileURLWithPath: ProcessInfo.processInfo.environment["CLAUDE_CONFIG_DIR"] ?? home.appendingPathComponent(".claude").path), URL(fileURLWithPath: ProcessInfo.processInfo.environment["CODEX_HOME"] ?? home.appendingPathComponent(".codex").path)]
             }
-            let mutations = MutationLedger(directory: state.directory)
-            let service = SessionService(cmux: cmux, home: home, transcriptRoots: roots, mutations: mutations)
             let lease = try BridgeRunLease(directory: state.directory)
             defer { withExtendedLifetime(lease) {} }
+            let mutations = MutationLedger(directory: state.directory)
+            let service = SessionService(cmux: cmux, home: home, transcriptRoots: roots, mutations: mutations)
             let events: Task<Void, Never>?
             if options.contains("demo") { events = nil }
             else {

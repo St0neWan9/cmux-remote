@@ -12,13 +12,22 @@ struct ChatComposer: View {
     var canReadFeed = true
     let showProject: () -> Void
     let showFeed: () -> Void
+    var hasImages = false
+    var sendBlocked = false
+    var showPhotos: (() -> Void)?
+    var dictating = false
+    var startVoice: (() -> Void)?
+    var finishVoice: (() -> Void)?
+    var showImageFiles: (() -> Void)?
     @FocusState private var focused: Bool
     // Match visible text to the symbol centers, rather than the text field's line box.
     @ScaledMetric(relativeTo: .body) private var textCenterOffset: CGFloat = 1.5
-    private var hasDraft: Bool { !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    private var hasDraft: Bool { !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || hasImages }
     var body: some View {
         HStack(alignment: .center, spacing: 10) {
             Menu {
+                if let showPhotos { Button(action: showPhotos) { Label(String(localized: "image.select"), systemImage: "photo") }.disabled(busy || !canSend || sendBlocked) }
+                if let showImageFiles { Button(action: showImageFiles) { Label(String(localized: "image.select_file"), systemImage: "folder") }.disabled(busy || !canSend || sendBlocked) }
                 if canReadProject { Button(action: showProject) { Label(String(localized: "project.title"), systemImage: "doc.text.magnifyingglass") } }
                 if canReadFeed { Button(action: showFeed) { Label(String(localized: "feed.title"), systemImage: "checkmark.bubble") } }
             } label: { Image(systemName: "plus").font(.system(size: 23, weight: .medium)).frame(width: 36, height: 42) }
@@ -27,6 +36,11 @@ struct ChatComposer: View {
                 .font(.body).lineLimit(1...6).focused($focused).padding(.vertical, 11)
                 .offset(y: textCenterOffset)
                 .accessibilityIdentifier("chat.composer")
+            if let startVoice {
+                Button { if dictating { finishVoice?() } else { focused = false; startVoice() } } label: {
+                    Image(systemName: dictating ? "waveform" : "mic").font(.system(size: 21)).foregroundStyle(dictating ? Color.accentColor : Color.primary).frame(width: 36, height: 42)
+                }.buttonStyle(.plain).accessibilityLabel(String(localized: dictating ? "voice.finish" : "voice.start")).accessibilityIdentifier("voice.microphone").disabled(busy || !canSend || (sendBlocked && !dictating))
+            }
             if working && !hasDraft {
                 Button(action: stop) { Image(systemName: "stop.fill").font(.system(size: 15, weight: .semibold)).foregroundStyle(.white).frame(width: 40, height: 40).background(Color.accentColor, in: Circle()) }
                     .buttonStyle(.plain).accessibilityLabel(String(localized: "chat.stop")).accessibilityIdentifier("chat.stop").disabled(busy || !canSend)
@@ -34,7 +48,7 @@ struct ChatComposer: View {
                 Button { focused = false; send() } label: {
                     Image(systemName: "arrow.up").font(.system(size: 20, weight: .semibold)).foregroundStyle(hasDraft && canSend ? Color.white : Color.secondary)
                         .frame(width: 40, height: 40).background(hasDraft && canSend ? Color.accentColor : Color(uiColor: .tertiarySystemFill), in: Circle())
-                }.buttonStyle(.plain).accessibilityLabel(String(localized: "chat.send")).accessibilityIdentifier("chat.send").disabled(busy || !canSend || !hasDraft)
+                }.buttonStyle(.plain).accessibilityLabel(String(localized: "chat.send")).accessibilityIdentifier("chat.send").disabled(busy || !canSend || !hasDraft || sendBlocked)
             }
         }.padding(.horizontal, 10).padding(.vertical, 7)
             .background(Color.white, in: RoundedRectangle(cornerRadius: 30))

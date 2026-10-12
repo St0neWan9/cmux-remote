@@ -13,11 +13,12 @@ final class ProjectModel {
     var truncated = false
     var busy = false
     var error: String?
-    private var generation = UUID()
+    private let reads = ReadRequestOwner()
+    private var readsEnabled = true
     private let read: @Sendable (String, [String: String]) async throws -> TextFileSnapshot
     private let list: @Sendable () async throws -> [ProjectChange]
     init(initialPath: String = "", read: @escaping @Sendable (String, [String: String]) async throws -> TextFileSnapshot, list: @escaping @Sendable () async throws -> [ProjectChange]) {
-        filePath = initialPath; self.read = read; self.list = list
+        filePath = initialPath; resource = initialPath.isEmpty ? .changes : .file; self.read = read; self.list = list
     }
     convenience init(session: SessionDescriptor, client: RemoteClient, initialPath: String = "") {
         self.init(initialPath: initialPath, read: { resource, query in
@@ -27,23 +28,27 @@ final class ProjectModel {
             return ProjectChange.parse(entries: value["entries"].array ?? [])
         })
     }
+    func suspendReads() { readsEnabled = false; reads.suspend(); busy = false }
+    func resumeReads() { readsEnabled = true }
+    func reload() async { await load(resource) }
     func load(_ resource: Resource) async {
-        let request = UUID(); generation = request; busy = true; error = nil
-        let path = filePath
-        // The new path/resource owns the presentation immediately. A rejected
-        // read must not leave another file's content available under this path.
-        self.resource = resource; content = ""; entries = []; truncated = false
-        defer { if generation == request { busy = false } }
-        do {
-            switch resource {
-            case .changes:
-                let value = try await list(); guard generation == request, !Task.isCancelled else { return }
-                entries = value; content = ""; truncated = false
-            case .file, .diff:
-                let value = try await read(resource == .file ? "file" : "diff", path.isEmpty && resource == .diff ? [:] : ["path": path])
-                guard generation == request, !Task.isCancelled else { return }; content = value.text; truncated = value.truncated
-            }
-            self.resource = resource
-        } catch { if generation == request, !Task.isCancelled { self.error = ErrorPresentation().message(error) } }
+        guard readsEnabled else { return }
+        await reads.run { [self] request in
+            busy = true; error = nil
+            let path = filePath
+            self.resource = resource; content = ""; entries = []; truncated = false
+            defer { if reads.revision == request { busy = false } }
+            do {
+                switch resource {
+                case .changes:
+                    let value = try await list(); guard reads.isCurrent(request) else { return }
+                    entries = value; content = ""; truncated = false
+                case .file, .diff:
+                    let value = try await read(resource == .file ? "file" : "diff", path.isEmpty && resource == .diff ? [:] : ["path": path])
+                    guard reads.isCurrent(request) else { return }; content = value.text; truncated = value.truncated
+                }
+                self.resource = resource
+            } catch { if reads.isCurrent(request) { self.error = ErrorPresentation().message(error) } }
+        }
     }
 }

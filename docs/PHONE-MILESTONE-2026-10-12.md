@@ -43,4 +43,4 @@
 先回顾并确认 M1 的产品体验与范围；随后完成实时推送及恢复交互，再做一次集中
 真机验收与主目录整合。这比现在继续扩散界面改动更容易判断离完整目标的距离。
 
-完整需求和逐次证据见 [PHONE-COMPLETION-PLAN.md](https://github.com/St0neWan9/cmux-remote/blob/codex/phone-completion/docs/PHONE-COMPLETION-PLAN.md)。
+完整需求和逐次证据见 [PHONE-COMPLETION-PLAN.md](PHONE-COMPLETION-PLAN.md)。

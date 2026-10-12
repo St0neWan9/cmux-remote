@@ -1,0 +1,22 @@
+import SwiftUI
+
+/// Match the pale tool card: leading title/body and a quiet trailing result.
+struct ToolDetailCard<Content: View>: View {
+    let title: String
+    var status: String?
+    var failed = false
+    @ViewBuilder let content: () -> Content
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(title).font(.subheadline).foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            content().frame(maxWidth: .infinity, alignment: .leading)
+            if let status {
+                Text(status).font(.caption).foregroundStyle(failed ? Color.red : Color.secondary)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+            }
+        }.padding(16).frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(white: 0.975), in: RoundedRectangle(cornerRadius: 20))
+            .overlay(RoundedRectangle(cornerRadius: 20).stroke(Color.black.opacity(0.035), lineWidth: 0.5))
+    }
+}

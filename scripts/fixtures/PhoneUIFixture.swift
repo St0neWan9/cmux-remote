@@ -46,11 +46,29 @@ private actor PhoneUIBackend: CmuxControlling {
         case "mobile.chat.interrupt": return .object(["interrupted": .bool(true)])
         case "mobile.chat.send":
             let stamp = ISO8601DateFormatter().string(from: Date())
-            let user: JSONValue = .object(["type": .string("user"), "uuid": .string(UUID().uuidString), "timestamp": .string(stamp), "message": .object(["content": params["text"] ?? .string("")])])
-            let reply: JSONValue = .object(["type": .string("assistant"), "uuid": .string(UUID().uuidString), "timestamp": .string(stamp), "message": .object(["content": .array([.object(["type": .string("text"), "text": .string("UI fixture received your prompt. No agent was started.")])])])])
+            let images = params["attachments"]?.array ?? []
+            let uploads = root.appendingPathComponent("uploads")
+            try FileManager.default.createDirectory(at: uploads, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+            var paths: [String] = []
+            for image in images {
+                guard let raw = image["data_b64"].string, let data = Data(base64Encoded: raw) else { throw BridgeError("invalid_image", "Fixture image invalid") }
+                let file = uploads.appendingPathComponent("photo-" + UUID().uuidString + ".jpg")
+                try data.write(to: file, options: .atomic); try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
+                paths.append(file.path)
+            }
+            let input = (paths + [params["text"]?.string ?? ""]).joined(separator: " ")
+            let user: JSONValue = .object(["type": .string("user"), "uuid": .string(UUID().uuidString), "timestamp": .string(stamp), "message": .object(["content": .string(input)])])
+            let replyText = "UI fixture received \(images.count) image(s) and your prompt. No agent was started."
+            let reply: JSONValue = .object(["type": .string("assistant"), "uuid": .string(UUID().uuidString), "timestamp": .string(stamp), "message": .object(["content": .array([.object(["type": .string("text"), "text": .string(replyText)])])])])
             let duration: JSONValue = .object(["type": .string("system"), "subtype": .string("turn_duration"), "durationMs": .number(2500), "timestamp": .string(stamp)])
             let handle = try FileHandle(forWritingTo: transcript); defer { try? handle.close() }; try handle.seekToEnd()
             for row in [user, reply, duration] { var data = try JSONEncoder().encode(row); data.append(10); try handle.write(contentsOf: data) }
+            let evidence: JSONValue = .object(["image_count": .number(Double(images.count)), "formats": .array(images.map { $0["format"] }), "text": params["text"] ?? .string("")])
+            let observed = root.deletingLastPathComponent().appendingPathComponent("observed-send.json")
+            try JSONEncoder().encode(evidence).write(to: observed, options: .atomic)
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: observed.path)
+            let lost = root.deletingLastPathComponent().appendingPathComponent("lose-next-receipt")
+            if FileManager.default.fileExists(atPath: lost.path) { try FileManager.default.removeItem(at: lost); throw BridgeError("outcome_unknown", "Fixture lost the mutation receipt", status: 504) }
             return .object(["submitted": .bool(true)])
         default: throw BridgeError("method_not_found", "UI fixture does not implement this method", status: 404)
         }
@@ -59,7 +77,9 @@ private actor PhoneUIBackend: CmuxControlling {
 
 @main private struct PhoneUIFixture {
     static func main() async throws {
-        guard CommandLine.arguments.count == 2 else { throw BridgeError("invalid_input", "Pass a fixture state directory") }
+        guard (2...3).contains(CommandLine.arguments.count) else { throw BridgeError("invalid_input", "Pass a fixture state directory and optional port") }
+        let port = CommandLine.arguments.count == 3 ? (Int(CommandLine.arguments[2]) ?? 0) : 7745
+        guard (1...65535).contains(port) else { throw BridgeError("invalid_input", "Pass a valid fixture port") }
         let state = BridgeState(directory: URL(fileURLWithPath: CommandLine.arguments[1]))
         if !FileManager.default.fileExists(atPath: state.certificate) { try state.initialize() }
         let root = state.directory.appendingPathComponent("project")
@@ -81,13 +101,13 @@ private actor PhoneUIBackend: CmuxControlling {
                 #"{"type":"system","subtype":"turn_duration","durationMs":5000,"timestamp":"2026-10-12T01:00:06Z"}"#]
             try Data((rows.joined(separator: "\n") + "\n").utf8).write(to: transcript)
         }
-        let pairing = try state.pairing(host: "127.0.0.1", port: 7745)
+        let pairing = try state.pairing(host: "127.0.0.1", port: port)
         let configuration = state.directory.appendingPathComponent("phone.json")
         try JSONEncoder().encode(pairing).write(to: configuration, options: .atomic)
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: configuration.path)
         let backend = PhoneUIBackend(root: root, transcript: transcript)
-        let service = SessionService(cmux: backend, home: FileManager.default.homeDirectoryForCurrentUser, transcriptRoots: [root])
-        print("Isolated phone UI fixture listening on loopback port 7745. No real cmux sessions are used.")
-        try await HTTPServer().run(host: "127.0.0.1", port: 7745, certificate: state.certificate, key: state.key, router: BridgeRouter(service: service, token: pairing.token))
+        let service = SessionService(cmux: backend, home: FileManager.default.homeDirectoryForCurrentUser, transcriptRoots: [root], journal: try MutationJournal(file: state.directory.appendingPathComponent("operations.json")))
+        print("Isolated phone UI fixture listening on loopback port \(port). No real cmux sessions are used.")
+        try await HTTPServer().run(host: "127.0.0.1", port: port, certificate: state.certificate, key: state.key, router: BridgeRouter(service: service, token: pairing.token))
     }
 }

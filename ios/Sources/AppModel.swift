@@ -20,6 +20,8 @@ final class AppModel {
     var enrollmentState = ""
     private let discovery: BridgeDiscovery
     private let store: PairingStore
+    private let makeSpeechInput: @MainActor () -> any SpeechInputServing
+    private let pendingSends: PendingSendStore
     private let identityKey: @MainActor () throws -> Data
     private let makeEnrollment: @MainActor (SignedValue<EnrollmentBootstrap>, Data, BridgeEndpoint?) throws -> any DeviceEnrolling
     private let enrollmentTicks: @MainActor () -> (stream: AsyncStream<Void>, stop: @MainActor () -> Void)
@@ -28,11 +30,13 @@ final class AppModel {
     private var refreshGeneration = UUID()
     private var saved: AuthorizedConnection?
     private var enrollmentTask: Task<Void, Never>?
+    @ObservationIgnored private var conversationModels: [String: ConversationModel] = [:]
     private var restored = false
     private var enrollmentActive = true
     private var enrollmentGeneration = UUID()
     private var monitorGeneration = UUID()
-    init(discovery: BridgeDiscovery = BridgeDiscovery(), store: PairingStore = PairingStore(),
+    init(discovery: BridgeDiscovery = BridgeDiscovery(), store: PairingStore = PairingStore(), pendingSends: PendingSendStore = PendingSendStore(),
+         makeSpeechInput: @escaping @MainActor () -> any SpeechInputServing = { UnavailableSpeechInput() },
          identityKey: @escaping @MainActor () throws -> Data = { try DeviceIdentityStore().privateKey() },
          makeEnrollment: @escaping @MainActor (SignedValue<EnrollmentBootstrap>, Data, BridgeEndpoint?) throws -> any DeviceEnrolling = { bootstrap, key, endpoint in try EnrollmentClient(bootstrap: bootstrap, privateKey: key, name: "cmux iPhone", kind: "iphone", endpoint: endpoint) },
          fetchSessions: @escaping @Sendable (RemoteClient) async throws -> [SessionDescriptor] = { try await $0.get("/v1/sessions", as: [SessionDescriptor].self) },
@@ -41,7 +45,8 @@ final class AppModel {
              return (value["workspaces"].array ?? []).compactMap(WorkspaceSummary.init(json:))
          },
          enrollmentTicks: @escaping @MainActor () -> (stream: AsyncStream<Void>, stop: @MainActor () -> Void) = { let ticker = RefreshTicker(); return (ticker.start(), { ticker.stop() }) }) {
-        self.discovery = discovery; self.store = store; self.identityKey = identityKey; self.makeEnrollment = makeEnrollment; self.enrollmentTicks = enrollmentTicks
+        self.makeSpeechInput = makeSpeechInput
+        self.discovery = discovery; self.store = store; self.pendingSends = pendingSends; self.identityKey = identityKey; self.makeEnrollment = makeEnrollment; self.enrollmentTicks = enrollmentTicks
         self.fetchSessions = fetchSessions; self.fetchWorkspaces = fetchWorkspaces
     }
     func restorePairing() {
@@ -185,5 +190,17 @@ final class AppModel {
             error = nil
         } catch { if self.client === client, refreshGeneration == request, !Task.isCancelled { self.error = ErrorPresentation().message(error) } }
     }
-    func unpair() { refreshGeneration = UUID(); loading = false; enrollmentGeneration = UUID(); stopEnrollmentMonitor(); client?.close(); client = nil; saved = nil; sessions = []; workspaces = []; store.remove(); store.removeConnection(); store.disableLegacy() }
+    /// Own in-flight and unresolved sends across pushed-view navigation.
+    func conversation(session: SessionDescriptor, client: RemoteClient) -> ConversationModel {
+        let key = client.operationRecoveryScope + ":" + session.id
+        if let existing = conversationModels[key] { return existing }
+        if conversationModels.count >= 32 { conversationModels = conversationModels.filter { $0.value.busy || $0.value.pendingSend != nil } }
+        let store = pendingSends; let scope = client.operationRecoveryScope; let id = session.id
+        let model = ConversationModel(session: session, client: client, speechInput: makeSpeechInput(),
+            loadRecovery: { try await store.load(scope: scope, sessionID: id) },
+            saveRecovery: { try await store.save($0, scope: scope, sessionID: id) })
+        conversationModels[key] = model
+        return model
+    }
+    func unpair() { for model in conversationModels.values { model.suspendReads(); model.speech.cancel() }; conversationModels.removeAll(); refreshGeneration = UUID(); loading = false; enrollmentGeneration = UUID(); stopEnrollmentMonitor(); client?.close(); client = nil; saved = nil; sessions = []; workspaces = []; store.remove(); store.removeConnection(); store.disableLegacy() }
 }

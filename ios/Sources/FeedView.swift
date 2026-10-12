@@ -57,8 +57,10 @@ struct FeedView: View {
                     if let error { Text(error).foregroundStyle(.red) }
                 }.padding(20).frame(maxWidth: .infinity, alignment: .leading)
             }.refreshable { await model.refresh() }
-        }.task(id: phase) {
-            guard phase == .active else { return }; await model.refresh()
+        }.onDisappear { model.suspendReads() }
+        .onChange(of: phase) { _, value in if value != .active { model.suspendReads() } }
+        .task(id: phase) {
+            guard phase == .active else { model.suspendReads(); return }; model.resumeReads(); await model.refresh()
             let ticker = RefreshTicker(); defer { ticker.stop() }
             for await _ in ticker.start() { guard !Task.isCancelled else { break }; await model.refresh() }
         }

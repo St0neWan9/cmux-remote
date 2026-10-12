@@ -23,8 +23,8 @@ final class BridgeHTTPHandler: ChannelInboundHandler, @unchecked Sendable {
             if rejected { writer.send(status: 413, data: Data()); return }
             let router = router; let body = body
             Task {
-                let response = await router.respond(method: head.method.rawValue, uri: head.uri, authorization: head.headers.first(name: "Authorization"), body: body)
-                writer.send(status: response.0, data: response.1)
+                let response = await router.respondResource(method: head.method.rawValue, uri: head.uri, authorization: head.headers.first(name: "Authorization"), body: body)
+                writer.send(status: response.status, data: response.data, contentType: response.contentType)
             }
         }
     }
