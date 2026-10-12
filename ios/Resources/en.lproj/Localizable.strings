@@ -213,3 +213,15 @@
 "error.image_unavailable" = "This recorded image is unavailable or exceeds preview limits.";
 
 "image.close" = "Close";
+
+"voice.preparing" = "Preparing dictation…";
+"voice.finishing" = "Finishing recognition…";
+"voice.listening" = "Listening on this device";
+"voice.draft" = "Dictated draft";
+"voice.start" = "Dictate a draft";
+"voice.finish" = "Finish dictation";
+"voice.use" = "Use text";
+"voice.permission" = "Allow Microphone and Speech Recognition in Settings to dictate.";
+"voice.unavailable" = "On-device recognition is unavailable for this language or device. You can type instead.";
+"voice.too_long" = "The dictated text exceeds the draft limit. Finish and use a shorter passage.";
+"voice.no_speech" = "No speech was recognized. Try again or type your message.";

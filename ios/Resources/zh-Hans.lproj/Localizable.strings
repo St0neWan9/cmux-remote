@@ -213,3 +213,15 @@
 "error.image_unavailable" = "这张历史图片已不可用，或超出预览限制。";
 
 "image.close" = "关闭";
+
+"voice.preparing" = "正在准备语音输入…";
+"voice.finishing" = "正在完成识别…";
+"voice.listening" = "正在本机识别";
+"voice.draft" = "语音草稿";
+"voice.start" = "语音输入";
+"voice.finish" = "结束录音";
+"voice.use" = "使用文字";
+"voice.permission" = "请在设置中允许麦克风和语音识别权限。";
+"voice.unavailable" = "此语言或设备暂不支持本机语音识别，可以继续输入文字。";
+"voice.too_long" = "语音文字超过草稿限制，请结束录音并分段输入。";
+"voice.no_speech" = "没有识别到文字，请重试或直接输入。";

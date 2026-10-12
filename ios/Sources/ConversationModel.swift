@@ -35,6 +35,7 @@ final class ConversationModel {
     var error: String?
     var draft = ""
     let imageDraft = ImageDraftModel()
+    let speech: SpeechDraftModel
     private(set) var pendingSend: SendRequest?
     private var mutationWarning: String?
     private let loadRecovery: @Sendable () async throws -> SendRequest?
@@ -56,7 +57,7 @@ final class ConversationModel {
     var hasMore = false
     private var generation: String?
     var historyGeneration: String? { generation }
-    init(session: SessionDescriptor, client: RemoteClient,
+    init(session: SessionDescriptor, client: RemoteClient, speechInput: (any SpeechInputServing)? = nil,
          loadRecovery: (@Sendable () async throws -> SendRequest?)? = nil,
          saveRecovery: (@Sendable (SendRequest?) async throws -> Void)? = nil,
          sendRequest: (@Sendable (SendRequest) async throws -> MutationReceipt)? = nil,
@@ -64,7 +65,7 @@ final class ConversationModel {
          readSessions: (@Sendable () async throws -> [SessionDescriptor])? = nil,
          readHistory: (@Sendable (Int?) async throws -> ConversationSnapshot)? = nil,
          readPreview: (@Sendable () async throws -> PreviewSnapshot)? = nil) {
-        self.session = session; self.client = client
+        self.session = session; self.client = client; speech = SpeechDraftModel(input: speechInput ?? UnavailableSpeechInput())
         let id = session.id
         let recovery = PendingSendStore(); let scope = client.operationRecoveryScope
         self.loadRecovery = loadRecovery ?? { try await recovery.load(scope: scope, sessionID: id) }
@@ -148,8 +149,9 @@ final class ConversationModel {
         }
         if let reanchor, readsEnabled, olderReads.isCurrent(reanchor), generation == sourceGeneration { await refresh() }
     }
+    func useSpeechDraft() { if let text = speech.takeText() { draft += (draft.isEmpty ? "" : "\n") + text } }
     func send() async {
-        guard canSend, !busy, !imageDraft.loading, pendingSend == nil,
+        guard canSend, !busy, !speech.active, !imageDraft.loading, pendingSend == nil,
               !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !imageDraft.images.isEmpty else { return }
         busy = true; defer { busy = false }
         do {

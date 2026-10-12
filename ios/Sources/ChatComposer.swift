@@ -15,6 +15,9 @@ struct ChatComposer: View {
     var hasImages = false
     var sendBlocked = false
     var showPhotos: (() -> Void)?
+    var dictating = false
+    var startVoice: (() -> Void)?
+    var finishVoice: (() -> Void)?
     var showImageFiles: (() -> Void)?
     @FocusState private var focused: Bool
     // Match visible text to the symbol centers, rather than the text field's line box.
@@ -33,6 +36,11 @@ struct ChatComposer: View {
                 .font(.body).lineLimit(1...6).focused($focused).padding(.vertical, 11)
                 .offset(y: textCenterOffset)
                 .accessibilityIdentifier("chat.composer")
+            if let startVoice {
+                Button { if dictating { finishVoice?() } else { focused = false; startVoice() } } label: {
+                    Image(systemName: dictating ? "waveform" : "mic").font(.system(size: 21)).foregroundStyle(dictating ? Color.accentColor : Color.primary).frame(width: 36, height: 42)
+                }.buttonStyle(.plain).accessibilityLabel(String(localized: dictating ? "voice.finish" : "voice.start")).accessibilityIdentifier("voice.microphone").disabled(busy || !canSend || (sendBlocked && !dictating))
+            }
             if working && !hasDraft {
                 Button(action: stop) { Image(systemName: "stop.fill").font(.system(size: 15, weight: .semibold)).foregroundStyle(.white).frame(width: 40, height: 40).background(Color.accentColor, in: Circle()) }
                     .buttonStyle(.plain).accessibilityLabel(String(localized: "chat.stop")).accessibilityIdentifier("chat.stop").disabled(busy || !canSend)

@@ -104,6 +104,7 @@ struct ConversationView: View {
         .safeAreaInset(edge: .top, spacing: 0) { header }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: 12) {
+                SpeechDraftStrip(model: model.speech, useText: model.useSpeechDraft)
                 if !model.imageDraft.images.isEmpty {
                     ImageDraftStrip(images: model.imageDraft.images, remove: model.imageDraft.remove).equatable()
                 }
@@ -129,10 +130,10 @@ struct ConversationView: View {
                 ChatComposer(draft: $model.draft, canSend: model.canSend, busy: model.busy, working: model.hasActiveResponse,
                              send: { Task { await model.send() } }, stop: { Task { await model.interrupt() } },
                              canReadProject: model.client.allows(.projectRead), canReadFeed: model.client.allows(.feedRead), showProject: { selectedFile = ""; showProject = true }, showFeed: { showFeed = true },
-                             hasImages: !model.imageDraft.images.isEmpty, sendBlocked: model.recoveryBlocked || model.imageDraft.loading, showPhotos: {
+                             hasImages: !model.imageDraft.images.isEmpty, sendBlocked: model.recoveryBlocked || model.imageDraft.loading || model.speech.active, showPhotos: {
                                  guard model.imageDraft.images.count < 4 else { model.imageDraft.error = String(localized: "error.image"); return }
                                  photoItems = []; showingPhotos = true
-                             }, showImageFiles: { showingImageFiles = true })
+                             }, dictating: model.speech.state == .recording, startVoice: { Task { await model.speech.start() } }, finishVoice: { model.speech.finish() }, showImageFiles: { showingImageFiles = true })
             }.padding(.horizontal, 14).padding(.top, 14).padding(.bottom, 10)
         }
         .photosPicker(isPresented: $showingPhotos, selection: $photoItems, maxSelectionCount: max(1, 4 - model.imageDraft.images.count), selectionBehavior: .ordered, matching: .images)
@@ -156,8 +157,8 @@ struct ConversationView: View {
             }
             photoLoadTask = Task { await model.imageDraft.load(selections, encode: ImageAttachmentEncoder().encode) }
         }
-        .onDisappear { model.suspendReads(); photoLoadTask?.cancel(); model.imageDraft.cancelLoading() }
-        .onChange(of: phase) { _, value in if value != .active { model.suspendReads(); photoLoadTask?.cancel(); model.imageDraft.cancelLoading() } }
+        .onDisappear { model.speech.suspend(); model.suspendReads(); photoLoadTask?.cancel(); model.imageDraft.cancelLoading() }
+        .onChange(of: phase) { _, value in if value == .background { model.speech.suspend() }; if value != .active { model.suspendReads(); photoLoadTask?.cancel(); model.imageDraft.cancelLoading() } }
         .alert(String(localized: "operation.inspected"), isPresented: $confirmPendingReset) {
             Button(String(localized: "operation.release")) { Task { await model.acknowledgePendingSend() } }
             Button(String(localized: "pair.cancel"), role: .cancel) {}
