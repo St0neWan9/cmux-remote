@@ -9,6 +9,8 @@ import CmuxRemoteCore
     var remote: MacCompanionModel
     var sharing: MacSharingModel
     var section = "share"
+    /// Stored for the next launch; every string lookup reads it through `Bundle.interface`.
+    var language: MacInterfaceLanguage { didSet { preferences.set(language.rawValue, forKey: MacInterfaceLanguage.preferenceKey) } }
     var statePath: String
     var serviceError: String?
     var starting = false
@@ -18,6 +20,7 @@ import CmuxRemoteCore
     private var startup: Task<Void, Never>?
     init(executable: URL, home: URL, preferences: UserDefaults) {
         self.executable = executable; self.preferences = preferences
+        language = preferences.string(forKey: MacInterfaceLanguage.preferenceKey).flatMap(MacInterfaceLanguage.init(rawValue:)) ?? .english
         let path = preferences.string(forKey: "bridgeStatePath") ?? home.appendingPathComponent(".local/state/cmux-remote").path
         statePath = path
         let directory = URL(fileURLWithPath: path)

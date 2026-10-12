@@ -6,8 +6,8 @@ UI tokens, component rules, density, states and interaction copy are defined in
 [the Mac design system](DESIGN-SYSTEM.md). Apply that specification before laying
 out the menu or settings pages.
 
-Both the source Mac and viewing Mac install the same **cmux Remote** menu bar
-application. It can share this Mac and connect to other Macs at the same time.
+Both the source Mac and viewing Mac install the same **CmuxRemote** menu bar
+application (`~/Applications/CmuxRemote.app`). It can share this Mac and connect to other Macs at the same time.
 The menu bar icon belongs to macOS. This is an independent application using the
 official cmux APIs, not an ExtensionKit sidebar or an injected cmux settings page.
 The official native sidebar, Remote workspace group, terminal mirroring, identity
@@ -17,7 +17,9 @@ their current behavior. The phone UI and remote wire resources remain unchanged.
 The app has no automatically opened main window or Dock icon. A missing first-use
 cmux connection opens the one Settings window to explain setup. Its small menu
 shows local sharing status, the pending approval count, **Remote Settings…** and
-Quit. Settings is one reusable window with two sections:
+Quit. Settings is one reusable preference window. Its toolbar categories are
+Share This Mac, Add Device, Devices, Connect to a Mac and Advanced; the two
+product areas are:
 
 - **Share This Mac**: sharing switch, endpoint/status, workspace selection for
   new pairing, expiring QR code, exact pending-device approval/denial and paired
@@ -54,7 +56,7 @@ the menu bar app to control only the sharing listener.
 
 ## First connection to official cmux
 
-After installing, click the cmux Remote icon in the macOS menu bar and open
+After installing, click the CmuxRemote icon in the macOS menu bar and open
 **Remote Settings…**. If no resident is available, copy its setup command into a
 new cmux shell, run it once, then use **Retry Connection**. Setup changes neither
 cmux settings nor its socket policy. A new installation creates private Bridge
