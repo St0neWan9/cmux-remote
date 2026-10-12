@@ -134,4 +134,4 @@ record for unconfirmed submission and authorizes cached receipts against stored
 scope; fresh mutations still authorize/check live targets. Tests now inject
 rebind/revocation at an actual backend await rather than an incidental discovery
 call count. The repaired candidate passes 89 tests in 21 suites plus the same
-17 actual-model checks and 174 locale keys. Fresh repair review remains pending.
+17 actual-model checks and 174 locale keys. Fresh independent review at `a180433` (tree `17e7333`) found no verified remaining backend defect and independently passed 40 focused tests across six suites. This does not complete the remaining phone/hardware requirements.
