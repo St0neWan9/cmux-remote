@@ -15,9 +15,20 @@ public actor TranscriptReader {
     }
     private var observations: [String: Observation] = [:]
     public init() {}
-    public func history(path: String, agent: String, beforeSeq: Int?, limit: Int) throws -> ConversationSnapshot {
+    public func history(path: String, agent: String, beforeSeq: Int?, limit: Int, allowsUncreatedTranscript: Bool = false) throws -> ConversationSnapshot {
         let url = URL(fileURLWithPath: path)
-        let attributes = try FileManager.default.attributesOfItem(atPath: path)
+        let attributes: [FileAttributeKey: Any]
+        do { attributes = try FileManager.default.attributesOfItem(atPath: path) }
+        catch {
+            let failure = error as NSError
+            // A newly bound agent may not create its JSONL until the first prompt.
+            // Never turn a deleted, previously read transcript into an empty history.
+            guard allowsUncreatedTranscript, observations[path] == nil,
+                  failure.domain == NSCocoaErrorDomain,
+                  [CocoaError.fileNoSuchFile.rawValue, CocoaError.fileReadNoSuchFile.rawValue].contains(failure.code) else { throw error }
+            let generation = "pending:" + IdentityCryptography().digest(Data(path.utf8))
+            return ConversationSnapshot(messages: [], hasMore: false, generation: generation, clipped: false)
+        }
         guard let size = attributes[.size] as? NSNumber, size.intValue <= 32 * 1024 * 1024 else {
             throw BridgeError("history_too_large", "This conversation exceeds the initial history reader limit.", status: 413)
         }

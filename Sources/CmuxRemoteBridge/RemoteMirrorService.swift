@@ -11,7 +11,7 @@ public actor RemoteMirrorService {
 
     public func workspace(id: String) async throws -> MirrorWorkspaceSnapshot {
         try validate(id)
-        let tree = try await cmux.request("system.tree", params: ["all": .bool(true)])
+        let tree = try await cmux.request("system.tree", params: ["all_windows": .bool(true)])
         let workspaces = (tree["windows"].array ?? []).flatMap { $0["workspaces"].array ?? [] } + (tree["workspaces"].array ?? [])
         guard let workspace = workspaces.first(where: { $0["id"].string?.lowercased() == id.lowercased() }) else {
             throw BridgeError("not_found", "The remote workspace no longer exists.", status: 404)
@@ -37,7 +37,9 @@ public actor RemoteMirrorService {
         }
         let value = try await cmux.request("terminal.replay", params: ["workspace_id": .string(workspaceID), "surface_id": .string(surfaceID),
             "anchor": .string("screen"), "max_scrollback_rows": .number(0)])
-        return try renderer.render(value, workspaceID: workspaceID, surfaceID: surfaceID)
+        var snapshot = try renderer.render(value, workspaceID: workspaceID, surfaceID: surfaceID)
+        snapshot.pasteSupported = true
+        return snapshot
     }
 
     public func input(workspaceID: String, surfaceID: String, clientID: String, request: MirrorInputRequest,
@@ -45,8 +47,9 @@ public actor RemoteMirrorService {
         guard !request.text.isEmpty, request.text.utf8.count <= 16_384, !request.runtimeEpoch.isEmpty else {
             throw BridgeError("invalid_input", "Terminal input must be bounded and belong to an observed runtime.")
         }
-        let signature = try MutationLedger.fingerprint(action: "terminal.input", resource: workspaceID.lowercased() + ":" + surfaceID.lowercased(),
-                                                       payload: .object(["epoch": .string(request.runtimeEpoch), "text": .string(request.text)]))
+        var payload: [String: JSONValue] = ["epoch": .string(request.runtimeEpoch), "text": .string(request.text)]
+        if request.paste == true { payload["paste"] = .bool(true) }
+        let signature = try MutationLedger.fingerprint(action: "terminal.input", resource: workspaceID.lowercased() + ":" + surfaceID.lowercased(), payload: .object(payload))
         if let prior = try await mutations.prior(clientID: clientID, operationID: request.operationID, fingerprint: signature) {
             try await authorize(); return try priorReceipt(prior)
         }
@@ -65,7 +68,9 @@ public actor RemoteMirrorService {
         guard current.runtimeEpoch == request.runtimeEpoch else { throw BridgeError("stale_binding", "The remote terminal changed during authorization. Reattach before sending input.", status: 409) }
         try await authorize()
         do {
-            let result = try await cmux.request("mobile.terminal.input", params: ["workspace_id": .string(workspaceID), "surface_id": .string(surfaceID), "text": .string(request.text)])
+            var params: [String: JSONValue] = ["workspace_id": .string(workspaceID), "surface_id": .string(surfaceID), "text": .string(request.text)]
+            if request.paste == true { params["submit_key"] = .string("none") }
+            let result = try await cmux.request(request.paste == true ? "terminal.paste" : "mobile.terminal.input", params: params)
             guard result["accepted"].bool != false else { throw BridgeError("outcome_unknown", "Inspect the remote terminal before repeating input.", status: 409) }
             return try await mutations.complete(clientID: clientID, operationID: request.operationID)
         } catch { throw BridgeError("outcome_unknown", "Terminal input outcome is unknown; it was not retried.", status: 409) }
