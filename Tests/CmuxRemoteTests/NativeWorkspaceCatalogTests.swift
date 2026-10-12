@@ -186,6 +186,55 @@ import CmuxRemoteMac
         try await catalog.refreshSelection()
         #expect(try await catalog.wait(original.id))
     }
+    @Test func explicitOpenRecreatesClosedUnavailableRowAfterInventoryReturnsAndRestart() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let local = CatalogLocalFixture(), group = CatalogGroupFixture(), host = try host()
+        let (original, _) = catalog(directory, local: local, group: group, host: host)
+        try await original.sync(host: host, workspaces: [.init(id: remoteWorkspace, title: "Agents")])
+        let row = try #require(try await original.rows().first), seed = try #require(row.seed)
+        await local.select(seed.workspaceID)
+        _ = try await original.open(row.id, workspaceID: seed.workspaceID, surfaceID: seed.surfaceID)
+        try await original.sync(host: host, workspaces: [])
+        await local.close(seed.workspaceID)
+
+        let (restored, mirrors) = catalog(directory, local: local, group: group, host: host)
+        try await restored.sync(host: host, workspaces: [.init(id: remoteWorkspace, title: "Agents")])
+        #expect(await local.calls.filter { $0 == "workspace.create" }.count == 1)
+        await local.allowExplicitSelection()
+        let opened = try await restored.select(hostID: host.id, workspaceID: remoteWorkspace)
+        let replacement = try #require(try await restored.rows().first), next = try #require(replacement.seed)
+        #expect(opened["recreated"].bool == true)
+        #expect(replacement.id == row.id && next.workspaceID != seed.workspaceID)
+        _ = try await restored.open(row.id, workspaceID: next.workspaceID, surfaceID: next.surfaceID)
+        _ = try await restored.select(hostID: host.id, workspaceID: remoteWorkspace)
+        #expect(await local.calls.filter { $0 == "workspace.create" }.count == 2)
+        #expect(await mirrors.list().count == 2)
+        #expect(await mirrors.list().allSatisfy { $0.localWorkspaceID == next.workspaceID })
+    }
+    @Test func closedUnavailableRowStillRequiresFreshAuthorityBeforeRecreation() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let local = CatalogLocalFixture(), group = CatalogGroupFixture(), host = try host()
+        let (original, _) = catalog(directory, local: local, group: group, host: host)
+        try await original.sync(host: host, workspaces: [.init(id: remoteWorkspace, title: "Agents")])
+        let row = try #require(try await original.rows().first), seed = try #require(row.seed)
+        try await original.sync(host: host, workspaces: [])
+        await local.close(seed.workspaceID)
+        let mirrors = WorkspaceMirrorCoordinator(local: local, executable: URL(fileURLWithPath: "/tmp/viewer"), stateDirectory: directory)
+        let revoked = NativeWorkspaceCatalog(local: local, repository: NativeWorkspaceRepository(directory: directory), mirrors: mirrors,
+            grouping: group, executable: URL(fileURLWithPath: "/tmp/viewer"), stateDirectory: directory) { _, _ in
+                throw BridgeError("scope_denied", "Revoked", status: 403)
+            }
+        try await revoked.sync(host: host, workspaces: [.init(id: remoteWorkspace, title: "Agents")])
+        do {
+            _ = try await revoked.select(hostID: host.id, workspaceID: remoteWorkspace)
+            Issue.record("Revoked authority must prevent recreation")
+        } catch { #expect((error as? BridgeError)?.code == "scope_denied") }
+        #expect(await local.calls.filter { $0 == "workspace.create" }.count == 1)
+        #expect(await mirrors.list().isEmpty)
+        #expect(try await revoked.row(hostID: host.id, workspaceID: remoteWorkspace)?.seed?.workspaceID == seed.workspaceID)
+    }
     @Test func unfocusedNativeWindowIsNeverMistakenForAClosedMirror() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }

@@ -174,7 +174,18 @@ remove a saved host locally, the owner channel supports `mac.forget`; host-side
   terminal output subscription. Changes between captures can be missed. This is
   not claimed as lossless/native mirror parity.
 - Browsers, graphics, remote clipboard, full scrollback and shared resizing are
-  not supported. Different terminal sizes can clip the producer's content.
+  not supported. Updated peers also send bounded validated character cells.
+  A smaller local viewer crops those cells around the visible cursor, retaining
+  the input area without resizing the remote producer. Content outside that
+  viewport is clipped; legacy peers without cells retain the previous clipping
+  behavior. Local pane resizing updates the viewer's viewport independently.
+  Wheel reports pan only the currently captured rows in the local viewer;
+  keyboard input returns to the producer cursor. Full remote history remains
+  unsupported. Wheel reports never become remote arrow keys or edit a draft.
+  Updated peers negotiate literal paste support. The viewer removes local
+  bracketed-paste delimiters and uses `terminal.paste` with `submit_key=none`,
+  rather than forwarding those delimiters as Escape keys. Legacy peers fail
+  closed for paste; ordinary keystrokes retain their existing protocol.
 - Snapshots publish only after the complete paint: baseline resets and positioned
   TUI rows share one DEC synchronized update. The local Bridge also normalizes
   older peers' early releases, keeping their baseline and paint in one update.
@@ -184,7 +195,8 @@ remove a saved host locally, the owner channel supports `mac.forget`; host-side
   change. This avoids repeated alternate-screen resets and their visible flashes.
   Both the source Bridge and viewer need this version for in-place updates;
   older peers retain the full-snapshot fallback. The capture cadence is unchanged.
-- Local focus and mouse reports stay disabled in replayed terminals. Switching
+- Source focus and mouse modes are not restored in replayed terminals. The
+  viewer consumes its own local pointer reports for navigation. Switching
   between the mirror and other windows does not send synthetic focus bytes into
   the remote prompt. Keyboard and bracketed-paste modes remain available; exiting
   a viewer resets its input-reporting modes before returning to the local shell.

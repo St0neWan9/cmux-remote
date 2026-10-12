@@ -1,11 +1,14 @@
 import SwiftUI
 import CmuxRemoteMac
+import CmuxRemoteClient
 
 /// Host choice and workspace mirroring; terminal work remains in the native cmux workspace.
 struct CompanionView: View {
     @Bindable var model: MacCompanionModel
     @State private var workspaceID: String?
     private let design = MacDesignTokens()
+    private var savedHostIDs: Set<String> { Set(model.connections.compactMap { $0["id"].string }) }
+    private var unpairedHosts: [DiscoveredBridge] { model.devices.filter { !savedHostIDs.contains($0.host.id) } }
     var body: some View {
         MacPreferencePage {
             MacPreferenceRow(title: String(localized: "mac.connect.host", bundle: .interface)) {
@@ -15,18 +18,19 @@ struct CompanionView: View {
                         Section(String(localized: "mac.connected", bundle: .interface)) {
                             ForEach(Array(model.connections.enumerated()), id: \.offset) { _, connection in
                                 if let id = connection["id"].string {
-                                    Text(connection["name"].string ?? String(localized: "mac.untitled", bundle: .interface)).tag(Optional("saved:" + id))
+                                    Text(connection["name"].string ?? String(localized: "mac.unnamedHost", bundle: .interface)).tag(Optional("saved:" + id))
                                 }
                             }
                         }
                     }
-                    if !model.devices.isEmpty {
+                    if !unpairedHosts.isEmpty {
                         Section(String(localized: "mac.nearby", bundle: .interface)) {
-                            ForEach(model.devices) { device in Text(device.host.name).tag(Optional("nearby:" + device.host.id)) }
+                            ForEach(unpairedHosts) { device in Text(device.host.name).tag(Optional("nearby:" + device.host.id)) }
                         }
                     }
                 }.labelsHidden().pickerStyle(.menu).fixedSize()
                 if let note = hostNote { MacPreferenceNote(text: note) }
+                MacPreferenceNote(text: String(localized: "mac.hostListHint", bundle: .interface))
                 HStack(spacing: 8) {
                     Button(String(localized: "mac.refresh", bundle: .interface)) { Task { await model.refresh() } }.disabled(model.busy).fixedSize()
                     if let id = savedHostID {
@@ -44,7 +48,7 @@ struct CompanionView: View {
                         Button(String(localized: "mac.cancel", bundle: .interface)) { Task { await model.cancelEnrollment() } }.fixedSize()
                     }
                     if let code = statusCode {
-                        Label(MacErrorPresentation.message(code), systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red)
+                        Label(MacErrorPresentation.message(code, forWorkspace: true), systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red)
                             .fixedSize(horizontal: false, vertical: true)
                         MacPreferenceNote(text: String(localized: "mac.bridgeHint", bundle: .interface))
                     } else if model.mirroredWorkspaceID != nil {
@@ -58,7 +62,7 @@ struct CompanionView: View {
             }
             MacPreferenceRow(title: String(localized: "mac.workspaces", bundle: .interface), topAligned: model.selectedHostID != nil && !model.workspaces.isEmpty) {
                 if model.selectedHostID == nil {
-                    Text(String(localized: "mac.selectHost", bundle: .interface)).foregroundStyle(.secondary)
+                    Text(String(localized: "mac.selectHostMessage", bundle: .interface)).foregroundStyle(.secondary)
                 } else if !model.workspaces.isEmpty {
                     Table(workspaceItems, selection: workspaceSelection) {
                         TableColumn(String(localized: "mac.column.workspace", bundle: .interface)) { item in Text(item.title).lineLimit(1).help(item.title) }
@@ -68,7 +72,7 @@ struct CompanionView: View {
                     }.disabled(model.busy || workspaceSelection.wrappedValue == nil).fixedSize()
                     MacPreferenceNote(text: String(localized: "mac.snapshotNote", bundle: .interface))
                 } else if !model.busy && model.pendingRequestID == nil && model.errorCode == nil {
-                    Text(String(localized: "mac.workspaces.empty", bundle: .interface)).foregroundStyle(.secondary)
+                    Text(String(localized: "mac.noWorkspacesMessage", bundle: .interface)).foregroundStyle(.secondary)
                 }
             }
         }
@@ -86,9 +90,9 @@ struct CompanionView: View {
     private var hostNote: String? {
         if model.connections.isEmpty && model.devices.isEmpty { return String(localized: "mac.noDevices", bundle: .interface) }
         guard model.selectedHostID != nil else { return nil }
-        return String(localized: savedHostID != nil ? "mac.connected" : "mac.nearby", bundle: .interface)
+        return String(localized: savedHostID != nil ? "mac.connected" : "mac.needsPairing", bundle: .interface)
     }
-    /// Saved and nearby entries carry distinct tags because a saved host can also be advertised nearby.
+    /// Discovery updates reachability; a paired host appears only in the saved section.
     private var hostSelection: Binding<String?> {
         Binding(get: {
             guard let id = model.selectedHostID else { return nil }
