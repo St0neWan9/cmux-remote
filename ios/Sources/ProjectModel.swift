@@ -18,7 +18,7 @@ final class ProjectModel {
     private let read: @Sendable (String, [String: String]) async throws -> TextFileSnapshot
     private let list: @Sendable () async throws -> [ProjectChange]
     init(initialPath: String = "", read: @escaping @Sendable (String, [String: String]) async throws -> TextFileSnapshot, list: @escaping @Sendable () async throws -> [ProjectChange]) {
-        filePath = initialPath; self.read = read; self.list = list
+        filePath = initialPath; resource = initialPath.isEmpty ? .changes : .file; self.read = read; self.list = list
     }
     convenience init(session: SessionDescriptor, client: RemoteClient, initialPath: String = "") {
         self.init(initialPath: initialPath, read: { resource, query in
@@ -30,6 +30,7 @@ final class ProjectModel {
     }
     func suspendReads() { readsEnabled = false; reads.suspend(); busy = false }
     func resumeReads() { readsEnabled = true }
+    func reload() async { await load(resource) }
     func load(_ resource: Resource) async {
         guard readsEnabled else { return }
         await reads.run { [self] request in

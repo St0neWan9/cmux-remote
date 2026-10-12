@@ -111,6 +111,11 @@ struct ConversationReadChecks {
         var slowPageStarted = slowPage.started.stream.makeAsyncIterator(); _ = await slowPageStarted.next()
         await paging.refresh(); await slowPage.finish(); await slowPageTask.value
         check(paging.messages.map(\.id) == ["cancelled-page", "new"], "A periodic refresh cancelled an older page from the unchanged transcript generation")
+        let selectedProject = ProjectModel(initialPath: "README.md", read: { _, _ in TextFileSnapshot(path: "README.md", text: "file", truncated: false) }, list: { [] })
+        await selectedProject.reload()
+        check(selectedProject.resource == .file && selectedProject.content == "file", "Initial file navigation did not load its requested file")
+        await selectedProject.load(.changes); selectedProject.suspendReads(); selectedProject.resumeReads(); await selectedProject.reload()
+        check(selectedProject.resource == .changes && selectedProject.content.isEmpty && selectedProject.filePath == "README.md", "Foreground reload abandoned the selected Changes resource")
         return (count, failures)
     }
 }
