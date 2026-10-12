@@ -2,11 +2,18 @@
 """Generate the small iPhone project without installing a project generator."""
 from pathlib import Path
 import hashlib
+import json
+import re
 
 root = Path(__file__).resolve().parents[1]
 ios = root / 'ios'
 project = ios / 'CmuxRemote.xcodeproj'
 project.mkdir(exist_ok=True)
+release = json.loads((ios / 'Release.json').read_text())
+for field, pattern in {'bundle_id': r'[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+',
+                       'team_id': r'[A-Z0-9]{10}', 'version': r'\d+\.\d+\.\d+'}.items():
+    if not re.fullmatch(pattern, release[field]):
+        raise SystemExit(f'Invalid release setting: {field}')
 
 def key(value):
     return hashlib.sha1(value.encode()).hexdigest()[:24].upper()
@@ -35,8 +42,12 @@ for locale in ('en', 'zh-Hans'):
     info_locale_refs.append(add('info-locale:' + locale, f'isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "{locale}"; path = "Resources/{locale}.lproj/InfoPlist.strings"; sourceTree = "<group>";'))
 info_variant = add('info-strings', f'isa = PBXVariantGroup; children = ({", ".join(info_locale_refs)}); name = InfoPlist.strings; sourceTree = "<group>";')
 info_build = add('info-strings-build', f'isa = PBXBuildFile; fileRef = {info_variant};')
+asset_ref = add('assets', 'isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = "Resources/Assets.xcassets"; sourceTree = "<group>";')
+asset_build = add('assets-build', f'isa = PBXBuildFile; fileRef = {asset_ref};')
+privacy_ref = add('privacy', 'isa = PBXFileReference; lastKnownFileType = text.xml; path = "Resources/PrivacyInfo.xcprivacy"; sourceTree = "<group>";')
+privacy_build = add('privacy-build', f'isa = PBXBuildFile; fileRef = {privacy_ref};')
 products = add('products', f'isa = PBXGroup; children = ({product}); name = Products; sourceTree = "<group>";')
-main = add('main', f'isa = PBXGroup; children = ({", ".join(source_refs + [variant, info_variant, products])}); sourceTree = "<group>";')
+main = add('main', f'isa = PBXGroup; children = ({", ".join(source_refs + [variant, info_variant, asset_ref, privacy_ref, products])}); sourceTree = "<group>";')
 package = add('package', 'isa = XCLocalSwiftPackageReference; relativePath = "..";')
 vendor_package = add('vendor-package', 'isa = XCLocalSwiftPackageReference; relativePath = "../Vendor/CmuxAgentChat";')
 deps, frameworks = [], []
@@ -45,15 +56,15 @@ for name in ('CmuxRemoteCore', 'CmuxRemoteClient', 'CmuxAgentChat'):
     deps.append(dep)
     frameworks.append(add('framework:' + name, f'isa = PBXBuildFile; productRef = {dep};'))
 sources = add('sources', f'isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = ({", ".join(source_builds)}); runOnlyForDeploymentPostprocessing = 0;')
-resources = add('resources', f'isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = ({strings_build}, {info_build}); runOnlyForDeploymentPostprocessing = 0;')
+resources = add('resources', f'isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = ({strings_build}, {info_build}, {asset_build}, {privacy_build}); runOnlyForDeploymentPostprocessing = 0;')
 frameworks_phase = add('frameworks', f'isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = ({", ".join(frameworks)}); runOnlyForDeploymentPostprocessing = 0;')
 project_configs, target_configs = [], []
 for config in ('Debug', 'Release'):
     debug_flags = 'SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)"; SWIFT_OPTIMIZATION_LEVEL = "-Onone";' if config == 'Debug' else 'SWIFT_OPTIMIZATION_LEVEL = "-O";'
     project_configs.append(add('project:' + config, f'isa = XCBuildConfiguration; name = {config}; buildSettings = {{ SDKROOT = iphoneos; IPHONEOS_DEPLOYMENT_TARGET = 17.0; SWIFT_VERSION = 6.0; CLANG_ENABLE_MODULES = YES; {debug_flags} }};'))
     target_configs.append(add('target:' + config, f'''isa = XCBuildConfiguration; name = {config}; buildSettings = {{
-        PRODUCT_NAME = "$(TARGET_NAME)"; PRODUCT_BUNDLE_IDENTIFIER = com.st0newan9.cmux-remote;
-        GENERATE_INFOPLIST_FILE = YES; INFOPLIST_FILE = Info.plist; INFOPLIST_KEY_CFBundleDisplayName = "cmux remote";
+        PRODUCT_NAME = "$(TARGET_NAME)"; PRODUCT_BUNDLE_IDENTIFIER = {release["bundle_id"]};
+        GENERATE_INFOPLIST_FILE = YES; INFOPLIST_FILE = Info.plist; INFOPLIST_KEY_CFBundleDisplayName = {json.dumps(release["display_name"])};
         CREATE_INFOPLIST_SECTION_IN_BINARY = YES;
         INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Connect to your paired cmux Bridge on your local network.";
         INFOPLIST_KEY_NSCameraUsageDescription = "Scan your Mac Bridge pairing code.";
@@ -62,7 +73,7 @@ for config in ('Debug', 'Release'):
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
         INFOPLIST_KEY_UILaunchScreen_Generation = YES;
         SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; TARGETED_DEVICE_FAMILY = "1,2";
-        CODE_SIGN_STYLE = Automatic; MARKETING_VERSION = 0.1.0; CURRENT_PROJECT_VERSION = 1;
+        CODE_SIGN_STYLE = Automatic; DEVELOPMENT_TEAM = {release["team_id"]}; ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon; MARKETING_VERSION = {release["version"]}; CURRENT_PROJECT_VERSION = 1;
         CODE_SIGN_ENTITLEMENTS = CmuxRemote.entitlements;
         SWIFT_STRICT_CONCURRENCY = complete;
     }};'''))

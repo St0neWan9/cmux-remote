@@ -1,0 +1,76 @@
+name: iOS TestFlight
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Marketing version (for example 0.1.0)
+        required: true
+        default: '0.1.0'
+      build_number:
+        description: Optional new build number; defaults to run number × 100 + attempt
+        required: false
+      upload:
+        description: Upload the signed IPA to TestFlight
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: ios-testflight
+  cancel-in-progress: false
+jobs:
+  package:
+    runs-on: macos-15
+    environment: testflight
+    env:
+      CMUX_REMOTE_IOS_VERSION: ${{ inputs.version }}
+      FASTLANE_SKIP_UPDATE_CHECK: '1'
+      FASTLANE_HIDE_CHANGELOG: '1'
+      FASTLANE_DISABLE_COLORS: '1'
+      FASTLANE_OPT_OUT_USAGE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3.12'
+          bundler-cache: true
+          working-directory: ios
+      - name: Select build number
+        env:
+          REQUESTED_BUILD: ${{ inputs.build_number }}
+        run: |
+          build="${REQUESTED_BUILD:-$((GITHUB_RUN_NUMBER * 100 + GITHUB_RUN_ATTEMPT))}"
+          [[ "$build" =~ ^[1-9][0-9]{0,8}$ ]] || { echo 'Invalid build number'; exit 1; }
+          echo "CMUX_REMOTE_IOS_BUILD_NUMBER=$build" >> "$GITHUB_ENV"
+          export CMUX_REMOTE_IOS_BUILD_NUMBER="$build"
+          scripts/package-ios.sh --dry-run
+      - run: scripts/verify.sh
+      - name: Validate Fastlane lanes without accessing Apple
+        working-directory: ios
+        run: bundle exec fastlane lanes
+      - name: Install Metal toolchain if needed
+        run: |
+          if ! xcrun --sdk iphoneos metal --version >/dev/null 2>&1; then
+            xcodebuild -downloadComponent MetalToolchain
+          fi
+      - name: Sign, export and optionally upload
+        env:
+          CMUX_REMOTE_IOS_API_KEY_B64: ${{ secrets.CMUX_REMOTE_IOS_API_KEY_B64 }}
+          CMUX_REMOTE_IOS_API_KEY_ID: ${{ secrets.CMUX_REMOTE_IOS_API_KEY_ID }}
+          CMUX_REMOTE_IOS_API_ISSUER: ${{ secrets.CMUX_REMOTE_IOS_API_ISSUER }}
+          CMUX_REMOTE_IOS_CERT_P12_B64: ${{ secrets.CMUX_REMOTE_IOS_CERT_P12_B64 }}
+          CMUX_REMOTE_IOS_CERT_PASSWORD: ${{ secrets.CMUX_REMOTE_IOS_CERT_PASSWORD }}
+          CMUX_REMOTE_IOS_APP_STORE_APP_ID: ${{ vars.CMUX_REMOTE_IOS_APP_STORE_APP_ID }}
+          UPLOAD_TESTFLIGHT: ${{ inputs.upload }}
+        run: |
+          args=()
+          if [[ "$UPLOAD_TESTFLIGHT" == 'true' ]]; then args+=(--upload); fi
+          python3 scripts/with-ios-signing.py scripts/package-ios.sh "${args[@]}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cmux-remote-ios-${{ env.CMUX_REMOTE_IOS_BUILD_NUMBER }}
+          path: |
+            .build/ios-release/dist/*.ipa
+            .build/ios-release/dist/*.dSYM.zip
+          if-no-files-found: error
+          retention-days: 7

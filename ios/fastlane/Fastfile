@@ -1,0 +1,46 @@
+require_relative "release_config"
+require "fileutils"
+default_platform(:ios)
+
+platform :ios do
+  private_lane :connect_key do
+    %w[CMUX_REMOTE_IOS_API_KEY_PATH CMUX_REMOTE_IOS_API_KEY_ID CMUX_REMOTE_IOS_API_ISSUER].each do |name|
+      UI.user_error!("#{name} is required") if ENV[name].to_s.empty?
+    end
+    app_store_connect_api_key(key_id: ENV.fetch("CMUX_REMOTE_IOS_API_KEY_ID"),
+      issuer_id: ENV.fetch("CMUX_REMOTE_IOS_API_ISSUER"), key_filepath: ENV.fetch("CMUX_REMOTE_IOS_API_KEY_PATH"),
+      duration: 1200, in_house: false)
+  end
+
+  desc "Archive and export this app using an existing Apple Distribution certificate"
+  lane :build_testflight do
+    config = ReleaseConfig.new
+    FileUtils.mkdir_p(config.output)
+    key = connect_key
+    # The caller imports an existing certificate; this lane does not create/revoke one.
+    get_provisioning_profile(api_key: key, app_identifier: config.bundle_id,
+      provisioning_name: config.profile_name, team_id: config.team_id,
+      development: false, platform: "ios", force: false, output_path: config.output)
+    build_app(project: "CmuxRemote.xcodeproj", scheme: "CmuxRemote", configuration: "Release",
+      export_method: "app-store", export_options: config.export_options, xcargs: config.xcargs,
+      archive_path: File.join(config.output, "CmuxRemote.xcarchive"),
+      derived_data_path: File.join(config.output, "DerivedData"),
+      output_directory: File.join(config.output, "dist"), output_name: "CmuxRemote.ipa")
+  end
+
+  desc "Upload a validated signed IPA; no external distribution or tester notifications"
+  lane :upload_testflight do
+    config = ReleaseConfig.new
+    ipa = File.join(config.output, "dist", "CmuxRemote.ipa")
+    UI.user_error!("Archive/export the IPA first") unless File.file?(ipa)
+    # Verify the exported payload before opening an Apple upload session.
+    sh("python3", File.expand_path("../../scripts/check-ios-package.py", __dir__), ipa,
+      "--bundle-id", config.bundle_id, "--version", config.version, "--build-number", config.build_number,
+      "--team-id", config.team_id)
+    options = { api_key: connect_key, app_identifier: config.bundle_id, ipa: ipa,
+      skip_waiting_for_build_processing: true, distribute_external: false, notify_external_testers: false }
+    app_id = ENV["CMUX_REMOTE_IOS_APP_STORE_APP_ID"]
+    options[:apple_id] = app_id unless app_id.to_s.empty?
+    upload_to_testflight(**options)
+  end
+end
