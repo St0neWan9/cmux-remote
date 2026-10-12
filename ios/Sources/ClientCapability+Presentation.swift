@@ -10,7 +10,9 @@ extension ClientCapability {
         case .conversationControl: return String(localized: "capability.conversationControl")
         case .feedRead: return String(localized: "capability.feedRead")
         case .feedReply: return String(localized: "capability.feedReply")
-        default: return String(localized: "capability.additional")
+        case .terminalRead: return String(localized: "capability.terminalRead")
+        case .terminalInput: return String(localized: "capability.terminalInput")
+        @unknown default: return String(localized: "capability.additional")
         }
     }
 }

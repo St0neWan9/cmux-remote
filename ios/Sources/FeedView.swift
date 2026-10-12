@@ -14,10 +14,10 @@ struct FeedView: View {
         let error = model.error
         WhitePage(title: String(localized: "feed.title")) {
             ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    HStack {
-                        Button(String(localized: "feed.pending")) { model.showHistory = false }
-                        Button(String(localized: "feed.history")) { model.showHistory = true }
+                VStack(alignment: .leading, spacing: MobileDesign.sectionGap) {
+                    ActionRow {
+                        Button(String(localized: "feed.pending")) { model.showHistory = false }.buttonStyle(FloatingButtonStyle(prominent: !model.showHistory)).accessibilityAddTraits(!model.showHistory ? .isSelected : [])
+                        Button(String(localized: "feed.history")) { model.showHistory = true }.buttonStyle(FloatingButtonStyle(prominent: model.showHistory)).accessibilityAddTraits(model.showHistory ? .isSelected : [])
                     }.buttonStyle(FloatingButtonStyle())
                     if loading && items.isEmpty { ProgressView() }
                     else if items.isEmpty { Text(String(localized: "feed.empty")).foregroundStyle(.secondary) }
@@ -55,7 +55,7 @@ struct FeedView: View {
                         }.frame(maxWidth: .infinity, alignment: .leading).modifier(FloatingSurface())
                     }
                     if let error { Text(error).foregroundStyle(.red) }
-                }.padding(20).frame(maxWidth: .infinity, alignment: .leading)
+                }.frame(maxWidth: .infinity, alignment: .leading).padding(MobileDesign.pageInset)
             }.refreshable { await model.refresh() }
         }.onDisappear { model.suspendReads() }
         .onChange(of: phase) { _, value in if value != .active { model.suspendReads() } }

@@ -15,8 +15,8 @@ struct ToolDetailCard<Content: View>: View {
                 Text(status).font(.caption).foregroundStyle(failed ? Color.red : Color.secondary)
                     .frame(maxWidth: .infinity, alignment: .trailing)
             }
-        }.padding(16).frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color(white: 0.975), in: RoundedRectangle(cornerRadius: 20))
-            .overlay(RoundedRectangle(cornerRadius: 20).stroke(Color.black.opacity(0.035), lineWidth: 0.5))
+        }.padding(MobileDesign.surfaceInset).frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(white: 0.975), in: RoundedRectangle(cornerRadius: MobileDesign.surfaceRadius))
+            .overlay(RoundedRectangle(cornerRadius: MobileDesign.surfaceRadius).stroke(Color.black.opacity(0.035), lineWidth: 0.5))
     }
 }

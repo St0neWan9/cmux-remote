@@ -16,15 +16,14 @@ struct ProjectView: View {
         let error = model.error
         WhitePage(title: String(localized: "project.title")) {
             ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
+                VStack(alignment: .leading, spacing: MobileDesign.sectionGap) {
                     TextField(String(localized: "project.path"), text: $model.filePath).textInputAutocapitalization(.never).autocorrectionDisabled()
                         .submitLabel(.go).onSubmit { Task { await model.load(.file) } }.accessibilityIdentifier("project.path")
-                        .padding(.horizontal, 16).padding(.vertical, 14).background(Color.white, in: Capsule())
-                        .overlay(Capsule().stroke(Color.black.opacity(0.07), lineWidth: 0.5)).shadow(color: .black.opacity(0.06), radius: 12, y: 3)
-                    HStack {
-                        Button(String(localized: "project.file")) { Task { await model.load(.file) } }.disabled(model.filePath.isEmpty).accessibilityIdentifier("project.file")
-                        Button(String(localized: "project.diff")) { Task { await model.load(.diff) } }.accessibilityIdentifier("project.diff")
-                        Button(String(localized: "project.changes")) { Task { await model.load(.changes) } }.accessibilityIdentifier("project.changes")
+                        .modifier(FloatingInput())
+                    ActionRow {
+                        Button(String(localized: "project.file")) { Task { await model.load(.file) } }.buttonStyle(FloatingButtonStyle(prominent: resource == .file)).disabled(model.filePath.isEmpty).accessibilityIdentifier("project.file")
+                        Button(String(localized: "project.diff")) { Task { await model.load(.diff) } }.buttonStyle(FloatingButtonStyle(prominent: resource == .diff)).accessibilityIdentifier("project.diff")
+                        Button(String(localized: "project.changes")) { Task { await model.load(.changes) } }.buttonStyle(FloatingButtonStyle(prominent: resource == .changes)).accessibilityIdentifier("project.changes")
                     }.buttonStyle(FloatingButtonStyle()).disabled(busy)
                     if busy { ProgressView() }
                     if let error { Text(error).foregroundStyle(.red) }
@@ -49,13 +48,13 @@ struct ProjectView: View {
                         if content.isEmpty && !busy { Text(String(localized: "project.empty_content")).foregroundStyle(.secondary) }
                         Text(content).font(.system(.footnote, design: .monospaced)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
                         if !content.isEmpty {
-                            HStack {
+                            ActionRow {
                                 Button { UIPasteboard.general.string = content } label: { Label(String(localized: "project.copy"), systemImage: "doc.on.doc") }
                                 ShareLink(item: content) { Label(String(localized: "project.share"), systemImage: "square.and.arrow.up") }
                             }.buttonStyle(FloatingButtonStyle())
                         }
                     }
-                }.padding(20)
+                }.frame(maxWidth: .infinity, alignment: .leading).padding(MobileDesign.pageInset)
             }
         }.onDisappear { model.suspendReads() }
         .onChange(of: phase) { _, value in if value != .active { model.suspendReads() } }

@@ -226,3 +226,7 @@
 "voice.unavailable" = "此语言或设备暂不支持本机语音识别，可以继续输入文字。";
 "voice.too_long" = "语音文字超过草稿限制，请结束录音并分段输入。";
 "voice.no_speech" = "没有识别到文字，请重试或直接输入。";
+
+"capability.terminalRead" = "查看终端镜像";
+
+"capability.terminalInput" = "终端镜像输入";

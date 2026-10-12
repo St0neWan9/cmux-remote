@@ -26,7 +26,7 @@ struct MessageRow: View {
                     imageButtons
                 }.frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 5)
             }
-        }.accessibilityIdentifier("message." + message.id)
+        }.accessibilityElement(children: .contain).accessibilityIdentifier("message." + message.id)
     }
     @ViewBuilder private var imageButtons: some View {
         if let openImage {

@@ -226,3 +226,7 @@
 "voice.unavailable" = "On-device recognition is unavailable for this language or device. You can type instead.";
 "voice.too_long" = "The dictated text exceeds the draft limit. Finish and use a shorter passage.";
 "voice.no_speech" = "No speech was recognized. Try again or type your message.";
+
+"capability.terminalRead" = "Terminal mirror viewing";
+
+"capability.terminalInput" = "Terminal mirror input";
