@@ -38,7 +38,7 @@ final class MobileGestureUITests: XCTestCase {
         XCTAssertTrue(app.buttons["chat.back"].waitForExistence(timeout: 5))
         let activity = app.buttons["activity.design-tool"]
         if activity.exists { activity.tap() }
-        let read = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "README.md")).firstMatch
+        let read = app.buttons["tool.disclosure.design-tool"]
         XCTAssertTrue(read.waitForExistence(timeout: 5))
         read.tap()
         let detail = app.buttons["tool.detail.design-tool"]

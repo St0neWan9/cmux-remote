@@ -4,6 +4,7 @@ import SwiftUI
 struct ToolDisclosure<Content: View>: View {
     let title: String
     let symbol: String
+    var identifier = "tool.disclosure"
     @ViewBuilder let content: () -> Content
     @State private var expanded = false
     var body: some View {
@@ -14,7 +15,7 @@ struct ToolDisclosure<Content: View>: View {
                     Text(title).font(.subheadline).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
                     Image(systemName: expanded ? "chevron.down" : "chevron.right").font(.caption.weight(.medium))
                 }.foregroundStyle(.secondary).frame(minHeight: 32).contentShape(Rectangle())
-            }.buttonStyle(.plain).accessibilityValue(expanded ? String(localized: "chat.expanded") : String(localized: "chat.collapsed"))
+            }.buttonStyle(.plain).accessibilityIdentifier(identifier).accessibilityValue(expanded ? String(localized: "chat.expanded") : String(localized: "chat.collapsed"))
             if expanded { content().frame(maxWidth: .infinity, alignment: .leading) }
         }.frame(maxWidth: .infinity, alignment: .leading)
     }
