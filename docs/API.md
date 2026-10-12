@@ -69,11 +69,13 @@ paged read of the underlying committed transcript field.
 `GET /v2/sessions/:id/tool-detail` requires `message_id`, the current history
 `generation`, and a supported `field`: `input`/`output` for a tool or terminal
 capture, or `diff` for an edit. `offset` defaults to zero; `limit` defaults to and
-is capped at 16,384 characters. The response includes `message_id`, `generation`,
+is capped at 16,384 Unicode scalars (at most 64 KiB UTF-8). Offsets and totals also count Unicode scalars, so even an oversized combining sequence can be traversed in bounded pages. The response includes `message_id`, `generation`,
 `field`, `content_id`, `text`, `offset`, `next_offset`, and `total_characters`.
 The client sends `content_id` on later pages. A changed field/replaced transcript
 returns `stale_detail`, requiring an explicit refresh instead of combining text
-from different revisions. Complete JSONL lines only; the 32 MiB transcript read
+from different revisions. Only an explicit first-page re-anchor may use
+`generation=current` with offset zero and no content revision; the response
+returns the current concrete generation for subsequent pages. Complete JSONL lines only; the 32 MiB transcript read
 limit still applies. Tool-detail parsing uses an explicit bounded larger budget;
 it does not increase ordinary conversation snapshots or export arbitrary files.
 

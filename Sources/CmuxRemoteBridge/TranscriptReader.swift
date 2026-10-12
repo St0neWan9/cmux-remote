@@ -47,17 +47,21 @@ public actor TranscriptReader {
     /// Read a tool's complete supported text without inflating ordinary history snapshots.
     public func toolText(path: String, agent: String, messageID: String, generation: String,
                          field: String, offset: Int, contentID: String?, limit: Int) throws -> ToolTextPage {
+        try Task.checkCancellation()
         let snapshot = try history(path: path, agent: agent, beforeSeq: nil, limit: 1)
-        guard snapshot.generation == generation else { throw BridgeError("stale_detail", "The conversation record changed. Reload this detail.", status: 409) }
+        let selectedGeneration = generation == "current" && offset == 0 && contentID == nil ? snapshot.generation : generation
+        guard snapshot.generation == selectedGeneration else { throw BridgeError("stale_detail", "The conversation record changed. Reload this detail.", status: 409) }
         guard observations[path]?.messages.contains(where: { $0.id == messageID }) == true else { throw BridgeError("detail_not_found", "This tool record is unavailable.", status: 404) }
         let handle = try FileHandle(forReadingFrom: URL(fileURLWithPath: path)); defer { try? handle.close() }
         var data = Data()
         while let chunk = try handle.read(upToCount: 65_536), !chunk.isEmpty {
+            try Task.checkCancellation()
             guard data.count + chunk.count <= 33_554_432 else { throw BridgeError("history_too_large", "This conversation exceeds the history read limit.", status: 413) }
             data.append(chunk)
         }
         guard let end = data.lastIndex(of: 10) else { throw BridgeError("detail_not_found", "No complete tool record is available.", status: 404) }
         let lines = String(decoding: data[...end], as: UTF8.self).split(separator: "\n", omittingEmptySubsequences: false).dropLast().map(String.init)
+        try Task.checkCancellation()
         let result = agent == "claude"
             ? ClaudeTranscriptParser(maxBodyCharacters: 33_554_432, maxInputDetailCharacters: 33_554_432).parse(lines: lines, startingSeq: 0)
             : CodexTranscriptParser(maxBodyCharacters: 33_554_432, maxInputDetailCharacters: 33_554_432).parse(lines: lines, startingSeq: 0)
@@ -72,14 +76,15 @@ public actor TranscriptReader {
         default: throw BridgeError("invalid_input", "Select a supported field of a tool record.", status: 422)
         }
         let refreshed = try history(path: path, agent: agent, beforeSeq: nil, limit: 1)
-        guard refreshed.generation == generation else { throw BridgeError("stale_detail", "The conversation record changed during this read.", status: 409) }
+        guard refreshed.generation == selectedGeneration else { throw BridgeError("stale_detail", "The conversation record changed during this read.", status: 409) }
         let digest = IdentityCryptography().digest(Data(text.utf8))
         guard contentID == nil || contentID == digest else { throw BridgeError("stale_detail", "The tool output changed. Reload this detail.", status: 409) }
-        let total = text.count
+        try Task.checkCancellation()
+        let total = text.unicodeScalars.count
         guard offset >= 0, offset <= total else { throw BridgeError("invalid_input", "The text page offset is invalid.", status: 422) }
-        let pageText = String(text.dropFirst(offset).prefix(min(16_384, max(1, limit))))
-        let next = offset + pageText.count
-        return ToolTextPage(messageID: messageID, generation: generation, field: field, contentID: digest,
+        let pageText = String(String.UnicodeScalarView(text.unicodeScalars.dropFirst(offset).prefix(min(16_384, max(1, limit)))))
+        let next = offset + pageText.unicodeScalars.count
+        return ToolTextPage(messageID: messageID, generation: selectedGeneration, field: field, contentID: digest,
                             text: pageText, offset: offset, nextOffset: next < total ? next : nil, totalCharacters: total)
     }
 

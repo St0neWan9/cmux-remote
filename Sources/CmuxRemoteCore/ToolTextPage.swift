@@ -1,6 +1,8 @@
 import Foundation
 
 /// One bounded page of a transcript-derived tool field, bound to its content revision.
+///
+/// Offsets and totals count Unicode scalars, bounding each 16,384-scalar page to 64 KiB UTF-8.
 public struct ToolTextPage: Codable, Sendable {
     public let messageID: String
     public let generation: String
