@@ -22,7 +22,10 @@ struct SocketResponseFixture: Sendable {
             defer { Darwin.close(descriptor) }
             do {
                 var ready = pollfd(fd: descriptor, events: Int16(POLLIN), revents: 0)
-                let clock = ContinuousClock(), deadline = ContinuousClock().now + .seconds(2)
+                // Parallel package tests can delay the cooperative client on a
+                // busy CI runner. Keep the listener alive while it is scheduled;
+                // the response/read checks still have their own short deadline.
+                let clock = ContinuousClock(), deadline = ContinuousClock().now + .seconds(15)
                 while true {
                     let remaining = deadline - clock.now
                     guard remaining > .zero else { throw BridgeError("fixture", "No client connected") }
