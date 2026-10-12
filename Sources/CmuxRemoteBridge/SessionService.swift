@@ -105,7 +105,8 @@ public actor SessionService {
         let record = try await authorizedRecord(id, capability: .conversationRead, access: access)
         guard let path = record.transcript else { throw BridgeError("history_unavailable", "No readable conversation record is available.", status: 404) }
         let reader = reader; let agent = record.descriptor.agent
-        let result = try await reader.history(path: path, agent: agent, beforeSeq: beforeSeq, limit: limit)
+        let result = try await reader.history(path: path, agent: agent, beforeSeq: beforeSeq, limit: limit,
+                                             allowsUncreatedTranscript: record.descriptor.writable)
         try await recheck(record, capability: .conversationRead, access: access)
         return result
     }
