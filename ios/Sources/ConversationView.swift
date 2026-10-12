@@ -26,18 +26,21 @@ struct ConversationView: View {
                         ContentUnavailableView(String(localized: "chat.empty"), systemImage: "bubble.left.and.bubble.right")
                     }
                     ForEach(model.timelineItems) { item in
-                        if item.isActivity { ActivityGroupView(item: item) }
-                        else { MessageRow(message: item.first) }
+                        Group {
+                            if item.isActivity { ActivityGroupView(item: item) }
+                            else { MessageRow(message: item.first) }
+                        }.modifier(HeaderContentEffect())
                     }
                     if let preview = model.preview {
                         VStack(alignment: .leading, spacing: 10) {
                             Label(String(localized: "chat.preview"), systemImage: "ellipsis.bubble").font(.caption).foregroundStyle(.secondary)
                             MarkdownMessageView(text: preview)
-                        }
+                        }.modifier(HeaderContentEffect())
                     }
                     if let error = model.error {
                         Label(error, systemImage: "exclamationmark.circle").font(.footnote).foregroundStyle(.red).padding(12)
                             .frame(maxWidth: .infinity, alignment: .leading).background(Color.red.opacity(0.055), in: RoundedRectangle(cornerRadius: 14))
+                            .modifier(HeaderContentEffect())
                     }
                     Color.clear.frame(height: 1).id("latest")
                         .background {
@@ -48,6 +51,7 @@ struct ConversationView: View {
                         }
                 }.padding(.horizontal, 18).padding(.top, 12).padding(.bottom, 18)
             }
+            .scrollClipDisabled()
             .coordinateSpace(name: "chatTimeline")
             .onPreferenceChange(TimelineBottomPreferenceKey.self) { bottom in
                 latestVisible = bottom > 0 && bottom <= viewport.size.height + 32
@@ -115,15 +119,5 @@ struct ConversationView: View {
             } label: { Image(systemName: "ellipsis").font(.system(size: 22, weight: .medium)).frame(width: 48, height: 44).background(Color.white, in: Capsule()).shadow(color: .black.opacity(0.07), radius: 10, y: 3) }
                 .tint(.primary).accessibilityLabel(String(localized: "chat.more")).accessibilityIdentifier("chat.more")
         }.padding(.horizontal, 14).padding(.vertical, 8)
-            .background {
-                Rectangle().fill(.regularMaterial)
-                    .overlay(Color.white.opacity(0.25))
-                    .mask(LinearGradient(stops: [
-                        .init(color: .white, location: 0),
-                        .init(color: .white, location: 0.9),
-                        .init(color: .clear, location: 1)
-                    ], startPoint: .top, endPoint: .bottom))
-                    .ignoresSafeArea(edges: .top)
-            }
     }
 }
