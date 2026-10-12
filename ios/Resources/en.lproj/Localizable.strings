@@ -190,3 +190,21 @@
 "tool.card.shell" = "Shell";
 
 "tool.card.success" = "Succeeded";
+
+"tool.detail.open" = "View full record";
+
+"tool.detail.title" = "Tool details";
+
+"tool.detail.input" = "Input";
+
+"tool.detail.output" = "Output";
+
+"tool.detail.empty" = "No text has been recorded for this field.";
+
+"tool.detail.previous" = "Previous";
+
+"tool.detail.next" = "Next";
+
+"tool.detail.changed" = "This record has changed. Refresh to read the current version.";
+
+"tool.detail.unavailable" = "This Bridge does not support full tool records yet. Update the Bridge and retry.";

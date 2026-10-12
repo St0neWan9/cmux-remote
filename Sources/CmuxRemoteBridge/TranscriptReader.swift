@@ -44,6 +44,45 @@ public actor TranscriptReader {
         observations[path] = Observation(inode: inode, size: size.intValue, modified: modified, generation: generation, messages: messages, presentation: presentation)
         return page(messages, presentation: presentation, beforeSeq: beforeSeq, limit: limit, generation: generation)
     }
+    /// Read a tool's complete supported text without inflating ordinary history snapshots.
+    public func toolText(path: String, agent: String, messageID: String, generation: String,
+                         field: String, offset: Int, contentID: String?, limit: Int) throws -> ToolTextPage {
+        let snapshot = try history(path: path, agent: agent, beforeSeq: nil, limit: 1)
+        guard snapshot.generation == generation else { throw BridgeError("stale_detail", "The conversation record changed. Reload this detail.", status: 409) }
+        guard observations[path]?.messages.contains(where: { $0.id == messageID }) == true else { throw BridgeError("detail_not_found", "This tool record is unavailable.", status: 404) }
+        let handle = try FileHandle(forReadingFrom: URL(fileURLWithPath: path)); defer { try? handle.close() }
+        var data = Data()
+        while let chunk = try handle.read(upToCount: 65_536), !chunk.isEmpty {
+            guard data.count + chunk.count <= 33_554_432 else { throw BridgeError("history_too_large", "This conversation exceeds the history read limit.", status: 413) }
+            data.append(chunk)
+        }
+        guard let end = data.lastIndex(of: 10) else { throw BridgeError("detail_not_found", "No complete tool record is available.", status: 404) }
+        let lines = String(decoding: data[...end], as: UTF8.self).split(separator: "\n", omittingEmptySubsequences: false).dropLast().map(String.init)
+        let result = agent == "claude"
+            ? ClaudeTranscriptParser(maxBodyCharacters: 33_554_432, maxInputDetailCharacters: 33_554_432).parse(lines: lines, startingSeq: 0)
+            : CodexTranscriptParser(maxBodyCharacters: 33_554_432, maxInputDetailCharacters: 33_554_432).parse(lines: lines, startingSeq: 0)
+        guard let message = (result.updatedMessages + result.messages).first(where: { $0.id == messageID }) else { throw BridgeError("detail_not_found", "This tool record is unavailable.", status: 404) }
+        let text: String
+        switch (message.kind, field) {
+        case (.toolUse(let tool), "input"): text = tool.inputDetail ?? ""
+        case (.toolUse(let tool), "output"): text = tool.output ?? ""
+        case (.terminal(let tool), "input"): text = tool.command
+        case (.terminal(let tool), "output"): text = tool.output ?? ""
+        case (.fileEdit(let tool), "diff"): text = tool.unifiedDiff ?? ""
+        default: throw BridgeError("invalid_input", "Select a supported field of a tool record.", status: 422)
+        }
+        let refreshed = try history(path: path, agent: agent, beforeSeq: nil, limit: 1)
+        guard refreshed.generation == generation else { throw BridgeError("stale_detail", "The conversation record changed during this read.", status: 409) }
+        let digest = IdentityCryptography().digest(Data(text.utf8))
+        guard contentID == nil || contentID == digest else { throw BridgeError("stale_detail", "The tool output changed. Reload this detail.", status: 409) }
+        let total = text.count
+        guard offset >= 0, offset <= total else { throw BridgeError("invalid_input", "The text page offset is invalid.", status: 422) }
+        let pageText = String(text.dropFirst(offset).prefix(min(16_384, max(1, limit))))
+        let next = offset + pageText.count
+        return ToolTextPage(messageID: messageID, generation: generation, field: field, contentID: digest,
+                            text: pageText, offset: offset, nextOffset: next < total ? next : nil, totalCharacters: total)
+    }
+
     private func page(_ messages: [ChatMessage], presentation: TranscriptResponseReader.Result, beforeSeq: Int?, limit: Int, generation: UUID) -> ConversationSnapshot {
         let eligible = messages.filter { beforeSeq == nil || $0.seq < beforeSeq! }
         let count = min(max(limit, 1), 200)

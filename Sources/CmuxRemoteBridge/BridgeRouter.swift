@@ -82,6 +82,12 @@ public struct BridgeRouter: Sendable {
                 }
                 switch (method, path[3]) {
                 case ("GET", "history"): data = try encode(await service.history(id: id, beforeSeq: query["before_seq"].flatMap(Int.init), limit: query["limit"].flatMap(Int.init) ?? 100, access: access))
+                case ("GET", "tool-detail"):
+                    guard let messageID = query["message_id"], let generation = query["generation"], let field = query["field"] else { throw BridgeError("invalid_input", "A tool record, generation and field are required.") }
+                    if let offset = query["offset"], Int(offset) == nil { throw BridgeError("invalid_input", "The text offset is invalid.") }
+                    if let limit = query["limit"], Int(limit) == nil { throw BridgeError("invalid_input", "The text page size is invalid.") }
+                    data = try encode(await service.toolText(id: id, messageID: messageID, generation: generation, field: field,
+                                                            offset: query["offset"].flatMap(Int.init) ?? 0, contentID: query["content_id"], limit: query["limit"].flatMap(Int.init) ?? 16_384, access: access))
                 case ("GET", "preview"): data = try encode(await service.preview(id: id, access: access))
                 case ("GET", "changes"): data = try encode(await service.changes(id: id, access: access))
                 case ("GET", "diff"): data = try encode(await service.diff(id: id, path: query["path"], access: access))

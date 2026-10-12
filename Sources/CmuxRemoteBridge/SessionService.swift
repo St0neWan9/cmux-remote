@@ -106,6 +106,17 @@ public actor SessionService {
         return result
     }
 
+    /// Returns a bounded, revision-bound page from an authorized session's tool record.
+    public func toolText(id: String, messageID: String, generation: String, field: String,
+                         offset: Int, contentID: String?, limit: Int, access: SessionAccess? = nil) async throws -> ToolTextPage {
+        let record = try await authorizedRecord(id, capability: .conversationRead, access: access)
+        guard let path = record.transcript else { throw BridgeError("history_unavailable", "No readable conversation record is available.", status: 404) }
+        let result = try await reader.toolText(path: path, agent: record.descriptor.agent, messageID: messageID,
+                                             generation: generation, field: field, offset: offset, contentID: contentID, limit: limit)
+        try await recheck(record, capability: .conversationRead, access: access)
+        return result
+    }
+
     public func preview(id: String, access: SessionAccess? = nil) async throws -> PreviewSnapshot {
         _ = try await sessions()
         let record = try await authorizedRecord(id, capability: .conversationRead, access: access)

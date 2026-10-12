@@ -7,6 +7,7 @@ struct MessageRow: View {
     let message: ChatMessage
     var projectRoot: String?
     var openFile: ((String) -> Void)?
+    var openDetail: ((String, String) -> Void)?
     var body: some View {
         Group {
             if message.role == .user, case .prose(let value) = message.kind {
@@ -28,6 +29,12 @@ struct MessageRow: View {
                 .buttonStyle(FloatingButtonStyle())
         }
     }
+    @ViewBuilder private func detailButton(_ field: String) -> some View {
+        if let openDetail {
+            Button(String(localized: "tool.detail.open")) { openDetail(message.id, field) }
+                .font(.footnote).buttonStyle(.plain).accessibilityIdentifier("tool.detail." + message.id)
+        }
+    }
     @ViewBuilder private var agentContent: some View {
         switch message.kind {
         case .prose(let value): MarkdownMessageView(text: value.text)
@@ -39,6 +46,7 @@ struct MessageRow: View {
                         if let input = value.inputDetail, !input.isEmpty { ToolCodeBlock(text: input) }
                         if let output = value.output, !output.isEmpty { ToolCodeBlock(text: output) }
                         ForEach(value.referencedPaths ?? [], id: \.self) { path in referenceButton(path) }
+                        detailButton(value.output == nil ? "input" : "output")
                     }.frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
@@ -50,6 +58,7 @@ struct MessageRow: View {
                     VStack(alignment: .leading, spacing: 12) {
                         ToolCodeBlock(text: "$ " + value.command)
                         if let output = value.output, !output.isEmpty { ToolCodeBlock(text: output).foregroundStyle(.secondary) }
+                        detailButton(value.output == nil ? "input" : "output")
                         if let seconds = value.durationSeconds, seconds.isFinite && seconds >= 0 { ResponseRunLabel(seconds: seconds, recorded: true) }
                     }.frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -60,6 +69,7 @@ struct MessageRow: View {
                     VStack(alignment: .leading, spacing: 12) {
                         if let diff = value.unifiedDiff, !diff.isEmpty { ToolCodeBlock(text: diff) }
                         referenceButton(value.filePath)
+                        detailButton("diff")
                     }.frame(maxWidth: .infinity, alignment: .leading)
                 }
             }

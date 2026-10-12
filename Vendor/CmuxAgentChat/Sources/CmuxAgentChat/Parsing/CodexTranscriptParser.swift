@@ -29,14 +29,23 @@ public struct CodexTranscriptParser: Sendable {
         "app", "session_id", "plan",
     ]
 
-    private let budget = TranscriptTextBudget()
+    private let budget: TranscriptTextBudget
     private let timestamps = TranscriptTimestampParser()
     private let attachmentTokens = ChatAttachmentTokenExtractor()
     private let referencedPaths = ChatToolReferencedPathExtractor()
     let artifactText = ChatArtifactTextReferenceExtractor()
 
-    /// Creates a Codex transcript parser.
-    public init() {}
+    /// Creates a Codex transcript parser with bounded text limits.
+    ///
+    /// - Parameters:
+    ///   - maxBodyCharacters: Body/output/diff limit; history defaults to 16,384.
+    ///   - maxInputDetailCharacters: Input-detail limit; history defaults to 2,048.
+    ///
+    /// Explicit detail readers may choose larger limits, capped at 32 Mi characters.
+    public init(maxBodyCharacters: Int = 16_384, maxInputDetailCharacters: Int = 2_048) {
+        budget = TranscriptTextBudget(maxBodyCharacters: min(33_554_432, max(1, maxBodyCharacters)),
+                                      maxInputDetailCharacters: min(33_554_432, max(1, maxInputDetailCharacters)))
+    }
 
     /// Parses a contiguous run of JSONL lines into chat messages.
     ///
