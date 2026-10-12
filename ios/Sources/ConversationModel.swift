@@ -93,9 +93,9 @@ final class ConversationModel {
             draft = ""; stopRequested = false; await refresh(); jumpToLatest += 1
         } catch { self.error = ErrorPresentation().message(error) }
     }
-    func interrupt() async {
+    func interrupt(hard: Bool = false) async {
         guard !busy else { return }; busy = true; defer { busy = false }
-        do { _ = try await client.post("/v1/sessions/\(session.id)/interrupt", body: InterruptRequest(), as: MutationReceipt.self); markInterrupted(); await refresh() }
+        do { _ = try await client.post("/v1/sessions/\(session.id)/interrupt", body: InterruptRequest(hard: hard), as: MutationReceipt.self); markInterrupted(); await refresh() }
         catch { self.error = ErrorPresentation().message(error) }
     }
 }

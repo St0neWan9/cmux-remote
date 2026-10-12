@@ -11,8 +11,10 @@ struct ConversationView: View {
     @State private var latestVisible = true
     @State private var initiallyScrolled = false
     @State private var showProject = false
+    @State private var selectedFile = ""
     @State private var showFeed = false
     @State private var showTiming = false
+    @State private var confirmHardStop = false
     private let hostName: String
     init(session: SessionDescriptor, client: RemoteClient, hostName: String = "") {
         _model = State(initialValue: ConversationModel(session: session, client: client)); self.hostName = hostName
@@ -31,8 +33,8 @@ struct ConversationView: View {
                             if let response = model.responses.first(where: { $0.firstMessageID == item.id }), let seconds = response.durationSeconds {
                                 ResponseRunLabel(seconds: seconds, recorded: response.recordedDuration)
                             }
-                            if item.isActivity { ActivityGroupView(item: item) }
-                            else { MessageRow(message: item.first) }
+                            if item.isActivity { ActivityGroupView(item: item, projectRoot: model.session.cwd, openFile: model.client.allows(.projectRead) ? { selectedFile = $0; showProject = true } : nil) }
+                            else { MessageRow(message: item.first, projectRoot: model.session.cwd, openFile: model.client.allows(.projectRead) ? { selectedFile = $0; showProject = true } : nil) }
                             if let response = model.responses.first(where: { $0.lastMessageID == item.id }), response.completed, case .prose = item.first.kind {
                                 ResponseFooter(response: response, text: model.responseText(response)) { text in
                                     let quoted = text.split(separator: "\n", omittingEmptySubsequences: false).map { "> " + $0 }.joined(separator: "\n")
@@ -104,12 +106,12 @@ struct ConversationView: View {
                     } else { Text(String(localized: "chat.working")).font(.footnote) }; Spacer(); Label(model.session.agent.capitalized, systemImage: "sparkles").font(.caption) }
                         .foregroundStyle(.secondary).padding(.horizontal, 12)
                 } else if !model.canSend { Text(String(localized: "sessions.read_only")).font(.caption).foregroundStyle(.secondary) }
-                ChatComposer(draft: $model.draft, canSend: model.canSend, busy: model.busy, working: model.working,
+                ChatComposer(draft: $model.draft, canSend: model.canSend, busy: model.busy, working: model.hasActiveResponse,
                              send: { Task { await model.send() } }, stop: { Task { await model.interrupt() } },
-                             showProject: { showProject = true }, showFeed: { showFeed = true })
+                             canReadProject: model.client.allows(.projectRead), canReadFeed: model.client.allows(.feedRead), showProject: { selectedFile = ""; showProject = true }, showFeed: { showFeed = true })
             }.padding(.horizontal, 14).padding(.top, 14).padding(.bottom, 10)
         }
-        .navigationDestination(isPresented: $showProject) { ProjectView(session: model.session, client: model.client) }
+        .navigationDestination(isPresented: $showProject) { ProjectView(session: model.session, client: model.client, initialPath: selectedFile) }
         .navigationDestination(isPresented: $showFeed) { FeedView(client: model.client) }
         .sheet(isPresented: $showTiming) {
             NavigationStack {
@@ -125,6 +127,10 @@ struct ConversationView: View {
                 }
             }
         }
+        .alert(String(localized: "chat.hard_stop"), isPresented: $confirmHardStop) {
+            Button(String(localized: "chat.hard_stop"), role: .destructive) { Task { await model.interrupt(hard: true) } }
+            Button(String(localized: "pair.cancel"), role: .cancel) {}
+        } message: { Text(String(localized: "chat.hard_stop_note")) }
         .task(id: phase) {
             guard phase == .active else { return }; await model.refresh()
             let ticker = RefreshTicker(); defer { ticker.stop() }
@@ -142,10 +148,13 @@ struct ConversationView: View {
             }.frame(maxWidth: .infinity, alignment: .leading)
             Menu {
                 Button { showTiming = true } label: { Label(String(localized: "chat.timing"), systemImage: "clock") }
-                Button { showProject = true } label: { Label(String(localized: "project.title"), systemImage: "doc.text.magnifyingglass") }
-                Button { showFeed = true } label: { Label(String(localized: "feed.title"), systemImage: "checkmark.bubble") }
+                if model.client.allows(.projectRead) { Button { selectedFile = ""; showProject = true } label: { Label(String(localized: "project.title"), systemImage: "doc.text.magnifyingglass") } }
+                if model.client.allows(.feedRead) { Button { showFeed = true } label: { Label(String(localized: "feed.title"), systemImage: "checkmark.bubble") } }
                 Button { Task { await model.refresh() } } label: { Label(String(localized: "chat.refresh"), systemImage: "arrow.clockwise") }
-                if model.canSend { Button { Task { await model.interrupt() } } label: { Label(String(localized: "chat.stop"), systemImage: "stop.circle") } }
+                if model.canSend {
+                    Button { Task { await model.interrupt() } } label: { Label(String(localized: "chat.stop"), systemImage: "stop.circle") }
+                    Button(role: .destructive) { confirmHardStop = true } label: { Label(String(localized: "chat.hard_stop"), systemImage: "stop.circle.fill") }
+                }
             } label: { Image(systemName: "ellipsis").font(.system(size: 22, weight: .medium)).frame(width: 48, height: 44).background(Color.white, in: Capsule()).shadow(color: .black.opacity(0.07), radius: 10, y: 3) }
                 .tint(.primary).accessibilityLabel(String(localized: "chat.more")).accessibilityIdentifier("chat.more")
         }.padding(.horizontal, 14).padding(.vertical, 8)

@@ -7,7 +7,7 @@ info = json.loads(subprocess.check_output(['swift', '-print-target-info']))
 triple = info['target']['unversionedTriple']
 build = root / '.build' / triple / 'debug'
 args = ['swiftc', '-parse-as-library', '-swift-version', '6', '-I', str(build / 'Modules')]
-for name in ['AppModel', 'ConversationModel', 'PairingStore', 'DeviceIdentityStore', 'SecureDeviceStore', 'ErrorPresentation', 'RefreshTicker', 'MarkdownBlock']:
+for name in ['AppModel', 'ConversationModel', 'PairingStore', 'DeviceIdentityStore', 'SecureDeviceStore', 'ErrorPresentation', 'RefreshTicker', 'MarkdownBlock', 'ProjectModel', 'FeedModel']:
     args.append(str(root / 'ios' / 'Sources' / (name + '.swift')))
 args.append(str(root / 'scripts/fixtures/PhoneStateChecks.swift'))
 for module in ['CmuxRemoteCore', 'CmuxRemoteClient', 'CmuxAgentChat']:

@@ -6,14 +6,17 @@ public final class RemoteClient: Sendable {
     private let runtime: RemoteClientRuntime
     public let canControlConversations: Bool
     public let canReplyFeed: Bool
+    private let capabilities: Set<ClientCapability>
+    public func allows(_ capability: ClientCapability) -> Bool { capabilities.contains(capability) }
     /// Explicit legacy mode; the owner must separately enable it on the Bridge.
     public init(pairing: PairingConfiguration) {
-        runtime = RemoteClientRuntime(pairing: pairing, connection: nil); canControlConversations = true; canReplyFeed = true
+        runtime = RemoteClientRuntime(pairing: pairing, connection: nil); canControlConversations = true; canReplyFeed = true; capabilities = Set(ClientCapability.allCases)
     }
     public init(connection: AuthorizedConnection) throws {
         try connection.validate()
         let pairing = try PairingConfiguration(host: connection.endpoint.host, port: connection.endpoint.port, token: String(repeating: "0", count: 32), certificateSHA256: connection.host.certificateSHA256)
         runtime = RemoteClientRuntime(pairing: pairing, connection: connection)
+        capabilities = Set(connection.grant.value.scope.capabilities)
         canControlConversations = connection.grant.value.scope.capabilities.contains(.conversationControl)
         canReplyFeed = connection.grant.value.scope.capabilities.contains(.feedReply)
     }

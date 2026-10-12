@@ -89,7 +89,7 @@ struct PairingView: View {
             } message: {
                 Text(String(localized: "pair.trust_instructions") + "\n" + (selectedBridge?.host.id ?? ""))
             }
-            .sheet(isPresented: $scanning) {
+            .fullScreenCover(isPresented: $scanning) {
                 NavigationStack {
                     QRScannerView { code in
                         scanning = false

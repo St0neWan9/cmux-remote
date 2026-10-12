@@ -8,6 +8,8 @@ struct ChatComposer: View {
     let working: Bool
     let send: () -> Void
     let stop: () -> Void
+    var canReadProject = true
+    var canReadFeed = true
     let showProject: () -> Void
     let showFeed: () -> Void
     @FocusState private var focused: Bool
@@ -17,8 +19,8 @@ struct ChatComposer: View {
     var body: some View {
         HStack(alignment: .center, spacing: 10) {
             Menu {
-                Button(action: showProject) { Label(String(localized: "project.title"), systemImage: "doc.text.magnifyingglass") }
-                Button(action: showFeed) { Label(String(localized: "feed.title"), systemImage: "checkmark.bubble") }
+                if canReadProject { Button(action: showProject) { Label(String(localized: "project.title"), systemImage: "doc.text.magnifyingglass") } }
+                if canReadFeed { Button(action: showFeed) { Label(String(localized: "feed.title"), systemImage: "checkmark.bubble") } }
             } label: { Image(systemName: "plus").font(.system(size: 23, weight: .medium)).frame(width: 36, height: 42) }
                 .tint(.primary).accessibilityLabel(String(localized: "chat.actions")).accessibilityIdentifier("chat.actions")
             TextField(String(localized: "chat.follow_up"), text: $draft, axis: .vertical)

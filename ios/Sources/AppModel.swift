@@ -8,6 +8,10 @@ import CmuxRemoteClient
 final class AppModel {
     var client: RemoteClient?
     var sessions: [SessionDescriptor] = []
+    var workspaces: [WorkspaceSummary] = []
+    var hostIdentity: String? { saved?.host.id }
+    var hostCertificate: String? { saved?.host.certificateSHA256 }
+    var endpoint: String? { saved.map { $0.endpoint.host + ":" + String($0.endpoint.port) } }
     var error: String?
     var loading = false
     var host = ""
@@ -19,6 +23,9 @@ final class AppModel {
     private let identityKey: @MainActor () throws -> Data
     private let makeEnrollment: @MainActor (SignedValue<EnrollmentBootstrap>, Data, BridgeEndpoint?) throws -> any DeviceEnrolling
     private let enrollmentTicks: @MainActor () -> (stream: AsyncStream<Void>, stop: @MainActor () -> Void)
+    private let fetchSessions: @Sendable (RemoteClient) async throws -> [SessionDescriptor]
+    private let fetchWorkspaces: @Sendable (RemoteClient) async throws -> [WorkspaceSummary]
+    private var refreshGeneration = UUID()
     private var saved: AuthorizedConnection?
     private var enrollmentTask: Task<Void, Never>?
     private var restored = false
@@ -28,8 +35,14 @@ final class AppModel {
     init(discovery: BridgeDiscovery = BridgeDiscovery(), store: PairingStore = PairingStore(),
          identityKey: @escaping @MainActor () throws -> Data = { try DeviceIdentityStore().privateKey() },
          makeEnrollment: @escaping @MainActor (SignedValue<EnrollmentBootstrap>, Data, BridgeEndpoint?) throws -> any DeviceEnrolling = { bootstrap, key, endpoint in try EnrollmentClient(bootstrap: bootstrap, privateKey: key, name: "cmux iPhone", kind: "iphone", endpoint: endpoint) },
+         fetchSessions: @escaping @Sendable (RemoteClient) async throws -> [SessionDescriptor] = { try await $0.get("/v1/sessions", as: [SessionDescriptor].self) },
+         fetchWorkspaces: @escaping @Sendable (RemoteClient) async throws -> [WorkspaceSummary] = { client in
+             let value = try await client.get("/v1/workspaces", as: JSONValue.self)
+             return (value["workspaces"].array ?? []).compactMap(WorkspaceSummary.init(json:))
+         },
          enrollmentTicks: @escaping @MainActor () -> (stream: AsyncStream<Void>, stop: @MainActor () -> Void) = { let ticker = RefreshTicker(); return (ticker.start(), { ticker.stop() }) }) {
         self.discovery = discovery; self.store = store; self.identityKey = identityKey; self.makeEnrollment = makeEnrollment; self.enrollmentTicks = enrollmentTicks
+        self.fetchSessions = fetchSessions; self.fetchWorkspaces = fetchWorkspaces
     }
     func restorePairing() {
         guard !restored else { return }; restored = true
@@ -158,12 +171,19 @@ final class AppModel {
         catch { candidate.close(); self.error = ErrorPresentation().message(error) }
     }
     func refresh() async {
-        guard let client else { return }; loading = true; defer { loading = false }
+        guard let client else { return }; let request = UUID(); refreshGeneration = request; loading = true
+        defer { if refreshGeneration == request { loading = false } }
         do {
-            let discovered = try await client.get("/v1/sessions", as: [SessionDescriptor].self)
+            let discovered = client.allows(.conversationRead) ? try await fetchSessions(client) : []
+            guard self.client === client, refreshGeneration == request, !Task.isCancelled else { return }
             sessions = discovered.sorted { if $0.writable != $1.writable { return $0.writable }; return $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+            if client.allows(.workspaceRead) {
+                let metadata = try await fetchWorkspaces(client)
+                guard self.client === client, refreshGeneration == request, !Task.isCancelled else { return }
+                workspaces = metadata
+            }
             error = nil
-        } catch { self.error = ErrorPresentation().message(error) }
+        } catch { if self.client === client, refreshGeneration == request, !Task.isCancelled { self.error = ErrorPresentation().message(error) } }
     }
-    func unpair() { enrollmentGeneration = UUID(); stopEnrollmentMonitor(); client?.close(); client = nil; saved = nil; sessions = []; store.remove(); store.removeConnection(); store.disableLegacy() }
+    func unpair() { refreshGeneration = UUID(); loading = false; enrollmentGeneration = UUID(); stopEnrollmentMonitor(); client?.close(); client = nil; saved = nil; sessions = []; workspaces = []; store.remove(); store.removeConnection(); store.disableLegacy() }
 }
