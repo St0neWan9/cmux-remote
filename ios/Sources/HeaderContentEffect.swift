@@ -6,8 +6,8 @@ struct HeaderContentEffect: ViewModifier {
         content.visualEffect { effect, geometry in
             let top = Float(geometry.frame(in: .named("chatTimeline")).minY)
             return effect
-                .layerEffect(ShaderLibrary.headerBlurHorizontal(.float(top)), maxSampleOffset: CGSize(width: 20, height: 0))
-                .layerEffect(ShaderLibrary.headerBlurVertical(.float(top)), maxSampleOffset: CGSize(width: 0, height: 20))
+                .layerEffect(ShaderLibrary.headerBlurHorizontal(.float(top)), maxSampleOffset: CGSize(width: 11, height: 0))
+                .layerEffect(ShaderLibrary.headerBlurVertical(.float(top)), maxSampleOffset: CGSize(width: 0, height: 11))
         }
     }
 }
