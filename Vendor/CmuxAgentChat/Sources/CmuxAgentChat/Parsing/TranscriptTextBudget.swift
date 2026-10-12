@@ -65,7 +65,7 @@ struct TranscriptTextBudget: Sendable {
     ///   - limit: The maximum character count.
     /// - Returns: The original text, or a truncated copy ending in `…`.
     private func truncated(_ text: String, limit: Int) -> String {
-        guard text.count > limit else { return text }
-        return String(text.prefix(limit)) + "…"
+        guard text.unicodeScalars.count > limit else { return text }
+        return String(String.UnicodeScalarView(text.unicodeScalars.prefix(limit))) + "…"
     }
 }

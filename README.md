@@ -10,13 +10,21 @@ Requires macOS 14+ and Swift 6. The iPhone app requires iOS 17+.
 
 ```sh
 swift build
-.build/debug/cmux-remote init
-.build/debug/cmux-remote serve
+.build/debug/cmux-remote serve --pair
 ```
 
-`init` creates a private state directory, a random bearer credential and a self-signed TLS certificate. `serve` defaults to loopback. For your phone, use `serve --listen 0.0.0.0`, then run `pairing --host <your-Mac-LAN-IP>` locally and enter its pairing information in the app. Treat the pairing output as a password. The app pins the exact TLS certificate fingerprint before sending authenticated requests.
+`serve --pair` opens a short-lived enrollment window and displays a QR code. Scan it in the iPhone app, then approve that exact device on the Mac. The QR supplies host identity and certificate trust; it no longer contains a permanent shared token. The phone saves its own private identity and signed grant. Bonjour finds nearby Bridges, while QR and manual entry remain available when discovery is unavailable.
 
-The socket path can be overridden with `--socket <path>` or `CMUX_SOCKET_PATH`. The Bridge does not change cmux access settings. If its process is denied, enable an appropriate cmux automation/password policy explicitly. Pass a socket password through `CMUX_REMOTE_SOCKET_PASSWORD`; this is separate from the phone bearer credential.
+```sh
+.build/debug/cmux-remote enrollment pending
+.build/debug/cmux-remote enrollment approve REQUEST_ID --workspace WORKSPACE_UUID --control
+.build/debug/cmux-remote clients list
+.build/debug/cmux-remote clients revoke CLIENT_ID
+```
+
+Each device has separately revocable access to explicitly approved workspaces. Omit `--control` for viewing-only access. The new protocol is documented in [Connection v2](docs/CONNECTION-V2.md), including bootstrap verification, owner commands, per-request signatures, endpoint relocation and legacy migration. `serve --legacy` is an explicit migration mode; ordinary v2 enrollment never promotes an old shared token.
+
+Open official cmux and run the Bridge **inside a cmux terminal**. The default `cmuxOnly` socket mode rejects processes started outside cmux, including the bundled CLI. `--socket`, `CMUX_SOCKET_PATH` and `--cli` can select the installed socket/CLI; they do not bypass its access policy. The Bridge never changes socket settings. Agent input uses the existing official cmux session, and no provider connection is created by this app.
 
 Generate and build the phone project:
 
@@ -33,6 +41,14 @@ Choose your own signing team to install on a physical iPhone. There is no depend
 - [Detailed design](docs/DESIGN.md)
 - [API and source mapping](docs/API.md)
 - [Development and validation](docs/DEVELOPMENT.md)
+- [Native Remote groups and terminal mirrors](docs/MAC-EXTENSION.md)
+- [Planned shared discovery, enrollment, and Mac mirroring](docs/UNIFIED-CONNECTION-PLAN.md)
+
+LAN discovery and per-client authorization are shared by the iPhone client and
+the Mac Companion. A public sidebar extension and snapshot-based terminal mirror
+are available as a development implementation; see the Mac guide for build,
+enrollment and capability requirements. Native/lossless mirror parity and a
+physical two-Mac acceptance run are not established by the package tests.
 
 Run `scripts/verify.sh` for package tests and build. The first implementation is a development baseline, not a promise of complete provider-version compatibility. Live screen extraction is a best-effort preview; transcript messages replace it when committed. Historical sessions without a verified live surface are read-only. Codex Feed actions only work when cmux exposes an actionable request.
 
