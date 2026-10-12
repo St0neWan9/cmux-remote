@@ -22,6 +22,7 @@ struct ConversationView: View {
     @State private var photoItems: [PhotosPickerItem] = []
     @State private var photoLoadTask: Task<Void, Never>?
     @State private var confirmPendingReset = false
+    @State private var selectedImage: ConversationImageReference?
     @State private var selectedToolDetail: ToolDetailReference?
     private let hostName: String
     init(model: ConversationModel, hostName: String = "") {
@@ -41,8 +42,8 @@ struct ConversationView: View {
                             if let response = model.responses.first(where: { $0.firstMessageID == item.id }), let seconds = response.durationSeconds {
                                 ResponseRunLabel(seconds: seconds, recorded: response.recordedDuration)
                             }
-                            if item.isActivity { ActivityGroupView(item: item, projectRoot: model.session.cwd, openFile: model.client.allows(.projectRead) ? { selectedFile = $0; showProject = true } : nil, openDetail: openToolDetail) }
-                            else { MessageRow(message: item.first, projectRoot: model.session.cwd, openFile: model.client.allows(.projectRead) ? { selectedFile = $0; showProject = true } : nil, openDetail: openToolDetail) }
+                            if item.isActivity { ActivityGroupView(item: item, projectRoot: model.session.cwd, openFile: model.client.allows(.projectRead) ? { selectedFile = $0; showProject = true } : nil, images: model.images.filter { reference in item.messages.contains { $0.id == reference.messageID } }, openImage: { selectedImage = $0 }, openDetail: openToolDetail) }
+                            else { MessageRow(message: item.first, projectRoot: model.session.cwd, openFile: model.client.allows(.projectRead) ? { selectedFile = $0; showProject = true } : nil, images: model.images.filter { reference in item.messages.contains { $0.id == reference.messageID } }, openImage: { selectedImage = $0 }, openDetail: openToolDetail) }
                             if let response = model.responses.first(where: { $0.lastMessageID == item.id }), response.completed, case .prose = item.first.kind {
                                 ResponseFooter(response: response, text: model.responseText(response)) { text in
                                     let quoted = text.split(separator: "\n", omittingEmptySubsequences: false).map { "> " + $0 }.joined(separator: "\n")
@@ -163,6 +164,9 @@ struct ConversationView: View {
         } message: { Text(String(localized: "operation.inspect_note")) }
         .navigationDestination(isPresented: $showProject) { ProjectView(session: model.session, client: model.client, initialPath: selectedFile) }
         .navigationDestination(isPresented: $showFeed) { FeedView(client: model.client) }
+        .sheet(item: $selectedImage) { reference in
+            HistoricalImageView(reference: reference, sessionID: model.session.id, client: model.client)
+        }
         .sheet(item: $selectedToolDetail) { reference in
             ToolDetailView(reference: reference, sessionID: model.session.id, client: model.client)
         }

@@ -84,3 +84,24 @@ before returning. The message must exist in that session's parsed history, and
 unsupported fields/message kinds are rejected. Each native detail page stays
 bounded and earlier/later controls can traverse the complete supported record.
 An older Bridge without this route produces a visible update-required message.
+
+## Recorded image previews
+
+`GET /v2/sessions/:id/image?reference_id=:opaque_id&generation=:generation`
+returns a static `image/jpeg` preview (at most 512 KiB, longest side 1600 px).
+The history page's optional `images` array binds each opaque reference to its
+message and transcript generation. The client cannot submit a host filename.
+A replaced record or unknown reference fails closed. JSON errors use the usual
+stable codes; all responses are `no-store` with `nosniff`.
+
+Recorded Claude user/Read-result image blocks and Codex user data URLs are read
+from complete bounded transcript lines. A matching recorded Read result can
+also back an attachment's path metadata without opening that outside file.
+Referenced PNG/JPEG files require both conversation-read and project-read grants
+and must pass the project policy and descriptor-based no-symlink walk. File
+previews read the current approved project file; they do not recreate an archived
+file version. Missing outside-project attachments without recorded bytes remain
+unavailable. Supported input is one static PNG/JPEG within 4 MiB and 32 megapixels;
+project file reads additionally retain the existing 1 MiB limit. Preview encoding
+strips source metadata. Current grant and session binding are rechecked after
+reading/decoding and before returning bytes.

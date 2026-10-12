@@ -12,6 +12,10 @@ public struct BridgeRouter: Sendable {
         self.service = service; self.authority = authority; self.legacyToken = legacyToken
     }
     public func respond(method: String, uri: String, authorization: String?, body: Data) async -> (Int, Data) {
+        let response = await respondResource(method: method, uri: uri, authorization: authorization, body: body)
+        return (response.status, response.data)
+    }
+    func respondResource(method: String, uri: String, authorization: String?, body: Data) async -> HTTPResourceResponse {
         do {
             guard body.count <= 1_048_576 else { throw BridgeError("too_large", "The request is too large.", status: 413) }
             guard let components = URLComponents(string: uri), components.scheme == nil, components.host == nil else { throw BridgeError("invalid_route", "Invalid resource path.") }
@@ -19,14 +23,14 @@ public struct BridgeRouter: Sendable {
             let query = Dictionary((components.queryItems ?? []).map { ($0.name, $0.value ?? "") }, uniquingKeysWith: { _, last in last })
             let client: EnrolledClient?
             if path.first == "v2", let authority {
-                if method == "GET", path == ["v2", "identity"] { return (200, try encode(await authority.announcement())) }
-                if method == "GET", path == ["v2", "enrollment", "bootstrap"] { return (200, try encode(await authority.bootstrap())) }
+                if method == "GET", path == ["v2", "identity"] { return HTTPResourceResponse.json(try encode(await authority.announcement())) }
+                if method == "GET", path == ["v2", "enrollment", "bootstrap"] { return HTTPResourceResponse.json(try encode(await authority.bootstrap())) }
                 if method == "POST", path.count == 3, path[1] == "enrollment" {
                     let request = try JSONDecoder().decode(SignedValue<EnrollmentRequest>.self, from: body)
                     switch path[2] {
-                    case "request": return (200, try encode(await authority.submit(request)))
-                    case "status": return (200, try encode(await authority.status(request)))
-                    case "cancel": return (200, try encode(await authority.cancel(request)))
+                    case "request": return HTTPResourceResponse.json(try encode(await authority.submit(request)))
+                    case "status": return HTTPResourceResponse.json(try encode(await authority.status(request)))
+                    case "cancel": return HTTPResourceResponse.json(try encode(await authority.cancel(request)))
                     default: throw BridgeError("not_found", "This enrollment resource is unavailable.", status: 404)
                     }
                 }
@@ -41,6 +45,7 @@ public struct BridgeRouter: Sendable {
                 access = SessionAccess(principalID: client.id) { capability, workspace in _ = try await authority.require(client.id, capability: capability, workspace: workspace) }
             } else { access = nil }
             let data: Data
+            var image = false
             if method == "GET", path == ["v1", "status"] {
                 if let client, let authority {
                     let approved = try await authority.require(client.id, capability: .workspaceRead)
@@ -88,6 +93,9 @@ public struct BridgeRouter: Sendable {
                     if let limit = query["limit"], Int(limit) == nil { throw BridgeError("invalid_input", "The text page size is invalid.") }
                     data = try encode(await service.toolText(id: id, messageID: messageID, generation: generation, field: field,
                                                             offset: query["offset"].flatMap(Int.init) ?? 0, contentID: query["content_id"], limit: query["limit"].flatMap(Int.init) ?? 16_384, access: access))
+                case ("GET", "image"):
+                    guard let reference = query["reference_id"], let generation = query["generation"], reference.range(of: "^[0-9a-f]{64}$", options: .regularExpression) != nil else { throw BridgeError("invalid_input", "A recorded image reference and generation are required.") }
+                    data = try await service.image(id: id, referenceID: reference, generation: generation, access: access); image = true
                 case ("GET", "preview"): data = try encode(await service.preview(id: id, access: access))
                 case ("GET", "changes"): data = try encode(await service.changes(id: id, access: access))
                 case ("GET", "diff"): data = try encode(await service.diff(id: id, path: query["path"], access: access))
@@ -104,10 +112,10 @@ public struct BridgeRouter: Sendable {
                 try await require(client, .feedReply)
                 data = try encode(await service.reply(requestID: path[2], body: JSONDecoder().decode(JSONValue.self, from: body), access: access))
             } else { throw BridgeError("not_found", "This resource is not available.", status: 404) }
-            return (200, data)
+            return HTTPResourceResponse(status: 200, data: data, contentType: image ? "image/jpeg" : "application/json; charset=utf-8")
         } catch {
             let failure = (error as? BridgeError) ?? BridgeError("invalid_request", "The request could not be processed.")
-            return (failure.status, (try? encode(["error": failure])) ?? Data())
+            return HTTPResourceResponse(status: failure.status, data: (try? encode(["error": failure])) ?? Data(), contentType: "application/json; charset=utf-8")
         }
     }
     private func allowed(_ workspace: String?, _ client: EnrolledClient) -> Bool { workspace.map { client.scope.workspaces.contains($0.lowercased()) } ?? false }

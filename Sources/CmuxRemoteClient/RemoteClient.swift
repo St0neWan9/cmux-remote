@@ -26,6 +26,8 @@ public final class RemoteClient: Sendable {
     }
     public func get<T: Decodable & Sendable>(_ path: String, query: [String: String] = [:], as type: T.Type) async throws -> T { try await runtime.request(path, method: "GET", query: query, body: nil, as: type) }
     public func post<B: Encodable & Sendable, T: Decodable & Sendable>(_ path: String, body: B, as type: T.Type) async throws -> T { try await runtime.request(path, method: "POST", query: [:], body: JSONEncoder().encode(body), as: type) }
+    /// Fetches a bounded JPEG preview by a transcript-derived reference, never by host pathname.
+    public func image(sessionID: String, reference: ConversationImageReference) async throws -> Data { try await runtime.image(sessionID: sessionID, reference: reference) }
     public func relocate(_ connection: AuthorizedConnection) async throws { try await runtime.relocate(connection) }
     public func close() { let runtime = runtime; Task { await runtime.close() } }
     deinit { let runtime = runtime; Task { await runtime.close() } }

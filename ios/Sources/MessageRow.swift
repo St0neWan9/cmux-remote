@@ -7,6 +7,8 @@ struct MessageRow: View {
     let message: ChatMessage
     var projectRoot: String?
     var openFile: ((String) -> Void)?
+    var images: [ConversationImageReference] = []
+    var openImage: ((ConversationImageReference) -> Void)?
     var openDetail: ((String, String) -> Void)?
     var body: some View {
         Group {
@@ -19,9 +21,20 @@ struct MessageRow: View {
                         .background(Color.accentColor.opacity(0.085), in: RoundedRectangle(cornerRadius: 24))
                 }.padding(.top, 10).padding(.bottom, 22)
             } else {
-                agentContent.frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 5)
+                VStack(alignment: .leading, spacing: 12) {
+                    agentContent
+                    imageButtons
+                }.frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 5)
             }
         }.accessibilityIdentifier("message." + message.id)
+    }
+    @ViewBuilder private var imageButtons: some View {
+        if let openImage {
+            ForEach(images.filter { $0.messageID == message.id }) { image in
+                Button { openImage(image) } label: { Label(String(localized: "image.history.open"), systemImage: "photo") }
+                    .buttonStyle(FloatingButtonStyle()).accessibilityIdentifier("image.history." + image.id)
+            }
+        }
     }
     @ViewBuilder private func referenceButton(_ path: String) -> some View {
         if let relative = ProjectReference().relativePath(path, root: projectRoot), let openFile {
@@ -83,7 +96,7 @@ struct MessageRow: View {
             VStack(alignment: .leading, spacing: 8) {
                 Label(value.displayName ?? value.hostPath.map { URL(fileURLWithPath: $0).lastPathComponent } ?? String(localized: "chat.attachment"), systemImage: value.media == .image ? "photo" : "paperclip")
                 if value.media == .file, let path = value.hostPath { referenceButton(path) }
-                if value.media == .image { Text(String(localized: "chat.image_metadata")).font(.caption).foregroundStyle(.secondary) }
+                if value.media == .image && !images.contains(where: { $0.messageID == message.id }) { Text(String(localized: "chat.image_metadata")).font(.caption).foregroundStyle(.secondary) }
             }.modifier(FloatingSurface())
         case .status(let value): Text(value.detail ?? value.event.localizedTitle).font(.footnote).foregroundStyle(.secondary)
         default: Text(String(localized: "chat.other")).font(.footnote).foregroundStyle(.secondary)
