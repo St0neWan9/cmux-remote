@@ -190,3 +190,21 @@
 "tool.card.shell" = "Shell";
 
 "tool.card.success" = "成功";
+
+"tool.detail.open" = "查看完整记录";
+
+"tool.detail.title" = "工具详情";
+
+"tool.detail.input" = "输入";
+
+"tool.detail.output" = "输出";
+
+"tool.detail.empty" = "此字段暂无文本记录。";
+
+"tool.detail.previous" = "上一页";
+
+"tool.detail.next" = "下一页";
+
+"tool.detail.changed" = "记录已更新，请刷新后查看当前内容。";
+
+"tool.detail.unavailable" = "此 Bridge 尚不支持完整工具记录，请更新 Bridge 后重试。";

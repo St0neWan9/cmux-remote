@@ -178,3 +178,21 @@ and 31 executed media/draft/recovery checks, 188 matching locale keys, and the i
 Simulator build. These results cover this slice only. R02/R03/R06/R07, complete
 auxiliary/native tours and physical R09/R10 acceptance remain pending; the full
 R01–R11 goal is not complete.
+
+### Tool-content correction — 2026-10-12
+
+The first tool-code renderer used a hidden two-axis scroll area capped at 264
+points. Native inspection reproduced a Read card showing its title/status while
+hiding a recorded 106-character input. It now renders wrapping, natural-height
+text under the conversation's own scroll. The same native Read card shows its
+complete `file_path` input after the repair; its result is an image, not textual
+file contents. Actual text-result/large-record route acceptance remains required.
+
+The explicit full-record route and bounded native detail pages supplement the
+upstream history parser's 2,048/16,384-character text budgets. The local vendored
+parser patch is documented in UPSTREAM.md; its default history behavior is
+unchanged. Tests cover complete long input/output, Unicode page reassembly,
+partial JSONL results, content/generation invalidation, fixed supported fields
+and final scope revocation. Current deployed live Bridge still needs updating to
+this candidate and native full-record acceptance before the correction is marked
+fully accepted.

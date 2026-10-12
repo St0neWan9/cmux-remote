@@ -50,6 +50,7 @@ final class ConversationModel {
     var busy = false
     var hasMore = false
     private var generation: String?
+    var historyGeneration: String? { generation }
     init(session: SessionDescriptor, client: RemoteClient,
          loadRecovery: (@Sendable () async throws -> SendRequest?)? = nil,
          saveRecovery: (@Sendable (SendRequest?) async throws -> Void)? = nil,

@@ -89,6 +89,27 @@ private actor UncertainImageSend {
     func confirm() { accepted = true }
 }
 
+private actor ToolPageFixture {
+    var text = String(repeating: "Full tool text\n", count: 2400) + "LAST"
+    var queries: [[String: String]] = []
+    func change() { text += " updated" }
+    func fetch(_ query: [String: String]) throws -> ToolTextPage {
+        queries.append(query)
+        let offset = Int(query["offset"] ?? "0") ?? 0
+        let revision = IdentityCryptography().digest(Data(text.utf8))
+        if let expected = query["content_id"], expected != revision { throw BridgeError("stale_detail", "Updated", status: 409) }
+        let value = String(text.dropFirst(offset).prefix(16_384)); let end = offset + value.count
+        return ToolTextPage(messageID: "tool", generation: "generation", field: query["field"] ?? "output", contentID: revision, text: value, offset: offset, nextOffset: end < text.count ? end : nil, totalCharacters: text.count)
+    }
+}
+private actor DeferredToolPage {
+    nonisolated let started = AsyncStream<Void>.makeStream()
+    private var continuation: CheckedContinuation<ToolTextPage, any Error>?
+    func read() async throws -> ToolTextPage { try await withCheckedThrowingContinuation { continuation = $0; started.continuation.yield(()) } }
+    func finish() {
+        continuation?.resume(returning: ToolTextPage(messageID: "tool", generation: "generation", field: "output", contentID: String(repeating: "a", count: 64), text: "old", offset: 0, nextOffset: nil, totalCharacters: 3)); continuation = nil
+    }
+}
 @main struct PhoneStateChecks {
     @MainActor static func main() async throws {
         let crypto = IdentityCryptography(); let hostKey = crypto.generatePrivateKey(); let publicKey = try crypto.publicKey(privateKey: hostKey)
@@ -365,7 +386,32 @@ private actor UncertainImageSend {
         checkMedia(await navigationLoss.requests.count == 1, "Reopening dispatched the same uncertain input under a fresh UUID")
         await afterNavigation.acknowledgePendingSend()
 
+        var detailChecks = 0
+        func checkDetail(_ condition: Bool, _ message: String) { detailChecks += 1; if !condition { failures.append(message) } }
+        let detailReference = ToolDetailReference(messageID: "tool", generation: "generation", initialField: "output")
+        let pageFixture = ToolPageFixture()
+        let detailModel = ToolDetailModel(reference: detailReference, fetch: { try await pageFixture.fetch($0) })
+        await detailModel.load()
+        checkDetail(detailModel.page?.offset == 0 && detailModel.page?.text.count == 16_384 && detailModel.error == nil && !detailModel.busy, "Tool detail did not load a bounded full-record page")
+        let nextPage = detailModel.page?.nextOffset ?? 0
+        await detailModel.load(offset: nextPage, preserveRevision: true)
+        let observedQuery = await pageFixture.queries.last
+        checkDetail(detailModel.page?.offset == nextPage && observedQuery?["content_id"] != nil, "Tool paging lost its source revision")
+        await pageFixture.change(); await detailModel.load(offset: 0, preserveRevision: true)
+        checkDetail(detailModel.error != nil && detailModel.page?.offset == nextPage, "Changed output mixed pages from separate content revisions")
+        await detailModel.load()
+        checkDetail(detailModel.error == nil && detailModel.page?.offset == 0, "Explicit refresh did not re-anchor updated tool output")
+        let delayedPage = DeferredToolPage()
+        let pausedDetail = ToolDetailModel(reference: detailReference, fetch: { _ in try await delayedPage.read() })
+        let delayedRead = Task { @MainActor in await pausedDetail.load() }
+        var detailStarted = delayedPage.started.stream.makeAsyncIterator(); _ = await detailStarted.next()
+        pausedDetail.suspend(); await delayedPage.finish(); await delayedRead.value
+        checkDetail(pausedDetail.page == nil && !pausedDetail.busy, "Suspended tool read published a stale page")
+        let incorrectPage = ToolDetailModel(reference: detailReference, fetch: { _ in ToolTextPage(messageID: "another-tool", generation: "generation", field: "output", contentID: String(repeating: "a", count: 64), text: "wrong", offset: 0, nextOffset: nil, totalCharacters: 5) })
+        await incorrectPage.load()
+        checkDetail(incorrectPage.page == nil && incorrectPage.error != nil, "A different tool's returned bytes were accepted as this detail")
+
         if !failures.isEmpty { print(failures.joined(separator: "\n")); exit(1) }
-        print("Phone state: 17 existing behavioral checks and \(mediaChecks) executed image/draft/receipt checks passed.")
+        print("Phone state: 17 existing behavioral checks, \(mediaChecks) image/draft/receipt checks and \(detailChecks) tool-detail checks passed.")
     }
 }

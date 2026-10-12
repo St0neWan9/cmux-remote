@@ -10,6 +10,7 @@ Version 2 uses a device-signed `Authorization: CmuxV2` proof and approved worksp
 | GET /v1/workspaces | workspace.list | cmux workspaces |
 | GET /v1/sessions | cmux-bound chat.sessions.dump / agent hooks, enriched by vault.sessions | cmux sessions only; external history excluded; known ended sessions read-only |
 | GET /v1/sessions/:id/history?before_seq=&limit= | local transcript, pinned upstream parser | messages, has_more, generation, clipped |
+| GET /v1/sessions/:id/tool-detail?message_id=&generation=&field=&offset=&content_id= | complete transcript tool field | bounded revision-bound text page |
 | GET /v1/sessions/:id/preview | surface.read_text + prose extractor | replaceable preview, availability |
 | POST /v1/sessions/:id/send | fixed mobile.chat.send | text, optional attachments, and operation_id |
 | POST /v1/sessions/:id/interrupt | mobile.chat.interrupt or explicit send_key | hard and operation_id |
@@ -57,3 +58,27 @@ original session or Feed item disappears; this does not issue another mutation.
 Fresh operations still need a current authorized target. An absent record returns `operation_not_found`; absence is not proof
 that an earlier request never executed. Persistence does not provide exactly-once
 execution across the cmux/Bridge boundary.
+
+## Full tool records
+
+Ordinary history preserves the upstream 2,048-character input-detail and
+16,384-character body/output/diff budgets. The inline card wraps all received text
+and uses the conversation's vertical scroll. `View full record` opens an explicit
+paged read of the underlying committed transcript field.
+
+`GET /v2/sessions/:id/tool-detail` requires `message_id`, the current history
+`generation`, and a supported `field`: `input`/`output` for a tool or terminal
+capture, or `diff` for an edit. `offset` defaults to zero; `limit` defaults to and
+is capped at 16,384 characters. The response includes `message_id`, `generation`,
+`field`, `content_id`, `text`, `offset`, `next_offset`, and `total_characters`.
+The client sends `content_id` on later pages. A changed field/replaced transcript
+returns `stale_detail`, requiring an explicit refresh instead of combining text
+from different revisions. Complete JSONL lines only; the 32 MiB transcript read
+limit still applies. Tool-detail parsing uses an explicit bounded larger budget;
+it does not increase ordinary conversation snapshots or export arbitrary files.
+
+Reads require current `conversationRead` for the bound workspace and recheck it
+before returning. The message must exist in that session's parsed history, and
+unsupported fields/message kinds are rejected. Each native detail page stays
+bounded and earlier/later controls can traverse the complete supported record.
+An older Bridge without this route produces a visible update-required message.
