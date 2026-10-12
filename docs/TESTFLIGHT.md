@@ -3,8 +3,8 @@
 This repository follows the adjacent Valuz app's Fastlane approach: an existing
 Apple Distribution certificate, an App Store provisioning profile, Release
 archive/export, and App Store Connect API-key authentication. The app remains
-independent of cmux and Valuz accounts. No Valuz credentials, app record, or
-provisioning profile are copied. Unlike Valuz's React Native project, this native
+independent of cmux and Valuz accounts. The existing owner-team distribution certificate can be reused across apps.
+Valuz’s API key, app record, and app-specific profiles are not reused. Unlike Valuz's React Native project, this native
 Swift project needs neither CocoaPods nor an extension profile.
 
 ## Release identity
@@ -129,3 +129,22 @@ Store profile validation, and cleanup after a failed packaging command. A
 successful unsigned archive or dry run does **not** establish signed export,
 App Store Connect access, TestFlight processing or physical-device acceptance.
 Those require this app's Apple record, actual credentials and a signed run.
+
+## Activated owner configuration — 2026-10-12
+
+The owner authorized a dedicated Developer API key and storage of the P8/P12
+signing material in GitHub's `testflight` environment Secrets. The environment
+is restricted to the `main` branch. Private key/certificate files are not
+tracked in Git; the API key backup is outside the checkout with private file
+permissions, and the temporary P12 export was removed after configuration.
+
+`0.1.0 (1)` was uploaded successfully and Apple finished processing it. The
+internal **Owner** group contains only the account owner; that tester is invited
+and the build is **Ready to Test**. Accept Apple's TestFlight invitation on the
+phone to install. No external tester group or public invitation link was created.
+
+The full manual GitHub packaging job also passed on the app's current code:
+[run 38249260373](https://github.com/St0neWan9/cmux-remote/actions/runs/38249260373).
+That run exported `0.1.0 (2)` without uploading it. The downloaded CI IPA passed
+the same identity/version, App Store profile and deep/strict code-signature
+guards. Future uploads must use an unused build number.
