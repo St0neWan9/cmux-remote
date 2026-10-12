@@ -66,7 +66,7 @@ public actor NativeWorkspaceCatalog {
             var row = NativeWorkspaceEntry(hostID: host.id, workspaceID: remoteID, title: host.name + " · " + workspace.title)
             if let existingWS = await mirrors.existingWorkspace(hostID: host.id, workspaceID: remoteID),
                let view = await mirrors.list().first(where: { $0.localWorkspaceID == existingWS }), let surface = view.localSurfaceID {
-                let tree = try await local.request("system.tree", params: ["all": .bool(true)])
+                let tree = try await local.request("system.tree", params: ["all_windows": .bool(true)])
                 guard let window = tree["windows"].array?.first(where: { ($0["workspaces"].array ?? []).contains { $0["id"].string == existingWS } })?["id"].string else {
                     throw BridgeError("stale_binding", "The attached native workspace moved.", status: 409)
                 }
@@ -146,7 +146,7 @@ public actor NativeWorkspaceCatalog {
         return .object(["workspace_id": .string(replacement.workspaceID), "catalog_pending": .bool(true), "recreated": .bool(true)])
     }
     private func localWindows() async throws -> [String: String] {
-        let tree = try await local.request("system.tree", params: ["all": .bool(true)])
+        let tree = try await local.request("system.tree", params: ["all_windows": .bool(true)])
         guard let windows = tree["windows"].array, windows.count <= 128 else { throw BridgeError("invalid_response", "Invalid complete local window inventory.") }
         var result: [String: String] = [:]
         for window in windows {

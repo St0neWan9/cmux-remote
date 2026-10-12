@@ -1,5 +1,6 @@
-name: Verify
-on: [push, pull_request]
+name: Package verification
+on:
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:
