@@ -255,3 +255,28 @@ iOS Simulator build passed. The signed IPA is in `.build/ios-release/dist/`,
 outside Git. TestFlight upload is pending approval to generate a dedicated
 Developer API key and store the signing credentials in the repository's
 TestFlight environment Secrets; the prepared key has not been generated.
+
+
+## TestFlight activation — 2026-10-12
+
+After explicit owner authorization, the dedicated Developer API key and existing
+owner-team distribution identity were stored in the repository's `testflight`
+environment Secrets. Deployment branch policy allows only `main`. No signing
+credential files are tracked in Git. The private P8 backup is outside the
+checkout with restricted permissions; the temporary P12 export was cleaned up.
+
+The signed `0.1.0 (1)` package uploaded through Fastlane, completed Apple
+processing, and is **Ready to Test** in the internal **Owner** group. Only the
+account owner was added, with invitation status **Invited**. External testers
+and public invitation links were not configured.
+
+[The manual packaging run](https://github.com/St0neWan9/cmux-remote/actions/runs/38249260373)
+on code SHA `61dd6d20ca2af2b4c07c5f1fb4ccbc418feb014a` passed all executed steps:
+201 package tests, 90 phone checks, seven release guards, SwiftPM build,
+localization audits, Fastlane loading, temporary keychain import, provisioning
+profile retrieval, device archive, signed IPA export and artifact upload. Its
+`0.1.0 (2)` IPA was downloaded and independently passed the actual payload,
+profile and deep/strict code-signature guard. The CI run did not upload that
+second build. Account screenshots and signed packages stay under `.build/`,
+outside Git. Physical iPhone installation and paired LAN use remain separate
+acceptance steps.
