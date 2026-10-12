@@ -244,3 +244,33 @@ Native scene/navigation acceptance and physical restart/LAN acceptance remain
 pending. Installed local chat/terminal artifact thumbnail methods were also
 probed with the owned test session and return `method_not_found`; a transcript-
 authorized Bridge image projection is still required for R06.
+
+### Historical-image implementation and live preview — 2026-10-12
+
+R06 now returns opaque, generation-bound references in history and a signed,
+pinned, bounded binary JPEG route. Recorded Claude image/Read-result blocks and
+Codex user data URLs are projected from complete transcript lines; a matching
+Read in the same user turn can back clipboard attachment metadata. Project
+PNG/JPEG references additionally require project-read, reject traversal/hidden
+secrets/symlinks/special/oversized files, and use a descriptor-based walk.
+Outside-project path-only attachments without recorded bytes remain unavailable.
+The phone has white preview, close, retry, copy and system-share controls.
+
+Two independent reviewers reproduced missing final project authority and wrong
+association for reused image paths. Regression commit `f41c90a` fails both
+behavioral tests. Repair `50c9547` (tree `7a1888ba`) checks all final capabilities
+against one production authority snapshot and bounds attachment matching to its
+user turn. All 104 package tests in 23 suites, 75 actual phone-model checks,
+200 matching locale keys and the iOS build pass. Fresh independent repair review
+found no verified P0–P2 defect on the exact repaired tree.
+
+The owned live Bridge on port 7740 was updated with its existing host identity,
+certificate and grants preserved. The retained phone client fetched the real
+32×32 blue Read image as 795 JPEG bytes, with actual decoded pixels verified.
+The original Simulator opened the corresponding attachment's white image
+preview; a native screenshot records the blue image and copy/share controls.
+Copy was invoked, but clipboard-content confirmation and the share-sheet tour
+remain unproven: another task changed Simulator's selected window during that
+action. No second Simulator, foreign process or official cmux was restarted.
+Full R03 streaming, R07 speech, remaining native tours and physical camera/LAN
+acceptance remain open.
