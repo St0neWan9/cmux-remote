@@ -16,6 +16,9 @@ Swift project needs neither CocoaPods nor an extension profile.
 | Bundle ID | `com.st0newan9.cmux-remote` |
 | Apple team | `UUHLDZ2S48` (same team as the Valuz configuration) |
 | Marketing version | `0.1.0` |
+| Phone display name | `Cmux Remote` |
+| App Store Connect name | `Cmux Remote Companion` |
+| App Store Connect app ID | `6821932840` |
 | App Store profile name | `cmux remote App Store com.st0newan9.cmux-remote` |
 
 A build number is required for every packaging run. Choose a new positive
@@ -24,7 +27,7 @@ without editing the generated project. The GitHub workflow derives a build
 number from its run number and attempt unless an explicit one is provided;
 when also uploading locally, coordinate the numbers to avoid reuse.
 
-For a fork, update `Release.json` and the bundle validation in
+For a fork, update the bundle/team/app record in `Release.json` and the bundle validation in
 `ios/fastlane/release_config.rb` to your own identity. Do not use `io.valuz` or the
 official cmux identity. `CMUX_REMOTE_IOS_TEAM_ID`, `CMUX_REMOTE_IOS_BUNDLE_ID`,
 `CMUX_REMOTE_IOS_PROFILE_NAME` and `CMUX_REMOTE_IOS_OUTPUT` can override release
@@ -68,7 +71,7 @@ variables supplied through your shell's secret manager:
 - `CMUX_REMOTE_IOS_API_KEY_PATH`: absolute path to the P8 file.
 - `CMUX_REMOTE_IOS_API_KEY_ID` and `CMUX_REMOTE_IOS_API_ISSUER`: API key identity.
 - `CMUX_REMOTE_IOS_BUILD_NUMBER`: required, or pass `--build-number`.
-- `CMUX_REMOTE_IOS_APP_STORE_APP_ID`: optional numeric ID of **this** app.
+- `CMUX_REMOTE_IOS_APP_STORE_APP_ID`: optional override of this app’s ID from `Release.json`.
 
 ```sh
 scripts/package-ios.sh --version=0.1.0 --build-number=2
@@ -114,8 +117,7 @@ workflow artifacts for seven days. Artifact visibility follows the
 repository's visibility and access settings.
 
 The app icon and privacy manifest are included in the project generator. The
-original geometric icon can be regenerated with
-`swift scripts/generate-ios-icon.swift`. Export compliance declares the app's
+original generated icon and its prompt are documented in `ios/Resources/APP-ICON.md`. Export compliance declares the app's
 OS-provided encryption through `ITSAppUsesNonExemptEncryption=false`; update
 that declaration and the privacy manifest if the app's behavior changes.
 

@@ -17,7 +17,7 @@ for arg in "$@"; do
 done
 [[ "$unsigned" == 0 || "$upload" == 0 ]] || { echo 'Unsigned archives cannot upload to TestFlight' >&2; exit 1; }
 # Validate public metadata even for dry runs; never print credentials.
-ruby -r ./ios/fastlane/release_config.rb -r json -e 'c=ReleaseConfig.new; puts JSON.generate({bundle:c.bundle_id,team:c.team_id,version:c.version,build:c.build_number,output:c.output})'
+ruby -r ./ios/fastlane/release_config.rb -r json -e 'c=ReleaseConfig.new; puts JSON.generate({bundle:c.bundle_id,team:c.team_id,version:c.version,build:c.build_number,output:c.output,app_store_app_id:c.app_store_app_id})'
 [[ "$dry_run" == 0 ]] || exit 0
 python3 scripts/generate-ios-project.py
 if [[ "$unsigned" == 1 ]]; then

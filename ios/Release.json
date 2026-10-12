@@ -1,7 +1,9 @@
 {
   "bundle_id": "com.st0newan9.cmux-remote",
   "team_id": "UUHLDZ2S48",
-  "display_name": "cmux remote",
+  "display_name": "Cmux Remote",
   "version": "0.1.0",
-  "profile_name": "cmux remote App Store com.st0newan9.cmux-remote"
+  "profile_name": "cmux remote App Store com.st0newan9.cmux-remote",
+  "app_store_name": "Cmux Remote Companion",
+  "app_store_app_id": "6821932840"
 }

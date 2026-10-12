@@ -30,6 +30,8 @@ TEAM = DEFAULTS['team_id']
 class ReleaseChecks(unittest.TestCase):
     def dry_run(self, *arguments):
         env = {k: v for k, v in os.environ.items() if not k.startswith('CMUX_REMOTE_IOS_')}
+        # GitHub passes an empty optional variable when no override is configured.
+        env['CMUX_REMOTE_IOS_APP_STORE_APP_ID'] = ''
         return subprocess.run([str(ROOT / 'scripts/package-ios.sh'), '--dry-run', *arguments], cwd=ROOT,
                               env=env, capture_output=True, text=True)
 
@@ -37,6 +39,7 @@ class ReleaseChecks(unittest.TestCase):
         result = self.dry_run('--build-number=23', '--version=0.2.1')
         self.assertEqual(result.returncode, 0, result.stderr)
         metadata = json.loads(result.stdout)
+        self.assertEqual(metadata['app_store_app_id'], DEFAULTS['app_store_app_id'])
         self.assertEqual((metadata['bundle'], metadata['team'], metadata['version'], metadata['build']), (BUNDLE, TEAM, '0.2.1', '23'))
 
     def test_missing_or_invalid_metadata_never_packages(self):
