@@ -105,3 +105,23 @@ ends subscriptions. Reconnecting a read stream never resubmits a mutation.
 All R01–R11 rows are unproven for this continuation until current-source evidence
 is recorded. Earlier baseline tests are useful regression evidence, but do not
 prove the new image, stream, durable-record or hardware behavior.
+
+### First backend implementation — 2026-10-12
+
+- R04 backend/storage/status route implemented. Current candidate passes 11 new
+  journal tests, including signed status reads after authority/service restart,
+  another-device/revoked denial, crash-prepared state, failed disk writes,
+  digest conflicts, capacity and send/stop/resolved-Feed deduplication. Phone
+  status/recovery UX and production-process/native revalidation remain pending.
+- R05 backend accepts validated bounded images through the fixed existing chat
+  route; seven new test functions exercise delivery, counts/size/format, stale or
+  read-only targets, desktop draft protection and unknown-result replay. Native
+  image selection/preview/send UI remains pending.
+- Installed official cmux accepted a generated 32×32 test PNG in the existing
+  dedicated Claude session. With a Mac-side one-time approval, Claude's Read tool
+  returned image content and its final reply identified the color as blue.
+  This Claude directory-policy approval did not appear in the phone Feed, so the
+  evidence does **not** establish phone handling of every terminal policy dialog.
+- The isolated candidate passes 88 tests in 21 suites, 17 actual phone-model
+  checks and 174 matching localized keys. The iOS Simulator build passes. These
+  checks do not complete R01–R11 or replace physical-device acceptance.

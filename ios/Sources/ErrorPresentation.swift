@@ -20,6 +20,9 @@ struct ErrorPresentation {
         case "session_not_found": return String(localized: "error.read_only")
         case "operation_conflict": return String(localized: "error.operation_conflict")
         case "receipt_capacity": return String(localized: "error.receipt_capacity")
+        case "journal_unavailable": return String(localized: "error.journal")
+        case "operation_not_found": return String(localized: "error.operation_missing")
+        case "invalid_image": return String(localized: "error.image")
         case "request_expired": return String(localized: "error.expired")
         default: return String(localized: "error.connection")
         }

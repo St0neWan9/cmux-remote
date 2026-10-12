@@ -169,3 +169,6 @@
 "error.receipt_capacity" = "The Bridge operation cache is full. Inspect pending actions before asking the Mac owner to restart the Bridge.";
 "feed.skip_questions" = "Skip questions";
 "sessions.no_read_grant" = "This device is not granted conversation access.";
+"error.journal" = "The Mac cannot safely save this operation. Ask its owner to check the Bridge state.";
+"error.operation_missing" = "No operation record was found. Inspect the conversation before sending again.";
+"error.image" = "Select up to four valid PNG or JPEG images within the upload limits.";

@@ -38,7 +38,7 @@ public struct BridgeRouter: Sendable {
             }
             let access: SessionAccess?
             if let client, let authority {
-                access = SessionAccess { capability, workspace in _ = try await authority.require(client.id, capability: capability, workspace: workspace) }
+                access = SessionAccess(principalID: client.id) { capability, workspace in _ = try await authority.require(client.id, capability: capability, workspace: workspace) }
             } else { access = nil }
             let data: Data
             if method == "GET", path == ["v1", "status"] {
@@ -46,6 +46,9 @@ public struct BridgeRouter: Sendable {
                     let approved = try await authority.require(client.id, capability: .workspaceRead)
                     data = try encode(JSONValue.object(["protocol": .string("cmux-remote/2"), "host_id": .string(authority.host.id), "capabilities": .array(approved.scope.capabilities.map { .string($0.rawValue) })]))
                 } else { data = try encode(await service.status()) }
+            } else if method == "GET", path.count == 3, path[0...1] == ["v1", "operations"] {
+                guard let id = UUID(uuidString: path[2]) else { throw BridgeError("invalid_input", "An operation identity is required.") }
+                data = try encode(await service.operationStatus(id: id, access: access))
             } else if method == "GET", path == ["v1", "workspaces"] {
                 try await require(client, .workspaceRead)
                 var workspaces = try await service.workspaces()
