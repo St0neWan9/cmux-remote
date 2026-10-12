@@ -88,3 +88,11 @@ and an artifact checksum manifest. It contains no Bridge state directories,
 identity private keys or grants. The bundle is for local review, not publication.
 The source checkout still contains concurrent uncommitted work, so a Git release
 tag is not implied by this artifact freeze.
+
+## Manual second-Mac handoff
+
+Mac A's dedicated frozen source service and preflight passed. The owner will
+perform Mac B's physical test using the Chinese
+[LAN Alpha guide](LAN-ALPHA-TEST.zh-CN.md), including exact addresses, certificate
+and package fingerprints, separate A/B commands, fresh enrollment and recovery
+expectations. This is a handoff of the physical gate, not a completed two-Mac gate.
