@@ -59,6 +59,11 @@ public actor RemoteMirrorService {
             try await authorize(); return try priorReceipt(prior)
         }
         try await authorize()
+        // Ledger and authorization hops can outlive the producer observed above.
+        // Re-read the exact membership/lifecycle/epoch before delivery, then recheck scope.
+        let current = try await replay(workspaceID: workspaceID, surfaceID: surfaceID)
+        guard current.runtimeEpoch == request.runtimeEpoch else { throw BridgeError("stale_binding", "The remote terminal changed during authorization. Reattach before sending input.", status: 409) }
+        try await authorize()
         do {
             let result = try await cmux.request("mobile.terminal.input", params: ["workspace_id": .string(workspaceID), "surface_id": .string(surfaceID), "text": .string(request.text)])
             guard result["accepted"].bool != false else { throw BridgeError("outcome_unknown", "Inspect the remote terminal before repeating input.", status: 409) }

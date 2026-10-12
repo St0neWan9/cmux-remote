@@ -69,6 +69,10 @@ Terminal output is a bounded character-grid snapshot, converted to ANSI, with a
 changes between reads. The producer remains on A. This architecture does not
 provide lossless PTY streaming, complete scrollback, graphics/browser mirroring,
 clipboard integration, exact split proportions or shared producer resizing.
+Input rechecks the producer after persistence/authorization waits. The current
+cmux input RPC has no atomic producer-epoch precondition, so a host-side runtime
+change between the final observation and delivery cannot be locked out by the
+companion. This remains an Alpha interface limitation.
 
 Use source-compatible pane sizes during Alpha. If lossless native terminal parity
 is a core acceptance requirement, the public cmux interface gap must be resolved;
