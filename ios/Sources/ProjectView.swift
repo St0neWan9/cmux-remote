@@ -61,7 +61,7 @@ struct ProjectView: View {
         .onChange(of: phase) { _, value in if value != .active { model.suspendReads() } }
         .task(id: phase) {
             guard phase == .active else { model.suspendReads(); return }
-            model.resumeReads(); await model.load(model.filePath.isEmpty && model.resource == .changes ? .changes : model.resource == .changes ? .file : model.resource)
+            model.resumeReads(); await model.reload()
         }
     }
 }
