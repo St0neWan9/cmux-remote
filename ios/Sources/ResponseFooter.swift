@@ -18,12 +18,12 @@ struct ResponseFooter: View {
                 .accessibilityLabel(String(localized: "chat.share")).accessibilityIdentifier("response.share")
             Button { quote(text) } label: { Image(systemName: "text.quote").frame(width: 30, height: 44) }
                 .accessibilityLabel(String(localized: "chat.quote")).accessibilityIdentifier("response.quote")
-            Spacer(minLength: 4)
             if let date = response.completedAt {
                 Text(date, format: .dateTime.month(.twoDigits).day(.twoDigits).hour().minute())
                     .font(.caption).monospacedDigit()
                     .accessibilityLabel(String(localized: "chat.response_time") + " " + date.formatted())
             }
+            Spacer(minLength: 0)
         }.font(.system(size: 16)).foregroundStyle(.secondary).buttonStyle(.plain)
             .padding(.top, 6).padding(.bottom, 10)
     }
