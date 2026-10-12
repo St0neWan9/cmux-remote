@@ -7,16 +7,18 @@ private actor JournalCmux: CmuxControlling {
     var sends = 0
     var interrupts = 0
     var replies = 0
+    var resourcesGone = false
+    func removeResources() { resourcesGone = true }
     let fail: Bool
     let workspace: String
     let afterSend: @Sendable () throws -> Void
     init(fail: Bool = false, workspace: String = "workspace", afterSend: @escaping @Sendable () throws -> Void = {}) { self.fail = fail; self.workspace = workspace; self.afterSend = afterSend }
     func request(_ method: String, params: [String: JSONValue]) async throws -> JSONValue {
         switch method {
-        case "vault.sessions": return .object(["sessions": .array([.object(["session_id": .string("session"), "agent": .string("claude")])])])
-        case "chat.sessions.dump": return .object(["sessions": .array([.object(["session_id": .string("session"), "agent": .string("claude"), "workspace_id": .string(workspace), "surface_id": .string("surface"), "state": .string("idle")])])])
+        case "vault.sessions": return .object(["sessions": .array(resourcesGone ? [] : [.object(["session_id": .string("session"), "agent": .string("claude")])])])
+        case "chat.sessions.dump": return .object(["sessions": .array(resourcesGone ? [] : [.object(["session_id": .string("session"), "agent": .string("claude"), "workspace_id": .string(workspace), "surface_id": .string("surface"), "state": .string("idle")])])])
         case "surface.input_state": return .object(["agent": .bool(true), "workspace_id": .string(workspace), "surface_id": .string("surface"), "blocks_typing": .bool(false)])
-        case "feed.list": return .object(["items": .array([.object(["request_id": .string("request"), "kind": .string("permissionRequest"), "source": .string("claude"), "status": .string(replies == 0 ? "pending" : "resolved"), "workspace_id": .string("workspace")])])])
+        case "feed.list": return .object(["items": .array(resourcesGone ? [] : [.object(["request_id": .string("request"), "kind": .string("permissionRequest"), "source": .string("claude"), "status": .string(replies == 0 ? "pending" : "resolved"), "workspace_id": .string(workspace)])])])
         case "mobile.chat.send": sends += 1; try afterSend(); if fail { throw BridgeError("outcome_unknown", "Lost response", status: 504) }
         case "mobile.chat.interrupt": interrupts += 1
         case "feed.permission.reply": replies += 1
@@ -152,7 +154,7 @@ private actor JournalCmux: CmuxControlling {
         let registry = root.appendingPathComponent("clients.json")
         let authority = try ConnectionAuthority(host: host, privateKey: hostKey, registryFile: registry, now: { 1000 })
         let bootstrap = try await authority.open(endpoint: BridgeEndpoint(host: "127.0.0.1", port: 7740), workspaces: [workspace])
-        let scope = ClientScope(workspaces: [workspace], capabilities: [.conversationRead, .conversationControl])
+        let scope = ClientScope(workspaces: [workspace], capabilities: [.conversationRead, .conversationControl, .feedRead, .feedReply])
         func enroll(_ key: Data) async throws -> String {
             let pub = try crypto.publicKey(privateKey: key), id = try crypto.identityID(publicKey: pub)
             let request = EnrollmentRequest(hostID: host.id, windowID: bootstrap.value.windowID, requestID: UUID().uuidString, clientID: id, clientPublicKey: pub, clientName: "Fixture", clientKind: "iphone", nonce: UUID().uuidString, scope: scope, expiresAt: bootstrap.value.expiresAt)
@@ -172,6 +174,10 @@ private actor JournalCmux: CmuxControlling {
         let request = SendRequest(text: "Receipt fixture")
         let body = try JSONEncoder().encode(request)
         #expect(try await call(firstRouter, authority, ownerID, ownerKey, "POST", "/v2/sessions/session/send", body).0 == 200)
+        let stopBody = try JSONEncoder().encode(InterruptRequest())
+        let decisionBody = try JSONEncoder().encode(JSONValue.object(["operation_id": .string(UUID().uuidString), "kind": .string("permissionRequest"), "mode": .string("once")]))
+        #expect(try await call(firstRouter, authority, ownerID, ownerKey, "POST", "/v2/sessions/session/interrupt", stopBody).0 == 200)
+        #expect(try await call(firstRouter, authority, ownerID, ownerKey, "POST", "/v2/feed/request/reply", decisionBody).0 == 200)
         let restarted = try ConnectionAuthority(host: host, privateKey: hostKey, registryFile: registry, now: { 1000 })
         #expect(restarted.epoch != authority.epoch)
         let router = BridgeRouter(service: try service(cmux, root), authority: restarted)
@@ -181,11 +187,21 @@ private actor JournalCmux: CmuxControlling {
         let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601
         #expect(try decoder.decode(OperationStatus.self, from: result.1).state == .accepted)
         #expect(try await call(router, restarted, ownerID, ownerKey, "POST", "/v2/sessions/session/send", body).0 == 200)
+        await cmux.removeResources()
+        #expect(try await call(router, restarted, ownerID, ownerKey, "GET", uri).0 == 200)
+        #expect(try await call(router, restarted, ownerID, ownerKey, "POST", "/v2/sessions/session/send", body).0 == 200)
+        #expect(try await call(router, restarted, ownerID, ownerKey, "POST", "/v2/sessions/session/interrupt", stopBody).0 == 200)
+        #expect(try await call(router, restarted, ownerID, ownerKey, "POST", "/v2/feed/request/reply", decisionBody).0 == 200)
+        let freshBody = try JSONEncoder().encode(SendRequest(text: "Never dispatch without the resource"))
+        #expect(try await call(router, restarted, ownerID, ownerKey, "POST", "/v2/sessions/session/send", freshBody).0 != 200)
         #expect(try await call(router, restarted, otherID, otherKey, "GET", uri).0 == 403)
         #expect(try await call(router, restarted, ownerID, ownerKey, "GET", "/v2/operations/invalid").0 == 400)
         #expect(try await call(router, restarted, ownerID, ownerKey, "GET", "/v2/operations/" + UUID().uuidString).0 == 404)
         try await restarted.revoke(clientID: ownerID)
         #expect(try await call(router, restarted, ownerID, ownerKey, "GET", uri).0 == 401)
+        #expect(try await call(router, restarted, ownerID, ownerKey, "POST", "/v2/sessions/session/send", body).0 == 401)
         #expect(await cmux.sends == 1)
+        #expect(await cmux.interrupts == 1)
+        #expect(await cmux.replies == 1)
     }
 }

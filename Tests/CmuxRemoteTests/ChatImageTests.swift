@@ -8,13 +8,14 @@ private actor ImageCmux: CmuxControlling {
     let valid: Bool
     let blocksTyping: Bool
     let fail: Bool
-    init(valid: Bool = true, blocksTyping: Bool = false, fail: Bool = false) { self.valid = valid; self.blocksTyping = blocksTyping; self.fail = fail }
+    let rejectSubmission: Bool
+    init(valid: Bool = true, blocksTyping: Bool = false, fail: Bool = false, rejectSubmission: Bool = false) { self.valid = valid; self.blocksTyping = blocksTyping; self.fail = fail; self.rejectSubmission = rejectSubmission }
     func request(_ method: String, params: [String: JSONValue]) async throws -> JSONValue {
         switch method {
         case "vault.sessions": return .object(["sessions": .array([.object(["session_id": .string("session"), "agent": .string("claude")])])])
         case "chat.sessions.dump": return .object(["sessions": .array([.object(["session_id": .string("session"), "agent": .string("claude"), "workspace_id": .string("workspace"), "surface_id": .string("surface"), "state": .string("idle")])])])
         case "surface.input_state": return .object(["agent": .bool(valid), "workspace_id": .string("workspace"), "surface_id": .string("surface"), "blocks_typing": .bool(blocksTyping)])
-        case "mobile.chat.send": deliveries.append(params); if fail { throw BridgeError("outcome_unknown", "Lost response", status: 504) }
+        case "mobile.chat.send": deliveries.append(params); if fail { throw BridgeError("outcome_unknown", "Lost response", status: 504) }; if rejectSubmission { return .object(["submitted": .bool(false)]) }
         default: break
         }
         return .object(["accepted": .bool(true)])
@@ -96,5 +97,21 @@ private actor ImageCmux: CmuxControlling {
         #expect(request.text == "Legacy" && request.operationID == uuid && request.attachments.isEmpty)
         let withImage = SendRequest(text: "Image", attachments: [image()])
         #expect(try JSONDecoder().decode(SendRequest.self, from: JSONEncoder().encode(withImage)).attachments.first?.dataBase64 == image().dataBase64)
+    }
+    @Test func rejectedImageOnlySubmitNeverPersistsASuccessfulReceipt() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("cmux-image-receipt-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let file = root.appendingPathComponent("operations.json")
+        let cmux = ImageCmux(rejectSubmission: true)
+        let first = SessionService(cmux: cmux, home: root, transcriptRoots: [], journal: try MutationJournal(file: file))
+        let request = SendRequest(text: "", attachments: [image()])
+        do { _ = try await first.send(id: "session", request: request); Issue.record("Expected an unconfirmed submission, not an accepted receipt") }
+        catch { #expect((error as? BridgeError)?.code == "outcome_unknown") }
+        let restarted = SessionService(cmux: cmux, home: root, transcriptRoots: [], journal: try MutationJournal(file: file))
+        #expect(try await restarted.operationStatus(id: request.operationID).state == .outcomeUnknown)
+        do { _ = try await restarted.send(id: "session", request: request); Issue.record("Expected no blind image replay") }
+        catch { #expect((error as? BridgeError)?.code == "outcome_unknown") }
+        #expect(await cmux.deliveries.count == 1)
     }
 }
