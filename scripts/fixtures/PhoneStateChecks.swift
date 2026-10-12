@@ -60,6 +60,35 @@ private actor DeferredSessionRead {
     func finish() { continuation?.resume(returning: [SessionDescriptor(id: "old", agent: "claude", title: "Old", cwd: nil)]); continuation = nil }
 }
 
+private actor DeferredImageRead {
+    nonisolated let started = AsyncStream<Void>.makeStream()
+    private var continuation: CheckedContinuation<Data, any Error>?
+    func read() async throws -> Data { try await withCheckedThrowingContinuation { continuation = $0; started.continuation.yield(()) } }
+    func finish(_ data: Data) { continuation?.resume(returning: data); continuation = nil }
+}
+private actor DeferredImageSend {
+    nonisolated let started = AsyncStream<Void>.makeStream()
+    var requests: [SendRequest] = []
+    private var continuation: CheckedContinuation<MutationReceipt, any Error>?
+    func send(_ request: SendRequest) async throws -> MutationReceipt {
+        requests.append(request)
+        return try await withCheckedThrowingContinuation { continuation = $0; started.continuation.yield(()) }
+    }
+    func finish() {
+        guard let request = requests.last else { return }
+        continuation?.resume(returning: MutationReceipt(operationID: request.operationID, accepted: true)); continuation = nil
+    }
+}
+private actor UncertainImageSend {
+    var requests: [SendRequest] = []
+    var accepted = false
+    func send(_ request: SendRequest) throws -> MutationReceipt {
+        requests.append(request); throw BridgeError("outcome_unknown", "Receipt lost", status: 504)
+    }
+    func status(_ id: UUID) -> OperationStatus { OperationStatus(operationID: id, state: accepted ? .accepted : .outcomeUnknown, recordedAt: Date()) }
+    func confirm() { accepted = true }
+}
+
 @main struct PhoneStateChecks {
     @MainActor static func main() async throws {
         let crypto = IdentityCryptography(); let hostKey = crypto.generatePrivateKey(); let publicKey = try crypto.publicKey(privateKey: hostKey)
@@ -172,7 +201,94 @@ private actor DeferredSessionRead {
         feedOnly.client = feedOnlyClient; await feedOnly.refresh()
         if feedOnly.error != nil || feedOnly.workspaces.first?.id != "allowed" || !feedOnly.sessions.isEmpty { failures.append("A Feed-only grant tried to read conversations or lost its workspace list") }
 
+        var mediaChecks = 0
+        func checkMedia(_ condition: Bool, _ message: String) { mediaChecks += 1; if !condition { failures.append(message) } }
+        let blue = Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAKklEQVR4nGPQyrtDU8QwasGoBaMWjFowasGoBaMWjFowasGoBaMWDBULAFSk0ExUjkswAAAAAElFTkSuQmCC")!
+        let photo = try await ImageAttachmentEncoder().encode(blue, name: "Test.png")
+        checkMedia(photo.format == "jpeg" && photo.fileName == "Test.jpg" && (Data(base64Encoded: photo.dataBase64)?.count ?? Int.max) <= 131_072, "Actual photo encoder did not produce a bounded JPEG")
+        var invalidPhotoRejected = false
+        do { _ = try await ImageAttachmentEncoder().encode(Data("invalid".utf8), name: "Bad") }
+        catch { invalidPhotoRejected = (error as? BridgeError)?.code == "invalid_image" }
+        checkMedia(invalidPhotoRejected, "Actual encoder accepted malformed photo data")
+        let fileRoot = FileManager.default.temporaryDirectory.appendingPathComponent("phone-images-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: fileRoot, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: fileRoot) }
+        let selectedFile = fileRoot.appendingPathComponent("selected.png")
+        try blue.write(to: selectedFile)
+        let selectedBytes = try await ImageFileLoader().load(selectedFile)
+        checkMedia(selectedBytes == blue, "Explicit file selection changed image bytes")
+        var rejectedDirectory = false
+        do { _ = try await ImageFileLoader().load(fileRoot) }
+        catch { rejectedDirectory = (error as? BridgeError)?.code == "invalid_image" }
+        checkMedia(rejectedDirectory, "File picker accepted a directory as an image")
+        let oversized = fileRoot.appendingPathComponent("large.png")
+        FileManager.default.createFile(atPath: oversized.path, contents: nil)
+        let largeHandle = try FileHandle(forWritingTo: oversized)
+        try largeHandle.truncate(atOffset: 33_554_433); try largeHandle.close()
+        var rejectedLarge = false
+        do { _ = try await ImageFileLoader().load(oversized) }
+        catch { rejectedLarge = (error as? BridgeError)?.code == "too_large" }
+        checkMedia(rejectedLarge, "File import bypassed the bounded input limit")
+        let cancelledFile = Task { try await ImageFileLoader().load(oversized) }; cancelledFile.cancel()
+        var rejectedCancelled = false
+        do { _ = try await cancelledFile.value }
+        catch is CancellationError { rejectedCancelled = true }
+        catch {}
+        checkMedia(rejectedCancelled, "Cancelled file import continued reading a selected file")
+        let unicodePhoto = try await ImageAttachmentEncoder().encode(blue, name: String(repeating: "照片", count: 100) + ".png")
+        checkMedia(unicodePhoto.fileName.utf8.count <= 255 && !unicodePhoto.fileName.contains("/"), "Unicode image filename exceeded the server metadata bound")
+        let photos = ImageDraftModel(); let imageRead = DeferredImageRead()
+        let latePhoto = Task { @MainActor in await photos.load([ImageSelection(name: "Late", load: { try await imageRead.read() })], encode: ImageAttachmentEncoder().encode) }
+        var imageStarted = imageRead.started.stream.makeAsyncIterator(); _ = await imageStarted.next()
+        photos.cancelLoading(); await imageRead.finish(blue); await latePhoto.value
+        checkMedia(!photos.loading && photos.images.isEmpty, "Cancelled photo loading resurrected an image draft")
+        await photos.load([ImageSelection(name: "Good", load: { blue })], encode: ImageAttachmentEncoder().encode)
+        checkMedia(photos.images.count == 1 && !photos.loading, "Photo selection did not prepare its actual image")
+        await photos.load((0..<4).map { index in ImageSelection(name: "\(index)", load: { blue }) }, encode: ImageAttachmentEncoder().encode)
+        checkMedia(photos.images.count == 1 && photos.error != nil && !photos.loading, "An over-limit selection changed the existing draft or stayed loading")
+        photos.remove(photos.images[0].id)
+        checkMedia(photos.images.isEmpty && photos.error == nil, "Removing a selected photo left stale image/error state")
+
+        func makePhotoChat(sender: @escaping @Sendable (SendRequest) async throws -> MutationReceipt,
+                           status: (@Sendable (UUID) async throws -> OperationStatus)? = nil,
+                           descriptor: SessionDescriptor = session) -> ConversationModel {
+            ConversationModel(session: descriptor, client: client, sendRequest: sender, getOperation: status,
+                              readSessions: { [descriptor] },
+                              readHistory: { _ in ConversationSnapshot(messages: [], hasMore: false, generation: "photo-fixture", clipped: false) },
+                              readPreview: { PreviewSnapshot(text: nil, available: false) })
+        }
+        let sending = DeferredImageSend(); let photoChat = makePhotoChat(sender: { try await sending.send($0) })
+        photoChat.imageDraft.images = [photo]; photoChat.draft = "Original caption"
+        let sendPhoto = Task { @MainActor in await photoChat.send() }
+        var sendStarted = sending.started.stream.makeAsyncIterator(); _ = await sendStarted.next()
+        let newPhoto = ChatImagePayload(fileName: "New.jpg", format: photo.format, data: Data(base64Encoded: photo.dataBase64)!)
+        photoChat.draft = "New caption"; photoChat.imageDraft.images.append(newPhoto)
+        await sending.finish(); await sendPhoto.value
+        checkMedia(photoChat.draft == "New caption" && photoChat.imageDraft.images.map(\.id) == [newPhoto.id], "A completed image send erased later draft edits")
+        let sentImages = await sending.requests
+        checkMedia(sentImages.count == 1 && sentImages[0].text == "Original caption" && sentImages[0].attachments.map(\.id) == [photo.id], "Photo send changed the captured input or image order")
+        let lost = UncertainImageSend(); let uncertainChat = makePhotoChat(sender: { try await lost.send($0) }, status: { await lost.status($0) })
+        uncertainChat.imageDraft.images = [photo]
+        await uncertainChat.send()
+        let pendingID = uncertainChat.pendingSend?.operationID
+        await uncertainChat.send(); await uncertainChat.refresh()
+        checkMedia(await lost.requests.count == 1 && pendingID != nil && uncertainChat.pendingSend?.operationID == pendingID && uncertainChat.imageDraft.images.count == 1 && uncertainChat.error != nil, "An unknown image send was repeated, cleared or hidden by refresh")
+        await uncertainChat.checkPendingSend()
+        checkMedia(uncertainChat.pendingSend != nil && uncertainChat.imageDraft.images.count == 1, "An unknown operation-status response cleared the draft")
+        await lost.confirm(); await uncertainChat.checkPendingSend()
+        checkMedia(uncertainChat.pendingSend == nil && uncertainChat.imageDraft.images.isEmpty && uncertainChat.error == nil, "A confirmed persisted receipt did not reconcile the image draft")
+        checkMedia(await lost.requests.count == 1, "Receipt reconciliation resent the images")
+        let inspect = makePhotoChat(sender: { try await lost.send($0) }, status: { await lost.status($0) })
+        inspect.imageDraft.images = [photo]; inspect.draft = "Keep this"
+        await inspect.send(); let beforeInspection = await lost.requests.count; inspect.acknowledgePendingSend()
+        let afterInspection = await lost.requests.count
+        checkMedia(inspect.pendingSend == nil && inspect.draft == "Keep this" && inspect.imageDraft.images.count == 1 && afterInspection == beforeInspection, "Inspection acknowledgement sent or erased the preserved draft")
+        var ended = session; ended.state = "ended"
+        let readonlyPhoto = makePhotoChat(sender: { try await lost.send($0) }, descriptor: ended)
+        readonlyPhoto.imageDraft.images = [photo]; await readonlyPhoto.send()
+        checkMedia(await lost.requests.count == beforeInspection, "Read-only image conversation invoked send")
+
         if !failures.isEmpty { print(failures.joined(separator: "\n")); exit(1) }
-        print("Phone state: 17 behavioral checks passed (enrollment, interrupt/turn timing, reply text, Markdown, project read races, decision warnings/feedback, discovery races and Feed-only grant).")
+        print("Phone state: 17 existing behavioral checks and \(mediaChecks) executed image/draft/receipt checks passed.")
     }
 }

@@ -172,3 +172,15 @@
 "error.journal" = "Mac 无法安全保存这次操作。请让主人检查 Bridge 的本地状态。";
 "error.operation_missing" = "未找到这次操作的记录。再次发送前，请先检查对话。";
 "error.image" = "请选择不超过四张、符合上传大小限制的 PNG 或 JPEG 图片。";
+"image.select" = "选择照片";
+"image.preview" = "图片预览";
+"image.remove" = "移除图片";
+"image.preparing" = "正在准备图片…";
+"operation.check" = "核对发送结果";
+"operation.inspected" = "我已检查对话";
+"operation.release" = "保留草稿，继续操作";
+"operation.inspect_note" = "请确认已检查对话及桌面输入框。此操作仅解除待核对状态，不会发送内容。再次发送可能重复执行结果不确定的操作。";
+"image.select_file" = "选择图片文件";
+"error.image_load" = "图片无法载入，请重新选择。";
+
+"sidebar.close" = "收起侧边栏";

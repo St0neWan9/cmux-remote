@@ -172,3 +172,15 @@
 "error.journal" = "The Mac cannot safely save this operation. Ask its owner to check the Bridge state.";
 "error.operation_missing" = "No operation record was found. Inspect the conversation before sending again.";
 "error.image" = "Select up to four valid PNG or JPEG images within the upload limits.";
+"image.select" = "Choose photos";
+"image.preview" = "Image preview";
+"image.remove" = "Remove image";
+"image.preparing" = "Preparing images…";
+"operation.check" = "Check send result";
+"operation.inspected" = "I inspected the conversation";
+"operation.release" = "Keep draft and continue";
+"operation.inspect_note" = "Confirm you inspected the conversation and desktop draft. This releases the pending check without sending anything. Sending again may repeat an operation whose result is unknown.";
+"image.select_file" = "Choose image files";
+"error.image_load" = "The image could not be loaded. Choose it again.";
+
+"sidebar.close" = "Close sidebar";
