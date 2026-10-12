@@ -105,3 +105,21 @@ unavailable. Supported input is one static PNG/JPEG within 4 MiB and 32 megapixe
 project file reads additionally retain the existing 1 MiB limit. Preview encoding
 strips source metadata. Current grant and session binding are rechecked after
 reading/decoding and before returning bytes.
+
+## iPhone dictation
+
+The microphone prepares a bounded local text draft through Apple's on-device
+Speech framework. Both microphone and Speech permission are explicit. A device or
+locale without on-device recognition fails with an unavailable state; no audio
+falls back to a provider, Apple server, Bridge upload or agent call. The request
+requires on-device recognition and checks support before recording. Partial text
+is replaceable; Finish, Cancel and Use text are separate actions. Use text appends
+to the current typed draft and never sends automatically. Ordinary send remains
+the only agent submission path. Recording is bounded to 60 seconds, finalization
+to five seconds, recognized text to 8 KiB. Navigation/background stops audio while
+preserving recognized words; explicit Cancel discards them. Physical microphone
+acceptance remains required. This interface does not implement a realtime voice
+conversation with the agent.
+
+Implementation references: [Apple on-device recognition](https://developer.apple.com/documentation/speech/sfspeechrecognitionrequest/requiresondevicerecognition)
+and [on-device support](https://developer.apple.com/documentation/speech/sfspeechrecognizer/supportsondevicerecognition).

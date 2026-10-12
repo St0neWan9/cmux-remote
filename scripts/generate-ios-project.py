@@ -30,8 +30,13 @@ for locale in ('en', 'zh-Hans'):
 variant = add('strings', f'isa = PBXVariantGroup; children = ({", ".join(locale_refs)}); name = Localizable.strings; sourceTree = "<group>";')
 strings_build = add('strings-build', f'isa = PBXBuildFile; fileRef = {variant};')
 product = add('product', 'isa = PBXFileReference; explicitFileType = wrapper.application; path = CmuxRemote.app; sourceTree = BUILT_PRODUCTS_DIR;')
+info_locale_refs = []
+for locale in ('en', 'zh-Hans'):
+    info_locale_refs.append(add('info-locale:' + locale, f'isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "{locale}"; path = "Resources/{locale}.lproj/InfoPlist.strings"; sourceTree = "<group>";'))
+info_variant = add('info-strings', f'isa = PBXVariantGroup; children = ({", ".join(info_locale_refs)}); name = InfoPlist.strings; sourceTree = "<group>";')
+info_build = add('info-strings-build', f'isa = PBXBuildFile; fileRef = {info_variant};')
 products = add('products', f'isa = PBXGroup; children = ({product}); name = Products; sourceTree = "<group>";')
-main = add('main', f'isa = PBXGroup; children = ({", ".join(source_refs + [variant, products])}); sourceTree = "<group>";')
+main = add('main', f'isa = PBXGroup; children = ({", ".join(source_refs + [variant, info_variant, products])}); sourceTree = "<group>";')
 package = add('package', 'isa = XCLocalSwiftPackageReference; relativePath = "..";')
 vendor_package = add('vendor-package', 'isa = XCLocalSwiftPackageReference; relativePath = "../Vendor/CmuxAgentChat";')
 deps, frameworks = [], []
@@ -40,7 +45,7 @@ for name in ('CmuxRemoteCore', 'CmuxRemoteClient', 'CmuxAgentChat'):
     deps.append(dep)
     frameworks.append(add('framework:' + name, f'isa = PBXBuildFile; productRef = {dep};'))
 sources = add('sources', f'isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = ({", ".join(source_builds)}); runOnlyForDeploymentPostprocessing = 0;')
-resources = add('resources', f'isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = ({strings_build}); runOnlyForDeploymentPostprocessing = 0;')
+resources = add('resources', f'isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = ({strings_build}, {info_build}); runOnlyForDeploymentPostprocessing = 0;')
 frameworks_phase = add('frameworks', f'isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = ({", ".join(frameworks)}); runOnlyForDeploymentPostprocessing = 0;')
 project_configs, target_configs = [], []
 for config in ('Debug', 'Release'):
@@ -52,6 +57,8 @@ for config in ('Debug', 'Release'):
         CREATE_INFOPLIST_SECTION_IN_BINARY = YES;
         INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Connect to your paired cmux Bridge on your local network.";
         INFOPLIST_KEY_NSCameraUsageDescription = "Scan your Mac Bridge pairing code.";
+        INFOPLIST_KEY_NSMicrophoneUsageDescription = "Record speech on this device to prepare an editable conversation draft.";
+        INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Recognize speech on this device. Audio is not sent to your Bridge or agent.";
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
         INFOPLIST_KEY_UILaunchScreen_Generation = YES;
         SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; TARGETED_DEVICE_FAMILY = "1,2";

@@ -7,11 +7,12 @@ info = json.loads(subprocess.check_output(['swift', '-print-target-info']))
 triple = info['target']['unversionedTriple']
 build = root / '.build' / triple / 'debug'
 args = ['swiftc', '-parse-as-library', '-swift-version', '6', '-I', str(build / 'Modules')]
-for name in ['HistoricalImageModel', 'ReadRequestOwner', 'AppModel', 'ConversationModel', 'ImageDraftModel', 'ImageSelection', 'ImageAttachmentEncoder', 'ImageFileLoader', 'PendingSendStore', 'ToolDetailModel', 'ToolDetailReference', 'PairingStore', 'DeviceIdentityStore', 'SecureDeviceStore', 'ErrorPresentation', 'RefreshTicker', 'MarkdownBlock', 'ProjectModel', 'FeedModel']:
+for name in ['SpeechDraftModel', 'SpeechInputServing', 'SpeechInputResult', 'UnavailableSpeechInput', 'HistoricalImageModel', 'ReadRequestOwner', 'AppModel', 'ConversationModel', 'ImageDraftModel', 'ImageSelection', 'ImageAttachmentEncoder', 'ImageFileLoader', 'PendingSendStore', 'ToolDetailModel', 'ToolDetailReference', 'PairingStore', 'DeviceIdentityStore', 'SecureDeviceStore', 'ErrorPresentation', 'RefreshTicker', 'MarkdownBlock', 'ProjectModel', 'FeedModel']:
     args.append(str(root / 'ios' / 'Sources' / (name + '.swift')))
 args.append(str(root / 'scripts/fixtures/PhoneStateChecks.swift'))
 args.append(str(root / 'scripts/fixtures/ConversationReadChecks.swift'))
 args.append(str(root / 'scripts/fixtures/HistoricalImageChecks.swift'))
+args.append(str(root / 'scripts/fixtures/SpeechStateChecks.swift'))
 for module in ['CmuxRemoteCore', 'CmuxRemoteClient', 'CmuxAgentChat']:
     mapping = json.loads((build / (module + '.build/output-file-map.json')).read_text())
     args += [entry['object'] for entry in mapping.values() if 'object' in entry]
