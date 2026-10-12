@@ -156,6 +156,21 @@ import CmuxRemoteMac
         try await catalog.refreshSelection()
         #expect(try await catalog.wait(original.id))
     }
+    @Test func unfocusedNativeWindowIsNeverMistakenForAClosedMirror() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let local = CatalogLocalFixture(), group = CatalogGroupFixture(), host = try host()
+        let (catalog, _) = catalog(directory, local: local, group: group, host: host)
+        try await catalog.sync(host: host, workspaces: [.init(id: remoteWorkspace, title: "Agents")])
+        let original = try #require(try await catalog.rows().first), seed = try #require(original.seed)
+        await local.focusWindow("BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB")
+        #expect(try await catalog.rows().first?.state == "pending")
+        await local.allowExplicitSelection()
+        let opened = try await catalog.select(hostID: host.id, workspaceID: remoteWorkspace)
+        #expect(opened["workspace_id"].string == seed.workspaceID)
+        #expect(await local.calls.filter { $0 == "workspace.create" }.count == 1)
+        #expect(await local.selectionWindows == [seed.windowID])
+    }
     @Test func existingPausedMirrorIsPreservedAndLostRecreationCannotRepeat() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }

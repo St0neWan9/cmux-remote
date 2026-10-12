@@ -3,10 +3,9 @@
 from pathlib import Path
 import json, subprocess
 root = Path(__file__).resolve().parents[1]
-info = json.loads(subprocess.check_output(['swift', '-print-target-info']))
-triple = info['target']['unversionedTriple']
-build = root / '.build' / triple / 'debug'
-args = ['swiftc', '-parse-as-library', '-swift-version', '6', '-I', str(build / 'Modules')]
+build = Path(subprocess.check_output(['swift', 'build', '--show-bin-path'], cwd=root, text=True).strip())
+modules = build / 'Modules' if (build / 'Modules').is_dir() else build
+args = ['swiftc', '-parse-as-library', '-swift-version', '6', '-I', str(modules)]
 for name in ['SpeechDraftModel', 'SpeechInputServing', 'SpeechInputResult', 'UnavailableSpeechInput', 'HistoricalImageModel', 'ReadRequestOwner', 'AppModel', 'ConversationModel', 'ImageDraftModel', 'ImageSelection', 'ImageAttachmentEncoder', 'ImageFileLoader', 'PendingSendStore', 'ToolDetailModel', 'ToolDetailReference', 'PairingStore', 'DeviceIdentityStore', 'SecureDeviceStore', 'ErrorPresentation', 'RefreshTicker', 'MarkdownBlock', 'ProjectModel', 'FeedModel']:
     args.append(str(root / 'ios' / 'Sources' / (name + '.swift')))
 args.append(str(root / 'scripts/fixtures/PhoneStateChecks.swift'))
@@ -14,8 +13,13 @@ args.append(str(root / 'scripts/fixtures/ConversationReadChecks.swift'))
 args.append(str(root / 'scripts/fixtures/HistoricalImageChecks.swift'))
 args.append(str(root / 'scripts/fixtures/SpeechStateChecks.swift'))
 for module in ['CmuxRemoteCore', 'CmuxRemoteClient', 'CmuxAgentChat']:
-    mapping = json.loads((build / (module + '.build/output-file-map.json')).read_text())
-    args += [entry['object'] for entry in mapping.values() if 'object' in entry]
+    mapping_file = build / (module + '.build/output-file-map.json')
+    if mapping_file.is_file():
+        mapping = json.loads(mapping_file.read_text())
+        args += [entry['object'] for entry in mapping.values() if 'object' in entry]
+    else:
+        # SwiftPM's Swift Build backend emits one combined object per module.
+        args.append(str(build / (module + '.o')))
 executable = root / '.build/phone-state-checks'
 subprocess.run(args + ['-o', str(executable)], cwd=root, check=True)
 subprocess.run([str(executable)], cwd=root, check=True)
