@@ -123,9 +123,11 @@ public actor SessionService {
         guard let path = record.transcript else { throw BridgeError("image_unavailable", "No recorded image is available.", status: 404) }
         let image = try await reader.image(path: path, agent: record.descriptor.agent, referenceID: referenceID, generation: generation)
         let bytes: Data
+        let required: [ClientCapability]
         switch image.source {
-        case .recorded(let data): bytes = data
+        case .recorded(let data): bytes = data; required = [.conversationRead]
         case .projectPath(let referenced):
+            required = [.conversationRead, .projectRead]
             try await access?.require(.projectRead, workspace: record.descriptor.workspaceID)
             guard let root = record.descriptor.cwd else { throw BridgeError("file_forbidden", "No approved project is available.", status: 403) }
             let policy = files
@@ -136,7 +138,7 @@ public actor SessionService {
         let decoding = Task.detached { try HistoricalImageProjection().preview(bytes) }
         let result = try await withTaskCancellationHandler { try await decoding.value } onCancel: { decoding.cancel() }
         _ = try await reader.image(path: path, agent: record.descriptor.agent, referenceID: referenceID, generation: generation)
-        try await recheck(record, capability: .conversationRead, access: access)
+        try await recheck(record, capabilities: required, access: access)
         try Task.checkCancellation()
         return result
     }
@@ -294,8 +296,9 @@ public actor SessionService {
         guard records[id]?.descriptor.workspaceID == value.descriptor.workspaceID, records[id]?.descriptor.surfaceID == value.descriptor.surfaceID else { throw BridgeError("stale_binding", "The session changed while authorizing access.", status: 409) }
         return value
     }
-    private func recheck(_ record: Record, capability: ClientCapability, access: SessionAccess?) async throws {
-        try await access?.require(capability, workspace: record.descriptor.workspaceID)
+    private func recheck(_ record: Record, capability: ClientCapability, access: SessionAccess?) async throws { try await recheck(record, capabilities: [capability], access: access) }
+    private func recheck(_ record: Record, capabilities: [ClientCapability], access: SessionAccess?) async throws {
+        try await access?.require(capabilities, workspace: record.descriptor.workspaceID)
         let current = records[record.descriptor.id]?.descriptor
         guard current?.workspaceID == record.descriptor.workspaceID, current?.surfaceID == record.descriptor.surfaceID else { throw BridgeError("stale_binding", "The resource binding changed during its read.", status: 409) }
     }
