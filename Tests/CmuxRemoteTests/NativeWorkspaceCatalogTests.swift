@@ -139,6 +139,36 @@ import CmuxRemoteMac
         _ = try await catalog.select(hostID: host.id, workspaceID: remoteWorkspace)
         #expect(await local.calls.filter { $0 == "workspace.create" }.count == 2)
     }
+    @Test func returningRemoteWorkspaceCanExplicitlyReopenItsConfirmedClosedRow() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let local = CatalogLocalFixture(), group = CatalogGroupFixture(), host = try host()
+        let (catalog, _) = catalog(directory, local: local, group: group, host: host)
+        try await catalog.sync(host: host, workspaces: [.init(id: remoteWorkspace, title: "Agents")])
+        let original = try #require(try await catalog.rows().first), seed = try #require(original.seed)
+        await local.close(seed.workspaceID)
+        try await catalog.sync(host: host, workspaces: [])
+        try await catalog.sync(host: host, workspaces: [.init(id: remoteWorkspace, title: "Agents")])
+        #expect(await local.calls.filter { $0 == "workspace.create" }.count == 1)
+        await local.allowExplicitSelection()
+        let reopened = try await catalog.select(hostID: host.id, workspaceID: remoteWorkspace)
+        #expect(reopened["recreated"].bool == true)
+        #expect(await local.calls.filter { $0 == "workspace.create" }.count == 2)
+    }
+
+    @Test func missingRemoteInventoryCannotEraseAnUnknownCreationOutcome() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let local = CatalogLocalFixture(), group = CatalogGroupFixture(), host = try host()
+        let (catalog, _) = catalog(directory, local: local, group: group, host: host)
+        await local.loseNextCreate()
+        try? await catalog.sync(host: host, workspaces: [.init(id: remoteWorkspace, title: "Agents")])
+        try await catalog.sync(host: host, workspaces: [])
+        try await catalog.sync(host: host, workspaces: [.init(id: remoteWorkspace, title: "Agents")])
+        #expect(try await catalog.rows().first?.errorCode == "outcome_unknown")
+        await #expect(throws: BridgeError.self) { _ = try await catalog.select(hostID: host.id, workspaceID: remoteWorkspace) }
+        #expect(await local.calls.filter { $0 == "workspace.create" }.count == 1)
+    }
     @Test func movedPendingRowSelectsItsActualWindowWithoutCreatingAnotherWorkspace() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }

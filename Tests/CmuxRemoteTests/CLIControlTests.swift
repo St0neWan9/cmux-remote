@@ -4,6 +4,24 @@ import CmuxRemoteCore
 import CmuxRemoteBridge
 
 @Suite struct CLIControlTests {
+    @Test func savedSetupEnvironmentReachesEveryOfficialCLIInvocation() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let executable = directory.appendingPathComponent("fixture-cli")
+        let script = """
+        #!/bin/sh
+        /bin/cat >/dev/null
+        [ "$CMUX_SOCKET_CAPABILITY" = "fixture-capability" ] || exit 42
+        [ "$CMUX_SOCKET_PATH" = "/fixture/cmux.sock" ] || exit 43
+        /usr/bin/printf '{"accepted":true}'
+        """
+        try Data(script.utf8).write(to: executable)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
+        let client = CLIControlClient(executable: executable, socketPath: "/fixture/cmux.sock", environment: ["CMUX_SOCKET_CAPABILITY": "fixture-capability", "CMUX_SOCKET_PATH": "/fixture/cmux.sock"])
+        #expect(try await client.request("system.tree", params: [:])["accepted"].bool == true)
+        #expect(try await client.request("workspace.create", params: [:])["accepted"].bool == true)
+    }
     @Test(arguments: ["workspace.create", "surface.create", "surface.move", "surface.split_off", "surface.reorder", "surface.close"])
     func lostMirrorWorkspaceCreateIsOutcomeUnknown(method: String) async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

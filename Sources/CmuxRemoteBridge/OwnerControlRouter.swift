@@ -6,12 +6,21 @@ struct OwnerControlRouter: Sendable {
     let authority: ConnectionAuthority
     let service: SessionService
     var mac: (any LocalMacControlling)? = nil
+    var sharing: ManagedSharingService? = nil
     func respond(_ request: JSONValue) async -> JSONValue {
         let id = request["id"]
         do {
             let params = request["params"]
             let value: JSONValue
             switch request["method"].string {
+            case "bridge.status", "bridge.start", "bridge.stop":
+                guard let sharing else { throw BridgeError("sharing_unsupported", "Upgrade the resident Bridge to manage sharing.") }
+                switch request["method"].string {
+                case "bridge.start": value = try await sharing.start(port: params["port"].int)
+                case "bridge.stop": value = await sharing.stop()
+                default: value = await sharing.status()
+                }
+            case "bridge.workspaces": value = try await service.workspaces()
             case "enrollment.open":
                 guard let host = params["host"].string, let port = params["port"].int else { throw BridgeError("invalid_input", "Choose the host endpoint.") }
                 let available = try await service.workspaces()["workspaces"].array ?? []
