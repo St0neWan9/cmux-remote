@@ -94,6 +94,11 @@ automatically distribute to external testers or notify them.
 
 ## GitHub Actions
 
+The release workflow pins Xcode 26.3 through `DEVELOPER_DIR` on the macOS 15
+runner. Its default Xcode 16.4 lacks the iOS 26 native content-back API; a runtime
+availability check does not make that declaration available to an older SDK.
+The selection is validated before building and signing.
+
 Create a `testflight` GitHub environment (or use repository secrets) and supply:
 
 | Secret | Content |
