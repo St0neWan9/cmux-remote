@@ -92,14 +92,20 @@ private actor UncertainImageSend {
 private actor ToolPageFixture {
     var text = String(repeating: "Full tool text\n", count: 2400) + "LAST"
     var queries: [[String: String]] = []
+    var generation = "generation"
+    var failInput = false
+    func replace() { generation = "replaced" }
+    func denyInput() { failInput = true }
     func change() { text += " updated" }
     func fetch(_ query: [String: String]) throws -> ToolTextPage {
         queries.append(query)
+        if query["field"] == "input", failInput { throw URLError(.timedOut) }
+        if query["generation"] != generation && query["generation"] != "current" { throw BridgeError("stale_detail", "Generation replaced", status: 409) }
         let offset = Int(query["offset"] ?? "0") ?? 0
         let revision = IdentityCryptography().digest(Data(text.utf8))
         if let expected = query["content_id"], expected != revision { throw BridgeError("stale_detail", "Updated", status: 409) }
         let value = String(text.dropFirst(offset).prefix(16_384)); let end = offset + value.count
-        return ToolTextPage(messageID: "tool", generation: "generation", field: query["field"] ?? "output", contentID: revision, text: value, offset: offset, nextOffset: end < text.count ? end : nil, totalCharacters: text.count)
+        return ToolTextPage(messageID: "tool", generation: generation, field: query["field"] ?? "output", contentID: revision, text: value, offset: offset, nextOffset: end < text.count ? end : nil, totalCharacters: text.count)
     }
 }
 private actor DeferredToolPage {
@@ -401,6 +407,12 @@ private actor DeferredToolPage {
         checkDetail(detailModel.error != nil && detailModel.page?.offset == nextPage, "Changed output mixed pages from separate content revisions")
         await detailModel.load()
         checkDetail(detailModel.error == nil && detailModel.page?.offset == 0, "Explicit refresh did not re-anchor updated tool output")
+        await pageFixture.replace(); await detailModel.load(); await detailModel.load()
+        checkDetail(detailModel.error == nil && detailModel.page?.generation == "replaced", "Explicit refresh kept an obsolete transcript generation")
+        let switchFixture = ToolPageFixture()
+        let switchedDetail = ToolDetailModel(reference: detailReference, fetch: { try await switchFixture.fetch($0) })
+        await switchedDetail.load(); await switchFixture.denyInput(); switchedDetail.field = "input"; await switchedDetail.load()
+        checkDetail(switchedDetail.page == nil && switchedDetail.error != nil, "Failed field switch displayed previous output as input")
         let delayedPage = DeferredToolPage()
         let pausedDetail = ToolDetailModel(reference: detailReference, fetch: { _ in try await delayedPage.read() })
         let delayedRead = Task { @MainActor in await pausedDetail.load() }

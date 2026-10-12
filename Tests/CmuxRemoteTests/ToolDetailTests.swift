@@ -58,6 +58,16 @@ private actor DetailRevocation {
         } while true
         #expect(collected == output && collected.hasSuffix("FINAL_MARKER"))
     }
+    @Test func oversizedGraphemeStillProducesBoundedTraversablePages() async throws {
+        let root = try directory(); defer { try? FileManager.default.removeItem(at: root) }
+        let file = root.appendingPathComponent("combining.jsonl")
+        let output = "a" + String(repeating: "\u{0301}", count: 4_500_000)
+        try claude(input: "README.md", output: output).write(to: file)
+        let reader = TranscriptReader(); let snapshot = try await reader.history(path: file.path, agent: "claude", beforeSeq: nil, limit: 100)
+        let page = try await reader.toolText(path: file.path, agent: "claude", messageID: "call", generation: snapshot.generation, field: "output", offset: 0, contentID: nil, limit: 16_384)
+        #expect(page.text.utf8.count <= 65_536)
+        #expect(page.nextOffset != nil)
+    }
     @Test func shortReadInputIsNotLostAndUnsupportedFieldsNeverExposeAnotherMessage() async throws {
         let root = try directory(); defer { try? FileManager.default.removeItem(at: root) }
         let file = root.appendingPathComponent("claude.jsonl")
