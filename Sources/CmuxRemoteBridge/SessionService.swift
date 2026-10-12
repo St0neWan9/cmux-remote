@@ -30,7 +30,18 @@ public actor SessionService {
         return .object(["protocol": .string("cmux-remote/1"), "cmux": caps, "history_source": .string("local_transcript"), "preview_fidelity": .string("screen_best_effort")])
     }
     public func workspaces() async throws -> JSONValue { try await cmux.request("workspace.list", params: [:]) }
-    public func feed() async throws -> JSONValue { try await cmux.request("feed.list", params: [:]) }
+    public func feed() async throws -> JSONValue {
+        let result = try await cmux.request("feed.list", params: [:])
+        let items = result["items"].array ?? []
+        let descriptors = items.contains(where: { $0["workstream_id"].string != nil }) ? try await sessions() : []
+        let binding = FeedWorkspaceBinding()
+        return .object(["items": .array(items.compactMap { item in
+            guard var fields = item.object else { return nil }
+            if let workspace = binding.workspace(for: item, sessions: descriptors) { fields["workspace_id"] = .string(workspace) }
+            else { fields.removeValue(forKey: "workspace_id") }
+            return .object(fields)
+        })])
+    }
 
     public func sessions() async throws -> [SessionDescriptor] {
         let vault = try await cmux.request("vault.sessions", params: ["limit": .number(200)])
@@ -131,20 +142,30 @@ public actor SessionService {
 
     public func reply(requestID: String, body: JSONValue, access: SessionAccess? = nil) async throws -> MutationReceipt {
         guard let rawID = body["operation_id"].string, let operation = UUID(uuidString: rawID), let kind = body["kind"].string else { throw BridgeError("invalid_input", "A decision identity and kind are required.") }
-        let serialized = String(decoding: try JSONEncoder().encode(body), as: UTF8.self)
+        let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+        let serialized = String(decoding: try encoder.encode(body), as: UTF8.self)
         let signature = "reply:\(requestID):\(serialized)"
         if let receipt = try existing(operation, signature: signature) { return receipt }
         let items = try await feed()["items"].array ?? []
         guard let pending = items.first(where: { $0["request_id"].string == requestID && $0["status"].string == "pending" }), pending["kind"].string == kind else { throw BridgeError("request_expired", "This request is no longer waiting for a decision.", status: 409) }
         try await access?.require(.feedReply, workspace: pending["workspace_id"].string)
+        // Authorization suspends the actor. Hook events/session refresh may move or end the target meanwhile.
+        if pending["workstream_id"].string != nil {
+            let live = records.values.map(\.descriptor).filter(\.writable)
+            let current = FeedWorkspaceBinding().workspace(for: pending, sessions: live)
+            guard current != nil, current == pending["workspace_id"].string?.lowercased() else {
+                throw BridgeError("stale_binding", "The Feed target changed during authorization. Refresh before replying.", status: 409)
+            }
+        }
         let method: String; var params: [String: JSONValue] = ["request_id": .string(requestID)]
         switch kind {
         case "permissionRequest":
-            guard let mode = body["mode"].string, ["once", "deny"].contains(mode) else { throw BridgeError("invalid_input", "Choose allow once or deny.") }
-            method = "feed.permission.reply"; params["mode"] = .string(mode)
+            guard let raw = body["mode"].string, let mode = FeedDecisionMode(rawValue: raw), FeedDecisionPolicy().modes(for: pending).contains(mode) else { throw BridgeError("invalid_input", "Choose an available permission decision.") }
+            method = "feed.permission.reply"; params["mode"] = .string(mode.rawValue)
         case "exitPlan":
-            guard let mode = body["mode"].string, ["manual", "deny"].contains(mode) else { throw BridgeError("invalid_input", "Choose manual or deny.") }
-            method = "feed.exit_plan.reply"; params["mode"] = .string(mode)
+            guard let raw = body["mode"].string, let mode = FeedDecisionMode(rawValue: raw), mode.supports(kind: kind) else { throw BridgeError("invalid_input", "Choose an available plan decision.") }
+            method = "feed.exit_plan.reply"; params["mode"] = .string(mode.rawValue)
+            if let feedback = body["feedback"].string, !feedback.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { params["feedback"] = .string(feedback) }
         case "question":
             guard let choices = body["selections"].array, choices.allSatisfy({ $0.string != nil }) else { throw BridgeError("invalid_input", "Choose an answer.") }
             method = "feed.question.reply"; params["selections"] = .array(choices)

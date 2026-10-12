@@ -29,6 +29,37 @@ private actor FixtureEnrollment: DeviceEnrolling {
     nonisolated func connection(from status: EnrollmentStatus) throws -> AuthorizedConnection { throw BridgeError("not_approved", "Fixture is pending") }
 }
 
+private actor DeferredProjectRead {
+    private var continuation: CheckedContinuation<TextFileSnapshot, any Error>?
+    nonisolated let started = AsyncStream<Void>.makeStream()
+    func read() async throws -> TextFileSnapshot {
+        try await withCheckedThrowingContinuation { continuation in self.continuation = continuation; started.continuation.yield(()) }
+    }
+    func finish() { continuation?.resume(returning: TextFileSnapshot(path: "old", text: "Old content", truncated: false)); continuation = nil }
+}
+private actor FeedModelFixture {
+    var calls = 0
+    var observedBody: JSONValue?
+    let item: JSONValue = .object(["request_id": .string("request"), "kind": .string("exitPlan"), "status": .string("pending")])
+    func send(_ body: JSONValue) throws -> MutationReceipt {
+        calls += 1; observedBody = body
+        throw BridgeError("outcome_unknown", "Lost", status: 504)
+    }
+    func load() -> [JSONValue] { [item] }
+}
+
+private actor DeferredSessionRead {
+    var calls = 0
+    private var continuation: CheckedContinuation<[SessionDescriptor], any Error>?
+    nonisolated let started = AsyncStream<Void>.makeStream()
+    func read() async throws -> [SessionDescriptor] {
+        calls += 1
+        if calls > 1 { return [SessionDescriptor(id: "new", agent: "claude", title: "New", cwd: nil)] }
+        return try await withCheckedThrowingContinuation { continuation in self.continuation = continuation; started.continuation.yield(()) }
+    }
+    func finish() { continuation?.resume(returning: [SessionDescriptor(id: "old", agent: "claude", title: "Old", cwd: nil)]); continuation = nil }
+}
+
 @main struct PhoneStateChecks {
     @MainActor static func main() async throws {
         let crypto = IdentityCryptography(); let hostKey = crypto.generatePrivateKey(); let publicKey = try crypto.publicKey(privateKey: hostKey)
@@ -99,7 +130,49 @@ private actor FixtureEnrollment: DeviceEnrolling {
         let labeled = MarkdownBlock.parse("```swift\nlet n = 1\n```").first
         if bare?.text != "ls\npwd" || labeled?.text != "let n = 1" { failures.append("Fenced Markdown lost code content") }
 
+        let deferred = DeferredProjectRead()
+        let project = ProjectModel(initialPath: " file with trailing space ", read: { resource, query in
+            if resource == "file" { return try await deferred.read() }
+            if query["path"] != " file with trailing space " { throw BridgeError("invalid_input", "Path changed") }
+            return TextFileSnapshot(path: "new", text: "New diff", truncated: true)
+        }, list: { [ProjectChange(status: " M", path: "source.swift")] })
+        let oldRead = Task { @MainActor in await project.load(.file) }
+        var projectStarted = deferred.started.stream.makeAsyncIterator(); _ = await projectStarted.next()
+        await project.load(.diff); await deferred.finish(); await oldRead.value
+        if project.content != "New diff" || !project.truncated || project.busy { failures.append("An older file read replaced the current diff or filename spaces were lost") }
+        await project.load(.changes)
+        if project.entries.first?.path != "source.swift" || !project.content.isEmpty { failures.append("Changes view retained previous file content") }
+        let feedFixture = FeedModelFixture()
+        let feed = FeedModel(fetch: { await feedFixture.load() }, send: { _, body in try await feedFixture.send(body) })
+        await feed.refresh()
+        let pendingItem = feedFixture.item
+        await feed.reply(pendingItem, mode: .manual, feedback: "Please keep tests")
+        let warning = feed.error
+        await feed.refresh()
+        if warning == nil || feed.error != warning || feed.busy { failures.append("Snapshot refresh hid a lost decision receipt") }
+        let feedCalls = await feedFixture.calls; let observedBody = await feedFixture.observedBody
+        if feedCalls != 1 || observedBody?["feedback"].string != "Please keep tests" { failures.append("Decision was retried or feedback was omitted") }
+        let readonly: JSONValue = .object(["request_id": .string("ended"), "kind": .string("exitPlan"), "status": .string("resolved")])
+        await feed.reply(readonly, mode: .manual)
+        if await feedFixture.calls != 1 { failures.append("A resolved item was submitted again") }
+
+        let sessionsFixture = DeferredSessionRead()
+        let browsing = AppModel(fetchSessions: { _ in try await sessionsFixture.read() }, fetchWorkspaces: { _ in [] })
+        browsing.client = client
+        let staleBrowse = Task { @MainActor in await browsing.refresh() }
+        var browseStarted = sessionsFixture.started.stream.makeAsyncIterator(); _ = await browseStarted.next()
+        await browsing.refresh(); await sessionsFixture.finish(); await staleBrowse.value
+        if browsing.sessions.first?.id != "new" || browsing.loading { failures.append("An older discovery snapshot replaced newer sessions") }
+        let feedScope = ClientScope(workspaces: bootstrap.value.workspaces, capabilities: [.workspaceRead, .feedRead, .feedReply])
+        let feedGrant = try crypto.sign(EnrollmentGrant(request: request.value, scope: feedScope, issuedAt: 1000), domain: "grant", privateKey: hostKey)
+        let feedConnection = AuthorizedConnection(host: host, endpoint: bootstrap.value.endpoint, privateKey: key, grant: feedGrant)
+        let feedOnlyClient = try RemoteClient(connection: feedConnection)
+        defer { feedOnlyClient.close() }
+        let feedOnly = AppModel(fetchSessions: { _ in throw BridgeError("scope_denied", "Should not ask for conversations") }, fetchWorkspaces: { _ in [WorkspaceSummary(id: "allowed", title: "Allowed")] })
+        feedOnly.client = feedOnlyClient; await feedOnly.refresh()
+        if feedOnly.error != nil || feedOnly.workspaces.first?.id != "allowed" || !feedOnly.sessions.isEmpty { failures.append("A Feed-only grant tried to read conversations or lost its workspace list") }
+
         if !failures.isEmpty { print(failures.joined(separator: "\n")); exit(1) }
-        print("Phone state: 10 behavioral checks passed (enrollment cancellation/recovery/pause, interrupt state, paginated and unknown turn timing, completed banner, full final-record action text, Markdown).")
+        print("Phone state: 17 behavioral checks passed (enrollment, interrupt/turn timing, reply text, Markdown, project read races, decision warnings/feedback, discovery races and Feed-only grant).")
     }
 }

@@ -12,7 +12,7 @@ final class QRScannerController: UIViewController, @preconcurrency AVCaptureMeta
     init(onCode: @escaping @MainActor (String) -> Void) { self.onCode = onCode; super.init(nibName: nil, bundle: nil) }
     required init?(coder: NSCoder) { fatalError("Storyboard initialization is not supported") }
     override func viewDidLoad() {
-        super.viewDidLoad(); view.backgroundColor = .black
+        super.viewDidLoad(); view.backgroundColor = .white
         Task {
             let granted = await AVCaptureDevice.requestAccess(for: .video)
             guard !stopped else { return }
@@ -38,7 +38,7 @@ final class QRScannerController: UIViewController, @preconcurrency AVCaptureMeta
     }
     func stop() { stopped = true; CameraSessionWorker(session: capture).stop() }
     private func showUnavailable() {
-        let label = UILabel(); label.text = String(localized: "pair.camera_unavailable"); label.textColor = .white; label.numberOfLines = 0; label.textAlignment = .center
+        let label = UILabel(); label.text = String(localized: "pair.camera_unavailable"); label.textColor = .secondaryLabel; label.numberOfLines = 0; label.textAlignment = .center
         label.translatesAutoresizingMaskIntoConstraints = false; view.addSubview(label)
         NSLayoutConstraint.activate([label.centerYAnchor.constraint(equalTo: view.centerYAnchor), label.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24), label.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24)])
     }
