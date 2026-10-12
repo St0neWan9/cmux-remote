@@ -60,3 +60,11 @@ After cancellation, cmux can retain a working snapshot even when Claude has
 restored the prompt. The phone acknowledges the successful stop request without
 claiming completion or suppressing further stop controls. The acknowledgement
 clears on an observed state change, a new user message, or a phone send.
+
+## Conversation overlap rendering
+
+The header keeps a white page background. A bounded SwiftUI layer shader blurs
+and fades message pixels beneath the floating controls; it does not add a tinted
+backdrop. The iOS target compiles `ConversationHeader.metal` into its default
+shader library. `scripts/build-ios.sh` checks the Metal compiler and downloads
+Apple's official Metal Toolchain component if the active Xcode lacks it.

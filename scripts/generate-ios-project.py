@@ -18,8 +18,9 @@ def add(name, value):
     return ident
 
 source_refs, source_builds = [], []
-for path in sorted((ios / 'Sources').glob('*.swift')):
-    ref = add(str(path.relative_to(ios)), f'isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Sources/{path.name}"; sourceTree = "<group>";')
+for path in sorted([*(ios / 'Sources').glob('*.swift'), *(ios / 'Sources').glob('*.metal')]):
+    source_type = 'sourcecode.metal' if path.suffix == '.metal' else 'sourcecode.swift'
+    ref = add(str(path.relative_to(ios)), f'isa = PBXFileReference; lastKnownFileType = {source_type}; path = "Sources/{path.name}"; sourceTree = "<group>";')
     source_refs.append(ref)
     source_builds.append(add('build:' + str(path.relative_to(ios)), f'isa = PBXBuildFile; fileRef = {ref};'))
 
