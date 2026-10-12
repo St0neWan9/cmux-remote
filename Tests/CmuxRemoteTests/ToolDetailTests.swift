@@ -67,6 +67,7 @@ private actor DetailRevocation {
         let page = try await reader.toolText(path: file.path, agent: "claude", messageID: "call", generation: snapshot.generation, field: "output", offset: 0, contentID: nil, limit: 16_384)
         #expect(page.text.utf8.count <= 65_536)
         #expect(page.nextOffset != nil)
+        #expect(try JSONEncoder().encode(snapshot).count < 100_000)
     }
     @Test func shortReadInputIsNotLostAndUnsupportedFieldsNeverExposeAnotherMessage() async throws {
         let root = try directory(); defer { try? FileManager.default.removeItem(at: root) }
@@ -96,6 +97,8 @@ private actor DetailRevocation {
         do { _ = try await reader.toolText(path: file.path, agent: "claude", messageID: "call", generation: snapshot.generation, field: "output", offset: 8, contentID: page.contentID, limit: 8); Issue.record("Expected generation invalidation") }
         catch { #expect((error as? BridgeError)?.code == "stale_detail") }
         let current = try await reader.history(path: file.path, agent: "claude", beforeSeq: nil, limit: 100)
+        let reanchored = try await reader.toolText(path: file.path, agent: "claude", messageID: "call", generation: "current", field: "output", offset: 0, contentID: nil, limit: 8)
+        #expect(reanchored.generation == current.generation && reanchored.text == "New outp")
         do { _ = try await reader.toolText(path: file.path, agent: "claude", messageID: "call", generation: current.generation, field: "output", offset: 8, contentID: page.contentID, limit: 8); Issue.record("Expected content invalidation") }
         catch { #expect((error as? BridgeError)?.code == "stale_detail") }
     }

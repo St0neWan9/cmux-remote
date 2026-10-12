@@ -21,7 +21,7 @@ struct ToolDetailView: View {
                         }.pickerStyle(.segmented).disabled(model.busy)
                     }
                     if let error = model.error { Text(error).font(.footnote).foregroundStyle(.red) }
-                    if let page = model.page {
+                    if let page = model.page, page.field == model.field {
                         ScrollView {
                             if page.text.isEmpty { Text(String(localized: "tool.detail.empty")).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading) }
                             else { ToolCodeBlock(text: page.text) }
@@ -44,7 +44,7 @@ struct ToolDetailView: View {
         .onChange(of: model.field) { _, _ in load() }
         .task(id: phase) {
             guard phase == .active else { loadTask?.cancel(); model.suspend(); return }
-            if model.page == nil { await model.load() }
+            if model.page == nil && model.error == nil { await model.load() }
         }
         .onDisappear { loadTask?.cancel(); model.suspend() }
     }
