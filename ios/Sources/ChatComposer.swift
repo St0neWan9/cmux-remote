@@ -5,6 +5,8 @@ import CmuxRemoteCore
 /// Focused or holding images, it expands: images, then the text, then a row of actions.
 struct ChatComposer: View {
     @Binding var draft: String
+    /// Owned by the page so a tap on the conversation can put the keyboard away.
+    var focused: FocusState<Bool>.Binding
     let canSend: Bool
     let busy: Bool
     let working: Bool
@@ -25,12 +27,11 @@ struct ChatComposer: View {
     var showImageFiles: (() -> Void)?
     /// Lines the focused field may grow to before it scrolls; the page derives it from half its free height.
     var maxLines = 6
-    @FocusState private var focused: Bool
     // Match visible text to the symbol centers, rather than the text field's line box.
     @ScaledMetric(relativeTo: .body) private var textCenterOffset: CGFloat = 1.5
     private var hasDraft: Bool { !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || hasImages }
     /// A multi-line draft stays open so its text is never hidden behind a one-line bar.
-    private var expanded: Bool { focused || !images.isEmpty || draft.contains("\n") }
+    private var expanded: Bool { focused.wrappedValue || !images.isEmpty || draft.contains("\n") }
     var body: some View {
         // One text field keeps its identity in both layouts; replacing it would drop the focus that expands the bar.
         VStack(alignment: .leading, spacing: 4) {
@@ -49,7 +50,7 @@ struct ChatComposer: View {
                 }
             }
         }
-        .padding(.horizontal, expanded ? 10 : 6).padding(.top, expanded ? 8 : 2).padding(.bottom, expanded ? 6 : 2)
+        .padding(.horizontal, expanded ? 10 : 6).padding(.top, expanded ? 8 : 5).padding(.bottom, expanded ? 6 : 5)
         .background(Color.white, in: RoundedRectangle(cornerRadius: expanded ? 26 : 30))
         .overlay(RoundedRectangle(cornerRadius: expanded ? 26 : 30).stroke(Color.primary.opacity(0.055), lineWidth: 0.5))
         .shadow(color: .black.opacity(0.075), radius: 18, y: 5)
@@ -59,7 +60,7 @@ struct ChatComposer: View {
     }
     private var textField: some View {
         TextField(String(localized: "chat.follow_up"), text: $draft, axis: .vertical)
-            .font(.body).lineLimit(expanded ? 1...max(2, maxLines) : 1...1).focused($focused).padding(.vertical, expanded ? 11 : 8)
+            .font(.body).lineLimit(expanded ? 1...max(2, maxLines) : 1...1).focused(focused).padding(.vertical, expanded ? 11 : 8)
             .accessibilityIdentifier("chat.composer")
     }
     private var actions: some View {
@@ -73,7 +74,7 @@ struct ChatComposer: View {
     }
     @ViewBuilder private var voice: some View {
         if let startVoice {
-            Button { if dictating { finishVoice?() } else { focused = false; startVoice() } } label: {
+            Button { if dictating { finishVoice?() } else { focused.wrappedValue = false; startVoice() } } label: {
                 Image(systemName: dictating ? "waveform" : "mic").font(.system(size: expanded ? 21 : 19)).foregroundStyle(dictating ? Color.accentColor : Color.primary).frame(width: expanded ? MobileDesign.controlHeight : 38, height: expanded ? MobileDesign.controlHeight : 38)
             }.buttonStyle(.plain).accessibilityLabel(String(localized: dictating ? "voice.finish" : "voice.start")).accessibilityIdentifier("voice.microphone").disabled(busy || !canSend || (sendBlocked && !dictating))
         }
@@ -83,7 +84,7 @@ struct ChatComposer: View {
             Button(action: stop) { Image(systemName: "stop.fill").font(.system(size: 15, weight: .semibold)).foregroundStyle(.white).frame(width: expanded ? 40 : 34, height: expanded ? 40 : 34).background(Color.accentColor, in: Circle()) }
                 .buttonStyle(.plain).accessibilityLabel(String(localized: "chat.stop")).accessibilityIdentifier("chat.stop").disabled(busy || !canSend)
         } else {
-            Button { focused = false; send() } label: {
+            Button { focused.wrappedValue = false; send() } label: {
                 Image(systemName: "arrow.up").font(.system(size: 20, weight: .semibold)).foregroundStyle(hasDraft && canSend ? Color.white : Color.secondary)
                     .frame(width: expanded ? 40 : 34, height: expanded ? 40 : 34).background(hasDraft && canSend ? Color.accentColor : Color(uiColor: .tertiarySystemFill), in: Circle())
             }.frame(width: expanded ? MobileDesign.controlHeight : 38, height: expanded ? MobileDesign.controlHeight : 38).contentShape(Rectangle()).buttonStyle(.plain).accessibilityLabel(String(localized: "chat.send")).accessibilityIdentifier("chat.send").disabled(busy || !canSend || !hasDraft || sendBlocked)
