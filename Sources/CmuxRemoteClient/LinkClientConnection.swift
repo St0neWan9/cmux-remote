@@ -41,7 +41,7 @@ actor LinkClientConnection {
     /// keeps the link: dropping it would turn a write that may have landed into an unknown outcome.
     func reconnect() async {
         guard !closed else { return }
-        if !pending.values.contains(where: { $0.method == "POST" }) { await failed(URLError(.networkConnectionLost)) }
+        if Self.mayDropLink(pendingMethods: pending.values.map(\.method)) { await failed(URLError(.networkConnectionLost)) }
         try? await connect()
     }
     func updateRelay(_ relay: RelayEndpoint?) { endpoint.relay = relay }
@@ -172,9 +172,11 @@ actor LinkClientConnection {
         subscriptions.removeValue(forKey: id)?.finish()
         abandoned.append(id); if abandoned.count > 64 { abandoned.removeFirst() }
         // A read that outlived its deadline points at a dead link: the next request dials again instead of waiting too.
-        if timedOut { await failed(URLError(.timedOut)); return }
+        if timedOut, Self.mayDropLink(pendingMethods: pending.values.map(\.method)) { await failed(URLError(.timedOut)); return }
         try? await send(LinkFrame(kind: "cancel", id: id))
     }
+    /// Whether the link may be torn down: never under an in-flight write, which would then have an unknown outcome.
+    static func mayDropLink(pendingMethods: [String]) -> Bool { !pendingMethods.contains("POST") }
     /// A ping with a deadline: a lost path never answers, and the socket alone may not report it.
     private static func ping(_ socket: LinkSocket) async throws {
         try await withThrowingTaskGroup(of: Void.self) { group in

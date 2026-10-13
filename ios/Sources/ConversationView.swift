@@ -47,7 +47,7 @@ struct ConversationView: View {
                 let visible = bottom > 0 && bottom <= viewport.size.height + 32
                 if latestVisible != visible { latestVisible = visible }
                 if userScrolling || !atLatest { if atLatest != visible { atLatest = visible } }
-                else if bottom.isFinite, abs(bottom - viewport.size.height) > 32 { proxy.scrollTo("latest", anchor: .bottom) }
+                else if bottom.isFinite && !latestVisible { proxy.scrollTo("latest", anchor: .bottom) }
             }
             .modifier(TimelineScrollInteraction(userScrolling: $userScrolling, atLatest: $atLatest, latestVisible: latestVisible))
             .scrollDismissesKeyboard(.interactively)

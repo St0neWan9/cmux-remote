@@ -20,9 +20,13 @@ extension AppModel {
         links.first { $0.client === client }.flatMap { linkStates[$0.id] }
     }
 
-    /// Drops links that may be dead, dials each Mac again and reloads the lists; a manual refresh and a returning network use it.
-    func reconnect() async {
-        let targets = links
+    /// Dials Macs again and reloads the lists.
+    ///
+    /// A pull to refresh redials every Mac, since a link that looks up may be half-open. Automatic retries and the
+    /// bar's Retry touch only Macs already known to be down: redialing a working link drops its live updates.
+    func reconnect(onlyLost: Bool = false) async {
+        let targets = onlyLost ? links.filter { linkStates[$0.id] != .connected } : links
+        guard !targets.isEmpty else { return }
         // The bar turns at once, before a slow relay dial has reported anything.
         for link in targets where linkStates[link.id] != .connected { linkStates[link.id] = .connecting }
         await withTaskGroup(of: Void.self) { group in
@@ -49,9 +53,10 @@ extension AppModel {
                 }
             }
             group.addTask { [weak self] in
+                // A new or changed path (Wi-Fi to cellular included) leaves sockets bound to the old one.
                 for await usable in network.availability() where usable {
                     guard let self else { return }
-                    if await self.connectionState == .disconnected { await self.reconnect() }
+                    await self.reconnect()
                 }
             }
             group.addTask { [weak self] in
@@ -61,7 +66,7 @@ extension AppModel {
                     let pause = [3, 5, 10, 20, 30][min(attempt, 4)]
                     do { try await Task.sleep(for: .seconds(pause)) } catch { return }
                     guard let self else { return }
-                    if await self.connectionState == .disconnected { attempt += 1; await self.reconnect() } else { attempt = 0 }
+                    if await self.connectionState == .disconnected { attempt += 1; await self.reconnect(onlyLost: true) } else { attempt = 0 }
                 }
             }
             await group.waitForAll()

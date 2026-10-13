@@ -47,4 +47,10 @@ import CmuxRemoteCore
         states.finish()
         #expect(await first.next() == nil)
     }
+    /// A slow read timing out must not turn a concurrent send into an unknown outcome by dropping their shared link.
+    @Test func aTimedOutReadKeepsALinkThatCarriesASend() {
+        #expect(LinkClientConnection.mayDropLink(pendingMethods: ["GET", "GET"]))
+        #expect(!LinkClientConnection.mayDropLink(pendingMethods: ["GET", "POST"]))
+        #expect(LinkClientConnection.mayDropLink(pendingMethods: []))
+    }
 }
