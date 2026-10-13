@@ -20,7 +20,9 @@ struct SessionListView: View {
         let links = model.links
         let workspaces = model.workspaces
         let hosted = model.hostedSessions.filter { filter.matches($0.session, query: query, workspaceID: workspaceID) }
-        let sections = SessionHostSection.make(links: links, sessions: hosted)
+        let sections = SessionHostSection.make(links: links, sessions: hosted, workspaces: workspaces)
+        // A single selected workspace needs no workspace headings.
+        let grouped = workspaceID == nil
         let loading = model.loading
         let error = model.error
         let multiple = links.count > 1
@@ -60,15 +62,17 @@ struct SessionListView: View {
                             if multiple {
                                 Label(section.hostName, systemImage: "laptopcomputer").font(.title3.weight(.semibold)).accessibilityAddTraits(.isHeader)
                                 if let hostError = model.hostErrors[section.hostID] { Text(hostError).font(.footnote).foregroundStyle(.red) }
-                            } else { Text(String(localized: "sessions.projects")).font(.headline) }
+                            } else if grouped { Text(String(localized: "sessions.workspaces_title")).font(.headline) }
                             ForEach(section.groups) { group in
                                 VStack(alignment: .leading, spacing: 14) {
-                                    Label(group.name ?? String(localized: "sessions.other"), systemImage: "folder")
-                                        .font(.body.weight(.semibold)).accessibilityAddTraits(.isHeader)
+                                    if grouped {
+                                        Label(group.name ?? String(localized: "sessions.other"), systemImage: group.name == nil ? "clock.arrow.circlepath" : "macwindow")
+                                            .font(.body.weight(.semibold)).lineLimit(1).accessibilityAddTraits(.isHeader)
+                                    }
                                     ForEach(group.sessions) { session in
                                         Button { openConversation(HostedSession(hostID: section.hostID, hostName: section.hostName, session: session)) } label: { sessionRow(session) }
                                         .buttonStyle(.plain).accessibilityIdentifier("session." + section.hostID + "." + session.id)
-                                        .padding(.leading, 34)
+                                        .padding(.leading, grouped ? 34 : 0)
                                     }
                                 }
                             }

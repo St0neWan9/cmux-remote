@@ -248,3 +248,4 @@
 "error.relay" = "中转服务器没有正确响应，请检查中转地址后重试。";
 "error.relay_origin" = "请输入以 https:// 开头、不带路径的地址。";
 "chat.loading" = "正在加载对话…";
+"sessions.workspaces_title" = "工作区";
