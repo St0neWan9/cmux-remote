@@ -11,7 +11,7 @@ struct ResponseFooter: View {
         HStack(spacing: 18) {
             Button {
                 UIPasteboard.general.string = text; copied = true
-            } label: { Image(systemName: copied ? "checkmark" : "doc.on.doc").frame(width: 30, height: 44) }
+            } label: { Image(systemName: copied ? "checkmark" : "square.on.square").frame(width: 30, height: 44) }
                 .accessibilityLabel(String(localized: copied ? "chat.copied" : "chat.copy"))
                 .accessibilityIdentifier("response.copy")
             ShareLink(item: text) { Image(systemName: "square.and.arrow.up").frame(width: 30, height: 44) }

@@ -107,7 +107,7 @@ struct SessionSidebarView: View {
             } label: {
                 HStack(spacing: 12) {
                     Image(systemName: group.name == nil ? "clock.arrow.circlepath" : "macwindow").font(.system(size: 20))
-                    Text(group.name ?? String(localized: "sessions.other")).font(.body.weight(.semibold))
+                    Text(group.name ?? String(localized: "sessions.other")).font(.body.weight(.semibold)).lineLimit(1)
                     Spacer()
                     Image(systemName: expanded.contains(key) ? "chevron.down" : "chevron.right").font(.caption).foregroundStyle(.secondary)
                 }.frame(minHeight: 44).contentShape(Rectangle())
