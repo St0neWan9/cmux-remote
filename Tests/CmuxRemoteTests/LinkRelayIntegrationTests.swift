@@ -84,6 +84,48 @@ import CmuxRemoteCore
             for link in links { link.close() }; await cloud.stop(); local?.stop(); await fixture.stop()
         } catch { for link in links { link.close() }; await relay?.stop(); local?.stop(); await fixture.stop(); throw error }
     }
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["CMUX_REMOTE_RELAY_TESTS"] == "1"), .timeLimit(.minutes(1)))
+    func phoneWithoutQROrLANFindsListedMacEnrollsThroughRelayAndOwnerNarrowsScope() async throws {
+        let fixture = try await LinkIntegrationFixture.create()
+        var relay: CloudRelayService?, local: LocalRelayProcess?, enrollment: EnrollmentClient?, link: WebSocketTransport?
+        do {
+            let process = try await LocalRelayProcess.start(root: fixture.root); local = process
+            let origin = try #require(URLComponents(string: process.origin)), port = try #require(origin.port)
+            let pairing = try process.tls.pairing(host: "127.0.0.1", port: port)
+            let service = SessionService(cmux: fixture.cmux, home: fixture.root.appendingPathComponent("home"), transcriptRoots: [fixture.root])
+            let ready = AsyncStream<Void>.makeStream()
+            let cloud = try CloudRelayService(origin: process.origin, secret: String(repeating: "a", count: 64), router: BridgeRouter(service: service, authority: fixture.authority), authority: fixture.authority,
+                dial: { CloudRelaySocket(url: $0, headers: $1, delegate: PinnedSessionDelegate(pairing: pairing)) }, onConnected: { ready.continuation.yield(()) })
+            relay = cloud
+            let workspaces = ["11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"]
+            let authority = fixture.authority
+            // The listed LAN endpoint is unreachable from this "phone"; only the relay path can work.
+            await cloud.setListing { try await authority.openDirectory(endpoint: BridgeEndpoint(host: "127.0.0.1", port: 1), workspaces: workspaces) }
+            try await cloud.start()
+            var connected = ready.stream.makeAsyncIterator(); #expect(await connected.next() != nil)
+            let directory = RelayDirectoryClient(delegate: PinnedSessionDelegate(pairing: pairing))
+            var hosts: [SignedValue<EnrollmentBootstrap>] = []
+            for _ in 0..<40 where hosts.isEmpty { hosts = try await directory.hosts(origin: process.origin); if hosts.isEmpty { try await Task.sleep(for: .milliseconds(100)) } }
+            let listed = try #require(hosts.first)
+            #expect(listed.value.host == fixture.connection.host)
+            let phone = try EnrollmentClient(bootstrap: listed, privateKey: IdentityCryptography().generatePrivateKey(), name: "Phone on cellular", kind: "iphone",
+                relayDial: { LinkSocket(url: $0, delegate: PinnedSessionDelegate(pairing: pairing), headers: $1) }); enrollment = phone
+            #expect(try await phone.submit().state == "pending")
+            let narrowed = ClientScope(workspaces: [workspaces[0]], capabilities: phone.request.value.scope.capabilities)
+            try await fixture.authority.approve(requestID: phone.request.value.requestID, scope: narrowed)
+            let connection = try phone.connection(from: await phone.status())
+            #expect(connection.grant.value.scope.workspaces == [workspaces[0]])
+            #expect(connection.endpoint.relay?.admission.value.kind == "approved")
+            let routed = WebSocketTransport(host: connection.host, key: connection.privateKey, endpoint: connection.endpoint,
+                relayDial: { LinkSocket(url: $0, delegate: PinnedSessionDelegate(pairing: pairing), headers: $1) }); link = routed
+            let sessions: [SessionDescriptor] = try await request(routed, connection: connection, path: "/v2/sessions")
+            #expect(sessions.count == 1)
+            await cloud.stop(); relay = nil
+            for _ in 0..<40 where !hosts.isEmpty { hosts = try await directory.hosts(origin: process.origin); if !hosts.isEmpty { try await Task.sleep(for: .milliseconds(100)) } }
+            #expect(hosts.isEmpty, "A stopped Bridge must leave the relay directory")
+            routed.close(); phone.close(); local?.stop(); await fixture.stop()
+        } catch { link?.close(); enrollment?.close(); await relay?.stop(); local?.stop(); await fixture.stop(); throw error }
+    }
     private func request<T: Decodable & Sendable>(_ link: WebSocketTransport, connection: AuthorizedConnection, path: String, body: Data? = nil) async throws -> T {
         let crypto = IdentityCryptography()
         let announcement = try await link.request("/v2/identity", method: "GET", as: SignedValue<HostAnnouncement>.self)
