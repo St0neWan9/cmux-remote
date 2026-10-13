@@ -132,13 +132,17 @@ public actor SessionService {
         switch image.source {
         case .recorded(let data): bytes = data; required = [.conversationRead]
         case .projectPath(let referenced):
-            required = [.conversationRead, .projectRead]
-            try await access?.require(.projectRead, workspace: record.descriptor.workspaceID)
-            guard let root = record.descriptor.cwd else { throw BridgeError("file_forbidden", "No approved project is available.", status: 403) }
-            let policy = files
-            let reading = Task.detached { try ProjectImageReader(policy: policy).read(root: root, referencedPath: referenced) }
-            bytes = try await withTaskCancellationHandler { try await reading.value } onCancel: { reading.cancel() }
-            try await recheck(record, capability: .projectRead, access: access)
+            if record.descriptor.id.hasPrefix("tui:"), let data = try await cmux.request("conversation.image.read", params: ["session_id": .string(record.descriptor.id), "path": .string(referenced)])["data_b64"].string, let decoded = Data(base64Encoded: data) {
+                bytes = decoded; required = [.conversationRead]
+            } else {
+                required = [.conversationRead, .projectRead]
+                try await access?.require(.projectRead, workspace: record.descriptor.workspaceID)
+                guard let root = record.descriptor.cwd else { throw BridgeError("file_forbidden", "No approved project is available.", status: 403) }
+                let policy = files
+                let reading = Task.detached { try ProjectImageReader(policy: policy).read(root: root, referencedPath: referenced) }
+                bytes = try await withTaskCancellationHandler { try await reading.value } onCancel: { reading.cancel() }
+                try await recheck(record, capability: .projectRead, access: access)
+            }
         }
         let decoding = Task.detached { try HistoricalImageProjection().preview(bytes) }
         let result = try await withTaskCancellationHandler { try await decoding.value } onCancel: { decoding.cancel() }
@@ -171,7 +175,7 @@ public actor SessionService {
         if let receipt = try await begin(request.operationID, signature: signature, workspace: session.workspaceID, capability: .conversationControl, legacySignature: legacySignature, access: access) { return receipt }
         try await validateMutationBinding(session, access: access)
         do {
-            var params: [String: JSONValue] = ["session_id": .string(session.id), "text": .string(request.text)]
+            var params: [String: JSONValue] = ["session_id": .string(session.id), "text": .string(request.text), "operation_id": .string(request.operationID.uuidString), "backend_operation_key": .string(IdentityCryptography().digest(Data(((access?.clientID ?? "owner") + ":" + request.operationID.uuidString).utf8))), "workspace_id": .string(session.workspaceID!), "surface_id": .string(session.surfaceID!)]
             if !attachments.isEmpty { params["attachments"] = .array(attachments) }
             let result = try await cmux.request("mobile.chat.send", params: params)
             guard result["submitted"].bool != false else { throw BridgeError("outcome_unknown", "cmux did not confirm prompt submission; inspect its draft before retrying.", status: 409) }
@@ -187,7 +191,7 @@ public actor SessionService {
         if let receipt = try await begin(request.operationID, signature: signature, workspace: session.workspaceID, capability: .conversationControl, legacySignature: legacySignature, access: access) { return receipt }
         try await validateMutationBinding(session, access: access)
         do {
-            let result = try await cmux.request("mobile.chat.interrupt", params: ["session_id": .string(session.id), "hard": .bool(request.hard)])
+            let result = try await cmux.request("mobile.chat.interrupt", params: ["session_id": .string(session.id), "hard": .bool(request.hard), "operation_id": .string(request.operationID.uuidString), "backend_operation_key": .string(IdentityCryptography().digest(Data(((access?.clientID ?? "owner") + ":" + request.operationID.uuidString).utf8))), "workspace_id": .string(session.workspaceID!), "surface_id": .string(session.surfaceID!)])
             guard result["interrupted"].bool != false else { throw BridgeError("outcome_unknown", "cmux did not confirm interruption.", status: 409) }
             return try await complete(request.operationID, access: access)
         } catch { journal?.uncertain(id: request.operationID); throw mutationError(error) }
