@@ -15,12 +15,13 @@ let package = Package(
         .package(path: "Vendor/CmuxAgentChat"),
         .package(path: "Vendor/CmuxTerminalReplay"),
         .package(url: "https://github.com/apple/swift-nio.git", from: "2.81.0"),
-        .package(url: "https://github.com/apple/swift-nio-ssl.git", from: "2.35.0")
+        .package(url: "https://github.com/apple/swift-nio-ssl.git", from: "2.35.0"),
+        .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", exact: "1.11.2")
     ],
     targets: [
         .target(name: "CmuxRemoteCore", dependencies: [.product(name: "CmuxAgentChat", package: "CmuxAgentChat")]),
         .target(name: "CBridgeDiscovery"),
-        .target(name: "CmuxRemoteBridge", dependencies: ["CmuxRemoteCore", "CBridgeDiscovery", .product(name: "CmuxTerminalReplay", package: "CmuxTerminalReplay"), .product(name: "NIOCore", package: "swift-nio"), .product(name: "NIOPosix", package: "swift-nio"), .product(name: "NIOHTTP1", package: "swift-nio"), .product(name: "NIOSSL", package: "swift-nio-ssl")]),
+        .target(name: "CmuxRemoteBridge", dependencies: ["CmuxRemoteCore", "CBridgeDiscovery", .product(name: "SwiftTerm", package: "SwiftTerm"), .product(name: "CmuxTerminalReplay", package: "CmuxTerminalReplay"), .product(name: "NIOCore", package: "swift-nio"), .product(name: "NIOPosix", package: "swift-nio"), .product(name: "NIOHTTP1", package: "swift-nio"), .product(name: "NIOSSL", package: "swift-nio-ssl")]),
         .target(name: "CmuxRemoteClient", dependencies: ["CmuxRemoteCore"]),
         .target(name: "CmuxRemoteMac", dependencies: ["CmuxRemoteCore", "CmuxRemoteClient", "CmuxRemoteBridge"]),
         .executableTarget(name: "CmuxRemoteCLI", dependencies: ["CmuxRemoteBridge", "CmuxRemoteMac", "CmuxRemoteClient"]),

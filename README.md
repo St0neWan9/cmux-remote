@@ -1,6 +1,6 @@
 # cmux-remote
 
-An independent Mac companion and native iPhone app for the official cmux application. Pair over your local network, read existing Claude/Codex conversations, see a live text preview, send prompts, stop work, answer supported Feed approvals, and inspect project changes and files. No cmux cloud account is involved.
+An independent Mac companion and native iPhone app for the official cmux application and its local cmux-tui daemons. Pair over your local network, read existing Claude/Codex conversations, see a live text preview, send prompts, stop work, answer supported Feed approvals, and inspect project changes and files. No cmux cloud account is involved.
 
 The phone receives structured chat data. It does not render a terminal. cmux continues owning the agents and terminals; this project does not connect to Claude or Codex APIs.
 
@@ -24,7 +24,9 @@ swift build
 
 Each device has separately revocable access to explicitly approved workspaces. Omit `--control` for viewing-only access. The new protocol is documented in [Connection v2](docs/CONNECTION-V2.md), including bootstrap verification, owner commands, per-request signatures, endpoint relocation and legacy migration. `serve --legacy` is an explicit migration mode; ordinary v2 enrollment never promotes an old shared token.
 
-Open official cmux and run the Bridge **inside a cmux terminal**. The default `cmuxOnly` socket mode rejects processes started outside cmux, including the bundled CLI. `--socket`, `CMUX_SOCKET_PATH` and `--cli` can select the installed socket/CLI; they do not bypass its access policy. The Bridge never changes socket settings. Agent input uses the existing official cmux session, and no provider connection is created by this app.
+For the desktop backend, open official cmux and run the Bridge **inside a cmux terminal**. The default `cmuxOnly` socket mode rejects processes started outside cmux, including the bundled CLI. `--socket`, `CMUX_SOCKET_PATH` and `--cli` can select the installed socket/CLI; they do not bypass its access policy. The Bridge never changes socket settings. Agent input uses the existing official cmux session, and no provider connection is created by this app.
+
+The same Bridge automatically discovers local same-user cmux-tui daemons, including terminals opened by managed `cmux ssh` from another Mac. Both backends appear together without a mode switch. A daemon-only host does not need a local desktop cmux instance. Use `--tui-socket /absolute/path/to/daemon.sock` for custom socket locations. [Daemon adapter](docs/CMUX-TUI-ADAPTER.md) documents discovery, images, interruptions and the limited recognized permission prompts.
 
 Generate and build the phone project:
 
@@ -43,6 +45,7 @@ IPA and manual GitHub Actions upload workflow.
 
 - [Detailed design](docs/DESIGN.md)
 - [API and source mapping](docs/API.md)
+- [Local cmux-tui daemon adapter](docs/CMUX-TUI-ADAPTER.md)
 - [Development and validation](docs/DEVELOPMENT.md)
 - [Native Remote groups and terminal mirrors](docs/MAC-EXTENSION.md)
 - [Planned shared discovery, enrollment, and Mac mirroring](docs/UNIFIED-CONNECTION-PLAN.md)
@@ -57,4 +60,4 @@ Run `scripts/verify.sh` for package tests and build. The first implementation is
 
 ## License
 
-GPL-3.0-or-later. The pinned cmux parsing package retains its upstream copyright and license. SwiftNIO and SwiftNIO SSL retain their own licenses. This project is independent and is not an official cmux product.
+GPL-3.0-or-later. The pinned cmux parsing package retains its upstream copyright and license. SwiftNIO, SwiftNIO SSL and the backend-only SwiftTerm dependency retain their own licenses. This project is independent and is not an official cmux product.
