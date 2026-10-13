@@ -17,8 +17,10 @@ public actor ManagedSharingService {
     private var generation: UUID?
     private var advertisement: BonjourAdvertisement?
     private let workspaces: @Sendable () async throws -> [String]
-    public init(state: BridgeState, authority: ConnectionAuthority, router: BridgeRouter, listen: String = "0.0.0.0", port: Int = 7740, advertise: Bool = true, relay: CloudRelayService? = nil, relayKeyFile: String? = nil, workspaces: @escaping @Sendable () async throws -> [String] = { [] }) {
-        self.workspaces = workspaces; self.state = state; self.authority = authority; self.router = router
+    /// Set for the menu bar resident; owner start/stop choices are remembered across restarts.
+    private let preference: SharingPreferenceRepository?
+    public init(state: BridgeState, authority: ConnectionAuthority, router: BridgeRouter, listen: String = "0.0.0.0", port: Int = 7740, advertise: Bool = true, relay: CloudRelayService? = nil, relayKeyFile: String? = nil, workspaces: @escaping @Sendable () async throws -> [String] = { [] }, remembersChoice: Bool = false) {
+        self.workspaces = workspaces; preference = remembersChoice ? SharingPreferenceRepository(directory: state.directory) : nil; self.state = state; self.authority = authority; self.router = router
         self.relayKeyFile = relayKeyFile; self.relay = relay; self.listen = listen; self.port = port; self.advertise = advertise
     }
     public func status() async -> JSONValue {
@@ -48,7 +50,14 @@ public actor ManagedSharingService {
         await authority.closeEnrollment()
         return await status()
     }
-    public func start(port requested: Int? = nil) async throws -> JSONValue {
+    /// Reopens sharing when the owner last left it on; a failure is reported in status and the resident keeps running.
+    public func restore() async {
+        guard let saved = preference?.load(), saved.enabled, phase == "stopped" else { return }
+        _ = try? await start(port: saved.port, remember: false)
+    }
+    /// An owner request; on success the choice is remembered so a restarted resident restores it.
+    public func start(port requested: Int? = nil) async throws -> JSONValue { try await start(port: requested, remember: true) }
+    private func start(port requested: Int?, remember: Bool) async throws -> JSONValue {
         guard phase == "stopped" else {
             if phase == "running", requested == nil || requested == port { return await status() }
             throw BridgeError("sharing_busy", "Stop sharing before changing its listener.", status: 409)
@@ -83,6 +92,7 @@ public actor ManagedSharingService {
                 catch { failure = "discovery_failed" }
             }
             Task { [weak self] in _ = try? await running.value; await self?.finished(id: id) }
+            if remember { try? preference?.save(.init(enabled: true, port: bound)) }
             return await status()
         } catch {
             if generation == id { task = nil; generation = nil; phase = "stopped"; failure = "sharing_start_failed" }
@@ -92,6 +102,8 @@ public actor ManagedSharingService {
     }
     public func stop() async -> JSONValue {
         guard phase != "stopping" else { return await status() }
+        // Only an explicit stop records "off"; a listener that ends on its own is restored on the next start.
+        try? preference?.save(.init(enabled: false, port: port))
         phase = "stopping"; generation = nil; advertisement = nil
         await authority.closeEnrollment()
         await relay?.stop()
