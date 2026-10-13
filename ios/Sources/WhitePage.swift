@@ -4,6 +4,8 @@ import SwiftUI
 struct WhitePage<Content: View>: View {
     let title: String
     var showsBack = true
+    /// A custom back action in the same place, for pages that are not pushed (e.g. adding a Mac over the list).
+    var back: (() -> Void)? = nil
     @ViewBuilder let content: () -> Content
     @Environment(\.dismiss) private var dismiss
     var body: some View {
@@ -13,8 +15,8 @@ struct WhitePage<Content: View>: View {
             .toolbar(.hidden, for: .navigationBar)
             .safeAreaInset(edge: .top, spacing: 0) {
                 HStack {
-                    if showsBack {
-                        Button { dismiss() } label: {
+                    if showsBack || back != nil {
+                        Button { if let back { back() } else { dismiss() } } label: {
                             Image(systemName: "chevron.left")
                         }.buttonStyle(FloatingIconStyle()).accessibilityLabel(String(localized: "page.back"))
                             .accessibilityIdentifier("page.back")

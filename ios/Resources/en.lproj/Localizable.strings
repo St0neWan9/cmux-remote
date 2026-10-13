@@ -1,4 +1,4 @@
-"app.title" = "cmux remote";
+"app.title" = "Cmux Remote";
 "pair.intro" = "Your cmux, on your phone";
 "pair.instructions" = "Start the Bridge on your Mac. Scan its enrollment QR code or select a nearby Bridge, then approve this device on the Mac.";
 "pair.connection" = "Connection";
@@ -16,6 +16,7 @@
 "sessions.empty" = "No supported conversations found.";
 "sessions.read_only" = "Read-only conversation";
 "chat.older" = "Load earlier messages";
+"chat.clipped" = "This conversation is long; earlier messages are not shown.";
 "chat.preview" = "Live preview";
 "chat.prompt" = "Send a message";
 "chat.send" = "Send";
@@ -249,3 +250,7 @@
 "error.relay_origin" = "Enter an address starting with https://, without a path.";
 "chat.loading" = "Loading conversation…";
 "sessions.workspaces_title" = "Workspaces";
+"sessions.sort" = "Sort";
+"sessions.sort.workspace" = "By workspace";
+"sessions.sort.time" = "By time";
+"sessions.recent" = "Recent";

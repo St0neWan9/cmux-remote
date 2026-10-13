@@ -1,4 +1,4 @@
-"app.title" = "cmux remote";
+"app.title" = "Cmux Remote";
 "pair.intro" = "在手机上使用你的 cmux";
 "pair.instructions" = "在 Mac 启动 Bridge。扫描配对二维码或选择附近的 Bridge，然后在 Mac 批准这台设备。";
 "pair.connection" = "连接";
@@ -16,6 +16,7 @@
 "sessions.empty" = "未找到支持的会话。";
 "sessions.read_only" = "只读会话";
 "chat.older" = "加载更早的消息";
+"chat.clipped" = "这段对话很长，更早的消息未显示。";
 "chat.preview" = "实时预览";
 "chat.prompt" = "发送消息";
 "chat.send" = "发送";
@@ -249,3 +250,7 @@
 "error.relay_origin" = "请输入以 https:// 开头、不带路径的地址。";
 "chat.loading" = "正在加载对话…";
 "sessions.workspaces_title" = "工作区";
+"sessions.sort" = "排序";
+"sessions.sort.workspace" = "按工作区";
+"sessions.sort.time" = "按时间";
+"sessions.recent" = "最近";
