@@ -17,6 +17,10 @@
 "sessions.read_only" = "Read-only conversation";
 "chat.older" = "Load earlier messages";
 "chat.clipped" = "This conversation is long; earlier messages are not shown.";
+"chat.outgoing.sending" = "Sending…";
+"chat.outgoing.sent" = "Sent · waiting for the agent";
+"chat.outgoing.unconfirmed" = "Delivery not confirmed";
+"chat.outgoing.images" = "%ld images";
 "chat.preview" = "Live preview";
 "chat.prompt" = "Send a message";
 "chat.send" = "Send";

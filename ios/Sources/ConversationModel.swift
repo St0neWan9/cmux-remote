@@ -37,6 +37,8 @@ final class ConversationModel {
     let imageDraft = ImageDraftModel()
     let speech: SpeechDraftModel
     private(set) var pendingSend: SendRequest?
+    /// Prompts shown at the bottom of the page from the moment they are sent until the transcript records them.
+    private(set) var outgoing: [OutgoingPrompt] = []
     private var mutationWarning: String?
     private let loadRecovery: @Sendable () async throws -> SendRequest?
     private let saveRecovery: @Sendable (SendRequest?) async throws -> Void
@@ -132,6 +134,7 @@ final class ConversationModel {
             recordedRunSeconds = history.recordedRunSeconds; recordedTurnCount = history.recordedTurnCount ?? 0
             currentTurnStartedAt = history.currentTurnStartedAt; currentTurnCompleted = history.currentTurnCompleted ?? false
             timelineItems = ConversationTimeline().items(from: messages)
+            outgoing = OutgoingPromptMatcher().pending(outgoing, messages: messages, generation: generation)
             let committed = messages.reversed().compactMap { message -> String? in
                 if message.role == .agent, case .prose(let value) = message.kind { return value.text }; return nil
             }.first
@@ -163,11 +166,15 @@ final class ConversationModel {
         guard canSend, !busy, !speech.active, !imageDraft.loading, pendingSend == nil,
               !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !imageDraft.images.isEmpty else { return }
         busy = true; defer { busy = false }
+        var sent: SendRequest?
         do {
             try await restorePendingSend()
             guard pendingSend == nil else { return }
             let request = SendRequest(text: draft, attachments: imageDraft.images)
-            pendingSend = request
+            pendingSend = request; sent = request
+            // The prompt moves into the conversation at once; the composer is free while the agent catches up.
+            outgoing.append(OutgoingPrompt(request: request, after: messages, generation: generation))
+            draft = ""; imageDraft.removeSubmitted(Set(request.attachments.map(\.id))); jumpToLatest += 1
             try await saveRecovery(request)
             let receipt = try await sendRequest(request)
             guard receipt.accepted, receipt.operationID == request.operationID else { throw BridgeError("outcome_unknown", "The send receipt could not be verified.", status: 504) }
@@ -175,10 +182,17 @@ final class ConversationModel {
         } catch {
             let safeRejections = ["unauthorized", "scope_denied", "read_only", "stale_binding", "input_busy", "invalid_image", "invalid_input", "too_large", "journal_unavailable", "receipt_capacity"]
             if let failure = error as? BridgeError, safeRejections.contains(failure.code) {
+                // Nothing reached the agent: the prompt leaves the conversation.
+                if let sent { outgoing.removeAll { $0.id == sent.operationID } }
                 do { try await saveRecovery(nil); pendingSend = nil; mutationWarning = nil }
                 catch { mutationWarning = ErrorPresentation().message(error) }
             }
-            else { mutationWarning = ErrorPresentation().message(error) }
+            else { if let sent { setDelivery(.unconfirmed, for: sent.operationID) }; mutationWarning = ErrorPresentation().message(error) }
+            // The composer gets the prompt back for a retry, as it kept it before the prompt left it.
+            if let sent {
+                if draft.isEmpty { draft = sent.text }
+                if imageDraft.images.isEmpty { imageDraft.images = sent.attachments }
+            }
             self.error = ErrorPresentation().message(error)
         }
     }
@@ -195,7 +209,8 @@ final class ConversationModel {
     /// An explicit inspection acknowledgement releases the draft; it never sends it.
     func acknowledgePendingSend() async {
         guard !busy else { return }; busy = true; defer { busy = false }
-        do { try await saveRecovery(nil); pendingSend = nil; recoveryReady = true; recoveryFailed = false; recoveryTask = nil; mutationWarning = nil; error = nil }
+        let released = pendingSend?.operationID
+        do { try await saveRecovery(nil); outgoing.removeAll { $0.id == released }; pendingSend = nil; recoveryReady = true; recoveryFailed = false; recoveryTask = nil; mutationWarning = nil; error = nil }
         catch { mutationWarning = ErrorPresentation().message(error); self.error = mutationWarning }
     }
     private func restorePendingSend() async throws {
@@ -217,7 +232,11 @@ final class ConversationModel {
         try await saveRecovery(nil)
         if draft == request.text { draft = "" }
         imageDraft.removeSubmitted(Set(request.attachments.map(\.id)))
+        setDelivery(.sent, for: request.operationID)
         pendingSend = nil; mutationWarning = nil; error = nil; stopRequested = false
+    }
+    private func setDelivery(_ delivery: OutgoingPrompt.Delivery, for id: UUID) {
+        if let index = outgoing.firstIndex(where: { $0.id == id }) { outgoing[index].delivery = delivery }
     }
     func interrupt(hard: Bool = false) async {
         guard !busy else { return }; busy = true; defer { busy = false }
