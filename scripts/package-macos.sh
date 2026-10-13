@@ -82,13 +82,22 @@ submit() {
   fi
 }
 
+# A ticket can lag behind an Accepted notarization (stapler error 68), so retry briefly.
+staple() {
+  local attempt
+  for attempt in 1 2 3 4 5 6; do
+    if xcrun stapler staple "$1"; then xcrun stapler validate "$1"; return; fi
+    [[ "$attempt" == 6 ]] && return 1
+    sleep $((attempt * 15))
+  done
+}
+
 if [[ "$notarize" == 1 ]]; then
   ditto -c -k --keepParent "$app" "$out/notarize.zip"
   submit "$out/notarize.zip"
   rm "$out/notarize.zip"
   # Staple before archiving: a zip cannot carry a ticket, but the app inside it can.
-  xcrun stapler staple "$app"
-  xcrun stapler validate "$app"
+  staple "$app"
   spctl --assess --type execute --verbose=2 "$app"
 fi
 
@@ -108,8 +117,7 @@ done
 codesign --force --timestamp --sign "$identity" "$dmg"
 if [[ "$notarize" == 1 ]]; then
   submit "$dmg"
-  xcrun stapler staple "$dmg"
-  xcrun stapler validate "$dmg"
+  staple "$dmg"
   spctl --assess --type open --context context:primary-signature --verbose=2 "$dmg"
 fi
 
