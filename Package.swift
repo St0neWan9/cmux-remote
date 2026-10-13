@@ -21,7 +21,7 @@ let package = Package(
     targets: [
         .target(name: "CmuxRemoteCore", dependencies: [.product(name: "CmuxAgentChat", package: "CmuxAgentChat")]),
         .target(name: "CBridgeDiscovery"),
-        .target(name: "CmuxRemoteBridge", dependencies: ["CmuxRemoteCore", "CBridgeDiscovery", .product(name: "SwiftTerm", package: "SwiftTerm"), .product(name: "CmuxTerminalReplay", package: "CmuxTerminalReplay"), .product(name: "NIOCore", package: "swift-nio"), .product(name: "NIOPosix", package: "swift-nio"), .product(name: "NIOHTTP1", package: "swift-nio"), .product(name: "NIOSSL", package: "swift-nio-ssl")]),
+        .target(name: "CmuxRemoteBridge", dependencies: ["CmuxRemoteCore", "CBridgeDiscovery", .product(name: "SwiftTerm", package: "SwiftTerm"), .product(name: "CmuxTerminalReplay", package: "CmuxTerminalReplay"), .product(name: "NIOCore", package: "swift-nio"), .product(name: "NIOPosix", package: "swift-nio"), .product(name: "NIOHTTP1", package: "swift-nio"), .product(name: "NIOWebSocket", package: "swift-nio"), .product(name: "NIOSSL", package: "swift-nio-ssl")]),
         .target(name: "CmuxRemoteClient", dependencies: ["CmuxRemoteCore"]),
         .target(name: "CmuxRemoteMac", dependencies: ["CmuxRemoteCore", "CmuxRemoteClient", "CmuxRemoteBridge"]),
         .executableTarget(name: "CmuxRemoteCLI", dependencies: ["CmuxRemoteBridge", "CmuxRemoteMac", "CmuxRemoteClient"]),

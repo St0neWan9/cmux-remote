@@ -16,6 +16,9 @@ final class PinnedSessionDelegate: NSObject, URLSessionDelegate, URLSessionTaskD
         guard digest == pairing.certificateSHA256 else { completionHandler(.cancelAuthenticationChallenge, nil); return }
         completionHandler(.useCredential, URLCredential(trust: trust))
     }
+    func urlSession(_ session: URLSession, task: URLSessionTask, didReceive challenge: URLAuthenticationChallenge, completionHandler: @escaping @Sendable (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
+        urlSession(session, didReceive: challenge, completionHandler: completionHandler)
+    }
     private func canonicalHost(_ value: String) -> String {
         let decoded = value.removingPercentEncoding ?? value
         let host = decoded.trimmingCharacters(in: CharacterSet(charactersIn: "[]")).lowercased()

@@ -8,26 +8,48 @@ public actor ManagedSharingService {
     private let router: BridgeRouter
     private let listen: String
     private let advertise: Bool
+    private var relay: CloudRelayService?
+    private var relayKeyFile: String?
     private var port: Int
     private var phase = "stopped"
     private var failure: String?
     private var task: Task<Void, any Error>?
     private var generation: UUID?
     private var advertisement: BonjourAdvertisement?
-    public init(state: BridgeState, authority: ConnectionAuthority, router: BridgeRouter, listen: String = "0.0.0.0", port: Int = 7740, advertise: Bool = true) {
+    public init(state: BridgeState, authority: ConnectionAuthority, router: BridgeRouter, listen: String = "0.0.0.0", port: Int = 7740, advertise: Bool = true, relay: CloudRelayService? = nil, relayKeyFile: String? = nil) {
         self.state = state; self.authority = authority; self.router = router
-        self.listen = listen; self.port = port; self.advertise = advertise
+        self.relayKeyFile = relayKeyFile; self.relay = relay; self.listen = listen; self.port = port; self.advertise = advertise
     }
-    public func status() -> JSONValue {
-        .object(["state": .string(phase), "port": .number(Double(port)),
+    public func status() async -> JSONValue {
+        var relayState = await relay?.status() ?? .null
+        if var fields = relayState.object { fields["key_file"] = relayKeyFile.map(JSONValue.string) ?? .null; relayState = .object(fields) }
+        return .object(["state": .string(phase), "port": .number(Double(port)),
                  "address": LANAddressResolver().address().map(JSONValue.string) ?? .null,
                  "host_id": .string(authority.host.id), "name": .string(authority.host.name),
                  "certificate": .string(authority.host.certificateSHA256),
-                 "error_code": failure.map(JSONValue.string) ?? .null])
+                 "relay": relayState, "error_code": failure.map(JSONValue.string) ?? .null])
+    }
+    /// Owner-only configuration; changing it never starts sharing or expands client grants.
+    public func configureRelay(origin: String?, keyFile: String?) async throws -> JSONValue {
+        guard phase == "stopped" else { throw BridgeError("sharing_busy", "Stop sharing before changing the relay.", status: 409) }
+        let repository = RelayConfigurationRepository(directory: state.directory)
+        if let origin, !origin.isEmpty {
+            guard let keyFile else { throw BridgeError("relay_configuration", "Choose a private relay registration key file.") }
+            do {
+                let value = try repository.save(origin: origin, keyFile: keyFile)
+                let service = try CloudRelayService(origin: value.origin, secret: repository.secret(value), router: router, authority: authority)
+                try await authority.configureRelay(origin: value.origin)
+                relay = service; relayKeyFile = value.keyFile
+            } catch { throw BridgeError("relay_configuration", "Check the HTTPS origin and private registration key file.") }
+        } else {
+            try repository.remove(); try await authority.configureRelay(origin: nil); relay = nil; relayKeyFile = nil
+        }
+        await authority.closeEnrollment()
+        return await status()
     }
     public func start(port requested: Int? = nil) async throws -> JSONValue {
         guard phase == "stopped" else {
-            if phase == "running", requested == nil || requested == port { return status() }
+            if phase == "running", requested == nil || requested == port { return await status() }
             throw BridgeError("sharing_busy", "Stop sharing before changing its listener.", status: 409)
         }
         let chosen = requested ?? port
@@ -45,12 +67,13 @@ public actor ManagedSharingService {
             var iterator = ready.stream.makeAsyncIterator()
             guard let bound = try await iterator.next(), generation == id, phase == "starting" else { throw CancellationError() }
             port = bound; phase = "running"
+            try await relay?.start()
             if advertise {
                 do { advertisement = try BonjourAdvertisement(host: authority.host, port: bound) }
                 catch { failure = "discovery_failed" }
             }
             Task { [weak self] in _ = try? await running.value; await self?.finished(id: id) }
-            return status()
+            return await status()
         } catch {
             if generation == id { task = nil; generation = nil; phase = "stopped"; failure = "sharing_start_failed" }
             running.cancel(); _ = try? await running.value
@@ -58,15 +81,17 @@ public actor ManagedSharingService {
         }
     }
     public func stop() async -> JSONValue {
-        guard phase != "stopping" else { return status() }
+        guard phase != "stopping" else { return await status() }
         phase = "stopping"; generation = nil; advertisement = nil
         await authority.closeEnrollment()
+        await relay?.stop()
         let running = task; task = nil; running?.cancel(); _ = try? await running?.value
         phase = "stopped"; failure = nil
-        return status()
+        return await status()
     }
-    private func finished(id: UUID) {
+    private func finished(id: UUID) async {
         guard generation == id else { return }
         generation = nil; task = nil; advertisement = nil; phase = "stopped"; failure = "sharing_stopped"
+        await relay?.stop()
     }
 }

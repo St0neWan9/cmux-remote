@@ -46,6 +46,8 @@ IPA and manual GitHub Actions upload workflow.
 - [Detailed design](docs/DESIGN.md)
 - [API and source mapping](docs/API.md)
 - [Local cmux-tui daemon adapter](docs/CMUX-TUI-ADAPTER.md)
+- [Unified WebSocket and Cloudflare relay — implementation status](docs/WEBSOCKET-RELAY.md)
+- [Cloudflare setup and local relay checks](cloudflare/README.md)
 - [Development and validation](docs/DEVELOPMENT.md)
 - [Native Remote groups and terminal mirrors](docs/MAC-EXTENSION.md)
 - [Planned shared discovery, enrollment, and Mac mirroring](docs/UNIFIED-CONNECTION-PLAN.md)
