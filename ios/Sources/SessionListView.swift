@@ -16,13 +16,21 @@ struct SessionListView: View {
     @State private var query = ""
     @State private var filter = SessionFilter.all
     @State private var workspaceID: String?
+    @AppStorage(SessionSortMode.storageKey) private var sortMode = SessionSortMode.workspace
+    /// Collapsed workspace groups, keyed by Mac and workspace; scene storage keeps them while other pages cover the list.
+    @SceneStorage("sessions.collapsed") private var collapsedKeys = ""
+    private var collapsed: Set<String> {
+        get { Set(collapsedKeys.split(separator: "\n").map(String.init)) }
+        nonmutating set { collapsedKeys = newValue.sorted().joined(separator: "\n") }
+    }
     var body: some View {
         let links = model.links
         let workspaces = model.workspaces
         let hosted = model.hostedSessions.filter { filter.matches($0.session, query: query, workspaceID: workspaceID) }
         let sections = SessionHostSection.make(links: links, sessions: hosted, workspaces: workspaces)
-        // A single selected workspace needs no workspace headings.
-        let grouped = workspaceID == nil
+        // Time order and a single selected workspace need no workspace headings.
+        let grouped = workspaceID == nil && sortMode == .workspace
+        let recent = hosted.sorted { ($0.session.updatedAt ?? .distantPast) > ($1.session.updatedAt ?? .distantPast) }
         let loading = model.loading
         let error = model.error
         let multiple = links.count > 1
@@ -57,6 +65,12 @@ struct SessionListView: View {
                         .overlay(Capsule().stroke(Color.black.opacity(0.04), lineWidth: 0.5))
                         .shadow(color: .black.opacity(0.065), radius: 14, y: 4)
                     }.tint(.primary).accessibilityIdentifier("sessions.workspaces")
+                    if sortMode == .time {
+                        ForEach(recent) { hosted in
+                            Button { openConversation(hosted) } label: { sessionRow(hosted.session, host: multiple ? hosted.hostName : nil) }
+                                .buttonStyle(.plain).accessibilityIdentifier("session." + hosted.hostID + "." + hosted.session.id)
+                        }
+                    } else {
                     ForEach(sections) { section in
                         VStack(alignment: .leading, spacing: MobileDesign.sectionGap) {
                             if multiple {
@@ -64,19 +78,30 @@ struct SessionListView: View {
                                 if let hostError = model.hostErrors[section.hostID] { Text(hostError).font(.footnote).foregroundStyle(.red) }
                             } else if grouped { Text(String(localized: "sessions.workspaces_title")).font(.headline) }
                             ForEach(section.groups) { group in
+                                let key = section.hostID + "/" + group.id
                                 VStack(alignment: .leading, spacing: 14) {
                                     if grouped {
-                                        Label(group.name ?? String(localized: "sessions.other"), systemImage: group.name == nil ? "clock.arrow.circlepath" : "macwindow")
-                                            .font(.body.weight(.semibold)).lineLimit(1).accessibilityAddTraits(.isHeader)
+                                        Button { withAnimation(.easeInOut(duration: 0.18)) { if collapsed.contains(key) { collapsed.remove(key) } else { collapsed.insert(key) } } } label: {
+                                            HStack(spacing: 10) {
+                                                Label(group.name ?? String(localized: "sessions.other"), systemImage: group.name == nil ? "clock.arrow.circlepath" : "macwindow")
+                                                    .font(.body.weight(.semibold)).lineLimit(1)
+                                                Spacer(minLength: 8)
+                                                Image(systemName: collapsed.contains(key) ? "chevron.right" : "chevron.down").font(.caption).foregroundStyle(.secondary)
+                                            }.frame(minHeight: 36).contentShape(Rectangle())
+                                        }.buttonStyle(.plain).accessibilityAddTraits(.isHeader).accessibilityIdentifier("sessions.group." + key)
+                                            .accessibilityValue(collapsed.contains(key) ? String(localized: "chat.collapsed") : String(localized: "chat.expanded"))
                                     }
+                                    if !grouped || !collapsed.contains(key) {
                                     ForEach(group.sessions) { session in
                                         Button { openConversation(HostedSession(hostID: section.hostID, hostName: section.hostName, session: session)) } label: { sessionRow(session) }
                                         .buttonStyle(.plain).accessibilityIdentifier("session." + section.hostID + "." + session.id)
                                         .padding(.leading, grouped ? 34 : 0)
                                     }
+                                    }
                                 }
                             }
                         }
+                    }
                     }
                     if hosted.isEmpty && !loading {
                         Text(String(localized: !canRead ? "sessions.no_read_grant" : (model.hostedSessions.isEmpty ? "sessions.empty" : "sessions.no_matches"))).foregroundStyle(.secondary).padding(.vertical, 12)
@@ -107,6 +132,7 @@ struct SessionListView: View {
         } drawer: {
             SessionSidebarView(sections: sections, hosts: links.map { SidebarHost(id: $0.id, name: $0.name, canReadFeed: $0.client.allows(.feedRead), failed: model.hostErrors[$0.id] != nil) },
                 query: $query,
+                recent: recent, sortMode: $sortMode,
                 select: { hosted in showSidebar = false; openConversation(hosted) },
                 showConnection: { id in showSidebar = false; connectionHostID = id; showConnection = true },
                 showFeed: { id in showSidebar = false; feedHostID = id; showFeed = true },
@@ -127,12 +153,14 @@ struct SessionListView: View {
         guard multiple, let host = model.workspaceHosts[workspace.id] else { return workspace.title }
         return workspace.title + " · " + host
     }
-    private func sessionRow(_ session: SessionDescriptor) -> some View {
+    private func sessionRow(_ session: SessionDescriptor, host: String? = nil) -> some View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 7) {
                 Text(session.title).font(.body).foregroundStyle(.primary).lineLimit(2)
                 HStack(spacing: 8) {
                     Text(session.agent.capitalized)
+                    if let host { Text(host).lineLimit(1) }
+                    if let updated = session.updatedAt { Text(updated, format: .relative(presentation: .named)).lineLimit(1) }
                     if !session.writable { Label(String(localized: "sessions.read_only"), systemImage: "lock") }
                 }.font(.caption).foregroundStyle(.secondary)
             }.frame(maxWidth: .infinity, alignment: .leading)
@@ -146,6 +174,12 @@ struct SessionListView: View {
                 Image(systemName: "line.3.horizontal")
             }.buttonStyle(FloatingIconStyle()).accessibilityLabel(String(localized: "sessions.sidebar")).accessibilityIdentifier("sessions.sidebar")
             Text(String(localized: "sessions.title")).font(.headline).frame(maxWidth: .infinity)
+            Menu {
+                Picker(String(localized: "sessions.sort"), selection: $sortMode) {
+                    ForEach(SessionSortMode.allCases) { mode in Label(mode.title, systemImage: mode.symbol).tag(mode) }
+                }
+            } label: { Image(systemName: "arrow.up.arrow.down") }
+                .buttonStyle(FloatingIconStyle()).accessibilityLabel(String(localized: "sessions.sort")).accessibilityIdentifier("sessions.sort")
             Button { if showSearch || !query.isEmpty { showSearch = false; query = "" } else { showSearch = true } } label: {
                 Image(systemName: "magnifyingglass")
             }.buttonStyle(FloatingIconStyle()).accessibilityLabel(String(localized: "sessions.search")).accessibilityIdentifier("sessions.search")

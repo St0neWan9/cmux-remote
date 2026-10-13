@@ -24,68 +24,17 @@ struct ConversationView: View {
     @State private var confirmPendingReset = false
     @State private var selectedImage: ConversationImageReference?
     @State private var selectedToolDetail: ToolDetailReference?
+    /// The page's height above the keyboard; the composer may use half of it.
+    @State private var pageHeight: CGFloat = 700
     private let hostName: String
     init(model: ConversationModel, hostName: String = "") {
         _model = State(initialValue: model); self.hostName = hostName
     }
     var body: some View {
-        // Lookups are built once per update instead of searched again by every row.
-        let firstResponse = Dictionary(model.responses.map { ($0.firstMessageID, $0) }, uniquingKeysWith: { _, latest in latest })
-        let lastResponse = Dictionary(model.responses.map { ($0.lastMessageID, $0) }, uniquingKeysWith: { _, latest in latest })
-        let imagesByMessage = Dictionary(grouping: model.images, by: \.messageID)
-        let runningSince = model.runningSince
-        // The live label belongs at the top of the reply in progress; before the first reply it has its own row.
-        let activeAnchor: String? = runningSince == nil ? nil : model.responses.last.flatMap { $0.completed ? nil : $0.firstMessageID }
         GeometryReader { viewport in
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 6) {
-                    if model.hasMore { Button(String(localized: "chat.older")) { Task { await model.older() } }.disabled(model.loadingOlder).font(.subheadline).foregroundStyle(.secondary).frame(maxWidth: .infinity).padding(.top, 12) }
-                    if model.messages.isEmpty && model.error == nil {
-                        // Until the first history read returns, an empty list means "loading", not "no conversation".
-                        if model.historyGeneration == nil { ProgressView(String(localized: "chat.loading")).frame(maxWidth: .infinity).padding(.top, 40) }
-                        else { ContentUnavailableView(String(localized: "chat.empty"), systemImage: "bubble.left.and.bubble.right") }
-                    }
-                    ForEach(model.timelineItems) { item in
-                        let images = item.messages.flatMap { imagesByMessage[$0.id] ?? [] }
-                        VStack(alignment: .leading, spacing: 12) {
-                            if item.id == activeAnchor, let runningSince {
-                                LiveRunLabel(since: runningSince)
-                            } else if let response = firstResponse[item.id], let seconds = response.durationSeconds {
-                                ResponseRunLabel(seconds: seconds, recorded: response.recordedDuration)
-                            }
-                            if item.isActivity { ActivityGroupView(item: item, projectRoot: model.session.cwd, openFile: model.client.allows(.projectRead) ? { selectedFile = $0; showProject = true } : nil, images: images, openImage: { selectedImage = $0 }, openDetail: openToolDetail) }
-                            else { MessageRow(message: item.first, projectRoot: model.session.cwd, openFile: model.client.allows(.projectRead) ? { selectedFile = $0; showProject = true } : nil, images: images, openImage: { selectedImage = $0 }, openDetail: openToolDetail) }
-                            if let response = lastResponse[item.id], response.completed, case .prose = item.first.kind {
-                                ResponseFooter(response: response, text: model.responseText(response)) { text in
-                                    let quoted = text.split(separator: "\n", omittingEmptySubsequences: false).map { "> " + $0 }.joined(separator: "\n")
-                                    model.draft = quoted + "\n\n" + model.draft
-                                }
-                            }
-                        }.modifier(HeaderContentEffect())
-                    }
-                    if activeAnchor == nil, let runningSince {
-                        LiveRunLabel(since: runningSince).modifier(HeaderContentEffect())
-                    }
-                    if let preview = model.preview {
-                        VStack(alignment: .leading, spacing: 10) {
-                            Label(String(localized: "chat.preview"), systemImage: "ellipsis.bubble").font(.caption).foregroundStyle(.secondary)
-                            MarkdownMessageView(text: preview)
-                        }.modifier(HeaderContentEffect())
-                    }
-                    if let error = model.error {
-                        Label(error, systemImage: "exclamationmark.circle").font(.footnote).foregroundStyle(.red).padding(12)
-                            .frame(maxWidth: .infinity, alignment: .leading).background(Color.red.opacity(0.055), in: RoundedRectangle(cornerRadius: 14))
-                            .modifier(HeaderContentEffect())
-                    }
-                    Color.clear.frame(height: 1).id("latest")
-                        .background {
-                            GeometryReader { anchor in
-                                Color.clear.preference(key: TimelineBottomPreferenceKey.self,
-                                    value: anchor.frame(in: .named("chatTimeline")).maxY)
-                            }
-                        }
-                }.padding(.horizontal, 18).padding(.top, 12).padding(.bottom, 18)
+                timeline(bottom: viewport.size.height)
             }
             .scrollClipDisabled()
             .coordinateSpace(name: "chatTimeline")
@@ -123,9 +72,6 @@ struct ConversationView: View {
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: 12) {
                 SpeechDraftStrip(model: model.speech, useText: model.useSpeechDraft)
-                if !model.imageDraft.images.isEmpty {
-                    ImageDraftStrip(images: model.imageDraft.images, remove: model.imageDraft.remove).equatable()
-                }
                 if model.imageDraft.loading { ProgressView(String(localized: "image.preparing")) }
                 if let error = model.imageDraft.error { Text(error).font(.footnote).foregroundStyle(.red) }
                 if (model.pendingSend != nil || model.recoveryFailed) && !model.busy {
@@ -146,15 +92,15 @@ struct ConversationView: View {
                         .foregroundStyle(.secondary).padding(.horizontal, 12)
                 } else if !model.canSend { Text(String(localized: "sessions.read_only")).font(.caption).foregroundStyle(.secondary) }
                 ChatComposer(draft: $model.draft, canSend: model.canSend, busy: model.busy, working: model.hasActiveResponse,
+                             images: model.imageDraft.images, removeImage: model.imageDraft.remove,
                              send: { Task { await model.send() } }, stop: { Task { await model.interrupt() } },
                              canReadProject: model.client.allows(.projectRead), canReadFeed: model.client.allows(.feedRead), showProject: { selectedFile = ""; showProject = true }, showFeed: { showFeed = true },
                              hasImages: !model.imageDraft.images.isEmpty, sendBlocked: model.recoveryBlocked || model.imageDraft.loading || model.speech.active, showPhotos: {
                                  guard model.imageDraft.images.count < 4 else { model.imageDraft.error = String(localized: "error.image"); return }
                                  photoItems = []; showingPhotos = true
-                             }, dictating: model.speech.state == .recording, startVoice: { Task { await model.speech.start() } }, finishVoice: { model.speech.finish() }, showImageFiles: { showingImageFiles = true })
+                             }, dictating: model.speech.state == .recording, startVoice: { Task { await model.speech.start() } }, finishVoice: { model.speech.finish() }, showImageFiles: { showingImageFiles = true },
+                             maxLines: max(3, Int((pageHeight * 0.5 - 120) / 22)))
             }.padding(.horizontal, 14).padding(.top, 14).padding(.bottom, 10)
-                // Opaque like the page, so scrolled messages never show through the composer area.
-                .background(Color.white.ignoresSafeArea(edges: .bottom))
         }
         .photosPicker(isPresented: $showingPhotos, selection: $photoItems, maxSelectionCount: max(1, 4 - model.imageDraft.images.count), selectionBehavior: .ordered, matching: .images)
         .fileImporter(isPresented: $showingImageFiles, allowedContentTypes: [.image], allowsMultipleSelection: true) { result in
@@ -212,7 +158,71 @@ struct ConversationView: View {
             await model.observeChanges()
         }
         .environment(\.colorScheme, .light)
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { pageHeight = $0 }
         .accessibilityAction(.escape) { dismiss() }
+    }
+    /// The message list. Separate from `body` so the page stays type-checkable.
+    @ViewBuilder private func timeline(bottom: CGFloat) -> some View {
+        // Lookups are built once per update instead of searched again by every row.
+        let firstResponse = Dictionary(model.responses.map { ($0.firstMessageID, $0) }, uniquingKeysWith: { _, latest in latest })
+        let lastResponse = Dictionary(model.responses.map { ($0.lastMessageID, $0) }, uniquingKeysWith: { _, latest in latest })
+        let imagesByMessage = Dictionary(grouping: model.images, by: \.messageID)
+        let runningSince = model.runningSince
+        // The live label belongs at the top of the reply in progress; before the first reply it has its own row.
+        let activeAnchor: String? = runningSince == nil ? nil : model.responses.last.flatMap { $0.completed ? nil : $0.firstMessageID }
+        LazyVStack(alignment: .leading, spacing: 6) {
+            if model.hasMore { Button(String(localized: "chat.older")) { Task { await model.older() } }.disabled(model.loadingOlder).font(.subheadline).foregroundStyle(.secondary).frame(maxWidth: .infinity).padding(.top, 12) }
+            else if model.clipped { Text(String(localized: "chat.clipped")).font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: .infinity).padding(.top, 12).accessibilityIdentifier("chat.clipped") }
+            if model.messages.isEmpty && model.error == nil {
+                // Until the first history read returns, an empty list means "loading", not "no conversation".
+                if model.historyGeneration == nil { ProgressView(String(localized: "chat.loading")).frame(maxWidth: .infinity).padding(.top, 40) }
+                else { ContentUnavailableView(String(localized: "chat.empty"), systemImage: "bubble.left.and.bubble.right") }
+            }
+            ForEach(model.timelineItems) { item in
+                timelineRow(item, firstResponse: firstResponse, lastResponse: lastResponse, imagesByMessage: imagesByMessage, activeAnchor: activeAnchor, runningSince: runningSince, bottom: bottom)
+            }
+            if activeAnchor == nil, let runningSince {
+                LiveRunLabel(since: runningSince).modifier(HeaderContentEffect(bottom: bottom))
+            }
+            if let preview = model.preview {
+                VStack(alignment: .leading, spacing: 10) {
+                    Label(String(localized: "chat.preview"), systemImage: "ellipsis.bubble").font(.caption).foregroundStyle(.secondary)
+                    MarkdownMessageView(text: preview)
+                }.modifier(HeaderContentEffect(bottom: bottom))
+            }
+            if let error = model.error {
+                Label(error, systemImage: "exclamationmark.circle").font(.footnote).foregroundStyle(.red).padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading).background(Color.red.opacity(0.055), in: RoundedRectangle(cornerRadius: 14))
+                    .modifier(HeaderContentEffect(bottom: bottom))
+            }
+            Color.clear.frame(height: 1).id("latest")
+                .background {
+                    GeometryReader { anchor in
+                        Color.clear.preference(key: TimelineBottomPreferenceKey.self,
+                            value: anchor.frame(in: .named("chatTimeline")).maxY)
+                    }
+                }
+        }.padding(.horizontal, 18).padding(.top, 12).padding(.bottom, 18)
+    }
+    /// One timeline item: its duration label, content and footer. Separate so the page body stays type-checkable.
+    @ViewBuilder private func timelineRow(_ item: ConversationTimelineItem, firstResponse: [String: ConversationResponse], lastResponse: [String: ConversationResponse],
+                                          imagesByMessage: [String: [ConversationImageReference]], activeAnchor: String?, runningSince: Date?, bottom: CGFloat) -> some View {
+        let images = item.messages.flatMap { imagesByMessage[$0.id] ?? [] }
+        VStack(alignment: .leading, spacing: 12) {
+            if item.id == activeAnchor, let runningSince {
+                LiveRunLabel(since: runningSince)
+            } else if let response = firstResponse[item.id], let seconds = response.durationSeconds {
+                ResponseRunLabel(seconds: seconds, recorded: response.recordedDuration)
+            }
+            if item.isActivity { ActivityGroupView(item: item, projectRoot: model.session.cwd, openFile: model.client.allows(.projectRead) ? { selectedFile = $0; showProject = true } : nil, images: images, openImage: { selectedImage = $0 }, openDetail: openToolDetail) }
+            else { MessageRow(message: item.first, projectRoot: model.session.cwd, openFile: model.client.allows(.projectRead) ? { selectedFile = $0; showProject = true } : nil, images: images, openImage: { selectedImage = $0 }, openDetail: openToolDetail) }
+            if let response = lastResponse[item.id], response.completed, case .prose = item.first.kind {
+                ResponseFooter(response: response, text: model.responseText(response)) { text in
+                    let quoted = text.split(separator: "\n", omittingEmptySubsequences: false).map { "> " + $0 }.joined(separator: "\n")
+                    model.draft = quoted + "\n\n" + model.draft
+                }
+            }
+        }.modifier(HeaderContentEffect(bottom: bottom))
     }
     private func openToolDetail(_ messageID: String, _ field: String) {
         guard let generation = model.historyGeneration else { return }

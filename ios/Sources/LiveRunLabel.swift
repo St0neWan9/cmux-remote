@@ -9,7 +9,8 @@ struct LiveRunLabel: View {
             let elapsed = Duration.seconds(max(0, context.date.timeIntervalSince(since))).formatted(.units(allowed: [.hours, .minutes, .seconds], width: .wide, maximumUnitCount: 2))
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 7) {
-                    ProgressView().controlSize(.mini)
+                    // A UIKit spinner cannot be drawn inside the header/footer blur layer; a symbol can.
+                    Image(systemName: "hourglass").symbolEffect(.pulse, options: .repeating)
                     Text(String.localizedStringWithFormat(String(localized: "chat.elapsed_duration"), elapsed)).monospacedDigit()
                 }.font(.subheadline).foregroundStyle(.secondary)
                 Rectangle().fill(Color.black.opacity(0.1)).frame(height: 0.5)

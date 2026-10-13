@@ -16,14 +16,10 @@ struct PairingView: View {
     @State private var scanning = false
     var body: some View {
         AppNavigationStack {
-            WhitePage(title: String(localized: "app.title"), showsBack: false) {
+            WhitePage(title: String(localized: "app.title"), showsBack: false,
+                      back: model.addingDevice && !model.links.isEmpty ? { Task { await model.cancelEnrollment() }; model.addingDevice = false } : nil) {
                 ScrollView {
                     VStack(alignment: .leading, spacing: MobileDesign.sectionGap) {
-                        if model.addingDevice && !model.links.isEmpty {
-                            Button { Task { await model.cancelEnrollment() }; model.addingDevice = false } label: {
-                                Label(String(localized: "pair.back_to_sessions"), systemImage: "chevron.left")
-                            }.buttonStyle(FloatingButtonStyle()).accessibilityIdentifier("pair.back")
-                        }
                         VStack(alignment: .leading, spacing: MobileDesign.rowGap) {
                             Label(String(localized: "pair.intro"), systemImage: "macbook.and.iphone").font(.headline)
                             Text(String(localized: "pair.instructions")).font(.footnote).foregroundStyle(.secondary)

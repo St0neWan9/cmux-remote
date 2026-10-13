@@ -270,7 +270,13 @@ final class AppModel {
             guard links.contains(where: { $0.id == link.id && $0.client === link.client }), let result = results[link.id] else { continue }
             switch result {
             case .success(let (sessions, workspaces)):
-                let ordered = sessions.sorted { if $0.writable != $1.writable { return $0.writable }; return $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+                // Most recent activity first; Bridges without activity times fall back to live-then-title order.
+                let ordered = sessions.sorted {
+                    let lhs = $0.updatedAt ?? .distantPast, rhs = $1.updatedAt ?? .distantPast
+                    if lhs != rhs { return lhs > rhs }
+                    if $0.writable != $1.writable { return $0.writable }
+                    return $0.title.localizedStandardCompare($1.title) == .orderedAscending
+                }
                 perHost[link.id] = (ordered, workspaces ?? perHost[link.id]?.workspaces ?? []); hostErrors[link.id] = nil
             case .failure(let failure): hostErrors[link.id] = ErrorPresentation().message(failure)
             }

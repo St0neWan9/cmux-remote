@@ -55,6 +55,8 @@ final class ConversationModel {
     private(set) var loadingOlder = false
     var busy = false
     var hasMore = false
+    /// The Bridge read only the newest part of a very long record; earlier messages cannot be paged in.
+    var clipped = false
     private var generation: String?
     var historyGeneration: String? { generation }
     init(session: SessionDescriptor, client: RemoteClient, speechInput: (any SpeechInputServing)? = nil,
@@ -118,6 +120,7 @@ final class ConversationModel {
                 }
                 messages = next.sorted { $0.seq < $1.seq }
             } else { olderReads.suspend(); loadingOlder = false; messages = history.messages; responses = []; generation = history.generation; hasMore = history.hasMore }
+            clipped = history.clipped
             let updatedIDs = Set(history.messages.map(\.id))
             images = images.filter { $0.generation == history.generation && !updatedIDs.contains($0.messageID) } + (history.images ?? [])
             if stopRequested, messages.last(where: { $0.role == .user })?.id != interruptedUserID { stopRequested = false }
