@@ -6,6 +6,9 @@ permissions:
 jobs:
   swift-and-ios:
     runs-on: macos-15
+    # Same toolchain as the TestFlight workflow; the iOS app uses iOS 26 SDK APIs.
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
     steps:
       - uses: actions/checkout@v4
       - run: scripts/verify.sh

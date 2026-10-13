@@ -55,3 +55,28 @@ import CmuxRemoteBridge
         } catch { raw?.socket.close(); await fixture.stop(); throw error }
     }
 }
+
+/// The Bridge must free a request slot when its last chunk is acknowledged, exactly when the client does.
+@Suite struct LinkRequestSlotTests {
+    @Test(.timeLimit(.minutes(1)))
+    func acknowledgedResponseFreesItsSlotBeforeTheNextBurst() async throws {
+        let fixture = try await LinkIntegrationFixture.create()
+        var raw: LinkRawConnection?
+        do {
+            var connection = try await LinkRawConnection.connect(fixture.connection); raw = connection
+            for _ in 0..<20 {
+                let first = try await connection.read("/v2/sessions", connection: fixture.connection)
+                let response = try await connection.next(); #expect(response.id == first); #expect(response.final == true)
+                // A client that just received the final chunk may immediately use all eight slots.
+                try await connection.ack(response)
+                var ids: Set<String> = []
+                for _ in 0..<8 { ids.insert(try await connection.read("/v2/sessions", connection: fixture.connection)) }
+                while !ids.isEmpty {
+                    let next = try await connection.next()
+                    #expect(next.status == 200); ids.remove(next.id); try await connection.ack(next)
+                }
+            }
+            connection.socket.close(); await fixture.stop()
+        } catch { raw?.socket.close(); await fixture.stop(); throw error }
+    }
+}

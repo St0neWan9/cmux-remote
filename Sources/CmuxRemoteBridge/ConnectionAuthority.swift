@@ -18,6 +18,8 @@ public actor ConnectionAuthority {
     private var clients: [String: EnrolledClient]
     private var pending: [String: Pending] = [:]
     private var window: EnrollmentBootstrap?
+    /// Rolling relay-directory windows; the newest two stay open so a listed request can still be approved.
+    private var directoryWindows: [EnrollmentBootstrap] = []
     private var relayOrigin: String?
     private var registryObservers: [UUID: AsyncStream<Void>.Continuation] = [:]
     private var usedNonces: [String: Int] = [:]
@@ -80,14 +82,32 @@ public actor ConnectionAuthority {
     }
     public func open(endpoint: BridgeEndpoint, workspaces: [String], seconds: Int = 300) throws -> SignedValue<EnrollmentBootstrap> {
         try endpoint.validate(); try ClientScope(workspaces: workspaces, capabilities: [.workspaceRead]).validate(); guard (30...600).contains(seconds) else { throw BridgeError("invalid_input", "Enrollment lasts between 30 and 600 seconds.") }
-        // A new window cancels all still-pending requests from the old window.
-        for id in pending.keys where pending[id]?.state == "pending" { pending[id]?.state = "cancelled" }
+        // A new window cancels still-pending requests from the old QR window only; directory requests keep theirs.
+        let previous = window?.windowID
+        for id in pending.keys where pending[id]?.state == "pending" && pending[id]?.request.value.windowID == previous { pending[id]?.state = "cancelled" }
         window = EnrollmentBootstrap(host: host, endpoint: endpoint, workspaces: workspaces.map { $0.lowercased() }.sorted(), windowID: UUID().uuidString, expiresAt: now() + seconds)
         if let origin = relayOrigin, var active = window {
             let permit = RelayPermit(hostID: host.id, origin: origin, permitID: active.windowID, kind: "enrollment", expiresAt: active.expiresAt)
             active.endpoint.relay = RelayEndpoint(origin: origin, admission: try crypto.sign(permit, domain: "relay3-permit", privateKey: privateKey)); window = active
         }
         return try bootstrap()
+    }
+    /// Lists this host in the relay directory with its own window; it never cancels pending requests.
+    public func openDirectory(endpoint: BridgeEndpoint, workspaces: [String], seconds: Int = 600) throws -> SignedValue<EnrollmentBootstrap> {
+        guard let origin = relayOrigin else { throw BridgeError("relay_configuration", "Configure the relay before listing this Mac.") }
+        try endpoint.validate(); try ClientScope(workspaces: workspaces, capabilities: [.workspaceRead]).validate()
+        guard (60...600).contains(seconds) else { throw BridgeError("invalid_input", "Directory windows last between 60 and 600 seconds.") }
+        var value = EnrollmentBootstrap(host: host, endpoint: endpoint, workspaces: workspaces.map { $0.lowercased() }.sorted(), windowID: UUID().uuidString, expiresAt: now() + seconds)
+        let permit = RelayPermit(hostID: host.id, origin: origin, permitID: value.windowID, kind: "enrollment", expiresAt: value.expiresAt)
+        value.endpoint.relay = RelayEndpoint(origin: origin, admission: try crypto.sign(permit, domain: "relay3-permit", privateKey: privateKey))
+        directoryWindows = Array((directoryWindows.filter { $0.expiresAt > now() } + [value]).suffix(2))
+        return try crypto.sign(value, domain: "bootstrap", privateKey: privateKey)
+    }
+    /// Stops new directory requests; already submitted requests keep their own expiry.
+    public func closeDirectory() { directoryWindows = [] }
+    private func openWindow(_ id: String) -> EnrollmentBootstrap? {
+        if let window, window.windowID == id, window.expiresAt > now() { return window }
+        return directoryWindows.first { $0.windowID == id && $0.expiresAt > now() }
     }
     public func closeEnrollment() {
         window = nil
@@ -104,7 +124,7 @@ public actor ConnectionAuthority {
             guard previous.request.value == request else { throw BridgeError("request_conflict", "This enrollment identity already belongs to another request.", status: 409) }
             return try status(signed)
         }
-        guard let window, request.windowID == window.windowID, window.expiresAt > now(), request.expiresAt <= window.expiresAt, Set(request.scope.workspaces).isSubset(of: Set(window.workspaces)) else { throw BridgeError("enrollment_closed", "This enrollment window is no longer open.", status: 403) }
+        guard let window = openWindow(request.windowID), request.expiresAt <= window.expiresAt, Set(request.scope.workspaces).isSubset(of: Set(window.workspaces)) else { throw BridgeError("enrollment_closed", "This enrollment window is no longer open.", status: 403) }
         pending = pending.filter { $0.value.request.value.expiresAt > now() }
         guard pending.count < 32 else { throw BridgeError("enrollment_capacity", "Too many device requests. Try later.", status: 429) }
         pending[request.requestID] = Pending(request: signed)
@@ -129,7 +149,7 @@ public actor ConnectionAuthority {
     public func approve(requestID: String, scope: ClientScope) throws {
         try scope.validate()
         guard let entry = pending[requestID], entry.state == "pending", entry.request.value.expiresAt > now(),
-              let window, window.windowID == entry.request.value.windowID, window.expiresAt > now() else { throw BridgeError("request_expired", "The exact pending device request is no longer available.", status: 409) }
+              openWindow(entry.request.value.windowID) != nil else { throw BridgeError("request_expired", "The exact pending device request is no longer available.", status: 409) }
         let request = entry.request.value
         guard Set(scope.workspaces).isSubset(of: Set(request.scope.workspaces)), Set(scope.capabilities).isSubset(of: Set(request.scope.capabilities)) else { throw BridgeError("invalid_scope", "Approval cannot expand the client's requested scope.") }
         guard clients[request.clientID] != nil || clients.count < 100 else { throw BridgeError("registry_capacity", "The device registry is full.", status: 409) }

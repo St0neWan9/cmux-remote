@@ -8,6 +8,8 @@ struct DevicesSettingsView: View {
     @State private var pendingID: String?
     @State private var clientID: String?
     @State private var showingRevoke = false
+    /// Workspaces the owner left unchecked for a pending request, keyed by request ID.
+    @State private var excluded: [String: Set<String>] = [:]
     private let design = MacDesignTokens()
     var body: some View {
         MacPreferencePage {
@@ -16,10 +18,18 @@ struct DevicesSettingsView: View {
                 else {
                     deviceTable(pendingItems, selection: selection($pendingID, in: pendingItems))
                     if let request = selectedRequest {
-                        details(clientID: request.clientID, workspaces: request.scope.workspaces, capabilities: request.scope.capabilities)
+                        details(clientID: request.clientID, workspaces: [], capabilities: request.scope.capabilities)
+                        ForEach(request.scope.workspaces, id: \.self) { workspace in
+                            Toggle(workspaceName(workspace), isOn: Binding(get: { !(excluded[request.requestID] ?? []).contains(workspace) },
+                                set: { allowed in if allowed { excluded[request.requestID, default: []].remove(workspace) } else { excluded[request.requestID, default: []].insert(workspace) } }))
+                                .toggleStyle(.checkbox).lineLimit(1).disabled(model.busy)
+                        }
+                        MacPreferenceNote(text: String(localized: "mac.device.narrowHint", bundle: .interface))
+                        let allowed = request.scope.workspaces.filter { !(excluded[request.requestID] ?? []).contains($0) }
                         HStack(spacing: 8) {
                             Button(String(localized: "mac.device.deny", bundle: .interface), role: .destructive) { Task { await model.deny(request) } }.fixedSize()
-                            Button(String(localized: "mac.device.approve", bundle: .interface)) { Task { await model.approve(request) } }.fixedSize()
+                            Button(String(localized: "mac.device.approve", bundle: .interface)) { Task { await model.approve(request, workspaces: allowed) } }.fixedSize()
+                                .disabled(allowed.isEmpty)
                         }.disabled(model.busy)
                     }
                 }
@@ -57,7 +67,7 @@ struct DevicesSettingsView: View {
     /// The complete identity and scope stay visible for the selected device; the short ID never replaces it.
     private func details(clientID: String, workspaces: [String], capabilities: [ClientCapability]) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            MacPreferenceNote(text: workspaces.map(workspaceName).joined(separator: ", "))
+            if !workspaces.isEmpty { MacPreferenceNote(text: workspaces.map(workspaceName).joined(separator: ", ")) }
             MacPreferenceNote(text: capabilities.map { MacCapabilityPresentation().name($0) }.joined(separator: ", "))
             Text(clientID).font(.system(size: 11, design: .monospaced)).foregroundStyle(.secondary).textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true).padding(.leading, 4)

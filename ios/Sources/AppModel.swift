@@ -3,19 +3,32 @@ import Observation
 import CmuxRemoteCore
 import CmuxRemoteClient
 
-/// Owns discovery, explicit first-use trust, enrollment progress and saved per-device authorization.
+/// Owns discovery, explicit first-use trust, enrollment progress and every approved Mac's authorization.
 @MainActor @Observable
 final class AppModel {
-    var client: RemoteClient?
-    var sessions: [SessionDescriptor] = []
+    /// Approved Macs in the order they were added; conversations from all of them are shown together.
+    var links: [HostLink] = []
+    /// The first Mac's client. Assigning one replaces all Macs with a single unsaved link (fixtures, legacy).
+    var client: RemoteClient? {
+        get { links.first?.client }
+        set { links = newValue.map { [HostLink(id: "primary", name: host, client: $0, connection: nil)] } ?? [] }
+    }
+    var sessions: [SessionDescriptor] { hostedSessions.map(\.session) }
+    var hostedSessions: [HostedSession] = []
     var workspaces: [WorkspaceSummary] = []
-    var hostIdentity: String? { saved?.host.id }
-    var hostCertificate: String? { saved?.host.certificateSHA256 }
-    var endpoint: String? { saved.map { $0.endpoint.host + ":" + String($0.endpoint.port) } }
+    /// Workspace ID to the Mac that owns it, for labels when several Macs are connected.
+    var workspaceHosts: [String: String] = [:]
+    var hostErrors: [String: String] = [:]
     var error: String?
     var loading = false
     var host = ""
     var discovered: [DiscoveredBridge] = []
+    /// Macs listed by a known relay; each entry is host-signed and verified like a scanned QR.
+    var relayHosts: [SignedValue<EnrollmentBootstrap>] = []
+    var relayOrigins: [String] = []
+    var relayError: String?
+    /// The pairing screen over the conversation list while another Mac is added.
+    var addingDevice = false
     var pendingEnrollment: (any DeviceEnrolling)?
     var enrollmentState = ""
     private let discovery: BridgeDiscovery
@@ -28,7 +41,8 @@ final class AppModel {
     private let fetchSessions: @Sendable (RemoteClient) async throws -> [SessionDescriptor]
     private let fetchWorkspaces: @Sendable (RemoteClient) async throws -> [WorkspaceSummary]
     private var refreshGeneration = UUID()
-    private var saved: AuthorizedConnection?
+    private var perHost: [String: (sessions: [SessionDescriptor], workspaces: [WorkspaceSummary])] = [:]
+    private let directory: @Sendable (String) async throws -> [SignedValue<EnrollmentBootstrap>]
     private var enrollmentTask: Task<Void, Never>?
     @ObservationIgnored private var conversationModels: [String: ConversationModel] = [:]
     private var restored = false
@@ -44,8 +58,9 @@ final class AppModel {
              let value = try await client.get("/v1/workspaces", as: JSONValue.self)
              return (value["workspaces"].array ?? []).compactMap(WorkspaceSummary.init(json:))
          },
-         enrollmentTicks: @escaping @MainActor () -> (stream: AsyncStream<Void>, stop: @MainActor () -> Void) = { let ticker = RefreshTicker(); return (ticker.start(), { ticker.stop() }) }) {
-        self.makeSpeechInput = makeSpeechInput
+         enrollmentTicks: @escaping @MainActor () -> (stream: AsyncStream<Void>, stop: @MainActor () -> Void) = { let ticker = RefreshTicker(); return (ticker.start(), { ticker.stop() }) },
+         directory: @escaping @Sendable (String) async throws -> [SignedValue<EnrollmentBootstrap>] = { try await RelayDirectoryClient().hosts(origin: $0) }) {
+        self.makeSpeechInput = makeSpeechInput; self.directory = directory
         self.discovery = discovery; self.store = store; self.pendingSends = pendingSends; self.identityKey = identityKey; self.makeEnrollment = makeEnrollment; self.enrollmentTicks = enrollmentTicks
         self.fetchSessions = fetchSessions; self.fetchWorkspaces = fetchWorkspaces
     }
@@ -59,16 +74,56 @@ final class AppModel {
             Task { await pair(value) }; return
         }
         #endif
-        if let value = store.loadConnection(), let remote = try? RemoteClient(connection: value) {
-            saved = value; host = value.host.name; client = remote
-        } else if store.legacyEnabled(), let legacy = store.load() { host = legacy.host; client = RemoteClient(pairing: legacy) }
-        else if store.load() != nil { error = String(localized: "pair.legacy_migration") }
+        relayOrigins = store.relayOrigins()
+        for value in store.loadConnections() {
+            guard let remote = try? RemoteClient(connection: value) else { continue }
+            links.append(HostLink(id: value.host.id, name: value.host.name, client: remote, connection: value))
+            learnRelay(value)
+        }
+        host = links.first?.name ?? ""
+        if links.isEmpty {
+            if store.legacyEnabled(), let legacy = store.load() { host = legacy.host; links = [HostLink(id: "legacy", name: legacy.host, client: RemoteClient(pairing: legacy), connection: nil)] }
+            else if store.load() != nil { error = String(localized: "pair.legacy_migration") }
+        }
+    }
+    /// Approved Macs teach their relay origin, so other Macs on the same relay can be listed.
+    private func learnRelay(_ connection: AuthorizedConnection) {
+        guard let origin = connection.endpoint.relay?.origin, !relayOrigins.contains(origin) else { return }
+        relayOrigins.append(origin); store.saveRelayOrigins(relayOrigins)
+    }
+    func addRelayOrigin(_ text: String) async {
+        do {
+            let origin = try RelayOrigin(text.trimmingCharacters(in: .whitespacesAndNewlines)).value
+            if !relayOrigins.contains(origin) { relayOrigins.append(origin); store.saveRelayOrigins(relayOrigins) }
+            relayError = nil; await refreshRelayDirectory()
+        } catch { relayError = ErrorPresentation().message(error) }
+    }
+    func removeRelayOrigin(_ origin: String) {
+        relayOrigins.removeAll { $0 == origin }; store.saveRelayOrigins(relayOrigins)
+        relayHosts.removeAll { $0.value.endpoint.relay?.origin == origin }
+    }
+    /// Reads every known relay; one unreachable relay does not hide the others' Macs.
+    func refreshRelayDirectory() async {
+        var found: [String: SignedValue<EnrollmentBootstrap>] = [:], failure: String?
+        for origin in relayOrigins {
+            do { for entry in try await directory(origin) where found[entry.value.host.id] == nil { found[entry.value.host.id] = entry } }
+            catch { failure = ErrorPresentation().message(error) }
+        }
+        relayHosts = found.values.sorted { $0.value.host.name.localizedStandardCompare($1.value.host.name) == .orderedAscending }
+        relayError = relayHosts.isEmpty ? failure : nil
+    }
+    func isApproved(_ hostID: String) -> Bool { links.contains { $0.id == hostID } }
+    /// Called only after the user confirms a listed identity; the Mac owner still approves this exact device.
+    func enrollListed(_ bootstrap: SignedValue<EnrollmentBootstrap>) async {
+        do { try EnrollmentLinkCodec().validate(bootstrap, now: Int(Date().timeIntervalSince1970)); await enroll(bootstrap) }
+        catch { self.error = ErrorPresentation().message(error) }
     }
     func discover() async {
         defer { discovery.stop() }
         for await values in discovery.start() {
             guard !Task.isCancelled else { break }; discovered = values
-            if let saved, let peer = values.first(where: { $0.host.id == saved.host.id }) {
+            for link in links {
+                guard let saved = link.connection, let peer = values.first(where: { $0.host.id == saved.host.id }) else { continue }
                 do {
                     let endpoint = try await discovery.resolve(peer)
                     let relocated = try saved.relocated(to: endpoint, advertisedHost: peer.host)
@@ -76,13 +131,14 @@ final class AppModel {
                         let candidate = try RemoteClient(connection: relocated)
                         do { _ = try await candidate.get("/v1/status", as: JSONValue.self) }
                         catch { candidate.close(); throw error }
-                        guard !Task.isCancelled, self.saved?.host.id == saved.host.id, self.saved?.grant.signature == saved.grant.signature, self.saved?.endpoint == saved.endpoint, let currentClient = client else { candidate.close(); continue }
+                        guard !Task.isCancelled, let current = links.first(where: { $0.id == link.id }), current.client === link.client,
+                              current.connection?.grant.signature == saved.grant.signature, current.connection?.endpoint == saved.endpoint else { candidate.close(); continue }
                         try store.saveConnection(relocated)
-                        try await currentClient.relocate(relocated); candidate.close()
-                        guard self.saved?.host.id == saved.host.id, self.saved?.grant.signature == saved.grant.signature, client === currentClient else { continue }
-                        self.saved = relocated; error = nil; await refresh()
+                        try await link.client.relocate(relocated); candidate.close()
+                        guard let index = links.firstIndex(where: { $0.id == link.id }), links[index].client === link.client else { continue }
+                        links[index].connection = relocated; error = nil; await refresh()
                     }
-                } catch { if !Task.isCancelled { self.error = ErrorPresentation().message(error) } }
+                } catch { if !Task.isCancelled { self.hostErrors[link.id] = ErrorPresentation().message(error) } }
             }
         }
     }
@@ -147,7 +203,8 @@ final class AppModel {
                                 try store.saveConnection(value); store.disableLegacy()
                             }
                             catch { candidate.close(); throw error }
-                            client?.close(); client = candidate; saved = value; host = value.host.name; pendingEnrollment = nil; enrollment.close(); await refresh(); break
+                            install(HostLink(id: value.host.id, name: value.host.name, client: candidate, connection: value))
+                            learnRelay(value); pendingEnrollment = nil; addingDevice = false; enrollment.close(); await refresh(); break
                         }
                         if ["denied", "expired", "cancelled", "revoked"].contains(status.state) { pendingEnrollment = nil; enrollment.close(); error = String(localized: "pair.enrollment_ended"); break }
                     } catch {
@@ -172,28 +229,64 @@ final class AppModel {
     func pair(_ pairing: PairingConfiguration) async {
         loading = true; error = nil; defer { loading = false }
         let candidate = RemoteClient(pairing: pairing)
-        do { _ = try await candidate.get("/v1/status", as: JSONValue.self); try store.save(pairing); try store.enableLegacy(); client = candidate; host = pairing.host }
+        do {
+            _ = try await candidate.get("/v1/status", as: JSONValue.self); try store.save(pairing); try store.enableLegacy()
+            install(HostLink(id: "legacy", name: pairing.host, client: candidate, connection: nil)); addingDevice = false
+        }
         catch { candidate.close(); self.error = ErrorPresentation().message(error) }
     }
-    func refresh() async {
-        guard let client else { return }; let request = UUID(); refreshGeneration = request; loading = true
-        defer { if refreshGeneration == request { loading = false } }
-        do {
-            let discovered = client.allows(.conversationRead) ? try await fetchSessions(client) : []
-            guard self.client === client, refreshGeneration == request, !Task.isCancelled else { return }
-            sessions = discovered.sorted { if $0.writable != $1.writable { return $0.writable }; return $0.title.localizedStandardCompare($1.title) == .orderedAscending }
-            if client.allows(.workspaceRead) {
-                let metadata = try await fetchWorkspaces(client)
-                guard self.client === client, refreshGeneration == request, !Task.isCancelled else { return }
-                workspaces = metadata
-            }
-            if let updated = try? await client.refreshRelayHint() {
-                guard self.client === client, refreshGeneration == request, !Task.isCancelled else { return }
-                try store.saveConnection(updated); saved = updated
-            }
-            error = nil
-        } catch { if self.client === client, refreshGeneration == request, !Task.isCancelled { self.error = ErrorPresentation().message(error) } }
+    /// A re-approved Mac replaces its old link in place; a new Mac is appended.
+    private func install(_ link: HostLink) {
+        if let index = links.firstIndex(where: { $0.id == link.id }) { let old = links[index].client; links[index] = link; if old !== link.client { old.close() } }
+        else { links.append(link) }
+        host = links.first?.name ?? link.name
     }
+    /// Reads every Mac concurrently; one unreachable Mac keeps its last list and reports its own error.
+    func refresh() async {
+        let targets = links; guard !targets.isEmpty else { return }
+        let request = UUID(); refreshGeneration = request; loading = true
+        defer { if refreshGeneration == request { loading = false } }
+        let fetchSessions = fetchSessions, fetchWorkspaces = fetchWorkspaces
+        let results = await withTaskGroup(of: (String, Result<([SessionDescriptor], [WorkspaceSummary]?), any Error>).self) { group in
+            for link in targets {
+                let client = link.client
+                group.addTask {
+                    do {
+                        let sessions = client.allows(.conversationRead) ? try await fetchSessions(client) : []
+                        let workspaces = client.allows(.workspaceRead) ? try await fetchWorkspaces(client) : nil
+                        return (link.id, .success((sessions, workspaces)))
+                    } catch { return (link.id, .failure(error)) }
+                }
+            }
+            var collected: [String: Result<([SessionDescriptor], [WorkspaceSummary]?), any Error>] = [:]
+            for await (id, result) in group { collected[id] = result }
+            return collected
+        }
+        guard refreshGeneration == request, !Task.isCancelled else { return }
+        for link in targets {
+            guard links.contains(where: { $0.id == link.id && $0.client === link.client }), let result = results[link.id] else { continue }
+            switch result {
+            case .success(let (sessions, workspaces)):
+                let ordered = sessions.sorted { if $0.writable != $1.writable { return $0.writable }; return $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+                perHost[link.id] = (ordered, workspaces ?? perHost[link.id]?.workspaces ?? []); hostErrors[link.id] = nil
+            case .failure(let failure): hostErrors[link.id] = ErrorPresentation().message(failure)
+            }
+        }
+        publish()
+        for link in targets where link.connection != nil {
+            guard let updated = try? await link.client.refreshRelayHint(), let index = links.firstIndex(where: { $0.id == link.id && $0.client === link.client }) else { continue }
+            try? store.saveConnection(updated); links[index].connection = updated; learnRelay(updated)
+        }
+    }
+    /// Rebuilds the combined lists in Mac order from each Mac's last successful read.
+    private func publish() {
+        let current = links.filter { perHost[$0.id] != nil }
+        hostedSessions = current.flatMap { link in perHost[link.id]!.sessions.map { HostedSession(hostID: link.id, hostName: link.name, session: $0) } }
+        workspaces = current.flatMap { perHost[$0.id]!.workspaces }
+        workspaceHosts = Dictionary(current.flatMap { link in perHost[link.id]!.workspaces.map { ($0.id, link.name) } }, uniquingKeysWith: { first, _ in first })
+        error = links.compactMap { link in hostErrors[link.id].map { links.count > 1 ? link.name + "：" + $0 : $0 } }.first
+    }
+    func link(for hostID: String) -> HostLink? { links.first { $0.id == hostID } }
     /// Own in-flight and unresolved sends across pushed-view navigation.
     func conversation(session: SessionDescriptor, client: RemoteClient) -> ConversationModel {
         let key = client.operationRecoveryScope + ":" + session.id
@@ -206,5 +299,14 @@ final class AppModel {
         conversationModels[key] = model
         return model
     }
-    func unpair() { for model in conversationModels.values { model.suspendReads(); model.speech.cancel() }; conversationModels.removeAll(); refreshGeneration = UUID(); loading = false; enrollmentGeneration = UUID(); stopEnrollmentMonitor(); client?.close(); client = nil; saved = nil; sessions = []; workspaces = []; store.remove(); store.removeConnection(); store.disableLegacy() }
+    /// Removes one Mac from this phone only; the Mac owner revokes the device separately.
+    func remove(hostID: String) {
+        guard let index = links.firstIndex(where: { $0.id == hostID }) else { return }
+        let removed = links.remove(at: index), scope = removed.client.operationRecoveryScope + ":"
+        for (key, model) in conversationModels where key.hasPrefix(scope) { model.suspendReads(); model.speech.cancel(); conversationModels[key] = nil }
+        removed.client.close(); perHost[hostID] = nil; hostErrors[hostID] = nil; refreshGeneration = UUID(); loading = false
+        if removed.connection != nil { store.removeConnection(hostID: hostID) } else { store.remove(); store.disableLegacy() }
+        host = links.first?.name ?? ""; publish()
+        if links.isEmpty { enrollmentGeneration = UUID(); stopEnrollmentMonitor() }
+    }
 }
