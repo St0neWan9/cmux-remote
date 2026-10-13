@@ -1,0 +1,64 @@
+name: macOS release
+on:
+  push:
+    tags: ['v*.*.*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to package without publishing (for example 0.1.0)
+        required: true
+permissions:
+  contents: write
+concurrency:
+  group: macos-release
+  cancel-in-progress: false
+jobs:
+  package:
+    runs-on: macos-15
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate release Xcode
+        run: |
+          test -d "$DEVELOPER_DIR"
+          xcodebuild -version
+      - name: Select version and release notes
+        env:
+          REQUESTED_VERSION: ${{ inputs.version }}
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" == 'push' ]]; then
+            version="${GITHUB_REF_NAME#v}"
+            notes="docs/releases/$GITHUB_REF_NAME.md"
+            test -s "$notes" || { echo "Missing release notes: $notes"; exit 1; }
+            echo "CMUX_REMOTE_RELEASE_NOTES=$notes" >> "$GITHUB_ENV"
+          else
+            version="$REQUESTED_VERSION"
+          fi
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'Invalid version'; exit 1; }
+          echo "CMUX_REMOTE_MAC_VERSION=$version" >> "$GITHUB_ENV"
+          echo "CMUX_REMOTE_MAC_BUILD_NUMBER=$GITHUB_RUN_NUMBER" >> "$GITHUB_ENV"
+      - run: scripts/verify.sh
+      - name: Sign, notarize and package
+        env:
+          CMUX_REMOTE_MAC_CERT_P12_B64: ${{ secrets.CMUX_REMOTE_MAC_CERT_P12_B64 }}
+          CMUX_REMOTE_MAC_CERT_PASSWORD: ${{ secrets.CMUX_REMOTE_MAC_CERT_PASSWORD }}
+          CMUX_REMOTE_NOTARY_KEY_B64: ${{ secrets.CMUX_REMOTE_IOS_API_KEY_B64 }}
+          CMUX_REMOTE_NOTARY_KEY_ID: ${{ secrets.CMUX_REMOTE_IOS_API_KEY_ID }}
+          CMUX_REMOTE_NOTARY_ISSUER: ${{ secrets.CMUX_REMOTE_IOS_API_ISSUER }}
+        run: python3 scripts/with-macos-signing.py scripts/package-macos.sh --notarize
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cmux-remote-macos-${{ env.CMUX_REMOTE_MAC_VERSION }}
+          path: .build/macos-release/dist/*
+          if-no-files-found: error
+          retention-days: 7
+      - name: Publish GitHub Release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" --verify-tag \
+            --title "CmuxRemote $CMUX_REMOTE_MAC_VERSION" \
+            --notes-file "$CMUX_REMOTE_RELEASE_NOTES" \
+            .build/macos-release/dist/*

@@ -41,6 +41,10 @@ a fork or physical iPhone installation. There is no dependency on cmux's iOS app
 or signing identity. [TestFlight packaging](docs/TESTFLIGHT.md) covers the signed
 IPA and manual GitHub Actions upload workflow.
 
+The signed and notarized Mac menu bar app is published on
+[GitHub Releases](https://github.com/St0neWan9/cmux-remote/releases); see
+[Mac release packaging](docs/MAC-RELEASE.md).
+
 ## Design and verification
 
 - [Detailed design](docs/DESIGN.md)
