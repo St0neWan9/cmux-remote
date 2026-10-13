@@ -5,6 +5,9 @@ import CmuxRemoteCore
 struct SessionSidebarView: View {
     let sections: [SessionHostSection]
     let hosts: [SidebarHost]
+    /// All matching conversations, newest activity first, for the time arrangement.
+    let recent: [HostedSession]
+    @Binding var sortMode: SessionSortMode
     @Binding var query: String
     let select: (HostedSession) -> Void
     let showConnection: (String) -> Void
@@ -14,8 +17,8 @@ struct SessionSidebarView: View {
     @State private var showSearch = false
     @State private var expanded: Set<String>
     @State private var initializedExpansion: Bool
-    init(sections: [SessionHostSection], hosts: [SidebarHost], query: Binding<String>, select: @escaping (HostedSession) -> Void, showConnection: @escaping (String) -> Void, showFeed: @escaping (String) -> Void, addDevice: @escaping () -> Void, refresh: @escaping () -> Void) {
-        self.sections = sections; self.hosts = hosts; _query = query
+    init(sections: [SessionHostSection], hosts: [SidebarHost], query: Binding<String>, recent: [HostedSession], sortMode: Binding<SessionSortMode>, select: @escaping (HostedSession) -> Void, showConnection: @escaping (String) -> Void, showFeed: @escaping (String) -> Void, addDevice: @escaping () -> Void, refresh: @escaping () -> Void) {
+        self.sections = sections; self.hosts = hosts; self.recent = recent; _sortMode = sortMode; _query = query
         self.select = select; self.showConnection = showConnection; self.showFeed = showFeed; self.addDevice = addDevice; self.refresh = refresh
         let first = sections.first.flatMap { section in section.groups.first.map { section.hostID + "/" + $0.id } }
         _expanded = State(initialValue: Set(first.map { [$0] } ?? []))
@@ -27,6 +30,12 @@ struct SessionSidebarView: View {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
                 Text(String(localized: "app.title")).font(.title2.weight(.bold)).frame(maxWidth: .infinity, alignment: .leading)
+                Menu {
+                    Picker(String(localized: "sessions.sort"), selection: $sortMode) {
+                        ForEach(SessionSortMode.allCases) { mode in Label(mode.title, systemImage: mode.symbol).tag(mode) }
+                    }
+                } label: { Image(systemName: "arrow.up.arrow.down").font(.system(size: 19)).frame(width: 44, height: 44) }
+                    .tint(.primary).accessibilityLabel(String(localized: "sessions.sort")).accessibilityIdentifier("sidebar.sort")
                 Button { withAnimation { showSearch.toggle() } } label: {
                     Image(systemName: "magnifyingglass").font(.system(size: 21)).frame(width: 44, height: 44)
                 }.buttonStyle(.plain).accessibilityLabel(String(localized: "sessions.search"))
@@ -35,9 +44,25 @@ struct SessionSidebarView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: MobileDesign.sectionGap) {
                     if showSearch || !query.isEmpty { SessionSearchField(query: $query) }
-                    ForEach(sections) { section in
-                        Text(multiple ? section.hostName : String(localized: "sessions.workspaces_title")).font(.headline).lineLimit(1)
-                        ForEach(section.groups) { group in projectGroup(group, section: section) }
+                    if sortMode == .time {
+                        Text(String(localized: "sessions.recent")).font(.headline)
+                        ForEach(recent) { hosted in
+                            Button { select(hosted) } label: {
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(hosted.session.title).lineLimit(2)
+                                        if multiple { Text(hosted.hostName).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
+                                    }.frame(maxWidth: .infinity, alignment: .leading)
+                                    if hosted.session.state.hasPrefix("working") { ProgressView().controlSize(.mini) }
+                                    else if !hosted.session.writable { Image(systemName: "lock").font(.caption).foregroundStyle(.secondary) }
+                                }.frame(minHeight: 44).contentShape(Rectangle())
+                            }.buttonStyle(.plain).accessibilityIdentifier("sidebar.session." + hosted.hostID + "." + hosted.session.id)
+                        }
+                    } else {
+                        ForEach(sections) { section in
+                            Text(multiple ? section.hostName : String(localized: "sessions.workspaces_title")).font(.headline).lineLimit(1)
+                            ForEach(section.groups) { group in projectGroup(group, section: section) }
+                        }
                     }
                     if sections.isEmpty { Text(String(localized: "sessions.no_matches")).foregroundStyle(.secondary) }
                     if feedHosts.count == 1, let only = feedHosts.first {
