@@ -3,11 +3,11 @@ import Foundation
 /// Local companion policy: crops a captured grid while keeping its visible cursor in view.
 public struct MobileTerminalGridViewport: Sendable {
     public init() {}
-    public func fit(_ source: MobileTerminalRenderGridFrame, columns: Int, rows: Int) -> MobileTerminalRenderGridFrame {
+    public func fit(_ source: MobileTerminalRenderGridFrame, columns: Int, rows: Int, topRow: Int? = nil) -> MobileTerminalRenderGridFrame {
         let width = max(1, min(columns, source.columns)), height = max(1, min(rows, source.rows))
         guard width != source.columns || height != source.rows else { return source }
         let cursor = source.cursor.flatMap { $0.visible ? $0 : nil }
-        let top = min(source.rows - height, max(0, (cursor?.row ?? 0) - max(0, height - 3)))
+        let top = min(source.rows - height, max(0, topRow ?? ((cursor?.row ?? 0) - max(0, height - 3))))
         let left = min(source.columns - width, max(0, (cursor?.column ?? 0) - max(0, width - 3)))
         var frame = source
         frame.columns = width; frame.rows = height
@@ -36,6 +36,7 @@ public struct MobileTerminalGridViewport: Sendable {
             return output
         }
         if var position = frame.cursor {
+            position.visible = position.visible && (top..<(top + height)).contains(position.row)
             position.row = min(height - 1, max(0, position.row - top))
             position.column = min(width - 1, max(0, position.column - left))
             frame.cursor = position

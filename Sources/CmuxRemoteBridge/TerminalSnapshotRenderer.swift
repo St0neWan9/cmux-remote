@@ -7,7 +7,7 @@ import CmuxTerminalReplay
 public struct TerminalSnapshotRenderer: Sendable {
     public init() {}
     public func render(_ payload: JSONValue, workspaceID: String, surfaceID: String,
-                       viewportColumns: Int? = nil, viewportRows: Int? = nil) throws -> MirrorTerminalSnapshot {
+                       viewportColumns: Int? = nil, viewportRows: Int? = nil, viewportTopRow: Int? = nil) throws -> MirrorTerminalSnapshot {
         guard payload["workspace_id"].string?.lowercased() == workspaceID.lowercased(),
               payload["surface_id"].string?.lowercased() == surfaceID.lowercased(), payload["render_grid"].object != nil else {
             throw BridgeError("mirror_unsupported", "This cmux version did not return a matching character-grid replay.", status: 422)
@@ -25,10 +25,10 @@ public struct TerminalSnapshotRenderer: Sendable {
         // A desktop snapshot viewer must not manufacture focus/mouse input on
         // behalf of the producer. Its coordinates and focus are local only.
         // The upstream full replay resets these modes before restoring modes.
-        frame.modes.removeAll { !$0.ansi && [9, 1000, 1002, 1003, 1004, 1005, 1006, 1015, 1016].contains($0.code) }
+        frame.modes.removeAll { !$0.ansi && [9, 1000, 1002, 1003, 1004, 1005, 1006, 1007, 1015, 1016].contains($0.code) }
         if let columns = viewportColumns, let rows = viewportRows {
             guard (1...1000).contains(columns), (1...500).contains(rows) else { throw BridgeError("invalid_input", "Invalid local terminal dimensions.") }
-            frame = MobileTerminalGridViewport().fit(frame, columns: columns, rows: rows)
+            frame = MobileTerminalGridViewport().fit(frame, columns: columns, rows: rows, topRow: viewportTopRow)
         } else if viewportColumns != nil || viewportRows != nil {
             throw BridgeError("invalid_input", "Specify both local terminal dimensions.")
         }

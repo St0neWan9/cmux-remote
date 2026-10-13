@@ -2,14 +2,15 @@ import Foundation
 
 /// Stable failure codes map to localized UI; internal network errors are not displayed.
 struct MacErrorPresentation {
-    static func message(_ code: String) -> String {
+    static func message(_ code: String, forWorkspace: Bool = false) -> String {
         switch code {
         case "setup_required": return String(localized: "mac.error.setup", bundle: .interface)
         case "setup_storage": return String(localized: "mac.error.setupStorage", bundle: .interface)
         case "resident_starting", "sharing_busy": return String(localized: "mac.error.starting", bundle: .interface)
         case "resident_missing", "resident_failed": return String(localized: "mac.error.resident", bundle: .interface)
         case "sharing_start_failed", "sharing_stopped", "invalid_endpoint": return String(localized: "mac.error.sharing", bundle: .interface)
-        case "sharing_unsupported", "not_found": return String(localized: "mac.error.sharingUpgrade", bundle: .interface)
+        case "sharing_unsupported": return String(localized: "mac.error.sharingUpgrade", bundle: .interface)
+        case "not_found": return forWorkspace ? String(localized: "mac.error.missingWorkspace", bundle: .interface) : String(localized: "mac.error.sharingUpgrade", bundle: .interface)
         case "pairing_selection": return String(localized: "mac.error.pairingSelection", bundle: .interface)
         case "invalid_state_path": return String(localized: "mac.error.statePath", bundle: .interface)
         case "socket_unavailable", "owner_socket_exists": return String(localized: "mac.error.localBridge", bundle: .interface)

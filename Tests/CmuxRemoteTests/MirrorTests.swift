@@ -16,6 +16,8 @@ private actor MirrorTestCmux: CmuxControlling {
     var calls = 0
     var lifecycle = "working"
     var replays = 0
+    var pastes = 0
+    var pasteSubmission: String?
     func hibernate() { lifecycle = "hibernated" }
     func setEpoch(_ value: String) { epoch = value }
     func setFailure() { failInput = true }
@@ -23,6 +25,12 @@ private actor MirrorTestCmux: CmuxControlling {
     func request(_ method: String, params: [String: JSONValue]) async throws -> JSONValue {
         calls += 1
         switch method {
+        case "system.tree":
+            guard params["all_windows"]?.bool == true else { return .object(["windows": .array([])]) }
+            return .object(["windows": .array([.object(["workspaces": .array([.object([
+                "id": .string(workspaceID), "title": .string("Background workspace"), "panes": .array([.object([
+                    "id": .string(surfaceID), "surfaces": .array([.object(["id": .string(surfaceID), "type": .string("terminal")])])])])
+            ])])])])])
         case "surface.input_state": return .object(["terminal": .bool(true), "lifecycle": .string(lifecycle)])
         case "surface.list": return .object(["workspace_id": .string(workspaceID), "surfaces": .array([.object(["id": .string(surfaceID), "type": .string("terminal")])])])
         case "terminal.replay":
@@ -32,6 +40,7 @@ private actor MirrorTestCmux: CmuxControlling {
             return .object(["workspace_id": .string(workspaceID), "surface_id": .string(surfaceID),
                 "render_grid": try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(frame))])
         case "mobile.terminal.input": inputs += 1; if failInput { throw BridgeError("socket_unavailable", "fixture") }; return .object(["accepted": .bool(true)])
+        case "terminal.paste": pastes += 1; pasteSubmission = params["submit_key"]?.string; return .object(["accepted": .bool(true)])
         default: return .object([:])
         }
     }
@@ -83,6 +92,36 @@ private actor MirrorTestLocal: CmuxControlling {
 }
 
 @Suite struct MirrorTests {
+    @Test func pasteUsesLiteralTextWithoutSubmittingAndSharesDurableDeduplication() async throws {
+        let cmux = MirrorTestCmux()
+        let server = RemoteMirrorService(cmux: cmux)
+        let request = MirrorInputRequest(runtimeEpoch: "producer-1", text: "line one\nline two", paste: true)
+        _ = try await server.input(workspaceID: cmux.workspaceID, surfaceID: cmux.surfaceID, clientID: "client", request: request) {}
+        _ = try await server.input(workspaceID: cmux.workspaceID, surfaceID: cmux.surfaceID, clientID: "client", request: request) {}
+        #expect(await cmux.pastes == 1)
+        #expect(await cmux.inputs == 0)
+        #expect(await cmux.pasteSubmission == "none")
+        #expect(try await server.replay(workspaceID: cmux.workspaceID, surfaceID: cmux.surfaceID).pasteSupported == true)
+        let changedMode = MirrorInputRequest(runtimeEpoch: request.runtimeEpoch, text: request.text, operationID: request.operationID)
+        await #expect(throws: BridgeError.self) { _ = try await server.input(workspaceID: cmux.workspaceID, surfaceID: cmux.surfaceID, clientID: "client", request: changedMode) {} }
+        #expect(await cmux.pastes == 1)
+        #expect(await cmux.inputs == 0)
+    }
+    @Test func remoteWorkspaceDiscoveryIncludesUnfocusedWindows() async throws {
+        let cmux = MirrorTestCmux()
+        let workspace = try await RemoteMirrorService(cmux: cmux).workspace(id: cmux.workspaceID)
+        #expect(workspace.id == cmux.workspaceID)
+        #expect(workspace.surfaces.map(\.id) == [cmux.surfaceID])
+    }
+    @Test func viewerFailureKeepsItsCauseForInspection() async throws {
+        let local = MirrorTestLocal(), remote = MirrorTestRemote()
+        let coordinator = WorkspaceMirrorCoordinator(local: local, executable: URL(fileURLWithPath: "/tmp/viewer"), stateDirectory: URL(fileURLWithPath: "/tmp/state"))
+        let host = HostIdentity(id: "host", publicKey: "", certificateSHA256: "", name: "Remote")
+        _ = try await coordinator.create(host: host, workspaceID: remote.workspaceID, remote: remote)
+        let view = try #require(await coordinator.list().first)
+        try await coordinator.detach(view.id, reason: "invalid_response")
+        #expect(await coordinator.syncStatus().first?.errorCode == "invalid_response")
+    }
     @Test func existingMirrorPublishesOlderPeersOnlyAfterFinalPaint() async throws {
         let local = MirrorTestLocal(), remote = MirrorTestRemote()
         let coordinator = WorkspaceMirrorCoordinator(local: local, executable: URL(fileURLWithPath: "/tmp/viewer"), stateDirectory: URL(fileURLWithPath: "/tmp/state"))

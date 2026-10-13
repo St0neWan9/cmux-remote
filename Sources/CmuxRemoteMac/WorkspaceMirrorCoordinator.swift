@@ -155,6 +155,8 @@ public actor WorkspaceMirrorCoordinator {
         presentation.allowsInput = snapshot.allowsInput
         presentation.presentationKey = snapshot.presentationKey
         presentation.repaintBytes = snapshot.repaintBytes
+        presentation.renderGrid = snapshot.renderGrid
+        presentation.pasteSupported = snapshot.pasteSupported
         return presentation
     }
     public func input(_ id: UUID, request: MirrorInputRequest) async throws -> MutationReceipt {
@@ -173,7 +175,7 @@ public actor WorkspaceMirrorCoordinator {
             return
         }
         projections[id] = nil; sources[id] = nil; retired[id] = nil
-        pause(key: view.hostID + ":" + view.workspaceID.lowercased(), code: "mirror_detached")
+        pause(key: view.hostID + ":" + view.workspaceID.lowercased(), code: reason ?? "mirror_detached")
         try await persist()
     }
     public func detach(hostID: String) async throws {
@@ -429,8 +431,9 @@ public actor WorkspaceMirrorCoordinator {
     }
     private func quote(_ value: String) -> String { "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'" }
     private func validate(_ snapshot: MirrorTerminalSnapshot, workspaceID: String, surfaceID: String) throws {
+        let cellBytes = try snapshot.renderGrid.map { try JSONEncoder().encode($0).count } ?? 0
         guard snapshot.workspaceID.lowercased() == workspaceID.lowercased(), snapshot.surfaceID.lowercased() == surfaceID.lowercased(),
-              !snapshot.runtimeEpoch.isEmpty, snapshot.bytes.count + (snapshot.repaintBytes?.count ?? 0) <= 4_194_304,
+              !snapshot.runtimeEpoch.isEmpty, snapshot.bytes.count + (snapshot.repaintBytes?.count ?? 0) + cellBytes <= 4_194_304,
               snapshot.presentationKey == nil || snapshot.presentationKey!.utf8.count <= 128 else { throw BridgeError("invalid_response", "A replay named another terminal or exceeded its limit.") }
     }
 }
