@@ -19,7 +19,7 @@ if [[ ! -e "$key_file" ]]; then
 fi
 test -f "$key_file" && test ! -L "$key_file" || { echo "The key file must be a regular file." >&2; exit 2; }
 test "$(stat -f '%u' "$key_file")" = "$(id -u)" || { echo "The key file must belong to you." >&2; exit 2; }
-test "$(( $(stat -f '%Lp' "$key_file") & 077 ))" = 0 || { echo "The key file must be private (chmod 600)." >&2; exit 2; }
+test "$(( 8#$(stat -f '%Lp' "$key_file") & 8#077 ))" = 0 || { echo "The key file must be private (chmod 600)." >&2; exit 2; }
 output="$(npx wrangler deploy 2>&1)" || { printf '%s\n' "$output" >&2; exit 1; }
 origin="$(printf '%s\n' "$output" | grep -Eo 'https://[A-Za-z0-9.-]+\.workers\.dev' | head -n 1 || true)"
 tr -d '\n' < "$key_file" | npx wrangler secret put BRIDGE_REGISTRATION_KEY >/dev/null
