@@ -6,12 +6,13 @@ root = Path(__file__).resolve().parents[1]
 build = Path(subprocess.check_output(['swift', 'build', '--show-bin-path'], cwd=root, text=True).strip())
 modules = build / 'Modules' if (build / 'Modules').is_dir() else build
 args = ['swiftc', '-parse-as-library', '-swift-version', '6', '-I', str(modules)]
-for name in ['SpeechDraftModel', 'SpeechInputServing', 'SpeechInputResult', 'UnavailableSpeechInput', 'HistoricalImageModel', 'ReadRequestOwner', 'AppModel', 'ConversationModel', 'ImageDraftModel', 'ImageSelection', 'ImageAttachmentEncoder', 'ImageFileLoader', 'PendingSendStore', 'ToolDetailModel', 'ToolDetailReference', 'PairingStore', 'DeviceIdentityStore', 'SecureDeviceStore', 'ErrorPresentation', 'RefreshTicker', 'MarkdownBlock', 'ProjectModel', 'FeedModel']:
+for name in ['SpeechDraftModel', 'SpeechInputServing', 'SpeechInputResult', 'UnavailableSpeechInput', 'HistoricalImageModel', 'ReadRequestOwner', 'AppModel', 'HostLink', 'HostedSession', 'ConversationModel', 'ImageDraftModel', 'ImageSelection', 'ImageAttachmentEncoder', 'ImageFileLoader', 'PendingSendStore', 'ToolDetailModel', 'ToolDetailReference', 'PairingStore', 'DeviceIdentityStore', 'SecureDeviceStore', 'ErrorPresentation', 'RefreshTicker', 'MarkdownBlock', 'ProjectModel', 'FeedModel']:
     args.append(str(root / 'ios' / 'Sources' / (name + '.swift')))
 args.append(str(root / 'scripts/fixtures/PhoneStateChecks.swift'))
 args.append(str(root / 'scripts/fixtures/ConversationReadChecks.swift'))
 args.append(str(root / 'scripts/fixtures/HistoricalImageChecks.swift'))
 args.append(str(root / 'scripts/fixtures/SpeechStateChecks.swift'))
+args.append(str(root / 'scripts/fixtures/MultiHostChecks.swift'))
 for module in ['CmuxRemoteCore', 'CmuxRemoteClient', 'CmuxAgentChat']:
     mapping_file = build / (module + '.build/output-file-map.json')
     if mapping_file.is_file():

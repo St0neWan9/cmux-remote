@@ -36,7 +36,8 @@ struct ConnectionDetailView: View {
                     }.modifier(FloatingSurface())
                     VStack(spacing: MobileDesign.rowGap) {
                         Button(String(localized: "chat.refresh")) { Task { await refresh() } }.disabled(loading)
-                        Button(String(localized: "pair.disconnect"), role: .destructive, action: disconnect)
+                        Button(String(localized: "connection.remove"), role: .destructive, action: disconnect)
+                        Text(String(localized: "connection.remove_hint")).font(.footnote).foregroundStyle(.secondary)
                     }.buttonStyle(FloatingButtonStyle(fullWidth: true))
                 }.frame(maxWidth: .infinity, alignment: .leading).padding(MobileDesign.pageInset)
             }.refreshable { await refresh() }
