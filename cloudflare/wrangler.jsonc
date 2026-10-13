@@ -2,7 +2,7 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "cmux-remote-relay",
   "main": "src/index.ts",
-  "compatibility_date": "2026-10-13",
+  "compatibility_date": "2026-10-06",
   "durable_objects": { "bindings": [{ "name": "ROOMS", "class_name": "RelayRoom" }] },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RelayRoom"] }],
   "ratelimits": [{ "name": "ADMISSION_LIMITER", "namespace_id": "1000", "simple": { "limit": 60, "period": 60 } }],

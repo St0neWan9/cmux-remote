@@ -20,7 +20,7 @@ function next(socket: any): Promise<any> {
 }
 async function fixture() {
   const mf = new Miniflare(convertV4MiniflareOptions({
-    modules: true, scriptPath: new URL("../dist/index.js", import.meta.url).pathname, compatibilityDate: "2026-10-13",
+    modules: true, scriptPath: new URL("../dist/index.js", import.meta.url).pathname, compatibilityDate: "2026-10-06",
     durableObjects: { ROOMS: { className: "RelayRoom", useSQLite: true } },
     ratelimits: { ADMISSION_LIMITER: { namespace_id: "1000", simple: { limit: 1000, period: 60 } } },
     bindings: { BRIDGE_REGISTRATION_KEY: "a".repeat(64) }
