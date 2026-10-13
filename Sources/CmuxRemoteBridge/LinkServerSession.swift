@@ -13,7 +13,7 @@ actor LinkServerSession {
     private var closed = false
     private var requests: [String: Task<Void, Never>] = [:]
     private var subscriptions: [String: Task<Void, Never>] = [:]
-    private var acknowledgements: [String: (Int, AsyncThrowingStream<Void, any Error>.Continuation)] = [:]
+    private var acknowledgements: [String: (index: Int, final: Bool, continuation: AsyncThrowingStream<Void, any Error>.Continuation)] = [:]
     private var handshakeDeadline: Task<Void, Never>?
     init(router: BridgeRouter, authority: ConnectionAuthority, send: @escaping @Sendable (Data) async throws -> Void, terminate: @escaping @Sendable () -> Void, expectedClientID: String? = nil) {
         self.expectedClientID = expectedClientID; self.router = router; self.authority = authority; writer = LinkPacketWriter(send: send, terminate: terminate)
@@ -43,12 +43,16 @@ actor LinkServerSession {
             let frame = try cipher!.open(data)
             switch frame.kind {
             case "ack":
-                guard let item = acknowledgements[frame.id], frame.index == item.0 else { throw BridgeError("invalid_request", "Unexpected response acknowledgement.") }
-                acknowledgements[frame.id] = nil; item.1.yield(()); item.1.finish()
+                guard let item = acknowledgements[frame.id], frame.index == item.index else { throw BridgeError("invalid_request", "Unexpected response acknowledgement.") }
+                acknowledgements[frame.id] = nil
+                // The client frees its slot on the final chunk; free ours in the same ordered step, not when the
+                // delivering task next runs, or a loaded Bridge rejects the client's next legitimate request.
+                if item.final { requests[frame.id] = nil }
+                item.continuation.yield(()); item.continuation.finish()
             case "cancel":
                 subscriptions.removeValue(forKey: frame.id)?.cancel()
                 requests.removeValue(forKey: frame.id)?.cancel()
-                acknowledgements.removeValue(forKey: frame.id)?.1.finish(throwing: CancellationError())
+                acknowledgements.removeValue(forKey: frame.id)?.continuation.finish(throwing: CancellationError())
             case "request", "subscribe":
                 guard requests[frame.id] == nil, subscriptions[frame.id] == nil, requests.count < 8,
                       let method = frame.method, ["GET", "POST"].contains(method), let uri = frame.uri,
@@ -79,7 +83,7 @@ actor LinkServerSession {
         handshakeDeadline?.cancel(); handshakeDeadline = nil
         for task in requests.values { task.cancel() }; requests.removeAll()
         for task in subscriptions.values { task.cancel() }; subscriptions.removeAll()
-        for item in acknowledgements.values { item.1.finish(throwing: CancellationError()) }; acknowledgements.removeAll()
+        for item in acknowledgements.values { item.continuation.finish(throwing: CancellationError()) }; acknowledgements.removeAll()
         cipher = nil; await writer.close()
     }
     private func finish(_ id: String, response: HTTPResourceResponse, baseline: EnrolledClient?) async {
@@ -95,7 +99,7 @@ actor LinkServerSession {
                 }
                 let start = min(index * 65_536, response.data.count), end = min(start + 65_536, response.data.count)
                 let ack = AsyncThrowingStream<Void, any Error>.makeStream(bufferingPolicy: .bufferingOldest(1))
-                acknowledgements[id] = (index, ack.continuation)
+                acknowledgements[id] = (index, index == count - 1, ack.continuation)
                 try await send(LinkFrame(kind: "response", id: id, data: response.data.subdata(in: start..<end), status: response.status, contentType: response.contentType, index: index, final: index == count - 1))
                 try await withThrowingTaskGroup(of: Void.self) { group in
                     group.addTask { var iterator = ack.stream.makeAsyncIterator(); guard try await iterator.next() != nil else { throw CancellationError() } }

@@ -230,3 +230,15 @@
 "capability.terminalRead" = "查看终端镜像";
 
 "capability.terminalInput" = "终端镜像输入";
+"sessions.all_macs" = "全部 %lld 台 Mac";
+"pair.add_device" = "添加 Mac";
+"pair.back_to_sessions" = "返回会话";
+"pair.relay" = "通过互联网（中转）";
+"pair.relay_hint" = "填写你的中转地址，即可列出在任何网络都能连接的 Mac。经中转批准过的 Mac 会自动记住它的中转地址。";
+"pair.relay_empty" = "暂时没有在线的 Mac。请在 Mac 上开启带中转的共享后刷新。";
+"pair.relay_placeholder" = "https://your-relay.workers.dev";
+"pair.relay_add" = "添加中转";
+"pair.relay_remove" = "移除中转";
+"pair.approved" = "已认证";
+"connection.remove" = "移除这台 Mac";
+"connection.remove_hint" = "只会把这台 Mac 从手机上移除。要取消它的访问权限，请在 Mac 上撤销这台设备。";

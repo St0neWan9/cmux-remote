@@ -11,6 +11,12 @@ public struct RelayOrigin: Sendable, Equatable {
         guard let origin = parts.url?.absoluteString else { throw BridgeError("invalid_endpoint", "Invalid relay origin.") }
         self.value = origin
     }
+    /// Hosts listed while online; each entry is host-signed and checked again by the reader.
+    public func directoryURL() throws -> URL {
+        guard var parts = URLComponents(string: value) else { throw BridgeError("invalid_endpoint", "Invalid relay route.") }
+        parts.path = "/v3/directory"
+        guard let url = parts.url else { throw BridgeError("invalid_endpoint", "Invalid relay route.") }; return url
+    }
     public func socketURL(hostID: String, role: String) throws -> URL {
         guard hostID.count == 64, hostID.allSatisfy({ $0.isASCII && $0.isHexDigit }), ["bridge", "client"].contains(role),
               var parts = URLComponents(string: value) else { throw BridgeError("invalid_endpoint", "Invalid relay route.") }

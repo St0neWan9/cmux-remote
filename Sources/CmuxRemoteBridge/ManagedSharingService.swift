@@ -16,8 +16,9 @@ public actor ManagedSharingService {
     private var task: Task<Void, any Error>?
     private var generation: UUID?
     private var advertisement: BonjourAdvertisement?
-    public init(state: BridgeState, authority: ConnectionAuthority, router: BridgeRouter, listen: String = "0.0.0.0", port: Int = 7740, advertise: Bool = true, relay: CloudRelayService? = nil, relayKeyFile: String? = nil) {
-        self.state = state; self.authority = authority; self.router = router
+    private let workspaces: @Sendable () async throws -> [String]
+    public init(state: BridgeState, authority: ConnectionAuthority, router: BridgeRouter, listen: String = "0.0.0.0", port: Int = 7740, advertise: Bool = true, relay: CloudRelayService? = nil, relayKeyFile: String? = nil, workspaces: @escaping @Sendable () async throws -> [String] = { [] }) {
+        self.workspaces = workspaces; self.state = state; self.authority = authority; self.router = router
         self.relayKeyFile = relayKeyFile; self.relay = relay; self.listen = listen; self.port = port; self.advertise = advertise
     }
     public func status() async -> JSONValue {
@@ -67,7 +68,16 @@ public actor ManagedSharingService {
             var iterator = ready.stream.makeAsyncIterator()
             guard let bound = try await iterator.next(), generation == id, phase == "starting" else { throw CancellationError() }
             port = bound; phase = "running"
-            try await relay?.start()
+            if let relay {
+                let authority = authority, workspaces = workspaces
+                // Listed while online: the entry carries this Mac's current workspaces; the owner narrows at approval.
+                await relay.setListing {
+                    let current = try await workspaces()
+                    guard !current.isEmpty else { return nil }
+                    return try await authority.openDirectory(endpoint: BridgeEndpoint(host: LANAddressResolver().address() ?? "localhost", port: bound), workspaces: current)
+                }
+                try await relay.start()
+            }
             if advertise {
                 do { advertisement = try BonjourAdvertisement(host: authority.host, port: bound) }
                 catch { failure = "discovery_failed" }

@@ -446,7 +446,9 @@ private actor DeferredToolPage {
         failures += historicalImageChecks.failures
         let speechChecks = await SpeechStateChecks.run(client:client)
         failures += speechChecks.failures
+        let multiHostChecks = await MultiHostChecks.run()
+        failures += multiHostChecks.failures
         if !failures.isEmpty { print(failures.joined(separator: "\n")); exit(1) }
-        print("Phone state: 20 existing behavioral checks, \(mediaChecks) image/draft/receipt checks and \(detailChecks) tool-detail checks, \(readChecks.count) conversation read checks and \(historicalImageChecks.count) historical-image checks and \(speechChecks.count) speech checks passed.")
+        print("Phone state: 20 existing behavioral checks, \(mediaChecks) image/draft/receipt checks and \(detailChecks) tool-detail checks, \(readChecks.count) conversation read checks and \(historicalImageChecks.count) historical-image checks and \(speechChecks.count) speech checks and \(multiHostChecks.count) multi-Mac checks passed.")
     }
 }

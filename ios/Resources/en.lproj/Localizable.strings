@@ -230,3 +230,15 @@
 "capability.terminalRead" = "Terminal mirror viewing";
 
 "capability.terminalInput" = "Terminal mirror input";
+"sessions.all_macs" = "All %lld Macs";
+"pair.add_device" = "Add a Mac";
+"pair.back_to_sessions" = "Back to conversations";
+"pair.relay" = "Over the internet (relay)";
+"pair.relay_hint" = "Enter your relay address to list Macs you can reach from anywhere. Macs you approved over the relay add theirs automatically.";
+"pair.relay_empty" = "No Mac is listed right now. Turn on sharing with a relay on the Mac, then refresh.";
+"pair.relay_placeholder" = "https://your-relay.workers.dev";
+"pair.relay_add" = "Add relay";
+"pair.relay_remove" = "Remove relay";
+"pair.approved" = "Approved";
+"connection.remove" = "Remove this Mac";
+"connection.remove_hint" = "Removes this Mac from this phone only. Revoke the device on the Mac to end its access there.";

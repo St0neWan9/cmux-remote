@@ -50,8 +50,9 @@ struct Main {
             }
         case "serve", "resident":
             if (options.contains("pair") || command == "resident"), !FileManager.default.fileExists(atPath: state.directory.appendingPathComponent("token").path) { try state.initialize() }
+            let machine = try BridgeMachineLease(home: home)
             let lease = try BridgeRunLease(directory: state.directory)
-            defer { withExtendedLifetime(lease) {} }
+            defer { withExtendedLifetime((machine, lease)) {} }
             let mutations = MutationLedger(directory: state.directory)
             let cmux: any CmuxControlling
             let localDesktop: (any CmuxControlling)?
@@ -124,7 +125,8 @@ struct Main {
                 relay = try CloudRelayService(origin: configuration.origin, secret: relayRepository.secret(configuration), router: router, authority: authority)
             } else { relay = nil; relayKeyFile = nil }
             let sharing = ManagedSharingService(state: state, authority: authority, router: router,
-                listen: options.value("listen") ?? (command == "resident" || options.contains("pair") ? "0.0.0.0" : "127.0.0.1"), port: port, advertise: !options.contains("no-discovery"), relay: relay, relayKeyFile: relayKeyFile)
+                listen: options.value("listen") ?? (command == "resident" || options.contains("pair") ? "0.0.0.0" : "127.0.0.1"), port: port, advertise: !options.contains("no-discovery"), relay: relay, relayKeyFile: relayKeyFile,
+                workspaces: { try await service.workspaces()["workspaces"].array?.compactMap { $0["id"].string } ?? [] })
             let ready = AsyncThrowingStream<Void, any Error>.makeStream()
             let owner = Task {
                 do { try await OwnerControlServer().run(path: state.directory.appendingPathComponent("owner.sock").path, authority: authority, service: service, mac: mac, sharing: sharing, onListening: { ready.continuation.yield(()); ready.continuation.finish() }) }

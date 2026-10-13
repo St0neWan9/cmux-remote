@@ -9,12 +9,29 @@ struct PairingStore {
     func legacyEnabled() -> Bool { protected.load(account: "explicit-legacy") == Data([1]) }
     func enableLegacy() throws { try protected.save(Data([1]), account: "explicit-legacy") }
     func disableLegacy() { protected.remove(account: "explicit-legacy") }
-    func loadConnection() -> AuthorizedConnection? {
-        guard let data = protected.load(account: "host"), let value = try? JSONDecoder().decode(AuthorizedConnection.self, from: data), (try? value.validate()) != nil else { return nil }
-        return value
+    /// Every approved Mac, one entry per host identity, in the order they were added.
+    func loadConnections() -> [AuthorizedConnection] {
+        if let data = protected.load(account: "hosts"), let values = try? JSONDecoder().decode([AuthorizedConnection].self, from: data) {
+            return values.filter { (try? $0.validate()) != nil }
+        }
+        // Earlier builds saved a single Mac; it becomes the first entry of the list.
+        guard let data = protected.load(account: "host"), let value = try? JSONDecoder().decode(AuthorizedConnection.self, from: data), (try? value.validate()) != nil else { return [] }
+        if (try? write([value])) != nil { protected.remove(account: "host") }
+        return [value]
     }
-    func saveConnection(_ value: AuthorizedConnection) throws { try value.validate(); try protected.save(JSONEncoder().encode(value), account: "host") }
-    func removeConnection() { protected.remove(account: "host") }
+    /// Replaces the entry for the same host identity, keeping its position, or appends a new Mac.
+    func saveConnection(_ value: AuthorizedConnection) throws {
+        try value.validate()
+        var values = loadConnections()
+        if let index = values.firstIndex(where: { $0.host.id == value.host.id }) { values[index] = value }
+        else { guard values.count < 16 else { throw BridgeError("pairing_capacity", "Remove a Mac before adding another.") }; values.append(value) }
+        try write(values)
+    }
+    func removeConnection(hostID: String) { try? write(loadConnections().filter { $0.host.id != hostID }) }
+    private func write(_ values: [AuthorizedConnection]) throws { try protected.save(JSONEncoder().encode(values), account: "hosts") }
+    /// Relay origins are public routing information, not credentials.
+    func relayOrigins() -> [String] { UserDefaults.standard.stringArray(forKey: "relayOrigins") ?? [] }
+    func saveRelayOrigins(_ values: [String]) { UserDefaults.standard.set(Array(values.prefix(8)), forKey: "relayOrigins") }
     func load() -> PairingConfiguration? {
         #if targetEnvironment(simulator)
         // Simulator verification has no provisioning profile. Keep fixture state inside its sandbox.

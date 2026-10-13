@@ -7,16 +7,21 @@ final class BridgeWebSocketHandler: ChannelInboundHandler, @unchecked Sendable {
     typealias InboundIn = WebSocketFrame
     typealias OutboundOut = WebSocketFrame
     private let session: LinkServerSession
-    private let input = AsyncStream<Data>.makeStream(bufferingPolicy: .bufferingOldest(8))
+    // Bursts of requests, subscriptions and acknowledgements are legitimate; the budget bounds memory instead.
+    private let input = AsyncStream<Data>.makeStream(bufferingPolicy: .unbounded)
+    private let budget = LinkInputBudget()
     private var consumer: Task<Void, Never>?
     private var fragmented = Data()
     private var assembling = false
     init(session: LinkServerSession) { self.session = session }
     func handlerAdded(context: ChannelHandlerContext) {
-        let session = session, stream = input.stream
+        let session = session, stream = input.stream, budget = budget
         consumer = Task {
             await session.start()
-            for await data in stream { guard !Task.isCancelled else { break }; await session.receive(data) }
+            for await data in stream {
+                guard !Task.isCancelled else { break }
+                await session.receive(data); budget.release(data.count)
+            }
             await session.close()
         }
     }
@@ -32,7 +37,8 @@ final class BridgeWebSocketHandler: ChannelInboundHandler, @unchecked Sendable {
             fragmented.append(contentsOf: bytes); assembling = !frame.fin
             if frame.fin {
                 let complete = fragmented; fragmented = Data()
-                if case .dropped = input.continuation.yield(complete) { context.close(promise: nil) }
+                guard budget.admit(complete.count) else { context.close(promise: nil); return }
+                input.continuation.yield(complete)
             }
         case .ping:
             context.writeAndFlush(wrapOutboundOut(WebSocketFrame(fin: true, opcode: .pong, data: frame.unmaskedData)), promise: nil)
