@@ -119,3 +119,17 @@
 "mac.noWorkspacesMessage" = "请确认远端工作区仍在运行，并且本机已获准访问。";
 "mac.error.missingWorkspace" = "这个工作区或视图已不可用。请刷新列表，选择仍在运行的工作区。";
 "mac.certificateFingerprint" = "证书指纹";
+
+"mac.relay.origin" = "云端中转";
+"mac.relay.keyFile" = "注册密钥文件";
+"mac.relay.keyPlaceholder" = "私有文件的绝对路径";
+"mac.relay.save" = "保存中转";
+"mac.relay.remove" = "移除中转";
+"mac.relay.hint" = "可选。关闭共享后修改。直连和中转使用同一配对。";
+"mac.relay.status" = "中转状态";
+"mac.relay.state.stopped" = "已停止";
+"mac.relay.state.connecting" = "正在连接…";
+"mac.relay.state.connected" = "已连接";
+"mac.relay.state.reconnecting" = "正在重连…";
+"mac.relay.error" = "请检查 HTTPS 中转地址和仅当前用户可读的注册密钥文件。";
+"mac.relay.originPlaceholder" = "https://your-relay.workers.dev";

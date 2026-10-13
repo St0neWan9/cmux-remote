@@ -1,5 +1,6 @@
 import Foundation
 import CmuxRemoteCore
+import CryptoKit
 
 /// Serializes enrollment, owner decisions, scoped authorization and revocation.
 public actor ConnectionAuthority {
@@ -17,6 +18,8 @@ public actor ConnectionAuthority {
     private var clients: [String: EnrolledClient]
     private var pending: [String: Pending] = [:]
     private var window: EnrollmentBootstrap?
+    private var relayOrigin: String?
+    private var registryObservers: [UUID: AsyncStream<Void>.Continuation] = [:]
     private var usedNonces: [String: Int] = [:]
 
     public init(host: HostIdentity, privateKey: Data, registryFile: URL, now: @escaping @Sendable () -> Int = { Int(Date().timeIntervalSince1970) }) throws {
@@ -35,11 +38,55 @@ public actor ConnectionAuthority {
         } else { clients = [:] }
     }
     public func announcement() throws -> SignedValue<HostAnnouncement> { try crypto.sign(HostAnnouncement(host: host, epoch: epoch), domain: "host", privateKey: privateKey) }
+    /// Certifies one fresh link key without granting resource access.
+    func acceptLink(_ proposal: SignedValue<LinkProposal>, key: P256.KeyAgreement.PrivateKey) throws -> SignedValue<LinkAcceptance> {
+        try proposal.value.validate(hostID: host.id, now: now())
+        try crypto.verify(proposal, domain: "link3-proposal", publicKey: proposal.value.clientPublicKey)
+        let value = LinkAcceptance(host: host, proposalDigest: crypto.digest(try crypto.bytes(proposal, domain: "link3-proposal")), agreementKey: key.publicKey.x963Representation, epoch: epoch)
+        return try crypto.sign(value, domain: "link3-acceptance", privateKey: privateKey)
+    }
+    /// Current registry authority, used again on every subscribed read and publish.
+    func currentClient(_ id: String) throws -> EnrolledClient {
+        guard let client = clients[id], !client.revoked else { throw BridgeError("unauthorized", "This device authorization was revoked.", status: 401) }
+        return client
+    }
+    /// Configures reachability only; all resource authority remains in the local registry.
+    public func configureRelay(origin: String?) throws { relayOrigin = try origin.map { try RelayOrigin($0).value } }
+    public func relayRegistration(origin: String) throws -> SignedValue<RelayRegistration> {
+        let canonical = try RelayOrigin(origin).value
+        guard canonical == relayOrigin else { throw BridgeError("invalid_endpoint", "The relay registration has a different origin.") }
+        return try crypto.sign(RelayRegistration(hostID: host.id, hostPublicKey: host.publicKey, origin: canonical, timestamp: now()), domain: "relay3-registration", privateKey: privateKey)
+    }
+    public func relayHint(clientID: String) throws -> SignedValue<RelayHint> {
+        let client = try currentClient(clientID)
+        let hint = RelayHint(hostID: host.id, clientID: client.id, epoch: epoch, relay: try approvedRelay(client))
+        return try crypto.sign(hint, domain: "relay3-hint", privateKey: privateKey)
+    }
+    /// Only registry invalidations are emitted; no grants, keys or resource bodies enter the stream.
+    func registryChanges() throws -> AsyncStream<Void> {
+        guard registryObservers.count < 64 else { throw BridgeError("too_large", "Too many authority observers.") }
+        let id = UUID(), pair = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        registryObservers[id] = pair.continuation
+        pair.continuation.onTermination = { [weak self] _ in Task { await self?.removeRegistryObserver(id) } }
+        pair.continuation.yield(())
+        return pair.stream
+    }
+    private func removeRegistryObserver(_ id: UUID) { registryObservers[id] = nil }
+    private func registryChanged() { for observer in registryObservers.values { observer.yield(()) } }
+    private func approvedRelay(_ client: EnrolledClient) throws -> RelayEndpoint? {
+        guard let origin = relayOrigin else { return nil }
+        let permit = RelayPermit(hostID: host.id, origin: origin, permitID: crypto.digest(Data(("relay3:" + origin + ":" + client.id).utf8)), kind: "approved", clientPublicKey: client.publicKey)
+        return RelayEndpoint(origin: origin, admission: try crypto.sign(permit, domain: "relay3-permit", privateKey: privateKey))
+    }
     public func open(endpoint: BridgeEndpoint, workspaces: [String], seconds: Int = 300) throws -> SignedValue<EnrollmentBootstrap> {
         try endpoint.validate(); try ClientScope(workspaces: workspaces, capabilities: [.workspaceRead]).validate(); guard (30...600).contains(seconds) else { throw BridgeError("invalid_input", "Enrollment lasts between 30 and 600 seconds.") }
         // A new window cancels all still-pending requests from the old window.
         for id in pending.keys where pending[id]?.state == "pending" { pending[id]?.state = "cancelled" }
         window = EnrollmentBootstrap(host: host, endpoint: endpoint, workspaces: workspaces.map { $0.lowercased() }.sorted(), windowID: UUID().uuidString, expiresAt: now() + seconds)
+        if let origin = relayOrigin, var active = window {
+            let permit = RelayPermit(hostID: host.id, origin: origin, permitID: active.windowID, kind: "enrollment", expiresAt: active.expiresAt)
+            active.endpoint.relay = RelayEndpoint(origin: origin, admission: try crypto.sign(permit, domain: "relay3-permit", privateKey: privateKey)); window = active
+        }
         return try bootstrap()
     }
     public func closeEnrollment() {
@@ -69,7 +116,7 @@ public actor ConnectionAuthority {
         let expired = entry.request.value.expiresAt <= now() && entry.state == "pending"
         let revoked = clients[entry.request.value.clientID]?.revoked == true && entry.state == "approved"
         let state = revoked ? "revoked" : (expired ? "expired" : entry.state)
-        return try crypto.sign(EnrollmentStatus(request: entry.request.value, state: state, grant: state == "approved" ? entry.grant : nil), domain: "enrollment-status", privateKey: privateKey)
+        return try crypto.sign(EnrollmentStatus(request: entry.request.value, state: state, grant: state == "approved" ? entry.grant : nil, relay: state == "approved" ? clients[entry.request.value.clientID].flatMap { try approvedRelay($0) } : nil), domain: "enrollment-status", privateKey: privateKey)
     }
     public func cancel(_ signed: SignedValue<EnrollmentRequest>) throws -> SignedValue<EnrollmentStatus> {
         _ = try status(signed)
@@ -89,7 +136,7 @@ public actor ConnectionAuthority {
         let grant = try crypto.sign(EnrollmentGrant(request: request, scope: scope, issuedAt: now()), domain: "grant", privateKey: privateKey)
         var updated = clients
         updated[request.clientID] = EnrolledClient(id: request.clientID, publicKey: request.clientPublicKey, name: request.clientName, kind: request.clientKind, scope: scope, revoked: false, grant: grant)
-        try persist(updated); clients = updated; pending[requestID]?.state = "approved"; pending[requestID]?.grant = grant
+        try persist(updated); clients = updated; registryChanged(); pending[requestID]?.state = "approved"; pending[requestID]?.grant = grant
     }
     public func deny(requestID: String) throws {
         guard let entry = pending[requestID], entry.state == "pending", entry.request.value.expiresAt > now() else { throw BridgeError("request_expired", "The device request is no longer pending.", status: 409) }
@@ -99,7 +146,7 @@ public actor ConnectionAuthority {
     public func revoke(clientID: String) throws {
         guard clients[clientID] != nil else { throw BridgeError("client_not_found", "No enrolled device matched.", status: 404) }
         var updated = clients; updated[clientID]?.revoked = true
-        try persist(updated); clients = updated
+        try persist(updated); clients = updated; registryChanged()
     }
     public func authorize(header: String?, method: String, uri: String, body: Data) throws -> EnrolledClient {
         guard let header, header.hasPrefix("CmuxV2 "), header.utf8.count <= 4096, let bytes = Data(base64Encoded: String(header.dropFirst(7))),

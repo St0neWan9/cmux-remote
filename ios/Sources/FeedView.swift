@@ -60,9 +60,8 @@ struct FeedView: View {
         }.onDisappear { model.suspendReads() }
         .onChange(of: phase) { _, value in if value != .active { model.suspendReads() } }
         .task(id: phase) {
-            guard phase == .active else { model.suspendReads(); return }; model.resumeReads(); await model.refresh()
-            let ticker = RefreshTicker(); defer { ticker.stop() }
-            for await _ in ticker.start() { guard !Task.isCancelled else { break }; await model.refresh() }
+            guard phase == .active else { model.suspendReads(); return }; model.resumeReads()
+            await model.observeChanges()
         }
     }
 }

@@ -7,7 +7,7 @@ public final class EnrollmentClient: DeviceEnrolling {
     public let request: SignedValue<EnrollmentRequest>
     private let endpoint: BridgeEndpoint
     private let privateKey: Data
-    private let transport: PinnedTransport
+    private let transport: any ResourceTransport
     public init(bootstrap: SignedValue<EnrollmentBootstrap>, privateKey: Data, name: String, kind: String, capabilities: [ClientCapability] = [.workspaceRead, .conversationRead, .projectRead, .conversationControl, .feedRead, .feedReply], endpoint: BridgeEndpoint? = nil, now: Int = Int(Date().timeIntervalSince1970)) throws {
         try EnrollmentLinkCodec().validate(bootstrap, now: now)
         self.bootstrap = bootstrap; self.privateKey = privateKey; self.endpoint = endpoint ?? bootstrap.value.endpoint
@@ -15,7 +15,7 @@ public final class EnrollmentClient: DeviceEnrolling {
         let scope = ClientScope(workspaces: bootstrap.value.workspaces, capabilities: capabilities)
         let value = EnrollmentRequest(hostID: bootstrap.value.host.id, windowID: bootstrap.value.windowID, requestID: UUID().uuidString, clientID: try crypto.identityID(publicKey: publicKey), clientPublicKey: publicKey, clientName: name, clientKind: kind, nonce: UUID().uuidString, scope: scope, expiresAt: bootstrap.value.expiresAt)
         request = try crypto.sign(value, domain: "enrollment-request", privateKey: privateKey)
-        transport = PinnedTransport(pairing: try PairingConfiguration(host: self.endpoint.host, port: self.endpoint.port, token: String(repeating: "0", count: 32), certificateSHA256: bootstrap.value.host.certificateSHA256))
+        transport = WebSocketTransport(host: bootstrap.value.host, key: privateKey, endpoint: self.endpoint)
     }
     public func submit() async throws -> EnrollmentStatus { try await exchange("request") }
     public func status() async throws -> EnrollmentStatus { try await exchange("status") }
@@ -27,7 +27,9 @@ public final class EnrollmentClient: DeviceEnrolling {
         try IdentityCryptography().verify(grant, domain: "grant", publicKey: bootstrap.value.host.publicKey)
         guard grant.value.requestID == request.value.requestID, grant.value.nonce == request.value.nonce,
               Set(grant.value.scope.workspaces).isSubset(of: Set(request.value.scope.workspaces)), Set(grant.value.scope.capabilities).isSubset(of: Set(request.value.scope.capabilities)) else { throw BridgeError("invalid_grant", "Approval does not match the requested scope.") }
-        let connection = AuthorizedConnection(host: bootstrap.value.host, endpoint: endpoint, privateKey: privateKey, grant: grant)
+        var savedEndpoint = endpoint
+        savedEndpoint.relay = status.relay
+        let connection = AuthorizedConnection(host: bootstrap.value.host, endpoint: savedEndpoint, privateKey: privateKey, grant: grant)
         try connection.validate(); return connection
     }
     private func exchange(_ verb: String) async throws -> EnrollmentStatus {

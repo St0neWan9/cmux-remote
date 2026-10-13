@@ -107,9 +107,24 @@ struct Main {
                 let companion = MacCompanionService(repository: connections, mirrors: mirrors, discovery: discovery, catalog: catalog)
                 mac = companion
             } else { mac = nil }
-            let sharing = ManagedSharingService(state: state, authority: authority,
-                router: BridgeRouter(service: service, authority: authority, legacyToken: options.contains("legacy") ? try state.token() : nil, mirrors: RemoteMirrorService(cmux: cmux, mutations: mutations)),
-                listen: options.value("listen") ?? (command == "resident" || options.contains("pair") ? "0.0.0.0" : "127.0.0.1"), port: port, advertise: !options.contains("no-discovery"))
+            let router = BridgeRouter(service: service, authority: authority, legacyToken: options.contains("legacy") ? try state.token() : nil, mirrors: RemoteMirrorService(cmux: cmux, mutations: mutations))
+            let relayRepository = RelayConfigurationRepository(directory: state.directory)
+            if let origin = options.value("relay") {
+                if origin == "off" { try relayRepository.remove() }
+                else {
+                    guard let path = options.value("relay-key-file") else { throw BridgeError("invalid_input", "Pass a private --relay-key-file with the relay origin.") }
+                    _ = try relayRepository.save(origin: origin, keyFile: path)
+                }
+            }
+            let relay: CloudRelayService?
+            let relayKeyFile: String?
+            if let configuration = try relayRepository.load() {
+                try await authority.configureRelay(origin: configuration.origin)
+                relayKeyFile = configuration.keyFile
+                relay = try CloudRelayService(origin: configuration.origin, secret: relayRepository.secret(configuration), router: router, authority: authority)
+            } else { relay = nil; relayKeyFile = nil }
+            let sharing = ManagedSharingService(state: state, authority: authority, router: router,
+                listen: options.value("listen") ?? (command == "resident" || options.contains("pair") ? "0.0.0.0" : "127.0.0.1"), port: port, advertise: !options.contains("no-discovery"), relay: relay, relayKeyFile: relayKeyFile)
             let ready = AsyncThrowingStream<Void, any Error>.makeStream()
             let owner = Task {
                 do { try await OwnerControlServer().run(path: state.directory.appendingPathComponent("owner.sock").path, authority: authority, service: service, mac: mac, sharing: sharing, onListening: { ready.continuation.yield(()); ready.continuation.finish() }) }
@@ -120,7 +135,7 @@ struct Main {
             await mac?.start()
             let qr: String?
             if options.contains("pair") {
-                guard let host = options.value("host") ?? LANAddressResolver().address() else { throw BridgeError("lan_unavailable", "No private LAN address was found. Connect to Wi-Fi or pass --host.") }
+                guard let host = options.value("host") ?? LANAddressResolver().address() ?? (relay != nil ? "localhost" : nil) else { throw BridgeError("lan_unavailable", "No private LAN address was found. Connect to Wi-Fi or pass --host.") }
                 let workspaces = try await service.workspaces()["workspaces"].array?.compactMap { $0["id"].string } ?? []
                 let bootstrap = try await authority.open(endpoint: BridgeEndpoint(host: host, port: port), workspaces: workspaces)
                 qr = try TerminalQRCode().render(EnrollmentLinkCodec().encode(bootstrap))
@@ -134,7 +149,7 @@ struct Main {
             let sources = try await SourceBackends(options: options, environment: runtimeEnvironment, home: home, transcripts: roots, directory: nil, mutations: MutationLedger())
             _ = try await sources.controller.request("system.ping", params: [:]); print("Local cmux backends are reachable.")
         default:
-            print("cmux-remote setup|resident|init|serve|pairing|enrollment|clients|discover|connect|mirror|doctor [--tui-socket PATH] [--pair] [--legacy] [--no-discovery] [--state PATH] [--socket PATH] [--cli PATH] [--direct-socket] [--listen HOST] [--host HOST] [--port PORT] [--format json] [--demo]")
+            print("cmux-remote setup|resident|init|serve|pairing|enrollment|clients|discover|connect|mirror|doctor [--tui-socket PATH] [--relay HTTPS_ORIGIN|off] [--relay-key-file PATH] [--pair] [--legacy] [--no-discovery] [--state PATH] [--socket PATH] [--cli PATH] [--direct-socket] [--listen HOST] [--host HOST] [--port PORT] [--format json] [--demo]")
         }
     }
 }

@@ -3,7 +3,7 @@ import NIOCore
 import NIOHTTP1
 
 /// Mutable request state is confined to the channel's event loop.
-final class BridgeHTTPHandler: ChannelInboundHandler, @unchecked Sendable {
+final class BridgeHTTPHandler: ChannelInboundHandler, RemovableChannelHandler, @unchecked Sendable {
     typealias InboundIn = HTTPServerRequestPart
     typealias OutboundOut = HTTPServerResponsePart
     private let router: BridgeRouter
