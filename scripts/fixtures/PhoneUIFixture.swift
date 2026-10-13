@@ -38,6 +38,15 @@ private actor PhoneUIBackend: CmuxControlling {
         case "system.capabilities": return .object(["methods": .array([])])
         case "workspace.list": return .object(["workspaces": .array([.object(["id": .string(workspace), "title": .string("UI fixture workspace")])])])
         case "vault.sessions": return .object(["sessions": .array([.object(["session_id": .string("fixture-session"), "agent": .string("claude"), "title": .string("UI 测试：连接与页面"), "cwd": .string(root.path), "file": .string(transcript.path)])])])
+        case "system.tree":
+            // The tab name stands in for a cmux rename, which the bridge reads from the tree.
+            let configured = try? String(contentsOf: root.deletingLastPathComponent().appendingPathComponent("tab-title"), encoding: .utf8)
+            let trimmed = configured?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let title = trimmed.isEmpty ? "UI 测试：连接与页面" : trimmed
+            let surfaceRow: JSONValue = .object(["id": .string(surface), "type": .string("terminal"), "title": .string(title)])
+            let paneRow: JSONValue = .object(["id": .string(surface), "surfaces": .array([surfaceRow])])
+            let workspaceRow: JSONValue = .object(["id": .string(workspace), "title": .string("UI fixture workspace"), "panes": .array([paneRow])])
+            return .object(["windows": .array([.object(["workspaces": .array([workspaceRow])])])])
         case "chat.sessions.dump": return .object(["sessions": .array([.object(["session_id": .string("fixture-session"), "agent": .string("claude"), "workspace_id": .string(workspace), "surface_id": .string(surface), "state": .string(flag("report-working") ? "working" : "idle"), "cwd": .string(root.path)])])])
         case "surface.input_state": return .object(["agent": .bool(true), "workspace_id": .string(workspace), "surface_id": .string(surface), "blocks_typing": .bool(false)])
         case "surface.read_text": return .object(["text": .string("")])

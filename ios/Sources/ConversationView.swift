@@ -45,12 +45,10 @@ struct ConversationView: View {
                 let visible = bottom > 0 && bottom <= viewport.size.height + 32
                 if latestVisible != visible { latestVisible = visible }
                 if userScrolling || !atLatest { if atLatest != visible { atLatest = visible } }
-                else if bottom.isFinite && !latestVisible { proxy.scrollTo("latest", anchor: .bottom) }
+                else if bottom.isFinite, abs(bottom - viewport.size.height) > 32 { proxy.scrollTo("latest", anchor: .bottom) }
             }
             .modifier(TimelineScrollInteraction(userScrolling: $userScrolling, atLatest: $atLatest, latestVisible: latestVisible))
             .scrollDismissesKeyboard(.interactively)
-            // A tap anywhere in the conversation puts the keyboard away; rows keep their own taps.
-            .simultaneousGesture(TapGesture().onEnded { composerFocused = false })
             .refreshable { await model.refresh() }
             .overlay(alignment: .bottom) {
                 if !atLatest {
@@ -60,14 +58,14 @@ struct ConversationView: View {
                     }.buttonStyle(.plain).accessibilityLabel(String(localized: "chat.latest")).accessibilityIdentifier("chat.latest").padding(.bottom, 10)
                 }
             }
-            // A cached conversation already has its messages, so no change below fires when the page opens.
-            .onAppear { if !model.messages.isEmpty { initiallyScrolled = true; Task { proxy.scrollTo("latest", anchor: .bottom) } } }
             .onChange(of: model.timelineItems.last?.id) { _, _ in
                 if !initiallyScrolled && !model.messages.isEmpty { proxy.scrollTo("latest", anchor: .bottom); initiallyScrolled = true }
                 else if atLatest { proxy.scrollTo("latest", anchor: .bottom) }
             }
             .onChange(of: model.latestMessageText) { _, _ in if atLatest { proxy.scrollTo("latest", anchor: .bottom) } }
             .onChange(of: model.preview) { _, _ in if atLatest { proxy.scrollTo("latest", anchor: .bottom) } }
+            // Opening a cached conversation re-enters with its follow state; start from the last message.
+            .onAppear { userScrolling = false; atLatest = true; if !model.messages.isEmpty { initiallyScrolled = true } }
             .onChange(of: model.jumpToLatest) { _, _ in atLatest = true; withAnimation { proxy.scrollTo("latest", anchor: .bottom) } }
         }
         }
@@ -210,6 +208,8 @@ struct ConversationView: View {
                     }
                 }
         }.padding(.horizontal, 18).padding(.top, 12).padding(.bottom, 18)
+            // A tap on the conversation puts the keyboard away; rows keep their own taps.
+            .simultaneousGesture(TapGesture().onEnded { composerFocused = false })
     }
     /// One timeline item: its duration label, content and footer. Separate so the page body stays type-checkable.
     @ViewBuilder private func timelineRow(_ item: ConversationTimelineItem, firstResponse: [String: ConversationResponse], lastResponse: [String: ConversationResponse],

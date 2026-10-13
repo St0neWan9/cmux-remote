@@ -56,9 +56,33 @@ public actor SessionService {
         if transcriptTails.count >= 512 { transcriptTails.removeAll() }
         transcriptTails[path] = (size, cwd, lastMessage); return (cwd, lastMessage ?? modified)
     }
+    /// The name the person gave each tab, which a cmux rename changes immediately; the vault keeps the agent's own title.
+    private func surfaceTitles() async -> [String: String] {
+        guard let tree = try? await cmux.request("system.tree", params: ["all_windows": .bool(true)]) else { return [:] }
+        let workspaces = (tree["windows"].array ?? []).flatMap { $0["workspaces"].array ?? [] } + (tree["workspaces"].array ?? [])
+        var titles: [String: String] = [:]
+        for workspace in workspaces {
+            for pane in workspace["panes"].array ?? [] {
+                for surface in pane["surfaces"].array ?? [] {
+                    guard let id = surface["id"].string, let title = surface["title"].string, !title.isEmpty else { continue }
+                    titles[id.lowercased()] = title
+                }
+            }
+        }
+        return titles
+    }
+    /// A shell title is the directory the terminal sits in, so it never names the conversation.
+    private func looksLikeADirectory(_ title: String, cwd: String?) -> Bool {
+        if title.hasPrefix("~") || title.hasPrefix("/") { return true }
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        if title.hasPrefix(home + "/") { return true }
+        guard let cwd else { return false }
+        return title == cwd || cwd.hasSuffix("/" + title)
+    }
     public func sessions() async throws -> [SessionDescriptor] {
         let vault = try await cmux.request("vault.sessions", params: ["limit": .number(200)])
         let dump = try? await cmux.request("chat.sessions.dump", params: [:])
+        let tabTitles = await surfaceTitles()
         let authoritativeIDs = Set((dump?["sessions"].array ?? []).compactMap { $0["session_id"].string })
         // Vault includes sessions started outside cmux. It enriches known bindings,
         // never establishes which conversations belong in this companion.
@@ -88,6 +112,14 @@ public actor SessionService {
                                                            surfaceID: old.surfaceID, state: old.state, updatedAt: facts.updatedAt)
         }
         records = discovered
+        for (id, record) in records {
+            guard let old = record.descriptor.surfaceID.map({ tabTitles[$0.lowercased()] }), let title = old else { continue }
+            // An unnamed tab shows the shell's directory, expanded or not; the agent's own title is more useful than a path.
+            guard !looksLikeADirectory(title, cwd: record.descriptor.cwd) else { continue }
+            let current = record.descriptor
+            records[id]?.descriptor = SessionDescriptor(id: current.id, agent: current.agent, title: title, cwd: current.cwd, workspaceID: current.workspaceID,
+                                                        surfaceID: current.surfaceID, state: current.state, updatedAt: current.updatedAt)
+        }
         for (id, event) in liveBindings {
             guard records[id] != nil else { continue }
             // Fresh cmux process-exit state outranks an older retained hook binding.
