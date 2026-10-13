@@ -16,7 +16,7 @@ struct ToolDetailCard<Content: View>: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             // A card grows with its output up to the ceiling, then scrolls; it is never taller or shorter than the content needs.
             if contentHeight > maxContentHeight {
-                ClippedScroller(length: maxContentHeight, contentLength: contentHeight) { measured.fixedSize(horizontal: false, vertical: true) }
+                ScrollView { measured }.frame(height: maxContentHeight).scrollBounceBehavior(.basedOnSize)
             } else {
                 measured.frame(minHeight: minContentHeight, alignment: .top)
             }

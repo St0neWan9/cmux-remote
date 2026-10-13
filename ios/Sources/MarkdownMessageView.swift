@@ -14,8 +14,6 @@ struct MarkdownMessageView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
                         .accessibilityIdentifier("markdown.code.\(block.id)")
-                } else if let table = block.table {
-                    MarkdownTableView(table: table).accessibilityIdentifier("markdown.table.\(block.id)")
                 } else if let level = block.headingLevel {
                     Text(.init(block.text)).font(level == 1 ? .title2 : level == 2 ? .title3 : .headline).bold()
                         .textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
