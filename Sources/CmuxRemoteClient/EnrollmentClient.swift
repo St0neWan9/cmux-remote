@@ -9,7 +9,7 @@ public final class EnrollmentClient: DeviceEnrolling {
     private let privateKey: Data
     private let transport: any ResourceTransport
     public convenience init(bootstrap: SignedValue<EnrollmentBootstrap>, privateKey: Data, name: String, kind: String, capabilities: [ClientCapability] = [.workspaceRead, .conversationRead, .projectRead, .conversationControl, .feedRead, .feedReply], endpoint: BridgeEndpoint? = nil, now: Int = Int(Date().timeIntervalSince1970)) throws {
-        try self.init(bootstrap: bootstrap, privateKey: privateKey, name: name, kind: kind, capabilities: capabilities, endpoint: endpoint, now: now, relayDial: { LinkSocket(url: $0, headers: $1) })
+        try self.init(bootstrap: bootstrap, privateKey: privateKey, name: name, kind: kind, capabilities: capabilities, endpoint: endpoint, now: now, relayDial: { LinkSocket(url: $0, headers: $1, timeout: 15) })
     }
     init(bootstrap: SignedValue<EnrollmentBootstrap>, privateKey: Data, name: String, kind: String, capabilities: [ClientCapability] = [.workspaceRead, .conversationRead, .projectRead, .conversationControl, .feedRead, .feedReply], endpoint: BridgeEndpoint? = nil, now: Int = Int(Date().timeIntervalSince1970), relayDial: @escaping @Sendable (URL, [String: String]) -> LinkSocket) throws {
         try EnrollmentLinkCodec().validate(bootstrap, now: now)

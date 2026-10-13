@@ -46,7 +46,8 @@ public actor TranscriptReader {
             observations[path] = Observation(inode: inode, size: size.intValue, modified: modified, generation: generation, images: [], messages: [], presentation: .init())
             return page([], images: [], presentation: .init(), beforeSeq: beforeSeq, limit: limit, generation: generation)
         }
-        let lines = String(decoding: data[...end], as: UTF8.self).split(separator: "\n", omittingEmptySubsequences: false).dropLast().map(String.init)
+        let raw = String(decoding: data[...end], as: UTF8.self).split(separator: "\n", omittingEmptySubsequences: false).dropLast().map(String.init)
+        let lines = agent == "claude" ? ClaudeQueuedPromptNormalizer().normalize(raw) : raw
         let result = agent == "claude" ? ClaudeTranscriptParser().parse(lines: lines, startingSeq: 0) : CodexTranscriptParser().parse(lines: lines, startingSeq: 0)
         var messages = result.messages
         for update in result.updatedMessages {
@@ -75,7 +76,8 @@ public actor TranscriptReader {
             data.append(chunk)
         }
         guard let end = data.lastIndex(of: 10) else { throw BridgeError("detail_not_found", "No complete tool record is available.", status: 404) }
-        let lines = String(decoding: data[...end], as: UTF8.self).split(separator: "\n", omittingEmptySubsequences: false).dropLast().map(String.init)
+        let raw = String(decoding: data[...end], as: UTF8.self).split(separator: "\n", omittingEmptySubsequences: false).dropLast().map(String.init)
+        let lines = agent == "claude" ? ClaudeQueuedPromptNormalizer().normalize(raw) : raw
         try Task.checkCancellation()
         let result = agent == "claude"
             ? ClaudeTranscriptParser(maxBodyCharacters: 33_554_432, maxInputDetailCharacters: 33_554_432).parse(lines: lines, startingSeq: 0)

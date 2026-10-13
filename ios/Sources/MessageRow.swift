@@ -24,9 +24,13 @@ struct MessageRow: View {
                 VStack(alignment: .leading, spacing: 12) {
                     agentContent
                     imageButtons
-                }.frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 5)
+                }.frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, isOperation ? 0 : 5)
             }
         }.accessibilityElement(children: .contain).accessibilityIdentifier("message." + message.id)
+    }
+    /// Tool rows stack tightly; text keeps its breathing room.
+    var isOperation: Bool {
+        switch message.kind { case .prose, .thought: return false; default: return true }
     }
     @ViewBuilder private var imageButtons: some View {
         if let openImage {
@@ -51,7 +55,8 @@ struct MessageRow: View {
     @ViewBuilder private var agentContent: some View {
         switch message.kind {
         case .prose(let value): MarkdownMessageView(text: value.text)
-        case .thought(let value): DisclosureGroup(String(localized: "chat.thought")) { MarkdownMessageView(text: value.text) }
+        // Reasoning between operations is part of the reply: shown in full, without a title or disclosure.
+        case .thought(let value): MarkdownMessageView(text: value.text)
         case .toolUse(let value):
             ToolDisclosure(title: value.summary, symbol: value.toolName.lowercased().contains("read") ? "book" : "magnifyingglass", identifier: "tool.disclosure." + message.id) {
                 ToolDetailCard(title: value.toolName, status: value.status == .succeeded ? String(localized: "tool.card.success") : value.status.localizedTitle, failed: value.status == .failed) {
