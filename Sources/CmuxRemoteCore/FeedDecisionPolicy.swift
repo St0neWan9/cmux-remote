@@ -6,6 +6,10 @@ public struct FeedDecisionPolicy: Sendable {
     public func modes(for item: JSONValue) -> [FeedDecisionMode] {
         let kind = item["kind"].string ?? ""
         let all = FeedDecisionMode.allCases.filter { $0.supports(kind: kind) }
+        if let supported = item["available_modes"].array {
+            let modes = Set(supported.compactMap(\.string))
+            return all.filter { modes.contains($0.rawValue) }
+        }
         guard kind == "permissionRequest" else { return all }
         let source = (item["source"].string ?? "").lowercased()
         // These companions support Claude/Codex. Unknown sources get only bounded, one-off decisions.

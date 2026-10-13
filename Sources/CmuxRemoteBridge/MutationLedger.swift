@@ -38,6 +38,10 @@ public actor MutationLedger {
         if entries.values.contains(where: { $0.operationID == operationID }) { throw BridgeError("scope_denied", "This operation belongs to another device.", status: 403) }
         return nil
     }
+    /// Backend-owned deduplication records do not reveal or collide with another principal's operation.
+    func scopedOperation(clientID: String, operationID: UUID) throws -> Entry? {
+        try load(); return entries[try key(clientID, operationID)]
+    }
     /// Commits the intent before any backend mutation; one actor serializes all writers.
     func begin(clientID: String, operationID: UUID, fingerprint: String, workspaceID: String, capability: ClientCapability) throws -> Entry? {
         if let existing = try prior(clientID: clientID, operationID: operationID, fingerprint: fingerprint) { return existing }

@@ -12,7 +12,7 @@ The Bridge reads local transcript/project data to fill holes in the official loc
 
 `CmuxRemoteCore` contains Sendable Codable DTOs, JSON values and pure policies. It reuses the pinned `CmuxAgentChat` parsing/model library. `CmuxRemoteBridge` owns socket I/O, the local session registry, transcript reads, constrained project file access, Git queries and TLS HTTP serving. `CmuxRemoteClient` owns HTTPS, certificate pinning and response decoding. `CmuxRemoteCLI` is the composition root. `ios/` owns observable app state and SwiftUI screens.
 
-Dependencies form a DAG: executable/server/client/UI -> Core -> upstream parsing/model code. No AppKit or Ghostty dependency enters the phone. The HTTP API is language-neutral; future backends implement the same domain operations with explicit capability differences.
+Dependencies form a DAG: executable/server/client/UI -> Core -> upstream parsing/model code. No AppKit or Ghostty dependency enters the phone. The HTTP API is language-neutral; backends implement the same domain operations with explicit capability differences. The [local cmux-tui adapter](CMUX-TUI-ADAPTER.md) adds direct access to daemon-owned SSH Agents without an A-to-B-to-A dependency.
 
 Mac mirrors keep a local ownership registry for their projected surface IDs and
 remote producer epochs. A bounded metadata watcher reconciles source split/tab
