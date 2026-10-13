@@ -13,6 +13,8 @@ struct ClippedScroller<Content: View>: View {
     @ViewBuilder let content: () -> Content
     @State private var offset: CGFloat = 0
     @State private var dragStart: CGFloat?
+    /// Whether the current drag runs along `axis`; decided once it has moved, so a page swipe is left alone.
+    @State private var alongAxis: Bool?
     init(_ axis: Axis = .vertical, length: CGFloat, contentLength: CGFloat, @ViewBuilder content: @escaping () -> Content) {
         self.axis = axis; self.length = length; self.contentLength = contentLength; self.content = content
     }
@@ -25,26 +27,43 @@ struct ClippedScroller<Content: View>: View {
             .clipped()
             .contentShape(Rectangle())
             .overlay(alignment: axis == .horizontal ? .bottomLeading : .topTrailing) { indicator }
-            .gesture(
-                DragGesture(minimumDistance: 6)
-                    .onChanged { value in
-                        let start = dragStart ?? offset
-                        dragStart = start
-                        offset = clamp(start - distance(value.translation))
-                    }
-                    .onEnded { value in
-                        // Carry the flick on, as a native scroll view would.
-                        let start = dragStart ?? offset
-                        dragStart = nil
-                        withAnimation(.easeOut(duration: 0.35)) { offset = clamp(start - distance(value.predictedEndTranslation)) }
-                    },
-                // A content that fits needs no gesture, so the page keeps its own scroll and swipe-back.
-                isEnabled: maxOffset > 0
-            )
+            .modifier(AxisPan(axis: axis, enabled: maxOffset > 0, drag: drag,
+                              // Dragging toward positive moves back toward the start; past an edge, the page scrolls.
+                              canMove: { direction in direction > 0 ? offset > 0.5 : offset < maxOffset - 0.5 },
+                              changed: { translation in
+                                  let start = dragStart ?? offset
+                                  dragStart = start
+                                  offset = clamp(start - translation)
+                              },
+                              ended: { _, predicted in
+                                  let start = dragStart ?? offset
+                                  dragStart = nil
+                                  withAnimation(.easeOut(duration: 0.35)) { offset = clamp(start - predicted) }
+                              }))
             .onChange(of: contentLength) { _, _ in offset = clamp(offset) }
             .accessibilityScrollAction { edge in
                 let forward = edge == .bottom || edge == .trailing
                 withAnimation { offset = clamp(offset + (forward ? length * 0.8 : -length * 0.8)) }
+            }
+    }
+    private var drag: some Gesture {
+        DragGesture(minimumDistance: 6)
+            .onChanged { value in
+                if alongAxis == nil {
+                    let along = abs(distance(value.translation)), across = abs(crossDistance(value.translation))
+                    alongAxis = along > across
+                }
+                guard alongAxis == true else { return }
+                let start = dragStart ?? offset
+                dragStart = start
+                offset = clamp(start - distance(value.translation))
+            }
+            .onEnded { value in
+                defer { alongAxis = nil; dragStart = nil }
+                guard alongAxis == true else { return }
+                // Carry the flick on, as a native scroll view would.
+                let start = dragStart ?? offset
+                withAnimation(.easeOut(duration: 0.35)) { offset = clamp(start - distance(value.predictedEndTranslation)) }
             }
     }
     /// A thin bar shows that there is more, and where the visible part sits.
@@ -60,5 +79,23 @@ struct ClippedScroller<Content: View>: View {
         }
     }
     private func distance(_ translation: CGSize) -> CGFloat { axis == .vertical ? translation.height : translation.width }
+    private func crossDistance(_ translation: CGSize) -> CGFloat { axis == .vertical ? translation.width : translation.height }
     private func clamp(_ value: CGFloat) -> CGFloat { min(max(0, value), maxOffset) }
+}
+
+/// Scrolling that leaves other drags to the page: a UIKit pan where available, a shared drag before.
+private struct AxisPan<G: Gesture>: ViewModifier {
+    let axis: Axis
+    let enabled: Bool
+    let drag: G
+    let canMove: (CGFloat) -> Bool
+    let changed: (CGFloat) -> Void
+    let ended: (CGFloat, CGFloat) -> Void
+    @ViewBuilder func body(content: Content) -> some View {
+        if #available(iOS 18.0, *) {
+            if enabled { content.gesture(AxisPanRecognizer(axis: axis, canMove: canMove, changed: changed, ended: ended)) } else { content }
+        } else {
+            content.simultaneousGesture(drag, isEnabled: enabled)
+        }
+    }
 }

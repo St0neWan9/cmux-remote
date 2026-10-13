@@ -188,7 +188,10 @@ final class ConversationModel {
             try await confirmSend(request); await refresh(); jumpToLatest += 1
         } catch {
             let safeRejections = ["unauthorized", "scope_denied", "read_only", "stale_binding", "input_busy", "invalid_image", "invalid_input", "too_large", "journal_unavailable", "receipt_capacity"]
-            if let failure = error as? BridgeError, safeRejections.contains(failure.code) {
+            // The client reports any failure after the write left as outcome_unknown; a bare network error means the
+            // link was down before it (the identity check failed), so nothing reached the Mac.
+            let neverSent = !(error is BridgeError) && ErrorPresentation().isConnectivity(error)
+            if neverSent || (error as? BridgeError).map({ safeRejections.contains($0.code) }) == true {
                 // Nothing reached the agent: the prompt leaves the conversation.
                 if let sent { outgoing.removeAll { $0.id == sent.operationID } }
                 do { try await saveRecovery(nil); pendingSend = nil; mutationWarning = nil }
@@ -200,7 +203,8 @@ final class ConversationModel {
                 if draft.isEmpty { draft = sent.text }
                 if imageDraft.images.isEmpty { imageDraft.images = sent.attachments }
             }
-            self.error = ErrorPresentation().message(error)
+            // The connection bar reports a lost link; the returned draft says the send did not happen.
+            self.error = neverSent ? nil : ErrorPresentation().message(error)
         }
     }
     func checkPendingSend() async {

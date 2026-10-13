@@ -117,7 +117,7 @@ struct SessionListView: View {
             .safeAreaInset(edge: .top, spacing: 0) {
                 VStack(spacing: 6) {
                     header
-                    ConnectionStatusBar(state: model.connectionState, hostName: model.offlineHostName) { Task { await model.reconnect() } }
+                    ConnectionStatusBar(state: model.connectionState, hostName: model.offlineHostName) { Task { await model.reconnect(onlyLost: true) } }
                 }
             }
             .onChange(of: workspaces.map(\.id)) { _, ids in if let workspaceID, !ids.contains(workspaceID) { self.workspaceID = nil } }
