@@ -142,6 +142,7 @@ struct PairingView: View {
                     .buttonStyle(.plain).accessibilityLabel(String(localized: "chat.refresh")).accessibilityIdentifier("pair.relay.refresh")
             }
             if model.relayOrigins.isEmpty { Text(String(localized: "pair.relay_hint")).font(.footnote).foregroundStyle(.secondary) }
+            else if model.relayLoading && model.relayHosts.isEmpty { ProgressView(String(localized: "pair.relay_loading")).font(.footnote) }
             else if model.relayHosts.isEmpty && model.relayError == nil { Text(String(localized: "pair.relay_empty")).font(.footnote).foregroundStyle(.secondary) }
             ForEach(model.relayHosts, id: \.value.host.id) { entry in
                 Button { selectedBridge = nil; selectedListing = entry; confirmingTrust = true } label: {

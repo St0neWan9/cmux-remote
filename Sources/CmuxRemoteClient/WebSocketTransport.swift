@@ -4,7 +4,7 @@ import CmuxRemoteCore
 /// The same encrypted resource transport is used for direct and relayed connections.
 final class WebSocketTransport: ResourceTransport {
     private let connection: LinkClientConnection
-    init(host: HostIdentity, key: Data, endpoint: BridgeEndpoint, relayDial: @escaping @Sendable (URL, [String: String]) -> LinkSocket = { LinkSocket(url: $0, headers: $1) }) { connection = LinkClientConnection(host: host, key: key, endpoint: endpoint, relayDial: relayDial) }
+    init(host: HostIdentity, key: Data, endpoint: BridgeEndpoint, relayDial: @escaping @Sendable (URL, [String: String]) -> LinkSocket = { LinkSocket(url: $0, headers: $1, timeout: 15) }) { connection = LinkClientConnection(host: host, key: key, endpoint: endpoint, relayDial: relayDial) }
     func updateRelay(_ relay: RelayEndpoint?) async { await connection.updateRelay(relay) }
     func exchange(_ path: String, method: String, query: [String: String], body: Data?, authorization: (@Sendable (String, Data) throws -> String)?) async throws -> LinkResourceResponse {
         let uri = try resourceURI(path, query: query)

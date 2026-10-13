@@ -113,9 +113,12 @@ public actor ConnectionAuthority {
         window = nil
         for id in pending.keys where pending[id]?.state == "pending" { pending[id]?.state = "cancelled" }
     }
+    /// The QR window when open; otherwise the Mac's current directory window, so a LAN-discovered Mac
+    /// accepts the same owner-approved requests as when it is found through the relay.
     public func bootstrap() throws -> SignedValue<EnrollmentBootstrap> {
-        guard let window, window.expiresAt > now() else { throw BridgeError("enrollment_closed", "Open enrollment on the Mac before adding a device.", status: 403) }
-        return try crypto.sign(window, domain: "bootstrap", privateKey: privateKey)
+        if let window, window.expiresAt > now() { return try crypto.sign(window, domain: "bootstrap", privateKey: privateKey) }
+        guard let listed = directoryWindows.last(where: { $0.expiresAt > now() }) else { throw BridgeError("enrollment_closed", "Open enrollment on the Mac before adding a device.", status: 403) }
+        return try crypto.sign(listed, domain: "bootstrap", privateKey: privateKey)
     }
     public func submit(_ signed: SignedValue<EnrollmentRequest>) throws -> SignedValue<EnrollmentStatus> {
         try verifyRequest(signed)
