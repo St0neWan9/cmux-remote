@@ -1,0 +1,19 @@
+{
+  "name": "cmux-remote-relay",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "build": "tsc --noEmit && wrangler deploy --dry-run --outdir dist",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20261013.1",
+    "typescript": "5.9.3",
+    "tsx": "4.20.6",
+    "wrangler": "4.149.0",
+    "miniflare": "5.20261006.1-alpha"
+  }
+}

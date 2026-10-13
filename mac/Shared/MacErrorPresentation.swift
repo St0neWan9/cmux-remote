@@ -6,6 +6,7 @@ struct MacErrorPresentation {
         switch code {
         case "setup_required": return String(localized: "mac.error.setup", bundle: .interface)
         case "setup_storage": return String(localized: "mac.error.setupStorage", bundle: .interface)
+        case "relay_configuration": return String(localized: "mac.relay.error", bundle: .interface)
         case "resident_starting", "sharing_busy": return String(localized: "mac.error.starting", bundle: .interface)
         case "resident_missing", "resident_failed": return String(localized: "mac.error.resident", bundle: .interface)
         case "sharing_start_failed", "sharing_stopped", "invalid_endpoint": return String(localized: "mac.error.sharing", bundle: .interface)

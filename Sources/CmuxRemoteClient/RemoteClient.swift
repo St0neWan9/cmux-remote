@@ -9,14 +9,16 @@ public final class RemoteClient: Sendable {
     public let canControlConversations: Bool
     public let canReplyFeed: Bool
     private let capabilities: Set<ClientCapability>
+    private let legacy: Bool
     public func allows(_ capability: ClientCapability) -> Bool { capabilities.contains(capability) }
     /// Explicit legacy mode; the owner must separately enable it on the Bridge.
     public init(pairing: PairingConfiguration) {
+        legacy = true
         operationRecoveryScope = IdentityCryptography().digest(Data((pairing.certificateSHA256 + ":" + pairing.token).utf8))
         runtime = RemoteClientRuntime(pairing: pairing, connection: nil); canControlConversations = true; canReplyFeed = true; capabilities = Set(ClientCapability.allCases)
     }
     public init(connection: AuthorizedConnection) throws {
-        try connection.validate()
+        try connection.validate(); legacy = false
         operationRecoveryScope = IdentityCryptography().digest(try JSONEncoder().encode([connection.host.id, connection.grant.value.clientID]))
         let pairing = try PairingConfiguration(host: connection.endpoint.host, port: connection.endpoint.port, token: String(repeating: "0", count: 32), certificateSHA256: connection.host.certificateSHA256)
         runtime = RemoteClientRuntime(pairing: pairing, connection: connection)
@@ -28,6 +30,47 @@ public final class RemoteClient: Sendable {
     public func post<B: Encodable & Sendable, T: Decodable & Sendable>(_ path: String, body: B, as type: T.Type) async throws -> T { try await runtime.request(path, method: "POST", query: [:], body: JSONEncoder().encode(body), as: type) }
     /// Fetches a bounded JPEG preview by a transcript-derived reference, never by host pathname.
     public func image(sessionID: String, reference: ConversationImageReference) async throws -> Data { try await runtime.image(sessionID: sessionID, reference: reference) }
+    /// Coalesced invalidations; reconnection re-anchors reads and never repeats modifications.
+    public func changes(paths: [String]) -> AsyncStream<Void> {
+        let output = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        guard !paths.isEmpty, paths.count <= 4, Set(paths).count == paths.count else { output.continuation.finish(); return output.stream }
+        let runtime = runtime, legacy = legacy
+        let task = Task {
+            if legacy {
+                while !Task.isCancelled {
+                    output.continuation.yield(())
+                    do { try await Task.sleep(for: .seconds(2)) } catch { break }
+                }
+                output.continuation.finish(); return
+            }
+            await withTaskGroup(of: Void.self) { group in
+                for path in paths {
+                    group.addTask {
+                        var attempt = 0
+                        while !Task.isCancelled {
+                            do {
+                                let subscription = try await runtime.subscribe(path)
+                                for try await _ in subscription { guard !Task.isCancelled else { return }; attempt = 0; output.continuation.yield(()) }
+                            } catch {
+                                guard !Task.isCancelled else { return }
+                                output.continuation.yield(())
+                                if let failure = error as? BridgeError, ["unauthorized", "scope_denied", "invalid_identity", "invalid_signature", "host_changed"].contains(failure.code) { return }
+                            }
+                            attempt = min(attempt + 1, 5)
+                            // Reconnection backoff is an intended, cancellable delay.
+                            do { try await Task.sleep(for: .seconds(1 << attempt)) } catch { return }
+                        }
+                    }
+                }
+                await group.waitForAll()
+            }
+            output.continuation.finish()
+        }
+        output.continuation.onTermination = { _ in task.cancel() }
+        return output.stream
+    }
+    /// Refreshes host-certified cloud reachability without expanding the saved grant.
+    public func refreshRelayHint() async throws -> AuthorizedConnection? { try await runtime.refreshRelayHint() }
     public func relocate(_ connection: AuthorizedConnection) async throws { try await runtime.relocate(connection) }
     public func close() { let runtime = runtime; Task { await runtime.close() } }
     deinit { let runtime = runtime; Task { await runtime.close() } }

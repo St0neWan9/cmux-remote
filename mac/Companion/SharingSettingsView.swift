@@ -35,6 +35,7 @@ struct SharingSettingsView: View {
                     .labelsHidden().textFieldStyle(.roundedBorder).frame(width: 72).disabled(model.isSharing || model.busy)
                 MacPreferenceNote(text: String(localized: "mac.share.portHint", bundle: .interface))
             }
+            RelaySettingsRows(model: model)
             MacPreferenceRow(title: String(localized: "mac.share.certificate", bundle: .interface)) {
                 Text(model.status["certificate"].string ?? "").font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary)
                     .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)

@@ -3,12 +3,14 @@ import CmuxRemoteCore
 
 /// Mutable endpoint ownership stays in one actor while existing views retain their client object.
 actor RemoteClientRuntime {
-    private var transport: PinnedTransport
+    private var transport: any ResourceTransport
     private var pairing: PairingConfiguration
     private var connection: AuthorizedConnection?
     private var closed = false
     init(pairing: PairingConfiguration, connection: AuthorizedConnection?) {
-        self.pairing = pairing; self.connection = connection; transport = PinnedTransport(pairing: pairing)
+        self.pairing = pairing; self.connection = connection
+        if let connection { transport = WebSocketTransport(host: connection.host, key: connection.privateKey, endpoint: connection.endpoint) }
+        else { transport = PinnedTransport(pairing: pairing) }
     }
     func close() { closed = true; transport.close() }
     func relocate(_ updated: AuthorizedConnection) throws {
@@ -18,7 +20,7 @@ actor RemoteClientRuntime {
         try updated.validate()
         let endpoint = try PairingConfiguration(host: updated.endpoint.host, port: updated.endpoint.port, token: String(repeating: "0", count: 32), certificateSHA256: updated.host.certificateSHA256)
         // In-flight requests own their old transport until completion; endpoint changes do not retry/cancel writes.
-        transport = PinnedTransport(pairing: endpoint); pairing = endpoint; connection = updated
+        transport = WebSocketTransport(host: updated.host, key: updated.privateKey, endpoint: updated.endpoint); pairing = endpoint; connection = updated
     }
     func request<T: Decodable & Sendable>(_ path: String, method: String, query: [String: String], body: Data?, as type: T.Type) async throws -> T {
         let request = try await authorized(path, method: method)
@@ -27,6 +29,25 @@ actor RemoteClientRuntime {
             if method == "POST", !(error is BridgeError) { throw BridgeError("outcome_unknown", "Inspect the task before repeating this operation.", status: 504) }
             throw error
         }
+    }
+    func savedConnection() -> AuthorizedConnection? { connection }
+    /// Learn a signed routing proof without replacing an in-flight transport or device grant.
+    func refreshRelayHint() async throws -> AuthorizedConnection? {
+        guard let original = connection else { return nil }
+        let signed = try await request("/v1/relay", method: "GET", query: [:], body: nil, as: SignedValue<RelayHint>.self)
+        let crypto = IdentityCryptography(); try crypto.verify(signed, domain: "relay3-hint", publicKey: original.host.publicKey)
+        guard !closed, let current = connection, current.host.id == original.host.id, current.grant.signature == original.grant.signature,
+              signed.value.hostID == current.host.id, signed.value.clientID == current.grant.value.clientID,
+              UUID(uuidString: signed.value.epoch) != nil else { throw BridgeError("invalid_identity", "The reachability hint belongs to another connection.") }
+        var updated = current; updated.endpoint.relay = signed.value.relay; try updated.validate()
+        // A relocation while the await was in flight owns its new transport; update that actor too.
+        if let link = transport as? WebSocketTransport { await link.updateRelay(updated.endpoint.relay) }
+        connection = updated; return updated
+    }
+    func subscribe(_ path: String) async throws -> AsyncThrowingStream<LinkFrame, any Error> {
+        let request = try await authorized(path, method: "GET")
+        guard let link = request.transport as? WebSocketTransport else { throw BridgeError("unsupported", "This connection has no subscriptions.", status: 422) }
+        return try await link.subscribe(request.path, query: [:], authorization: request.authorization)
     }
     func image(sessionID: String, reference: ConversationImageReference) async throws -> Data {
         let path = "/v1/sessions/\(sessionID)/image"

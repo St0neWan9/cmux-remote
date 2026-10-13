@@ -15,6 +15,9 @@ import CmuxRemoteBridge
     public private(set) var errorCode: String?
     public var selectedWorkspaces: Set<String> = []
     public var port = 7740
+    public var relayOrigin = ""
+    public var relayKeyFile = ""
+    private var relayDraftLoaded = false
     public var isSharing: Bool { status["state"].string == "running" }
     public var address: String? { status["address"].string }
     private let owner: any CmuxControlling
@@ -36,6 +39,9 @@ import CmuxRemoteBridge
         guard !busy else { return }
         do {
             status = try await owner.request("bridge.status", params: [:])
+            if !relayDraftLoaded {
+                relayOrigin = status["relay"]["origin"].string ?? ""; relayKeyFile = status["relay"]["key_file"].string ?? ""; relayDraftLoaded = true
+            }
             if let bound = status["port"].int, isSharing { port = bound }
             let requests = try await owner.request("enrollment.pending", params: [:])
             pending = try JSONDecoder().decode([EnrollmentRequest].self, from: JSONEncoder().encode(requests))
@@ -51,6 +57,15 @@ import CmuxRemoteBridge
             status = try await owner.request(enabled ? "bridge.start" : "bridge.stop", params: enabled ? ["port": .number(Double(port))] : [:])
             if !enabled { qrLink = nil; expiresAt = nil }
         }
+    }
+    public func saveRelay() async {
+        await action {
+            status = try await owner.request("relay.configure", params: ["origin": .string(relayOrigin.trimmingCharacters(in: .whitespacesAndNewlines)), "key_file": .string(relayKeyFile)])
+            relayDraftLoaded = false
+        }
+    }
+    public func removeRelay() async {
+        await action { status = try await owner.request("relay.configure", params: [:]); relayDraftLoaded = false }
     }
     public func openPairing() async {
         guard isSharing, !selectedWorkspaces.isEmpty, let address else { errorCode = "pairing_selection"; return }

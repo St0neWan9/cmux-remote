@@ -14,6 +14,7 @@ final class FeedModel {
     private var writeError: String?
     var error: String? { writeError ?? readError }
     private let reads = ReadRequestOwner()
+    private var observe: (@Sendable () -> AsyncStream<Void>)?
     private var readsEnabled = true
     private let fetch: @Sendable () async throws -> [JSONValue]
     private let send: @Sendable (String, JSONValue) async throws -> MutationReceipt
@@ -22,6 +23,11 @@ final class FeedModel {
         self.init(fetch: { try await client.get("/v1/feed", as: JSONValue.self)["items"].array ?? [] }, send: { id, body in
             try await client.post("/v1/feed/\(id)/reply", body: body, as: MutationReceipt.self)
         })
+        observe = { client.changes(paths: ["/v1/feed"]) }
+    }
+    func observeChanges() async {
+        guard let observe else { await refresh(); return }
+        for await _ in observe() { guard !Task.isCancelled, readsEnabled else { return }; await refresh() }
     }
     func suspendReads() { readsEnabled = false; reads.suspend(); loading = false }
     func resumeReads() { readsEnabled = true }
