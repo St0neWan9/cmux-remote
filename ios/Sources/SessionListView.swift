@@ -164,7 +164,7 @@ struct SessionListView: View {
                     if !session.writable { Label(String(localized: "sessions.read_only"), systemImage: "lock") }
                 }.font(.caption).foregroundStyle(.secondary)
             }.frame(maxWidth: .infinity, alignment: .leading)
-            if session.state.hasPrefix("working") { ProgressView().controlSize(.small) }
+            if session.state.hasPrefix("working") { WorkingIndicator() }
             else { Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary) }
         }.padding(.vertical, 10).contentShape(Rectangle())
     }
