@@ -13,7 +13,7 @@ public actor SessionService {
     private let files: ProjectFilePolicy
     private let reader = TranscriptReader()
     private var records: [String: Record] = [:]
-    private var transcriptTails: [String: (size: Int, cwd: String?, lastMessage: Date?)] = [:]
+    private var transcriptTails: [String: (size: Int, cwd: String?, lastMessage: Date?, title: String?)] = [:]
     private let mutations: MutationLedger
     private var journal: MutationJournal?
     private var liveBindings: [String: JSONValue] = [:]
@@ -46,15 +46,17 @@ public actor SessionService {
 
     /// Last message time and the agent's own directory; the tail is re-read only when the file grew.
     /// Write time stands in only when the tail holds no dated message.
-    private func transcriptFacts(_ path: String) -> (cwd: String?, updatedAt: Date?)? {
+    private func transcriptFacts(_ path: String) -> (cwd: String?, updatedAt: Date?, title: String?)? {
         guard let attributes = try? FileManager.default.attributesOfItem(atPath: path),
-              let size = (attributes[.size] as? NSNumber)?.intValue, size > 0 else { return nil }
+              let size = (attributes[.size] as? NSNumber)?.intValue else { return nil }
         let modified = attributes[.modificationDate] as? Date
-        if let cached = transcriptTails[path], cached.size == size { return (cached.cwd, cached.lastMessage ?? modified) }
-        let cwd = TranscriptWorkingDirectory().read(path: path, size: size)
-        let lastMessage = TranscriptActivity().lastMessage(path: path, size: size)
+        if let cached = transcriptTails[path], cached.size == size { return (cached.cwd, cached.lastMessage ?? modified, cached.title) }
+        let cwd = size > 0 ? TranscriptWorkingDirectory().read(path: path, size: size) : nil
+        let lastMessage = size > 0 ? TranscriptActivity().lastMessage(path: path, size: size) : nil
+        // A record rewritten as the conversation develops, so a longer transcript may carry a newer name.
+        let title = transcriptTails[path]?.title ?? TranscriptTitle().readTitle(path: path)
         if transcriptTails.count >= 512 { transcriptTails.removeAll() }
-        transcriptTails[path] = (size, cwd, lastMessage); return (cwd, lastMessage ?? modified)
+        transcriptTails[path] = (size, cwd, lastMessage, title); return (cwd, lastMessage ?? modified, title)
     }
     /// The name the person gave each tab, which a cmux rename changes immediately; the vault keeps the agent's own title.
     private func surfaceTitles() async -> [String: String] {
@@ -94,7 +96,8 @@ public actor SessionService {
             guard let id = item["session_id"].string, cmuxIDs.contains(id), let agent = item["agent"].string,
                   ["claude", "codex"].contains(agent) else { continue }
             let path = allowedTranscript(item["file"].string)
-            let descriptor = SessionDescriptor(id: id, agent: agent, title: item["title"].string ?? id, cwd: item["cwd"].string, state: item["status"].string ?? "unknown")
+            let named = item["title"].string?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let descriptor = SessionDescriptor(id: id, agent: agent, title: named.flatMap { $0.isEmpty ? nil : $0 } ?? id, cwd: item["cwd"].string, state: item["status"].string ?? "unknown")
             discovered[id] = Record(descriptor: descriptor, transcript: path)
         }
         for item in dump?["sessions"].array ?? [] {
@@ -108,7 +111,9 @@ public actor SessionService {
         for (id, record) in discovered {
             guard let path = record.transcript, let facts = transcriptFacts(path) else { continue }
             let old = record.descriptor
-            discovered[id]?.descriptor = SessionDescriptor(id: old.id, agent: old.agent, title: old.title, cwd: facts.cwd ?? old.cwd, workspaceID: old.workspaceID,
+            // An unnamed session falls back to the summary the agent writes into its own transcript.
+            let named = old.title == old.id ? facts.title ?? old.title : old.title
+            discovered[id]?.descriptor = SessionDescriptor(id: old.id, agent: old.agent, title: named, cwd: facts.cwd ?? old.cwd, workspaceID: old.workspaceID,
                                                            surfaceID: old.surfaceID, state: old.state, updatedAt: facts.updatedAt)
         }
         records = discovered
