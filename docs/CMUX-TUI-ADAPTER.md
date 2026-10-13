@@ -128,10 +128,11 @@ live Agent. Record executed operations and missing physical-device acceptance.
 
 ## Executed evidence — 2026-10-13
 
-- `scripts/verify.sh`: 230 Swift tests in 46 suites, existing phone guards,
-  locale parity (214 phone keys / 114 Mac keys), release checks and
+- `scripts/verify.sh`: 245 Swift tests in 48 suites, existing phone guards,
+  locale parity (214 phone keys / 121 Mac keys), release checks and
   `git diff --check` passed on the final run.
-- Native Mac app/helper build and signature verification passed. The existing
+- Before merging the latest main mirror fixes, native Mac app/helper build and
+  signature verification passed. The existing
   iPhone target compiled with the shared Feed mode policy; no page/layout changes
   or Simulator installation were performed.
 - Installed cmux-tui build `c18c5c1243f4b5a7a41dd84b89b113b29749ff43` ran as an
