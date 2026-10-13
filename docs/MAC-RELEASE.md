@@ -50,6 +50,9 @@ requires exactly one valid Developer ID Application identity there, passes its
 SHA-1 to packaging and deletes the keychain afterwards. Nothing secret is
 printed.
 
+These are secrets of the `testflight` GitHub environment, which only `main` and
+`v*` tags may use.
+
 | Secret | Purpose |
 | --- | --- |
 | `CMUX_REMOTE_MAC_CERT_P12_B64` | Developer ID Application (G2) certificate, private key and G2 intermediate |
