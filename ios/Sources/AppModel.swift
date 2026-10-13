@@ -27,6 +27,7 @@ final class AppModel {
     var relayHosts: [SignedValue<EnrollmentBootstrap>] = []
     var relayOrigins: [String] = []
     var relayError: String?
+    var relayLoading = false
     /// The pairing screen over the conversation list while another Mac is added.
     var addingDevice = false
     var pendingEnrollment: (any DeviceEnrolling)?
@@ -104,6 +105,8 @@ final class AppModel {
     }
     /// Reads every known relay; one unreachable relay does not hide the others' Macs.
     func refreshRelayDirectory() async {
+        guard !relayOrigins.isEmpty else { relayHosts = []; relayError = nil; return }
+        relayLoading = true; defer { relayLoading = false }
         var found: [String: SignedValue<EnrollmentBootstrap>] = [:], failure: String?
         for origin in relayOrigins {
             do { for entry in try await directory(origin) where found[entry.value.host.id] == nil { found[entry.value.host.id] = entry } }

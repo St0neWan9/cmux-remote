@@ -29,28 +29,43 @@ struct ConversationView: View {
         _model = State(initialValue: model); self.hostName = hostName
     }
     var body: some View {
+        // Lookups are built once per update instead of searched again by every row.
+        let firstResponse = Dictionary(model.responses.map { ($0.firstMessageID, $0) }, uniquingKeysWith: { _, latest in latest })
+        let lastResponse = Dictionary(model.responses.map { ($0.lastMessageID, $0) }, uniquingKeysWith: { _, latest in latest })
+        let imagesByMessage = Dictionary(grouping: model.images, by: \.messageID)
+        let runningSince = model.runningSince
+        // The live label belongs at the top of the reply in progress; before the first reply it has its own row.
+        let activeAnchor: String? = runningSince == nil ? nil : model.responses.last.flatMap { $0.completed ? nil : $0.firstMessageID }
         GeometryReader { viewport in
         ScrollViewReader { proxy in
             ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
+                LazyVStack(alignment: .leading, spacing: 6) {
                     if model.hasMore { Button(String(localized: "chat.older")) { Task { await model.older() } }.disabled(model.loadingOlder).font(.subheadline).foregroundStyle(.secondary).frame(maxWidth: .infinity).padding(.top, 12) }
                     if model.messages.isEmpty && model.error == nil {
-                        ContentUnavailableView(String(localized: "chat.empty"), systemImage: "bubble.left.and.bubble.right")
+                        // Until the first history read returns, an empty list means "loading", not "no conversation".
+                        if model.historyGeneration == nil { ProgressView(String(localized: "chat.loading")).frame(maxWidth: .infinity).padding(.top, 40) }
+                        else { ContentUnavailableView(String(localized: "chat.empty"), systemImage: "bubble.left.and.bubble.right") }
                     }
                     ForEach(model.timelineItems) { item in
+                        let images = item.messages.flatMap { imagesByMessage[$0.id] ?? [] }
                         VStack(alignment: .leading, spacing: 12) {
-                            if let response = model.responses.first(where: { $0.firstMessageID == item.id }), let seconds = response.durationSeconds {
+                            if item.id == activeAnchor, let runningSince {
+                                LiveRunLabel(since: runningSince)
+                            } else if let response = firstResponse[item.id], let seconds = response.durationSeconds {
                                 ResponseRunLabel(seconds: seconds, recorded: response.recordedDuration)
                             }
-                            if item.isActivity { ActivityGroupView(item: item, projectRoot: model.session.cwd, openFile: model.client.allows(.projectRead) ? { selectedFile = $0; showProject = true } : nil, images: model.images.filter { reference in item.messages.contains { $0.id == reference.messageID } }, openImage: { selectedImage = $0 }, openDetail: openToolDetail) }
-                            else { MessageRow(message: item.first, projectRoot: model.session.cwd, openFile: model.client.allows(.projectRead) ? { selectedFile = $0; showProject = true } : nil, images: model.images.filter { reference in item.messages.contains { $0.id == reference.messageID } }, openImage: { selectedImage = $0 }, openDetail: openToolDetail) }
-                            if let response = model.responses.first(where: { $0.lastMessageID == item.id }), response.completed, case .prose = item.first.kind {
+                            if item.isActivity { ActivityGroupView(item: item, projectRoot: model.session.cwd, openFile: model.client.allows(.projectRead) ? { selectedFile = $0; showProject = true } : nil, images: images, openImage: { selectedImage = $0 }, openDetail: openToolDetail) }
+                            else { MessageRow(message: item.first, projectRoot: model.session.cwd, openFile: model.client.allows(.projectRead) ? { selectedFile = $0; showProject = true } : nil, images: images, openImage: { selectedImage = $0 }, openDetail: openToolDetail) }
+                            if let response = lastResponse[item.id], response.completed, case .prose = item.first.kind {
                                 ResponseFooter(response: response, text: model.responseText(response)) { text in
                                     let quoted = text.split(separator: "\n", omittingEmptySubsequences: false).map { "> " + $0 }.joined(separator: "\n")
                                     model.draft = quoted + "\n\n" + model.draft
                                 }
                             }
                         }.modifier(HeaderContentEffect())
+                    }
+                    if activeAnchor == nil, let runningSince {
+                        LiveRunLabel(since: runningSince).modifier(HeaderContentEffect())
                     }
                     if let preview = model.preview {
                         VStack(alignment: .leading, spacing: 10) {
@@ -75,8 +90,10 @@ struct ConversationView: View {
             .scrollClipDisabled()
             .coordinateSpace(name: "chatTimeline")
             .onPreferenceChange(TimelineBottomPreferenceKey.self) { bottom in
-                latestVisible = bottom > 0 && bottom <= viewport.size.height + 32
-                if userScrolling || !atLatest { atLatest = latestVisible }
+                // Scrolling reports every frame; only a real change may invalidate the timeline.
+                let visible = bottom > 0 && bottom <= viewport.size.height + 32
+                if latestVisible != visible { latestVisible = visible }
+                if userScrolling || !atLatest { if atLatest != visible { atLatest = visible } }
                 else if bottom.isFinite && !latestVisible { proxy.scrollTo("latest", anchor: .bottom) }
             }
             .modifier(TimelineScrollInteraction(userScrolling: $userScrolling, atLatest: $atLatest, latestVisible: latestVisible))
@@ -136,6 +153,8 @@ struct ConversationView: View {
                                  photoItems = []; showingPhotos = true
                              }, dictating: model.speech.state == .recording, startVoice: { Task { await model.speech.start() } }, finishVoice: { model.speech.finish() }, showImageFiles: { showingImageFiles = true })
             }.padding(.horizontal, 14).padding(.top, 14).padding(.bottom, 10)
+                // Opaque like the page, so scrolled messages never show through the composer area.
+                .background(Color.white.ignoresSafeArea(edges: .bottom))
         }
         .photosPicker(isPresented: $showingPhotos, selection: $photoItems, maxSelectionCount: max(1, 4 - model.imageDraft.images.count), selectionBehavior: .ordered, matching: .images)
         .fileImporter(isPresented: $showingImageFiles, allowedContentTypes: [.image], allowsMultipleSelection: true) { result in

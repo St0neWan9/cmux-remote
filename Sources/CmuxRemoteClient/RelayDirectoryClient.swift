@@ -9,7 +9,7 @@ public struct RelayDirectoryClient: Sendable {
     public func hosts(origin: String, now: Int = Int(Date().timeIntervalSince1970)) async throws -> [SignedValue<EnrollmentBootstrap>] {
         let canonical = try RelayOrigin(origin)
         let configuration = URLSessionConfiguration.ephemeral
-        configuration.timeoutIntervalForRequest = 8; configuration.httpShouldSetCookies = false; configuration.urlCache = nil
+        configuration.timeoutIntervalForRequest = 20; configuration.httpShouldSetCookies = false; configuration.urlCache = nil
         let session = URLSession(configuration: configuration, delegate: delegate ?? RelaySessionDelegate(), delegateQueue: nil)
         defer { session.finishTasksAndInvalidate() }
         let (data, response) = try await session.data(from: canonical.directoryURL())

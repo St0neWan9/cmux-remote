@@ -242,3 +242,9 @@
 "pair.approved" = "已认证";
 "connection.remove" = "移除这台 Mac";
 "connection.remove_hint" = "只会把这台 Mac 从手机上移除。要取消它的访问权限，请在 Mac 上撤销这台设备。";
+"pair.relay_loading" = "正在读取中转…";
+"error.network" = "网络不可用，请检查 Wi-Fi 或蜂窝数据后重试。";
+"error.network_timeout" = "连接超时。网络可能很慢或被限制，请重试，或改用你自己的中转域名。";
+"error.relay" = "中转服务器没有正确响应，请检查中转地址后重试。";
+"error.relay_origin" = "请输入以 https:// 开头、不带路径的地址。";
+"chat.loading" = "正在加载对话…";
