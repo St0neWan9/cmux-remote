@@ -10,7 +10,11 @@ struct ToolDetailCard<Content: View>: View {
         VStack(alignment: .leading, spacing: 12) {
             Text(title).font(.subheadline).foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
-            content().frame(maxWidth: .infinity, alignment: .leading)
+            // Short output keeps its natural height; long output scrolls inside a fixed-height card.
+            ViewThatFits(in: .vertical) {
+                content().frame(maxWidth: .infinity, alignment: .leading)
+                ScrollView { content().frame(maxWidth: .infinity, alignment: .leading) }.scrollBounceBehavior(.basedOnSize)
+            }.frame(maxHeight: 280)
             if let status {
                 Text(status).font(.caption).foregroundStyle(failed ? Color.red : Color.secondary)
                     .frame(maxWidth: .infinity, alignment: .trailing)

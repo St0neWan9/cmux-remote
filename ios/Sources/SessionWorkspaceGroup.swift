@@ -15,10 +15,12 @@ struct SessionWorkspaceGroup: Identifiable {
             let key = session.workspaceID?.lowercased() ?? "unbound"
             groups[key, default: Self(id: key, name: key == "unbound" ? nil : (titles[key] ?? session.title), sessions: [])].sessions.append(session)
         }
-        // Known workspaces first in the Mac's order, then workspaces not in its list, then unbound conversations.
+        // The group with the most recent activity leads; ties keep the Mac's workspace order; unbound conversations last.
+        func latest(_ group: Self) -> Date { group.sessions.compactMap(\.updatedAt).max() ?? .distantPast }
         return groups.values.sorted { lhs, rhs in
-            func rank(_ group: Self) -> (Int, String) { group.id == "unbound" ? (Int.max, "") : (order[group.id] ?? Int.max - 1, group.name ?? "") }
-            return rank(lhs) < rank(rhs)
+            if (lhs.id == "unbound") != (rhs.id == "unbound") { return rhs.id == "unbound" }
+            if latest(lhs) != latest(rhs) { return latest(lhs) > latest(rhs) }
+            return (order[lhs.id] ?? Int.max) < (order[rhs.id] ?? Int.max)
         }
     }
 }
