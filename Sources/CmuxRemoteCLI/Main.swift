@@ -126,7 +126,8 @@ struct Main {
             } else { relay = nil; relayKeyFile = nil }
             let sharing = ManagedSharingService(state: state, authority: authority, router: router,
                 listen: options.value("listen") ?? (command == "resident" || options.contains("pair") ? "0.0.0.0" : "127.0.0.1"), port: port, advertise: !options.contains("no-discovery"), relay: relay, relayKeyFile: relayKeyFile,
-                workspaces: { try await service.workspaces()["workspaces"].array?.compactMap { $0["id"].string } ?? [] })
+                workspaces: { try await service.workspaces()["workspaces"].array?.compactMap { $0["id"].string } ?? [] },
+                remembersChoice: command == "resident")
             let ready = AsyncThrowingStream<Void, any Error>.makeStream()
             let owner = Task {
                 do { try await OwnerControlServer().run(path: state.directory.appendingPathComponent("owner.sock").path, authority: authority, service: service, mac: mac, sharing: sharing, onListening: { ready.continuation.yield(()); ready.continuation.finish() }) }
@@ -142,7 +143,7 @@ struct Main {
                 let bootstrap = try await authority.open(endpoint: BridgeEndpoint(host: host, port: port), workspaces: workspaces)
                 qr = try TerminalQRCode().render(EnrollmentLinkCodec().encode(bootstrap))
             } else { qr = nil }
-            if command == "serve" { _ = try await sharing.start() }
+            if command == "serve" { _ = try await sharing.start() } else { await sharing.restore() }
             if let qr { print("Scan to request enrollment, then approve that exact device using enrollment pending/approve."); print(qr) }
             // Resident owner/discovery/mirror services stay alive while LAN sharing is off.
             try await owner.value
