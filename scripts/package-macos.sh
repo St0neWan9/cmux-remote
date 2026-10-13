@@ -82,11 +82,12 @@ submit() {
   fi
 }
 
-# A ticket can lag behind an Accepted notarization (stapler error 68), so retry briefly.
+# Stapling and validating both reach Apple's ticket service, which can lag behind an Accepted
+# notarization or drop the connection (stapler error 68), so retry the pair briefly.
 staple() {
   local attempt
   for attempt in 1 2 3 4 5 6; do
-    if xcrun stapler staple "$1"; then xcrun stapler validate "$1"; return; fi
+    if xcrun stapler staple "$1" && xcrun stapler validate "$1"; then return 0; fi
     [[ "$attempt" == 6 ]] && return 1
     sleep $((attempt * 15))
   done
