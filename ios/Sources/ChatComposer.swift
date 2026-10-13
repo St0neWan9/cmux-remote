@@ -27,8 +27,8 @@ struct ChatComposer: View {
     var showImageFiles: (() -> Void)?
     /// Lines the focused field may grow to before it scrolls; the page derives it from half its free height.
     var maxLines = 6
-    // Match visible text to the symbol centers, rather than the text field's line box.
-    @ScaledMetric(relativeTo: .body) private var textCenterOffset: CGFloat = 1.5
+    // The line box sits below the glyphs it draws; lift it so text and symbols share a center.
+    @ScaledMetric(relativeTo: .body) private var textCenterOffset: CGFloat = -1
     private var hasDraft: Bool { !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || hasImages }
     /// A multi-line draft stays open so its text is never hidden behind a one-line bar.
     private var expanded: Bool { focused.wrappedValue || !images.isEmpty || draft.contains("\n") }

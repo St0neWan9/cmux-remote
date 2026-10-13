@@ -5,13 +5,24 @@ import CmuxRemoteBridge
 
 private actor DiscoveryCmux: CmuxControlling {
     let dumpAvailable: Bool
-    init(dumpAvailable: Bool = true) { self.dumpAvailable = dumpAvailable }
+    let tabTitle: String
+    init(dumpAvailable: Bool = true, tabTitle: String = "Renamed tab") { self.dumpAvailable = dumpAvailable; self.tabTitle = tabTitle }
+    /// The cmux tree shape the bridge reads for tab names.
+    var tree: JSONValue {
+        let surface: JSONValue = .object(["id": .string("surface"), "type": .string("terminal"), "title": .string(tabTitle)])
+        let pane: JSONValue = .object(["id": .string("surface"), "surfaces": .array([surface])])
+        let workspace: JSONValue = .object(["id": .string("workspace"), "title": .string("Project"), "panes": .array([pane])])
+        return .object(["windows": .array([.object(["workspaces": .array([workspace])])])])
+    }
+
     func request(_ method: String, params: [String: JSONValue]) async throws -> JSONValue {
         switch method {
         case "vault.sessions":
             return .object(["sessions": .array(["managed", "outside", "registered-without-binding", "hook-managed"].map {
                 .object(["session_id": .string($0), "agent": .string("claude"), "title": .string($0), "cwd": .string("/example/shared-project")])
             })])
+        case "system.tree":
+            return tree
         case "chat.sessions.dump":
             guard dumpAvailable else { throw BridgeError("method_not_found", "Unavailable") }
             return .object(["sessions": .array([
@@ -31,6 +42,15 @@ private actor DiscoveryCmux: CmuxControlling {
         #expect(sessions.first?.writable == true)
         do { _ = try await service.history(id: "outside", beforeSeq: nil, limit: 10); Issue.record("Outside history must not be accessible") }
         catch { #expect((error as? BridgeError)?.code == "session_not_found") }
+    }
+    @Test func aRenamedTabNamesTheConversationOverTheAgentsOwnTitle() async throws {
+        let service = SessionService(cmux: DiscoveryCmux(), home: URL(fileURLWithPath: "/example/home"), transcriptRoots: [])
+        #expect(try await service.sessions().first?.title == "Renamed tab")
+    }
+    @Test func aDirectoryShapedTabNameNeverRenamesTheConversation() async throws {
+        let service = SessionService(cmux: DiscoveryCmux(tabTitle: "~/projects/cmux-remote"), home: URL(fileURLWithPath: "/example/home"), transcriptRoots: [])
+        let sessions = try await service.sessions()
+        #expect(sessions.first(where: { $0.id == "managed" })?.title == "managed")
     }
     @Test func unavailableRegistryDoesNotFallBackToGlobalHistory() async throws {
         let service = SessionService(cmux: DiscoveryCmux(dumpAvailable: false), home: URL(fileURLWithPath: "/example/home"), transcriptRoots: [])
