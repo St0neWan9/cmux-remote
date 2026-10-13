@@ -36,7 +36,7 @@ struct SessionSidebarView: View {
                 LazyVStack(alignment: .leading, spacing: MobileDesign.sectionGap) {
                     if showSearch || !query.isEmpty { SessionSearchField(query: $query) }
                     ForEach(sections) { section in
-                        Text(multiple ? section.hostName : String(localized: "sessions.projects")).font(.headline).lineLimit(1)
+                        Text(multiple ? section.hostName : String(localized: "sessions.workspaces_title")).font(.headline).lineLimit(1)
                         ForEach(section.groups) { group in projectGroup(group, section: section) }
                     }
                     if sections.isEmpty { Text(String(localized: "sessions.no_matches")).foregroundStyle(.secondary) }
@@ -74,14 +74,14 @@ struct SessionSidebarView: View {
                 if !initializedExpansion, let section = sections.first, let group = section.groups.first { expanded.insert(section.hostID + "/" + group.id); initializedExpansion = true }
             }
     }
-    private func projectGroup(_ group: SessionProjectGroup, section: SessionHostSection) -> some View {
+    private func projectGroup(_ group: SessionWorkspaceGroup, section: SessionHostSection) -> some View {
         let key = section.hostID + "/" + group.id
         return VStack(alignment: .leading, spacing: 10) {
             Button {
                 if expanded.contains(key) { expanded.remove(key) } else { expanded.insert(key) }
             } label: {
                 HStack(spacing: 12) {
-                    Image(systemName: "folder").font(.system(size: 22))
+                    Image(systemName: group.name == nil ? "clock.arrow.circlepath" : "macwindow").font(.system(size: 20))
                     Text(group.name ?? String(localized: "sessions.other")).font(.body.weight(.semibold))
                     Spacer()
                     Image(systemName: expanded.contains(key) ? "chevron.down" : "chevron.right").font(.caption).foregroundStyle(.secondary)
