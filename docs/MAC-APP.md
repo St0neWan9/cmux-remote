@@ -27,7 +27,9 @@ product areas are:
 - **Connect to a Mac**: the existing nearby/saved host, trust, enrollment and
   workspace-mirror flow. Native Remote rows remain the everyday workspace entry.
 
-Closing Settings leaves the background service and mirrors running. Quitting the
+Closing Settings leaves the background service and mirrors running. The resident remembers the owner's last explicit sharing choice
+(`sharing.json`, owner-only) and restores it after a restart; a listener that ends
+on its own is not recorded as "off". A failed restore is shown as a status error. Quitting the
 menu bar app does not implicitly revoke devices or stop a separately running CLI
 Bridge. A process started by this app is its own resource and can be stopped by
 the app. No unrelated Bridge or official cmux process may be killed.
