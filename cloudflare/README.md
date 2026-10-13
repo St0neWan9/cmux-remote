@@ -24,20 +24,22 @@ local fixtures. Update them together and rerun interoperability tests.
 
 ## Deploy when your Cloudflare account is ready
 
-Run inside `cloudflare/`:
+Log in once (a browser window opens for Cloudflare OAuth), then deploy from the
+repository root:
 
 ```sh
-npm ci
-npx wrangler login
-npx wrangler secret put BRIDGE_REGISTRATION_KEY
-npm run deploy
+(cd cloudflare && npm ci && npx wrangler login)
+scripts/deploy-relay.sh            # optional argument: absolute key file path
 ```
 
-Create a unique random key of at least 32 characters. Store the same key in a
-Mac file owned by your user with permissions 600. This is a project registration
-key, not a Cloudflare API token. Do not put it in source, a QR, a URL, or chat.
-Wrangler handles account authentication locally. Record the final HTTPS origin
-printed by deployment, such as `https://cmux-remote-relay.YOUR-SUBDOMAIN.workers.dev`.
+The script creates a random 64-hex registration key in an owner-only file
+(default `~/.local/state/cmux-remote/relay-registration-key`) unless one exists,
+deploys the Worker, stores the key as the `BRIDGE_REGISTRATION_KEY` secret through
+stdin, and prints the HTTPS origin, such as
+`https://cmux-remote-relay.YOUR-SUBDOMAIN.workers.dev`. The key is a project
+registration key, not a Cloudflare API token; it never appears in argv, output,
+source, a QR, a URL or chat. A new account must first choose its `workers.dev`
+subdomain in the Cloudflare dashboard (Workers & Pages).
 
 The Wrangler migration creates the SQLite Durable Object class. The rate-limit
 binding bounds admission by client IP; the DO also bounds connections, messages,
