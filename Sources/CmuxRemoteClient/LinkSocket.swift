@@ -5,9 +5,10 @@ import CmuxRemoteCore
 final class LinkSocket: Sendable {
     let task: URLSessionWebSocketTask
     private let session: URLSession
-    init(url: URL, delegate: (any URLSessionDelegate)? = nil, headers: [String: String] = [:]) {
+    /// LAN sockets fail fast so the relay is tried promptly; relay sockets allow slow mobile and cross-border TLS.
+    init(url: URL, delegate: (any URLSessionDelegate)? = nil, headers: [String: String] = [:], timeout: TimeInterval = 4) {
         let configuration = URLSessionConfiguration.ephemeral
-        configuration.timeoutIntervalForRequest = 4; configuration.httpShouldSetCookies = false
+        configuration.timeoutIntervalForRequest = timeout; configuration.httpShouldSetCookies = false
         session = URLSession(configuration: configuration, delegate: delegate ?? RelaySessionDelegate(), delegateQueue: nil)
         var request = URLRequest(url: url); request.setValue("cmux-remote.v3", forHTTPHeaderField: "Sec-WebSocket-Protocol")
         for (key, value) in headers { request.setValue(value, forHTTPHeaderField: key) }

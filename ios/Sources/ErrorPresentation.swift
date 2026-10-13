@@ -3,8 +3,14 @@ import CmuxRemoteCore
 
 struct ErrorPresentation {
     func message(_ error: any Error) -> String {
+        if let network = error as? URLError {
+            return String(localized: network.code == .timedOut ? "error.network_timeout" : "error.network")
+        }
+        if (error as NSError).domain == NSPOSIXErrorDomain { return String(localized: "error.network") }
         let code = (error as? BridgeError)?.code
         switch code {
+        case "relay_unavailable": return String(localized: "error.relay")
+        case "invalid_endpoint": return String(localized: "error.relay_origin")
         case "unauthorized", "scope_denied": return String(localized: "error.authorization")
         case "enrollment_closed", "enrollment_expired", "request_not_found", "request_finished": return String(localized: "error.enrollment")
         case "host_changed", "invalid_identity", "invalid_signature", "invalid_grant", "invalid_proof", "replayed_request": return String(localized: "error.identity")

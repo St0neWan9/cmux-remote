@@ -47,4 +47,18 @@ import CmuxRemoteBridge
         do { _ = try await authority.submit(try request(listed)); Issue.record("A closed directory window must not accept requests") }
         catch { #expect((error as? BridgeError)?.code == "enrollment_closed") }
     }
+    @Test func lanDiscoveryOffersTheDirectoryWindowUntilAQRWindowIsOpen() async throws {
+        let (authority, root) = try authority(); defer { try? FileManager.default.removeItem(at: root) }
+        let endpoint = BridgeEndpoint(host: "192.168.1.2", port: 7740)
+        do { _ = try await authority.bootstrap(); Issue.record("Without any window, LAN discovery must not offer enrollment") }
+        catch { #expect((error as? BridgeError)?.code == "enrollment_closed") }
+        try await authority.configureRelay(origin: "https://relay.example")
+        let listed = try await authority.openDirectory(endpoint: endpoint, workspaces: workspaces)
+        #expect(try await authority.bootstrap().value.windowID == listed.value.windowID)
+        let qr = try await authority.open(endpoint: endpoint, workspaces: [workspaces[0]])
+        #expect(try await authority.bootstrap().value.windowID == qr.value.windowID, "An open QR window keeps its narrower scope")
+        await authority.closeEnrollment(); await authority.closeDirectory()
+        do { _ = try await authority.bootstrap(); Issue.record("Closed windows must not be offered") }
+        catch { #expect((error as? BridgeError)?.code == "enrollment_closed") }
+    }
 }

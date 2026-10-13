@@ -28,7 +28,7 @@ actor LinkClientConnection {
     /// Recently cancelled IDs; the Bridge may already have frames for them in flight.
     private var abandoned: [String] = []
     private var closed = false
-    init(host: HostIdentity, key: Data, endpoint: BridgeEndpoint, relayDial: @escaping @Sendable (URL, [String: String]) -> LinkSocket = { LinkSocket(url: $0, headers: $1) }) { self.host = host; self.key = key; self.endpoint = endpoint; self.relayDial = relayDial }
+    init(host: HostIdentity, key: Data, endpoint: BridgeEndpoint, relayDial: @escaping @Sendable (URL, [String: String]) -> LinkSocket = { LinkSocket(url: $0, headers: $1, timeout: 15) }) { self.host = host; self.key = key; self.endpoint = endpoint; self.relayDial = relayDial }
     func updateRelay(_ relay: RelayEndpoint?) { endpoint.relay = relay }
     func exchange(_ frame: LinkFrame) async throws -> LinkResourceResponse {
         try Task.checkCancellation(); try await connect(); try Task.checkCancellation()
@@ -69,13 +69,13 @@ actor LinkClientConnection {
                 do { return try await self.prepare(direct, handshake: handshake) }
                 catch {
                     direct.close()
-                    guard let network = error as? URLError, [.timedOut, .cannotFindHost, .cannotConnectToHost, .networkConnectionLost, .notConnectedToInternet, .dnsLookupFailed].contains(network.code), let relay = endpoint.relay else { throw error }
+                    guard LinkPathFailure().isUnreachable(error), let relay = endpoint.relay else { throw error }
                     try relay.validate(host: host, now: Int(Date().timeIntervalSince1970))
                     let crypto = IdentityCryptography(), publicKey = try crypto.publicKey(privateKey: key)
                     if relay.admission.value.kind == "approved", relay.admission.value.clientPublicKey != publicKey { throw BridgeError("invalid_identity", "The relay admission belongs to another client.") }
                     let join = try crypto.sign(RelayJoin(hostID: host.id, clientPublicKey: publicKey, permitDigest: crypto.digest(crypto.bytes(relay.admission, domain: "relay3-permit-envelope"))), domain: "relay3-join", privateKey: key)
                     let relayed = relayDial(try RelayOrigin(relay.origin).socketURL(hostID: host.id, role: "client"), ["X-Cmux-Relay-Permit": try JSONEncoder().encode(relay.admission).base64EncodedString(), "X-Cmux-Relay-Join": try JSONEncoder().encode(join).base64EncodedString()])
-                    do { return try await self.prepare(relayed, handshake: handshake) } catch { relayed.close(); throw error }
+                    do { return try await self.prepare(relayed, handshake: handshake, deadline: .seconds(15)) } catch { relayed.close(); throw error }
                 }
             }
         }
@@ -98,10 +98,10 @@ actor LinkClientConnection {
             preparing = nil
         } catch { preparing = nil; throw error }
     }
-    private nonisolated func prepare(_ socket: LinkSocket, handshake: LinkClientHandshake) async throws -> Prepared {
+    private nonisolated func prepare(_ socket: LinkSocket, handshake: LinkClientHandshake, deadline: Duration = .seconds(4)) async throws -> Prepared {
         let acceptance: SignedValue<LinkAcceptance> = try await withThrowingTaskGroup(of: Data.self) { group in
             group.addTask { try await socket.send(JSONEncoder().encode(handshake.proposal)); return try await socket.receive() }
-            group.addTask { try await Task.sleep(for: .seconds(4)); socket.close(); throw URLError(.timedOut) }
+            group.addTask { try await Task.sleep(for: deadline); socket.close(); throw URLError(.timedOut) }
             defer { group.cancelAll() }
             return try JSONDecoder().decode(SignedValue<LinkAcceptance>.self, from: await group.next()!)
         }
