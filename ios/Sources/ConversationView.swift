@@ -27,6 +27,8 @@ struct ConversationView: View {
     /// The page's height above the keyboard; the composer may use half of it.
     @State private var pageHeight: CGFloat = 700
     @FocusState private var composerFocused: Bool
+    /// This Mac's link, shown above the conversation while it is not up.
+    @State private var linkState: LinkState?
     private let hostName: String
     init(model: ConversationModel, hostName: String = "") {
         _model = State(initialValue: model); self.hostName = hostName
@@ -49,7 +51,7 @@ struct ConversationView: View {
             }
             .modifier(TimelineScrollInteraction(userScrolling: $userScrolling, atLatest: $atLatest, latestVisible: latestVisible))
             .scrollDismissesKeyboard(.interactively)
-            .refreshable { await model.refresh() }
+            .refreshable { await reconnect() }
             .overlay(alignment: .bottom) {
                 if !atLatest {
                     Button { atLatest = true; withAnimation { proxy.scrollTo("latest", anchor: .bottom) } } label: {
@@ -72,7 +74,13 @@ struct ConversationView: View {
         .background(Color.white.ignoresSafeArea())
         .background(InteractivePopInstaller())
         .toolbar(.hidden, for: .navigationBar)
-        .safeAreaInset(edge: .top, spacing: 0) { header }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            VStack(spacing: 6) {
+                header
+                ConnectionStatusBar(state: linkState) { Task { await reconnect() } }
+            }
+        }
+        .task { for await state in model.client.linkStates() { linkState = state } }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: 12) {
                 SpeechDraftStrip(model: model.speech, useText: model.useSpeechDraft)
@@ -235,6 +243,12 @@ struct ConversationView: View {
         guard let generation = model.historyGeneration else { return }
         selectedToolDetail = ToolDetailReference(messageID: messageID, generation: generation, initialField: field)
     }
+    /// A manual refresh redials a link that may be dead before reading, and shows the dial while it happens.
+    private func reconnect() async {
+        if linkState != .connected { linkState = .connecting }
+        await model.client.reconnect()
+        await model.refresh()
+    }
     private var header: some View {
         HStack(spacing: 12) {
             Button { dismiss() } label: { Image(systemName: "chevron.left") }
@@ -247,7 +261,7 @@ struct ConversationView: View {
                 Button { showTiming = true } label: { Label(String(localized: "chat.timing"), systemImage: "clock") }.accessibilityIdentifier("chat.timing")
                 if model.client.allows(.projectRead) { Button { selectedFile = ""; showProject = true } label: { Label(String(localized: "project.title"), systemImage: "doc.text.magnifyingglass") }.accessibilityIdentifier("chat.project") }
                 if model.client.allows(.feedRead) { Button { showFeed = true } label: { Label(String(localized: "feed.title"), systemImage: "checkmark.bubble") }.accessibilityIdentifier("chat.feed") }
-                Button { Task { await model.refresh() } } label: { Label(String(localized: "chat.refresh"), systemImage: "arrow.clockwise") }
+                Button { Task { await reconnect() } } label: { Label(String(localized: "chat.refresh"), systemImage: "arrow.clockwise") }
                 if model.canSend {
                     Button { Task { await model.interrupt() } } label: { Label(String(localized: "chat.stop"), systemImage: "stop.circle") }
                     Button(role: .destructive) { confirmHardStop = true } label: { Label(String(localized: "chat.hard_stop"), systemImage: "stop.circle.fill") }

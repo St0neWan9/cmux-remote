@@ -20,7 +20,12 @@ struct CmuxRemoteApp: App {
             }.environment(\.colorScheme, .light).tint(MobileDesign.accent).task(id: phase) {
                 model.restorePairing()
                 if phase == .active { model.resumeEnrollment(); await model.discover() }
-                else { model.pauseEnrollment() }
+                else { model.pauseEnrollment(); if phase == .background { model.backgroundedAt = Date() } }
+            }
+            // Restarted when a Mac is added or removed, so every link is followed.
+            .task(id: ConnectionSupervision(active: phase == .active, hosts: model.links.map(\.id))) {
+                guard phase == .active, !model.links.isEmpty else { return }
+                await model.superviseConnections()
             }
         }
     }

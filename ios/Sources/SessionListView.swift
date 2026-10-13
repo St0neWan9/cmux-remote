@@ -106,16 +106,23 @@ struct SessionListView: View {
                     if hosted.isEmpty && !loading {
                         Text(String(localized: !canRead ? "sessions.no_read_grant" : (model.hostedSessions.isEmpty ? "sessions.empty" : "sessions.no_matches"))).foregroundStyle(.secondary).padding(.vertical, 12)
                     }
-                    if let error, !multiple { Text(error).font(.footnote).foregroundStyle(.red) }
+                    // The bar already says the Mac is unreachable; the red line is for other failures.
+                    if let error, !multiple, model.connectionState != .disconnected { Text(error).font(.footnote).foregroundStyle(.red) }
                 }.frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, MobileDesign.pageInset).padding(.top, 20).padding(.bottom, 24)
             }
             .clipped()
             .background(Color.white.ignoresSafeArea())
             .toolbar(.hidden, for: .navigationBar)
-            .safeAreaInset(edge: .top, spacing: 0) { header }
+            .safeAreaInset(edge: .top, spacing: 0) {
+                VStack(spacing: 6) {
+                    header
+                    ConnectionStatusBar(state: model.connectionState, hostName: model.offlineHostName) { Task { await model.reconnect() } }
+                }
+            }
             .onChange(of: workspaces.map(\.id)) { _, ids in if let workspaceID, !ids.contains(workspaceID) { self.workspaceID = nil } }
-            .refreshable { await model.refresh() }
+            // A pull drops a link that may be dead and dials again, rather than reading over it.
+            .refreshable { await model.reconnect() }
             .task { await model.refresh() }
             .onDisappear { showSidebar = false }
             .overlay { if loading && hosted.isEmpty { ProgressView() } }
@@ -137,7 +144,7 @@ struct SessionListView: View {
                 showConnection: { id in showSidebar = false; connectionHostID = id; showConnection = true },
                 showFeed: { id in showSidebar = false; feedHostID = id; showFeed = true },
                 addDevice: { showSidebar = false; model.addingDevice = true },
-                refresh: { Task { await model.refresh() } })
+                refresh: { Task { await model.reconnect() } })
         }.environment(\.colorScheme, .light)
     }
     private func openConversation(_ hosted: HostedSession) {
