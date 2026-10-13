@@ -12,6 +12,9 @@ public actor CloudRelayService {
     private var running: Task<Void, Never>?
     private var registry: Task<Void, Never>?
     private var heartbeat: Task<Void, Never>?
+    private var publisher: Task<Void, Never>?
+    /// Supplies this host's signed directory entry; nil keeps the host out of the directory.
+    private var listing: (@Sendable () async throws -> SignedValue<EnrollmentBootstrap>?)?
     private var failure: String?
     private var socket: (any CloudRelayConnecting)?
     private var writer: LinkPacketWriter?
@@ -22,6 +25,8 @@ public actor CloudRelayService {
         self.onConnected = onConnected; self.origin = try RelayOrigin(origin); self.secret = secret; self.router = router; self.authority = authority; self.dial = dial
         guard secret.utf8.count >= 32, secret.utf8.count <= 256, !secret.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else { throw BridgeError("invalid_identity", "Invalid private relay registration key.") }
     }
+    /// Set before `start`; the entry is republished well before each window's ten-minute expiry.
+    public func setListing(_ provider: (@Sendable () async throws -> SignedValue<EnrollmentBootstrap>?)?) { listing = provider }
     public func status() -> JSONValue { .object(["state": .string(phase), "origin": .string(origin.value), "error_code": failure.map(JSONValue.string) ?? .null]) }
     public func start() async throws {
         guard running == nil else { return }
@@ -33,6 +38,8 @@ public actor CloudRelayService {
         generation = nil; phase = "stopped"; failure = nil
         let task = running; running = nil; task?.cancel()
         await disconnect(); _ = await task?.value
+        // A transient reconnect keeps windows so listed requests stay approvable; stopping ends them.
+        await authority.closeDirectory()
     }
     private func run(_ id: UUID) async {
         var attempt = 0
@@ -52,6 +59,16 @@ public actor CloudRelayService {
                     do { while !Task.isCancelled { try await Task.sleep(for: .seconds(25)); try await socket.ping() } }
                     catch { if !Task.isCancelled { socket.close() } }
                 }
+                if let listing {
+                    publisher = Task { [weak self] in
+                        while !Task.isCancelled {
+                            // A listing failure (e.g. no workspaces yet) withdraws the entry instead of ending the relay.
+                            let entry = try? await listing()
+                            try? await self?.publish(entry)
+                            do { try await Task.sleep(for: .seconds(240)) } catch { break }
+                        }
+                    }
+                }
                 let changes = try await authority.registryChanges()
                 registry = Task { [weak self] in
                     for await _ in changes {
@@ -69,6 +86,10 @@ public actor CloudRelayService {
             phase = "reconnecting"; attempt = min(attempt + 1, 5)
             do { try await Task.sleep(for: .seconds(1 << attempt)) } catch { break }
         }
+    }
+    private func publish(_ entry: SignedValue<EnrollmentBootstrap>?) async throws {
+        if let entry { try await send(RelayEnvelope(kind: "directory", data: JSONEncoder().encode(entry))) }
+        else { try await send(RelayEnvelope(kind: "withdraw")) }
     }
     private func synchronizeRegistry() async throws {
         let revoked = await authority.enrolledClients().filter(\.revoked).map(\.id)
@@ -103,6 +124,9 @@ public actor CloudRelayService {
     }
     private func disconnect() async {
         heartbeat?.cancel(); heartbeat = nil
+        publisher?.cancel(); publisher = nil
+        // The relay also withdraws a host's entry when its Bridge socket closes.
+        if listing != nil, writer != nil { try? await send(RelayEnvelope(kind: "withdraw")) }
         registry?.cancel(); registry = nil
         let old = sessions; sessions.removeAll()
         let oldWriter = writer; writer = nil; socket?.close(); socket = nil

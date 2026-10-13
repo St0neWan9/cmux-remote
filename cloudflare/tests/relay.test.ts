@@ -21,7 +21,7 @@ function next(socket: any): Promise<any> {
 async function fixture() {
   const mf = new Miniflare(convertV4MiniflareOptions({
     modules: true, scriptPath: new URL("../dist/index.js", import.meta.url).pathname, compatibilityDate: "2026-10-06",
-    durableObjects: { ROOMS: { className: "RelayRoom", useSQLite: true } },
+    durableObjects: { ROOMS: { className: "RelayRoom", useSQLite: true }, DIRECTORY: { className: "RelayDirectory", useSQLite: true } },
     ratelimits: { ADMISSION_LIMITER: { namespace_id: "1000", simple: { limit: 1000, period: 60 } } },
     bindings: { BRIDGE_REGISTRATION_KEY: "a".repeat(64) }
   }));
@@ -80,5 +80,33 @@ test("replayed registration/join, borrowed admission and expired enrollment are 
     assert.equal(client.status, 101); client.webSocket!.accept(); await opened;
     assert.equal((await f.join({ nonce: joinNonce })).status, 409);
     client.webSocket!.close(); bridge.close();
+  } finally { await f.mf.dispose(); }
+});
+
+test("a registered Bridge lists only its own signed bootstrap and leaves the directory when offline", async () => {
+  const f = await fixture();
+  try {
+    const bridge = (await f.bridge()).webSocket!; bridge.accept();
+    const ready = next(bridge); bridge.send(JSON.stringify({ kind: "registry", revoked: [] })); await ready;
+    const origin = "https://relay.example", now = Math.floor(Date.now() / 1000), windowID = crypto.randomUUID();
+    const permit = await f.host.sign({ version: 3, hostID: f.host.id, origin, permitID: windowID, kind: "enrollment", expiresAt: now + 600 }, "relay3-permit");
+    const bootstrap = (actor: typeof f.host) => actor.sign({ version: 2, host: { id: f.host.id, publicKey: actor.publicKey, certificateSHA256: "a".repeat(64), name: "Studio Mac" },
+      endpoint: { host: "192.168.1.2", port: 7740, relay: { origin, admission: permit } }, workspaces: ["11111111-1111-1111-1111-111111111111"], windowID, expiresAt: now + 600 }, "bootstrap");
+    const list = async () => (await (await f.mf.dispatchFetch(origin + "/v3/directory")).json() as { hosts: string[] }).hosts;
+    assert.deepEqual(await list(), []);
+    const signed = await bootstrap(f.host);
+    bridge.send(JSON.stringify({ kind: "directory", data: base64(new TextEncoder().encode(JSON.stringify(signed))) }));
+    let hosts: string[] = [];
+    for (let attempt = 0; attempt < 20 && hosts.length === 0; attempt++) { hosts = await list(); if (!hosts.length) await new Promise(r => setTimeout(r, 50)); }
+    assert.equal(hosts.length, 1);
+    assert.equal(JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(hosts[0]), c => c.charCodeAt(0)))).value.host.name, "Studio Mac");
+    bridge.send(JSON.stringify({ kind: "withdraw" }));
+    for (let attempt = 0; attempt < 20 && hosts.length > 0; attempt++) { hosts = await list(); if (hosts.length) await new Promise(r => setTimeout(r, 50)); }
+    assert.deepEqual(hosts, []);
+    // Another key cannot list itself under this host's identity; the Bridge socket is closed.
+    const closed = new Promise(resolve => bridge.addEventListener("close", resolve));
+    bridge.send(JSON.stringify({ kind: "directory", data: base64(new TextEncoder().encode(JSON.stringify(await bootstrap(await signer())))) }));
+    await closed;
+    assert.deepEqual(await list(), []);
   } finally { await f.mf.dispose(); }
 });

@@ -133,3 +133,4 @@
 "mac.relay.state.reconnecting" = "正在重连…";
 "mac.relay.error" = "请检查 HTTPS 中转地址和仅当前用户可读的注册密钥文件。";
 "mac.relay.originPlaceholder" = "https://your-relay.workers.dev";
+"mac.device.narrowHint" = "取消勾选这台设备不应看到的工作区。批准不会增加申请之外的工作区。";

@@ -1,14 +1,27 @@
 import { DurableObject } from "cloudflare:workers";
-import { base64, bytes, digest, fresh, header, Join, Permit, Registration, RelayFailure, secretMatches, unbase64, verify } from "./proofs";
-interface Env { ROOMS: DurableObjectNamespace; ADMISSION_LIMITER: RateLimit; BRIDGE_REGISTRATION_KEY?: string }
+import { base64, bytes, digest, fresh, header, Join, Permit, Registration, RelayFailure, secretMatches, Signed, unbase64, verify } from "./proofs";
+import { DirectoryEntry, RelayDirectory } from "./directory";
+export { RelayDirectory };
+interface Env { ROOMS: DurableObjectNamespace; DIRECTORY: DurableObjectNamespace; ADMISSION_LIMITER: RateLimit; BRIDGE_REGISTRATION_KEY?: string }
 interface Connection {
   role: "bridge" | "client"; channel: string; clientID?: string; pending?: boolean;
-  bridge?: string; ready?: boolean; expiresAt?: number; window: number; messages: number; byteCount: number;
+  bridge?: string; ready?: boolean; expiresAt?: number; window: number; messages: number; byteCount: number; origin?: string;
 }
+interface Bootstrap {
+  version: number; host: { id: string; publicKey: string; certificateSHA256: string; name: string };
+  endpoint: { host: string; port: number; relay?: { origin: string; admission: Signed<Permit> } };
+  workspaces: string[]; windowID: string; expiresAt: number;
+}
+const directory = (env: Env) => env.DIRECTORY.get(env.DIRECTORY.idFromName("directory"));
 const identity = (value: unknown): value is string => typeof value === "string" && /^[0-9a-f]{64}$/.test(value);
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
+    if (url.pathname === "/v3/directory" && request.method === "GET" && !request.headers.get("Upgrade")) {
+      // Hosts that chose to be listed while online; entries are host-signed and verified again by the phone.
+      if (!await env.ADMISSION_LIMITER.limit({ key: request.headers.get("CF-Connecting-IP") ?? "unknown" }).then(x => x.success)) return new Response("rate_limited", { status: 429 });
+      return directory(env).fetch("https://directory/list");
+    }
     if (request.method !== "GET" || request.headers.get("Upgrade")?.toLowerCase() !== "websocket") return new Response("websocket_required", { status: 426 });
     const match = /^\/v3\/relay\/([0-9a-f]{64})$/.exec(url.pathname), role = url.searchParams.get("role");
     if (!match || !["bridge", "client"].includes(role ?? "") || [...url.searchParams].length !== 1 || url.searchParams.getAll("role").length !== 1) return new Response("invalid_route", { status: 400 });
@@ -42,8 +55,9 @@ export class RelayRoom extends DurableObject<Env> {
         const existing = await this.ctx.storage.get<string>("hostKey");
         if (existing && existing !== proof.hostPublicKey) throw new RelayFailure("host_changed");
         await this.ctx.storage.put("hostKey", proof.hostPublicKey);
+        await this.ctx.storage.put("hostID", hostID);
         for (const socket of this.ctx.getWebSockets()) socket.close(1012, "bridge_replaced");
-        metadata = { role: "bridge", channel: crypto.randomUUID(), ready: false, window: now, messages: 0, byteCount: 0 };
+        metadata = { role: "bridge", channel: crypto.randomUUID(), ready: false, window: now, messages: 0, byteCount: 0, origin: url.origin };
       } else if (role === "client") {
         const bridge = this.bridge(); if (!bridge) throw new RelayFailure("bridge_offline", 503);
         const owner = bridge.deserializeAttachment() as Connection;
@@ -78,7 +92,7 @@ export class RelayRoom extends DurableObject<Env> {
       return new Response(failure.code, { status: failure.status });
     }
   }
-  webSocketMessage(socket: WebSocket, message: string | ArrayBuffer): void {
+  async webSocketMessage(socket: WebSocket, message: string | ArrayBuffer): Promise<void> {
     try {
       const state = socket.deserializeAttachment() as Connection;
       if (!state) throw new RelayFailure("invalid_connection");
@@ -92,6 +106,13 @@ export class RelayRoom extends DurableObject<Env> {
       } else {
         if (this.bridge() !== socket || typeof message !== "string" || message.length > 3_000_000) throw new RelayFailure("invalid_bridge_packet");
         const envelope = JSON.parse(message) as { kind: string; channel_id?: string; data?: string; revoked?: unknown[] };
+        if (envelope.kind === "directory" || envelope.kind === "withdraw") {
+          const hostID = await this.ctx.storage.get<string>("hostID");
+          if (!hostID) throw new RelayFailure("invalid_bridge_packet");
+          if (envelope.kind === "withdraw") { await directory(this.env).fetch("https://directory/remove", { method: "POST", body: JSON.stringify({ hostID }) }); return; }
+          await directory(this.env).fetch("https://directory/put", { method: "POST", body: JSON.stringify(await this.entry(hostID, envelope.data, state)) });
+          return;
+        }
         if (envelope.kind === "registry") {
           if (!envelope.revoked || envelope.revoked.length > 100 || !envelope.revoked.every(identity)) throw new RelayFailure("invalid_registry");
           // SQLite is synchronous: ordering with client admission/revocation does not depend on detached promises.
@@ -112,16 +133,35 @@ export class RelayRoom extends DurableObject<Env> {
       }
     } catch (error) { socket.close(1008, error instanceof RelayFailure ? error.code : "invalid_packet"); }
   }
-  webSocketClose(socket: WebSocket): void {
+  async webSocketClose(socket: WebSocket): Promise<void> {
     const state = socket.deserializeAttachment() as Connection | undefined;
     if (state?.role === "bridge") {
       const replacement = this.bridge();
       if (!replacement || (replacement.deserializeAttachment() as Connection).channel === state.channel) {
         for (const peer of this.ctx.getWebSockets("client")) if ((peer.deserializeAttachment() as Connection).bridge === state.channel) peer.close(1012, "bridge_offline");
+        // An offline host leaves the directory; its next registration lists it again.
+        const hostID = await this.ctx.storage.get<string>("hostID");
+        if (hostID) await directory(this.env).fetch("https://directory/remove", { method: "POST", body: JSON.stringify({ hostID }) });
       }
     } else if (state?.role === "client") this.bridge()?.send(JSON.stringify({ kind: "close", channel_id: state.channel }));
   }
   webSocketError(socket: WebSocket): void { socket.close(1011, "connection_failed"); }
+  /** Accepts only this host's own signed bootstrap with a current relay enrollment permit for this origin. */
+  private async entry(hostID: string, data: string | undefined, state: Connection): Promise<DirectoryEntry> {
+    const hostKey = await this.ctx.storage.get<string>("hostKey");
+    if (!hostKey || !data || !state.origin) throw new RelayFailure("invalid_directory");
+    let signed: Signed<Bootstrap>;
+    try { signed = JSON.parse(new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(unbase64(data, 8192))) as Signed<Bootstrap>; } catch { throw new RelayFailure("invalid_directory"); }
+    const value = signed?.value, now = Math.floor(Date.now() / 1000), relay = value?.endpoint?.relay;
+    if (value?.version !== 2 || value.host?.id !== hostID || value.host.publicKey !== hostKey || !relay || relay.origin !== state.origin
+      || !Number.isSafeInteger(value.expiresAt) || value.expiresAt <= now || value.expiresAt > now + 600
+      || typeof value.host.name !== "string" || value.host.name.length > 128) throw new RelayFailure("invalid_directory");
+    await verify(signed, "bootstrap", hostKey);
+    const permit = relay.admission?.value;
+    if (permit?.kind !== "enrollment" || permit.hostID !== hostID || permit.origin !== state.origin || permit.permitID !== value.windowID || permit.expiresAt !== value.expiresAt) throw new RelayFailure("invalid_directory");
+    await verify(relay.admission, "relay3-permit", hostKey);
+    return { hostID, value: data, expires: value.expiresAt };
+  }
   private bridge(): WebSocket | undefined { return this.ctx.getWebSockets("bridge").find(x => x.readyState === 1); }
   private claimNonce(key: string, expires: number, now: number): void {
     this.ctx.storage.sql.exec("DELETE FROM nonces WHERE expires <= ?", now);
