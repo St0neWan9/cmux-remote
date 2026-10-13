@@ -8,17 +8,17 @@ public actor CloudRelayService {
     private let router: BridgeRouter
     private let authority: ConnectionAuthority
     private let onConnected: (@Sendable () -> Void)?
-    private let dial: @Sendable (URL, [String: String]) -> CloudRelaySocket
+    private let dial: @Sendable (URL, [String: String]) -> any CloudRelayConnecting
     private var running: Task<Void, Never>?
     private var registry: Task<Void, Never>?
     private var heartbeat: Task<Void, Never>?
     private var failure: String?
-    private var socket: CloudRelaySocket?
+    private var socket: (any CloudRelayConnecting)?
     private var writer: LinkPacketWriter?
     private var sessions: [String: LinkServerSession] = [:]
     private var phase = "stopped"
     private var generation: UUID?
-    public init(origin: String, secret: String, router: BridgeRouter, authority: ConnectionAuthority, dial: @escaping @Sendable (URL, [String: String]) -> CloudRelaySocket = { CloudRelaySocket(url: $0, headers: $1) }, onConnected: (@Sendable () -> Void)? = nil) throws {
+    public init(origin: String, secret: String, router: BridgeRouter, authority: ConnectionAuthority, dial: @escaping @Sendable (URL, [String: String]) -> any CloudRelayConnecting = { CloudRelaySocket(url: $0, headers: $1) }, onConnected: (@Sendable () -> Void)? = nil) throws {
         self.onConnected = onConnected; self.origin = try RelayOrigin(origin); self.secret = secret; self.router = router; self.authority = authority; self.dial = dial
         guard secret.utf8.count >= 32, secret.utf8.count <= 256, !secret.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else { throw BridgeError("invalid_identity", "Invalid private relay registration key.") }
     }
@@ -81,14 +81,17 @@ public actor CloudRelayService {
         guard let channel = envelope.channelID, UUID(uuidString: channel) != nil else { throw BridgeError("invalid_response", "Invalid relay channel.") }
         switch envelope.kind {
         case "open":
-            guard sessions[channel] == nil, sessions.count < 20, let client = envelope.clientID,
-                  client.count == 64, client.allSatisfy({ $0.isASCII && $0.isHexDigit }) else { throw BridgeError("invalid_response", "Invalid or full relay channel.") }
+            guard let client = envelope.clientID, client.count == 64, client.allSatisfy({ $0.isASCII && $0.isHexDigit }) else { throw BridgeError("invalid_response", "Invalid relay channel.") }
+            // A full or duplicate channel is refused alone; other phones keep their links.
+            guard sessions[channel] == nil, sessions.count < 20 else { try await send(RelayEnvelope(kind: "close", channelID: channel)); return }
             let session = LinkServerSession(router: router, authority: authority, send: { [weak self] data in
                 guard let self else { throw CancellationError() }; try await self.send(RelayEnvelope(kind: "data", channelID: channel, data: data))
             }, terminate: { [weak self] in Task { try? await self?.send(RelayEnvelope(kind: "close", channelID: channel)) } }, expectedClientID: client)
             sessions[channel] = session; await session.start()
         case "data":
-            guard let bytes = envelope.data, bytes.count <= 2_100_000, let session = sessions[channel] else { throw BridgeError("invalid_response", "The relay sent data for an unknown channel.") }
+            guard let bytes = envelope.data, bytes.count <= 2_100_000 else { throw BridgeError("invalid_response", "Invalid relay data.") }
+            // Packets can cross a revocation or local close in flight; end only that channel.
+            guard let session = sessions[channel] else { try await send(RelayEnvelope(kind: "close", channelID: channel)); return }
             await session.receive(bytes)
         case "close": await sessions.removeValue(forKey: channel)?.close()
         default: throw BridgeError("invalid_response", "Unknown relay operation.")

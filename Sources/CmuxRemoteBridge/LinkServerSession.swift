@@ -103,6 +103,8 @@ actor LinkServerSession {
                     defer { group.cancelAll() }; try await group.next()
                 }
             }
+        } catch is CancellationError {
+            // The client cancelled this request only; the link and its other requests continue.
         } catch { await close() }
     }
     private func observe(_ frame: LinkFrame, clientID: String) async {
