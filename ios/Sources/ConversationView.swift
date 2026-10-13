@@ -26,6 +26,7 @@ struct ConversationView: View {
     @State private var selectedToolDetail: ToolDetailReference?
     /// The page's height above the keyboard; the composer may use half of it.
     @State private var pageHeight: CGFloat = 700
+    @FocusState private var composerFocused: Bool
     private let hostName: String
     init(model: ConversationModel, hostName: String = "") {
         _model = State(initialValue: model); self.hostName = hostName
@@ -37,6 +38,7 @@ struct ConversationView: View {
                 timeline(bottom: viewport.size.height)
             }
             .scrollClipDisabled()
+            .modifier(InitialBottomAnchor())
             .coordinateSpace(name: "chatTimeline")
             .onPreferenceChange(TimelineBottomPreferenceKey.self) { bottom in
                 // Scrolling reports every frame; only a real change may invalidate the timeline.
@@ -47,6 +49,8 @@ struct ConversationView: View {
             }
             .modifier(TimelineScrollInteraction(userScrolling: $userScrolling, atLatest: $atLatest, latestVisible: latestVisible))
             .scrollDismissesKeyboard(.interactively)
+            // A tap anywhere in the conversation puts the keyboard away; rows keep their own taps.
+            .simultaneousGesture(TapGesture().onEnded { composerFocused = false })
             .refreshable { await model.refresh() }
             .overlay(alignment: .bottom) {
                 if !atLatest {
@@ -56,6 +60,8 @@ struct ConversationView: View {
                     }.buttonStyle(.plain).accessibilityLabel(String(localized: "chat.latest")).accessibilityIdentifier("chat.latest").padding(.bottom, 10)
                 }
             }
+            // A cached conversation already has its messages, so no change below fires when the page opens.
+            .onAppear { if !model.messages.isEmpty { initiallyScrolled = true; Task { proxy.scrollTo("latest", anchor: .bottom) } } }
             .onChange(of: model.timelineItems.last?.id) { _, _ in
                 if !initiallyScrolled && !model.messages.isEmpty { proxy.scrollTo("latest", anchor: .bottom); initiallyScrolled = true }
                 else if atLatest { proxy.scrollTo("latest", anchor: .bottom) }
@@ -91,7 +97,7 @@ struct ConversationView: View {
                     } else { Text(String(localized: "chat.working")).font(.footnote) }; Spacer(); Label(model.session.agent.capitalized, systemImage: "sparkles").font(.caption) }
                         .foregroundStyle(.secondary).padding(.horizontal, 12)
                 } else if !model.canSend { Text(String(localized: "sessions.read_only")).font(.caption).foregroundStyle(.secondary) }
-                ChatComposer(draft: $model.draft, canSend: model.canSend, busy: model.busy, working: model.hasActiveResponse,
+                ChatComposer(draft: $model.draft, focused: $composerFocused, canSend: model.canSend, busy: model.busy, working: model.hasActiveResponse,
                              images: model.imageDraft.images, removeImage: model.imageDraft.remove,
                              send: { Task { await model.send() } }, stop: { Task { await model.interrupt() } },
                              canReadProject: model.client.allows(.projectRead), canReadFeed: model.client.allows(.feedRead), showProject: { selectedFile = ""; showProject = true }, showFeed: { showFeed = true },
@@ -190,6 +196,7 @@ struct ConversationView: View {
                     MarkdownMessageView(text: preview)
                 }.modifier(HeaderContentEffect(bottom: bottom))
             }
+            ForEach(model.outgoing) { prompt in OutgoingPromptRow(prompt: prompt).modifier(HeaderContentEffect(bottom: bottom)) }
             if let error = model.error {
                 Label(error, systemImage: "exclamationmark.circle").font(.footnote).foregroundStyle(.red).padding(12)
                     .frame(maxWidth: .infinity, alignment: .leading).background(Color.red.opacity(0.055), in: RoundedRectangle(cornerRadius: 14))

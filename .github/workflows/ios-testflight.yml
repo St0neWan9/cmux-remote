@@ -12,7 +12,7 @@ on:
       upload:
         description: Upload the signed IPA to TestFlight
         type: boolean
-        default: false
+        default: true
 permissions:
   contents: read
 concurrency:
