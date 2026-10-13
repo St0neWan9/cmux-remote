@@ -13,6 +13,7 @@ public actor SessionService {
     private let files: ProjectFilePolicy
     private let reader = TranscriptReader()
     private var records: [String: Record] = [:]
+    private var workingDirectories: [String: (size: Int, cwd: String?)] = [:]
     private let mutations: MutationLedger
     private var journal: MutationJournal?
     private var liveBindings: [String: JSONValue] = [:]
@@ -43,6 +44,14 @@ public actor SessionService {
         })])
     }
 
+    /// Cached by transcript size, so only a file that grew is read again.
+    private func workingDirectory(_ path: String) -> String? {
+        guard let size = (try? FileManager.default.attributesOfItem(atPath: path)[.size] as? NSNumber)?.intValue, size > 0 else { return nil }
+        if let cached = workingDirectories[path], cached.size == size { return cached.cwd }
+        let cwd = TranscriptWorkingDirectory().read(path: path, size: size)
+        if workingDirectories.count >= 512 { workingDirectories.removeAll() }
+        workingDirectories[path] = (size, cwd); return cwd
+    }
     public func sessions() async throws -> [SessionDescriptor] {
         let vault = try await cmux.request("vault.sessions", params: ["limit": .number(200)])
         let dump = try? await cmux.request("chat.sessions.dump", params: [:])
@@ -67,6 +76,11 @@ public actor SessionService {
             record.descriptor.surfaceID = item["surface_id"].string
             record.descriptor.state = item["state"].string ?? "unknown"
             discovered[id] = record
+        }
+        for (id, record) in discovered {
+            guard let path = record.transcript, let cwd = workingDirectory(path) else { continue }
+            let old = record.descriptor
+            discovered[id]?.descriptor = SessionDescriptor(id: old.id, agent: old.agent, title: old.title, cwd: cwd, workspaceID: old.workspaceID, surfaceID: old.surfaceID, state: old.state)
         }
         records = discovered
         for (id, event) in liveBindings {
