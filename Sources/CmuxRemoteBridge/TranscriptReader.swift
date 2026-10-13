@@ -69,7 +69,7 @@ public actor TranscriptReader {
         }
         let raw = String(decoding: data[...end], as: UTF8.self).split(separator: "\n", omittingEmptySubsequences: false).dropLast().map(String.init)
         let compaction = agent == "claude" ? ClaudeCompactionSummary().replace(raw) : .init(lines: raw, markers: [])
-        let lines = agent == "claude" ? ClaudeQueuedPromptNormalizer().normalize(compaction.lines) : raw
+        let lines = agent == "claude" ? ClaudeTaskNoticeRewriter().normalize(ClaudeQueuedPromptNormalizer().normalize(compaction.lines)) : raw
         let result = agent == "claude" ? ClaudeTranscriptParser().parse(lines: lines, startingSeq: 0) : CodexTranscriptParser().parse(lines: lines, startingSeq: 0)
         var messages = result.messages
         for update in result.updatedMessages {
@@ -95,7 +95,7 @@ public actor TranscriptReader {
         let data = try window(path: path, size: observed.size).data
         guard let end = data.lastIndex(of: 10) else { throw BridgeError("detail_not_found", "No complete tool record is available.", status: 404) }
         let raw = String(decoding: data[...end], as: UTF8.self).split(separator: "\n", omittingEmptySubsequences: false).dropLast().map(String.init)
-        let lines = agent == "claude" ? ClaudeQueuedPromptNormalizer().normalize(ClaudeCompactionSummary().replace(raw).lines) : raw
+        let lines = agent == "claude" ? ClaudeTaskNoticeRewriter().normalize(ClaudeQueuedPromptNormalizer().normalize(ClaudeCompactionSummary().replace(raw).lines)) : raw
         try Task.checkCancellation()
         let result = agent == "claude"
             ? ClaudeTranscriptParser(maxBodyCharacters: 33_554_432, maxInputDetailCharacters: 33_554_432).parse(lines: lines, startingSeq: 0)
