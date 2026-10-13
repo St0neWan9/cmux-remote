@@ -24,13 +24,21 @@ private actor PhoneUIBackend: CmuxControlling {
             .object(["id": .string("plan"), "request_id": .string("plan"), "workstream_id": .string(workstream), "source": .string("claude"), "kind": .string("exitPlan"), "status": .string("pending"), "title": .string("UI 测试：计划反馈"), "plan": .string("1. 验证白色页面\n2. 验证本地表单状态\n\n此计划不会执行代码或修改实际权限。")]),
             .object(["id": .string("result"), "workstream_id": .string(workstream), "source": .string("claude"), "kind": .string("toolResult"), "status": .string("telemetry"), "tool_name": .string("UI 测试：错误结果"), "tool_result": .string("UI_FIXTURE_ERROR_OUTPUT_VISIBLE"), "tool_result_is_error": .bool(true)])]
     }
+    /// Opt-in fixture behaviors, switched by an empty file in the state directory.
+    private func flag(_ name: String) -> Bool {
+        FileManager.default.fileExists(atPath: root.deletingLastPathComponent().appendingPathComponent(name).path)
+    }
+    private static func append(_ rows: [JSONValue], to transcript: URL) throws {
+        let handle = try FileHandle(forWritingTo: transcript); defer { try? handle.close() }; try handle.seekToEnd()
+        for row in rows { var data = try JSONEncoder().encode(row); data.append(10); try handle.write(contentsOf: data) }
+    }
     func request(_ method: String, params: [String: JSONValue]) async throws -> JSONValue {
         switch method {
         case "system.ping": return .object(["pong": .bool(true)])
         case "system.capabilities": return .object(["methods": .array([])])
         case "workspace.list": return .object(["workspaces": .array([.object(["id": .string(workspace), "title": .string("UI fixture workspace")])])])
         case "vault.sessions": return .object(["sessions": .array([.object(["session_id": .string("fixture-session"), "agent": .string("claude"), "title": .string("UI 测试：连接与页面"), "cwd": .string(root.path), "file": .string(transcript.path)])])])
-        case "chat.sessions.dump": return .object(["sessions": .array([.object(["session_id": .string("fixture-session"), "agent": .string("claude"), "workspace_id": .string(workspace), "surface_id": .string(surface), "state": .string("idle"), "cwd": .string(root.path)])])])
+        case "chat.sessions.dump": return .object(["sessions": .array([.object(["session_id": .string("fixture-session"), "agent": .string("claude"), "workspace_id": .string(workspace), "surface_id": .string(surface), "state": .string(flag("report-working") ? "working" : "idle"), "cwd": .string(root.path)])])])
         case "surface.input_state": return .object(["agent": .bool(true), "workspace_id": .string(workspace), "surface_id": .string(surface), "blocks_typing": .bool(false)])
         case "surface.read_text": return .object(["text": .string("")])
         case "feed.list": return .object(["items": .array(items)])
@@ -61,8 +69,11 @@ private actor PhoneUIBackend: CmuxControlling {
             let replyText = "UI fixture received \(images.count) image(s) and your prompt. No agent was started."
             let reply: JSONValue = .object(["type": .string("assistant"), "uuid": .string(UUID().uuidString), "timestamp": .string(stamp), "message": .object(["content": .array([.object(["type": .string("text"), "text": .string(replyText)])])])])
             let duration: JSONValue = .object(["type": .string("system"), "subtype": .string("turn_duration"), "durationMs": .number(2500), "timestamp": .string(stamp)])
-            let handle = try FileHandle(forWritingTo: transcript); defer { try? handle.close() }; try handle.seekToEnd()
-            for row in [user, reply, duration] { var data = try JSONEncoder().encode(row); data.append(10); try handle.write(contentsOf: data) }
+            // An opt-in delay stands in for an agent that records the prompt late, so the phone's pending bubble stays visible.
+            if flag("delay-transcript") {
+                let transcript = transcript
+                Task { try? await Task.sleep(for: .seconds(6)); try? Self.append([user, reply, duration], to: transcript) }
+            } else { try Self.append([user, reply, duration], to: transcript) }
             let evidence: JSONValue = .object(["image_count": .number(Double(images.count)), "formats": .array(images.map { $0["format"] }), "text": params["text"] ?? .string("")])
             let observed = root.deletingLastPathComponent().appendingPathComponent("observed-send.json")
             try JSONEncoder().encode(evidence).write(to: observed, options: .atomic)
