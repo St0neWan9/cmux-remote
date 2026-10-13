@@ -2,6 +2,10 @@
 
 This document describes the companion architecture. The implemented unified connection layer is specified in [Connection v2](CONNECTION-V2.md). The development Mac sidebar/snapshot-mirror implementation is described in [the Mac guide](MAC-EXTENSION.md); live acceptance and remaining continuity work are tracked in [the unified connection plan](UNIFIED-CONNECTION-PLAN.md).
 
+The planned LAN/cloud WebSocket transport migration is specified in
+[WebSocket and Cloudflare relay](WEBSOCKET-RELAY.md). It is a design proposal;
+the current client still uses HTTPS and foreground snapshot polling.
+
 ## Scope
 
 One repository contains a Swift Mac CLI/Bridge, shared wire models, a Swift client, and a native SwiftUI iPhone app. The first backend is the installed official cmux Mac app. The phone and Mac are on a reachable LAN. No cloud account, public relay, provider API integration, terminal emulator on the phone, or modification of cmux is required.
