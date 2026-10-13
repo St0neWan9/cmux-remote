@@ -187,6 +187,10 @@ final class AppModel {
                 guard self.client === client, refreshGeneration == request, !Task.isCancelled else { return }
                 workspaces = metadata
             }
+            if let updated = try? await client.refreshRelayHint() {
+                guard self.client === client, refreshGeneration == request, !Task.isCancelled else { return }
+                try store.saveConnection(updated); saved = updated
+            }
             error = nil
         } catch { if self.client === client, refreshGeneration == request, !Task.isCancelled { self.error = ErrorPresentation().message(error) } }
     }

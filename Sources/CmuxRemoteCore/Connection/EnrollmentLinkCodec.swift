@@ -18,6 +18,10 @@ public struct EnrollmentLinkCodec: Sendable {
     public func validate(_ bootstrap: SignedValue<EnrollmentBootstrap>, now: Int) throws {
         let value = bootstrap.value
         try ClientScope(workspaces: value.workspaces, capabilities: [.workspaceRead]).validate()
+        if let relay = value.endpoint.relay {
+            guard relay.admission.value.kind == "enrollment", relay.admission.value.permitID == value.windowID, relay.admission.value.expiresAt == value.expiresAt else { throw BridgeError("invalid_pairing", "The relay permit belongs to another enrollment window.") }
+            try relay.validate(host: value.host, now: now)
+        }
         try value.endpoint.validate(); try IdentityCryptography().validate(value.host)
         guard value.version == 2, UUID(uuidString: value.windowID) != nil, value.expiresAt > now, value.expiresAt - now <= 600 else { throw BridgeError("enrollment_expired", "Open a new enrollment window on the Mac.") }
         try IdentityCryptography().verify(bootstrap, domain: "bootstrap", publicKey: value.host.publicKey)

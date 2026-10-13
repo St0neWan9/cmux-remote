@@ -6,3 +6,5 @@ public struct SignedValue<Value: Codable & Sendable>: Codable, Sendable {
     public var signature: String
     public init(value: Value, signature: String) { self.value = value; self.signature = signature }
 }
+
+extension SignedValue: Equatable where Value: Equatable {}

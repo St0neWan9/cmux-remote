@@ -20,6 +20,9 @@ struct OwnerControlRouter: Sendable {
                 case "bridge.stop": value = await sharing.stop()
                 default: value = await sharing.status()
                 }
+            case "relay.configure":
+                guard let sharing else { throw BridgeError("sharing_unsupported", "Upgrade the Bridge to configure relay access.") }
+                value = try await sharing.configureRelay(origin: params["origin"].string, keyFile: params["key_file"].string)
             case "bridge.workspaces": value = try await service.workspaces()
             case "enrollment.open":
                 guard let host = params["host"].string, let port = params["port"].int else { throw BridgeError("invalid_input", "Choose the host endpoint.") }

@@ -1,9 +1,9 @@
 # 统一 WebSocket 协议与 Cloudflare 中转方案
 
-状态：设计文档，尚未实现、部署或完成公网验收。更新时间：2026-10-13。
+状态：首轮代码已实现，公网部署与完整验收未完成。更新时间：2026-10-13。
 
-本文定义下一阶段的实现边界。文中的接口、参数、目录和数值是计划合同，
-不能当作当前版本已经可用的功能或命令。
+本文保留设计合同。当前实现及执行过的检查见下方进度记录；
+未列为已实现的合同条目仍是后续工作，不能作为已完成能力。
 
 ## 1. 目标与当前状态
 
@@ -229,7 +229,7 @@ Cloudflare 官方 DO 接收消息上限为 32 MiB；不能因此把应用上限�
 | E. 订阅 | Bridge 观察与共享客户端、前台页面生命周期 | 同时序初始快照和订阅，撤销/后台及时取消 |
 | F. 部署验收 | Cloudflare 实际环境与两端设备 | 直连、公网、断网、重连与结果未知流程有证据 |
 
-初始计划参数（尚未可用）：
+当前代码支持的启动参数：
 
 ```sh
 cmux-remote serve --relay https://YOUR-RELAY.workers.dev \
@@ -293,3 +293,37 @@ relay origin 仅接受合法 HTTPS origin，拒绝 URL 用户信息、查询、�
 - [Cloudflare Workers 计费](https://developers.cloudflare.com/workers/platform/pricing/)
 - [Apple CryptoKit HPKE](https://developer.apple.com/documentation/cryptokit/hpke)
 - [RFC 9180](https://www.rfc-editor.org/rfc/rfc9180.html)
+
+## 当前实现与提交时的证据
+
+截至本次提交，已接入：
+
+- LAN `/v3/link` 与 Cloudflare 中转复用 authenticated HPKE 消息和固定资源路由。
+- 请求关联、每设备请求证明、响应 64 KiB 分块与逐块 ACK、慢消费者 deadline。
+- 公网出站 Bridge、SQLite DO 注册与接入证明、nonce 防重放、连接/帧/速率限制。
+- LAN 建连不可达时尝试中转；修改操作不自动重发，继续使用原操作回执。
+- 历史/预览/Feed 订阅失效通知，退后台取消，网络恢复后重新读取与订阅。
+- Mac 原生中转设置、owner 配置、私有密钥文件、resident 配置恢复和停止双路径。
+- QR 中转配对与批准后的设备证明；已配对 iPhone 可刷新并保存主机签名的路由提示。
+
+执行过的检查：
+
+- 一次全量 Swift 测试执行 257 个测试、52 个 suite，全部通过。该次 `verify.sh`
+  后续手机状态检查失败：可选路由提示读取影响 Feed-only 的模拟场景。修复后
+  单独手机状态检查通过；最终修改后没有再运行完整验证脚本。
+- 后续 7 个直连/真实 Cloudflare 本地运行时/边界测试通过，包括实际多块响应、
+  6 个并发读取、操作回执去重、订阅撤销、跨握手借用请求证明拒绝、慢消费者
+  deadline。最初大文本会被历史阅读器裁剪；已改为多个记录并通过分块断言，
+  不以长输入字数作为实际多块传输的证据。
+- Worker TypeScript 与 Wrangler dry-run 打包通过；两个真实 SQLite DO 测试通过，
+  覆盖独立通道、接入撤销、重放、借用许可和过期窗口。
+- Mac app/helper 编译与签名通过，iOS 目标编译通过。后续仅 AppModel 可选提示
+  错误处理及测试 fixture 修改未重新做原生构建。
+- 独立测试版 Mac 设置窗口已实际打开并检查中转配置行，沿用原生表单布局；
+  未修改用户运行中的 cmux，测试进程已在提交时清理。
+
+按用户要求先提交代码，停止进一步验收。尚未完成：公网 Cloudflare 部署、
+蜂窝/真机/两 Mac 验收、DO 生产休眠恢复验收、加密协议外部审计。
+上传仍复用现有有界请求 body；独立 blob 上传消息尚未实现。订阅当前采用
+初始失效通知和权威快照重读，尚未实现独立持久事件游标缓存与增量回放。
+这些限制不应被测试名称、编译成功或 dry-run 打包表述为已经完成。

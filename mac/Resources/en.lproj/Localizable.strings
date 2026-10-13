@@ -119,3 +119,17 @@
 "mac.noWorkspacesMessage" = "Check that the remote workspaces are still running and this Mac has permission to access them.";
 "mac.error.missingWorkspace" = "This workspace or view is no longer available. Refresh the list and choose a running workspace.";
 "mac.certificateFingerprint" = "Certificate fingerprint";
+
+"mac.relay.origin" = "Cloud relay";
+"mac.relay.keyFile" = "Registration key file";
+"mac.relay.keyPlaceholder" = "Absolute path to a private file";
+"mac.relay.save" = "Save Relay";
+"mac.relay.remove" = "Remove Relay";
+"mac.relay.hint" = "Optional. Stop sharing before editing. Devices use the same pairing over LAN or relay.";
+"mac.relay.status" = "Relay status";
+"mac.relay.state.stopped" = "Stopped";
+"mac.relay.state.connecting" = "Connecting…";
+"mac.relay.state.connected" = "Connected";
+"mac.relay.state.reconnecting" = "Reconnecting…";
+"mac.relay.error" = "Check the HTTPS relay address and owner-only registration key file.";
+"mac.relay.originPlaceholder" = "https://your-relay.workers.dev";

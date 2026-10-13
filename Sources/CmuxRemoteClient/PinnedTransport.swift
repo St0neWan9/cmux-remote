@@ -2,7 +2,7 @@ import Foundation
 import CmuxRemoteCore
 
 /// Exact certificate/endpoint pinning applies before enrollment or authenticated payloads are sent.
-final class PinnedTransport: Sendable {
+final class PinnedTransport: ResourceTransport {
     private let pairing: PairingConfiguration
     private let session: URLSession
     init(pairing: PairingConfiguration) {
@@ -42,6 +42,18 @@ final class PinnedTransport: Sendable {
             throw BridgeError(object?["error"]["code"].string ?? "connection_failed", object?["error"]["message"].string ?? "The Bridge could not complete the request.", status: response.statusCode)
         }
         return try decoder.decode(T.self, from: data)
+    }
+    func exchange(_ path: String, method: String, query: [String: String], body: Data?, authorization: (@Sendable (String, Data) throws -> String)?) async throws -> LinkResourceResponse {
+        let request = try makeRequest(path, method: method, query: query, body: body, authorization: authorization)
+        let (bytes, raw) = try await session.bytes(for: request)
+        defer { bytes.task.cancel() }
+        guard let response = raw as? HTTPURLResponse, response.expectedContentLength <= 8_388_608 else { throw BridgeError("invalid_response", "The response exceeds its bound.", status: 502) }
+        var data = Data()
+        for try await byte in bytes {
+            guard data.count < 8_388_608 else { throw BridgeError("invalid_response", "The response exceeds its bound.", status: 502) }
+            data.append(byte)
+        }
+        return LinkResourceResponse(status: response.statusCode, data: data, contentType: response.mimeType ?? "application/json")
     }
     private func makeRequest(_ path: String, method: String, query: [String: String], body: Data?, authorization: (@Sendable (String, Data) throws -> String)?) throws -> URLRequest {
         guard path.hasPrefix("/v1/") || path.hasPrefix("/v2/"), !path.contains(".."),

@@ -16,7 +16,32 @@ public struct BridgeRouter: Sendable {
         let response = await respondResource(method: method, uri: uri, authorization: authorization, body: body)
         return (response.status, response.data)
     }
-    func respondResource(method: String, uri: String, authorization: String?, body: Data) async -> HTTPResourceResponse {
+    var linkAuthority: ConnectionAuthority? { authority }
+    /// Prevents a signed request from borrowing another authenticated link identity.
+    func verifyChannelIdentity(_ frame: LinkFrame, clientID: String) throws {
+        if frame.uri == "/v2/identity" || frame.uri == "/v2/enrollment/bootstrap" { return }
+        if frame.uri?.hasPrefix("/v2/enrollment/") == true {
+            let signed = try JSONDecoder().decode(SignedValue<EnrollmentRequest>.self, from: frame.data ?? Data())
+            guard signed.value.clientID == clientID else { throw BridgeError("unauthorized", "The enrollment belongs to another device.", status: 401) }
+        } else {
+            guard let header = frame.authorization, header.hasPrefix("CmuxV2 "), header.utf8.count <= 4096,
+                  let data = Data(base64Encoded: String(header.dropFirst(7))),
+                  let proof = try? JSONDecoder().decode(SignedValue<RequestProof>.self, from: data), proof.value.clientID == clientID else { throw BridgeError("unauthorized", "The request belongs to another device.", status: 401) }
+        }
+    }
+    func subscriptionIdentity(_ frame: LinkFrame, clientID: String) async throws -> String {
+        guard frame.method == "GET", let uri = frame.uri, let authority, isSubscriptionURI(uri) else { throw BridgeError("invalid_route", "This resource cannot be subscribed.") }
+        let client = try await authority.authorize(header: frame.authorization, method: "GET", uri: uri, body: Data())
+        guard client.id == clientID else { throw BridgeError("unauthorized", "The subscription belongs to another device.", status: 401) }
+        return client.id
+    }
+    private func isSubscriptionURI(_ uri: String) -> Bool {
+        guard let components = URLComponents(string: uri), components.scheme == nil, components.host == nil else { return false }
+        let path = components.path.split(separator: "/").map(String.init)
+        if path == ["v2", "sessions"] || path == ["v2", "feed"] { return true }
+        return path.count == 4 && path[0...1] == ["v2", "sessions"] && ["history", "preview"].contains(path[3])
+    }
+    func respondResource(method: String, uri: String, authorization: String?, body: Data, subscriptionClientID: String? = nil) async -> HTTPResourceResponse {
         do {
             guard body.count <= 1_048_576 else { throw BridgeError("too_large", "The request is too large.", status: 413) }
             guard let components = URLComponents(string: uri), components.scheme == nil, components.host == nil else { throw BridgeError("invalid_route", "Invalid resource path.") }
@@ -35,7 +60,10 @@ public struct BridgeRouter: Sendable {
                     default: throw BridgeError("not_found", "This enrollment resource is unavailable.", status: 404)
                     }
                 }
-                client = try await authority.authorize(header: authorization, method: method, uri: uri, body: body)
+                if let subscriptionClientID {
+                    guard method == "GET", isSubscriptionURI(uri), body.isEmpty else { throw BridgeError("invalid_route", "Invalid subscription read.") }
+                    client = try await authority.currentClient(subscriptionClientID)
+                } else { client = try await authority.authorize(header: authorization, method: method, uri: uri, body: body) }
                 path[0] = "v1"
             } else {
                 guard path.first == "v1", let legacyToken, constantTimeEqual(authorization ?? "", "Bearer " + legacyToken) else { throw BridgeError("unauthorized", "Enroll this device to continue. Legacy pairing is disabled unless explicitly enabled.", status: 401) }
@@ -47,6 +75,10 @@ public struct BridgeRouter: Sendable {
             } else { access = nil }
             let data: Data
             var image = false
+            if method == "GET", path == ["v1", "relay"] {
+                guard let authority, let client else { throw BridgeError("unauthorized", "Relay hints require an enrolled device.", status: 401) }
+                return HTTPResourceResponse.json(try encode(await authority.relayHint(clientID: client.id)))
+            }
             if path.count == 4, path[0...1] == ["v1", "workspaces"], path[3] == "mirror", method == "GET" {
                 guard let client, let authority, let mirrors else { throw BridgeError("mirror_unsupported", "Terminal mirroring requires scoped v2 enrollment and a mirror-enabled Bridge.", status: 422) }
                 _ = try await authority.require(client.id, capability: .terminalRead, workspace: path[2])

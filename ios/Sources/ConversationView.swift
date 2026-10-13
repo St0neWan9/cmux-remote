@@ -189,9 +189,8 @@ struct ConversationView: View {
             Button(String(localized: "pair.cancel"), role: .cancel) {}
         } message: { Text(String(localized: "chat.hard_stop_note")) }
         .task(id: phase) {
-            guard phase == .active else { model.suspendReads(); return }; model.resumeReads(); await model.refresh()
-            let ticker = RefreshTicker(); defer { ticker.stop() }
-            for await _ in ticker.start() { guard !Task.isCancelled else { break }; await model.refresh() }
+            guard phase == .active else { model.suspendReads(); return }; model.resumeReads()
+            await model.observeChanges()
         }
         .environment(\.colorScheme, .light)
         .accessibilityAction(.escape) { dismiss() }

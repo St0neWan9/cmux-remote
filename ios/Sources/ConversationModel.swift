@@ -85,6 +85,12 @@ final class ConversationModel {
         interruptedUserID = messages.last(where: { $0.role == .user })?.id
     }
     /// Suspending reads leaves durable mutations and their captured drafts intact.
+    func observeChanges() async {
+        let paths = ["/v1/sessions/\(session.id)/history", "/v1/sessions/\(session.id)/preview", "/v1/sessions"]
+        for await _ in client.changes(paths: paths) {
+            guard !Task.isCancelled, readsEnabled else { return }; await refresh()
+        }
+    }
     func suspendReads() { readsEnabled = false; refreshReads.suspend(); olderReads.suspend(); loadingOlder = false }
     func resumeReads() { readsEnabled = true }
     func refresh() async {
