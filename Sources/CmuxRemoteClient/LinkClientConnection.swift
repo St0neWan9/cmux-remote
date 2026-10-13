@@ -28,7 +28,22 @@ actor LinkClientConnection {
     /// Recently cancelled IDs; the Bridge may already have frames for them in flight.
     private var abandoned: [String] = []
     private var closed = false
-    init(host: HostIdentity, key: Data, endpoint: BridgeEndpoint, relayDial: @escaping @Sendable (URL, [String: String]) -> LinkSocket = { LinkSocket(url: $0, headers: $1, timeout: 15) }) { self.host = host; self.key = key; self.endpoint = endpoint; self.relayDial = relayDial }
+    private let report: @Sendable (LinkState) -> Void
+    /// A pong that does not arrive within this time means the path died without the socket noticing.
+    private static let pongDeadline: Duration = .seconds(10)
+    init(host: HostIdentity, key: Data, endpoint: BridgeEndpoint, relayDial: @escaping @Sendable (URL, [String: String]) -> LinkSocket = { LinkSocket(url: $0, headers: $1, timeout: 15) },
+         report: @escaping @Sendable (LinkState) -> Void = { _ in }) {
+        self.host = host; self.key = key; self.endpoint = endpoint; self.relayDial = relayDial; self.report = report
+    }
+    /// Drops a link the person or the network says may be dead, then dials again.
+    ///
+    /// A half-open socket otherwise keeps taking requests that each wait out their deadline. An in-flight send
+    /// keeps the link: dropping it would turn a write that may have landed into an unknown outcome.
+    func reconnect() async {
+        guard !closed else { return }
+        if !pending.values.contains(where: { $0.method == "POST" }) { await failed(URLError(.networkConnectionLost)) }
+        try? await connect()
+    }
     func updateRelay(_ relay: RelayEndpoint?) { endpoint.relay = relay }
     func exchange(_ frame: LinkFrame) async throws -> LinkResourceResponse {
         try Task.checkCancellation(); try await connect(); try Task.checkCancellation()
@@ -59,6 +74,7 @@ actor LinkClientConnection {
         guard !closed else { throw CancellationError() }
         if socket != nil { return }
         if preparing == nil {
+            report(.connecting)
             let host = host, key = key, endpoint = endpoint, relayDial = relayDial
             preparing = Task {
                 let handshake = try LinkClientHandshake(host: host, privateKey: key)
@@ -81,12 +97,14 @@ actor LinkClientConnection {
         }
         let current = preparing!
         do {
-            let ready = try await current.value
+            let ready: Prepared
+            do { ready = try await current.value } catch { if !closed { report(.disconnected) }; throw error }
             guard !closed else { ready.socket.close(); throw CancellationError() }
             if socket == nil {
                 socket = ready.socket; cipher = ready.cipher; writer = WebSocketSendQueue(socket: ready.socket, cipher: ready.cipher)
+                report(.connected)
                 heartbeat = Task { [weak self] in
-                    do { while !Task.isCancelled { try await Task.sleep(for: .seconds(25)); try await ready.socket.ping() } }
+                    do { while !Task.isCancelled { try await Task.sleep(for: .seconds(25)); try await Self.ping(ready.socket) } }
                     catch { if !Task.isCancelled { await self?.failed(error, source: ready.socket) } }
                 }
                 receiver = Task { [weak self] in
@@ -122,7 +140,12 @@ actor LinkClientConnection {
         if pending[frame.id] == nil, subscriptions[frame.id] == nil, abandoned.contains(frame.id) { return }
         if frame.kind == "event", let continuation = subscriptions[frame.id] {
             if frame.status != 200 || frame.final == true {
-                subscriptions[frame.id] = nil; continuation.finish(throwing: BridgeError("unauthorized", "The subscription ended; refresh its authorization.", status: frame.status ?? 401))
+                // Only a refused grant is final; a missing or failing resource ends this stream and is resubscribed.
+                let status = frame.status ?? 401
+                let failure = status == 401 || status == 403
+                    ? BridgeError("unauthorized", "The subscription ended; refresh its authorization.", status: status)
+                    : BridgeError("subscription_ended", "The subscription ended; it will be renewed.", status: status)
+                subscriptions[frame.id] = nil; continuation.finish(throwing: failure)
             } else { continuation.yield(frame) }
             return
         }
@@ -148,10 +171,22 @@ actor LinkClientConnection {
         }
         subscriptions.removeValue(forKey: id)?.finish()
         abandoned.append(id); if abandoned.count > 64 { abandoned.removeFirst() }
+        // A read that outlived its deadline points at a dead link: the next request dials again instead of waiting too.
+        if timedOut { await failed(URLError(.timedOut)); return }
         try? await send(LinkFrame(kind: "cancel", id: id))
+    }
+    /// A ping with a deadline: a lost path never answers, and the socket alone may not report it.
+    private static func ping(_ socket: LinkSocket) async throws {
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            group.addTask { try await socket.ping() }
+            group.addTask { try await Task.sleep(for: pongDeadline); throw URLError(.timedOut) }
+            defer { group.cancelAll() }
+            try await group.next()
+        }
     }
     private func failed(_ error: any Error, source: LinkSocket? = nil) async {
         if let source, socket !== source { return }
+        if !closed { report(.disconnected) }
         heartbeat?.cancel(); heartbeat = nil
         receiver?.cancel(); receiver = nil; socket?.close(); socket = nil; cipher = nil
         let oldWriter = writer; writer = nil; await oldWriter?.close()

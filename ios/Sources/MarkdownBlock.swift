@@ -1,4 +1,5 @@
 import Foundation
+import CmuxRemoteCore
 
 /// Selectable Markdown segments preserve the original code inside each fence.
 struct MarkdownBlock: Identifiable {
@@ -7,6 +8,7 @@ struct MarkdownBlock: Identifiable {
     let code: Bool
     var headingLevel: Int? = nil
     var listMarker: String? = nil
+    var table: MarkdownTable? = nil
     static func parse(_ text: String) -> [Self] {
         var blocks: [Self] = []
         for (index, value) in text.components(separatedBy: "```").enumerated() {
@@ -21,7 +23,25 @@ struct MarkdownBlock: Identifiable {
             guard !content.isEmpty else { continue }
             if index % 2 == 1 { blocks.append(Self(id: blocks.count, text: content, code: true)); continue }
             var paragraph: [String] = []
-            for line in content.components(separatedBy: "\n") {
+            let lines = content.components(separatedBy: "\n")
+            var position = 0
+            while position < lines.count {
+                let line = lines[position]
+                // A pipe table runs from its header and delimiter rows to the last consecutive pipe row.
+                if MarkdownTable.isRow(line), position + 1 < lines.count, MarkdownTable(lines: [line, lines[position + 1]]) != nil {
+                    var end = position + 2
+                    while end < lines.count, MarkdownTable.isRow(lines[end]) { end += 1 }
+                    if let table = MarkdownTable(lines: Array(lines[position..<end])) {
+                        if !paragraph.isEmpty {
+                            blocks.append(Self(id: blocks.count, text: paragraph.joined(separator: "\n"), code: false))
+                            paragraph = []
+                        }
+                        blocks.append(Self(id: blocks.count, text: lines[position..<end].joined(separator: "\n"), code: false, table: table))
+                        position = end
+                        continue
+                    }
+                }
+                position += 1
                 let structural = structure(line)
                 if line.isEmpty || structural != nil {
                     if !paragraph.isEmpty {

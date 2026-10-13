@@ -258,3 +258,7 @@
 "sessions.sort.workspace" = "按工作区";
 "sessions.sort.time" = "按时间";
 "sessions.recent" = "最近";
+"connection.reconnecting" = "正在重新连接…";
+"connection.offline" = "无法连接到 Mac";
+"connection.retry" = "重试";
+"connection.offline_named" = "无法连接到 %@";

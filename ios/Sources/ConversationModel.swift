@@ -139,7 +139,11 @@ final class ConversationModel {
                 if message.role == .agent, case .prose(let value) = message.kind { return value.text }; return nil
             }.first
             preview = live?.text == committed ? nil : live?.text; error = mutationWarning
-        } catch { if refreshReads.isCurrent(request) { self.error = ErrorPresentation().message(error) } }
+        } catch {
+            // A lost link is shown and retried by the connection bar; the page keeps only errors about the conversation.
+            guard refreshReads.isCurrent(request) else { return }
+            self.error = ErrorPresentation().isConnectivity(error) ? mutationWarning : ErrorPresentation().message(error)
+        }
     }
     func older() async {
         guard readsEnabled, !Task.isCancelled, let seq = messages.first?.seq, let sourceGeneration = generation else { return }
@@ -157,7 +161,10 @@ final class ConversationModel {
                 messages.insert(contentsOf: page.messages.filter { !existing.contains($0.id) }, at: 0)
                 let imageIDs = Set(images.map(\.id)); images += (page.images ?? []).filter { !imageIDs.contains($0.id) }
                 timelineItems = ConversationTimeline().items(from: messages); hasMore = page.hasMore
-            } catch { if olderReads.isCurrent(request), generation == sourceGeneration { self.error = ErrorPresentation().message(error) } }
+            } catch {
+                guard olderReads.isCurrent(request), generation == sourceGeneration, !ErrorPresentation().isConnectivity(error) else { return }
+                self.error = ErrorPresentation().message(error)
+            }
         }
         if let reanchor, readsEnabled, olderReads.isCurrent(reanchor), generation == sourceGeneration { await refresh() }
     }
