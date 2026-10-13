@@ -24,6 +24,11 @@ private actor PhoneUIBackend: CmuxControlling {
             .object(["id": .string("plan"), "request_id": .string("plan"), "workstream_id": .string(workstream), "source": .string("claude"), "kind": .string("exitPlan"), "status": .string("pending"), "title": .string("UI 测试：计划反馈"), "plan": .string("1. 验证白色页面\n2. 验证本地表单状态\n\n此计划不会执行代码或修改实际权限。")]),
             .object(["id": .string("result"), "workstream_id": .string(workstream), "source": .string("claude"), "kind": .string("toolResult"), "status": .string("telemetry"), "tool_name": .string("UI 测试：错误结果"), "tool_result": .string("UI_FIXTURE_ERROR_OUTPUT_VISIBLE"), "tool_result_is_error": .bool(true)])]
     }
+    /// The vault title; a `no-vault-title` file stands in for a session cmux has not named.
+    private var vaultTitle: String {
+        if flag("no-vault-title") { return "" }
+        return (try? String(contentsOf: root.deletingLastPathComponent().appendingPathComponent("vault-title"), encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "UI 测试：连接与页面"
+    }
     /// Opt-in fixture behaviors, switched by an empty file in the state directory.
     private func flag(_ name: String) -> Bool {
         FileManager.default.fileExists(atPath: root.deletingLastPathComponent().appendingPathComponent(name).path)
@@ -37,7 +42,7 @@ private actor PhoneUIBackend: CmuxControlling {
         case "system.ping": return .object(["pong": .bool(true)])
         case "system.capabilities": return .object(["methods": .array([])])
         case "workspace.list": return .object(["workspaces": .array([.object(["id": .string(workspace), "title": .string("UI fixture workspace")])])])
-        case "vault.sessions": return .object(["sessions": .array([.object(["session_id": .string("fixture-session"), "agent": .string("claude"), "title": .string("UI 测试：连接与页面"), "cwd": .string(root.path), "file": .string(transcript.path)])])])
+        case "vault.sessions": return .object(["sessions": .array([.object(["session_id": .string("fixture-session"), "agent": .string("claude"), "title": .string(vaultTitle), "cwd": .string(root.path), "file": .string(transcript.path)])])])
         case "system.tree":
             // The tab name stands in for a cmux rename, which the bridge reads from the tree.
             let configured = try? String(contentsOf: root.deletingLastPathComponent().appendingPathComponent("tab-title"), encoding: .utf8)

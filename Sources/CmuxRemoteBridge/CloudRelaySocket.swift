@@ -18,9 +18,11 @@ public final class CloudRelaySocket: CloudRelayConnecting {
         return Data(text.utf8)
     }
     public func ping() async throws {
-        try await withCheckedThrowingContinuation { (done: CheckedContinuation<Void, any Error>) in
-            task.sendPing { error in if let error { done.resume(throwing: error) } else { done.resume() } }
-        }
+        let ping = WebSocketPing()
+        // Closing the session or cancelling the task can settle the ping twice; the helper keeps the first outcome.
+        return try await withTaskCancellationHandler {
+            try await ping.run { task.sendPing(pongReceiveHandler: $0) }
+        } onCancel: { ping.cancel() }
     }
     public func failureCode() -> String {
         let status = (task.response as? HTTPURLResponse)?.statusCode
