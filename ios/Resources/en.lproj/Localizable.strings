@@ -248,3 +248,4 @@
 "error.relay" = "The relay did not answer correctly. Check the relay address and try again.";
 "error.relay_origin" = "Enter an address starting with https://, without a path.";
 "chat.loading" = "Loading conversation…";
+"sessions.workspaces_title" = "Workspaces";
