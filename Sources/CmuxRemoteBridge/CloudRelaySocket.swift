@@ -2,7 +2,7 @@ import Foundation
 import CmuxRemoteCore
 
 /// Outgoing cloud WSS uses system PKI; the inner link authenticates Bridge separately.
-public final class CloudRelaySocket: Sendable {
+public final class CloudRelaySocket: CloudRelayConnecting {
     private let session: URLSession
     private let task: URLSessionWebSocketTask
     public init(url: URL, headers: [String: String], delegate: (any URLSessionDelegate)? = nil) {

@@ -25,6 +25,8 @@ actor LinkClientConnection {
     private var heartbeat: Task<Void, Never>?
     private var pending: [String: Pending] = [:]
     private var subscriptions: [String: AsyncThrowingStream<LinkFrame, any Error>.Continuation] = [:]
+    /// Recently cancelled IDs; the Bridge may already have frames for them in flight.
+    private var abandoned: [String] = []
     private var closed = false
     init(host: HostIdentity, key: Data, endpoint: BridgeEndpoint, relayDial: @escaping @Sendable (URL, [String: String]) -> LinkSocket = { LinkSocket(url: $0, headers: $1) }) { self.host = host; self.key = key; self.endpoint = endpoint; self.relayDial = relayDial }
     func updateRelay(_ relay: RelayEndpoint?) { endpoint.relay = relay }
@@ -117,6 +119,7 @@ actor LinkClientConnection {
         guard socket === source else { return }
         guard cipher != nil else { throw CancellationError() }
         let frame = try cipher!.open(data)
+        if pending[frame.id] == nil, subscriptions[frame.id] == nil, abandoned.contains(frame.id) { return }
         if frame.kind == "event", let continuation = subscriptions[frame.id] {
             if frame.status != 200 || frame.final == true {
                 subscriptions[frame.id] = nil; continuation.finish(throwing: BridgeError("unauthorized", "The subscription ended; refresh its authorization.", status: frame.status ?? 401))
@@ -144,6 +147,7 @@ actor LinkClientConnection {
             item.done.resume(throwing: failure)
         }
         subscriptions.removeValue(forKey: id)?.finish()
+        abandoned.append(id); if abandoned.count > 64 { abandoned.removeFirst() }
         try? await send(LinkFrame(kind: "cancel", id: id))
     }
     private func failed(_ error: any Error, source: LinkSocket? = nil) async {
