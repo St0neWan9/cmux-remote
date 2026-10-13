@@ -153,3 +153,12 @@ The full manual GitHub packaging job also passed on the app's current code:
 That run exported `0.1.0 (2)` without uploading it. The downloaded CI IPA passed
 the same identity/version, App Store profile and deep/strict code-signature
 guards. Future uploads must use an unused build number.
+
+## Checking build status locally
+
+`scripts/testflight-status.py` lists the app's latest builds with their processing and
+internal/external TestFlight state. It reads a local App Store Connect API key from
+`~/.appstoreconnect/config.json` (`key_id`, `issuer_id`, `key_path` to an owner-only
+`.p8`); the key never enters this repository. Uploads use `skip_waiting_for_build_processing`,
+so a successful workflow means "uploaded", not "installable": wait until the build shows
+`processing=VALID` and `internal=IN_BETA_TESTING`.
