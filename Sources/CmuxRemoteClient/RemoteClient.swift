@@ -72,6 +72,10 @@ public final class RemoteClient: Sendable {
     /// Refreshes host-certified cloud reachability without expanding the saved grant.
     public func refreshRelayHint() async throws -> AuthorizedConnection? { try await runtime.refreshRelayHint() }
     public func relocate(_ connection: AuthorizedConnection) async throws { try await runtime.relocate(connection) }
+    /// Drops a link that may be dead and dials again, for a manual refresh or a network that came back.
+    public func reconnect() async { await runtime.reconnect() }
+    /// The link's state as it changes, starting with the current one once a dial has happened.
+    public func linkStates() -> AsyncStream<LinkState> { runtime.linkStates.states() }
     public func close() { let runtime = runtime; Task { await runtime.close() } }
     deinit { let runtime = runtime; Task { await runtime.close() } }
 }

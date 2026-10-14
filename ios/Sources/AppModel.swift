@@ -19,6 +19,10 @@ final class AppModel {
     /// Workspace ID to the Mac that owns it, for labels when several Macs are connected.
     var workspaceHosts: [String: String] = [:]
     var hostErrors: [String: String] = [:]
+    /// Each Mac's link as the client reports it; a Mac never dialed yet has no entry.
+    var linkStates: [String: LinkState] = [:]
+    /// When the app last left the foreground, so a short switch does not force every link to dial again.
+    @ObservationIgnored var backgroundedAt: Date?
     var error: String?
     var loading = false
     var host = ""
@@ -278,7 +282,12 @@ final class AppModel {
                     return $0.title.localizedStandardCompare($1.title) == .orderedAscending
                 }
                 perHost[link.id] = (ordered, workspaces ?? perHost[link.id]?.workspaces ?? []); hostErrors[link.id] = nil
-            case .failure(let failure): hostErrors[link.id] = ErrorPresentation().message(failure)
+                // A read that just succeeded proves the link, including for a transport that reports no states.
+                if linkStates[link.id] != nil { linkStates[link.id] = .connected }
+            case .failure(let failure):
+                // The Mac keeps its own error, so several Macs still say which one is down; the bar retries it.
+                hostErrors[link.id] = ErrorPresentation().message(failure)
+                if ErrorPresentation().isConnectivity(failure) { linkStates[link.id] = .disconnected }
             }
         }
         publish()

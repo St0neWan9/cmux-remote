@@ -2,6 +2,12 @@ import Foundation
 import CmuxRemoteCore
 
 struct ErrorPresentation {
+    /// A lost or unreachable link, which the connection bar shows and retries instead of a red line on the page.
+    func isConnectivity(_ error: any Error) -> Bool {
+        if error is URLError { return true }
+        if (error as NSError).domain == NSPOSIXErrorDomain { return true }
+        return ["relay_unavailable", "connection_failed"].contains((error as? BridgeError)?.code ?? "")
+    }
     func message(_ error: any Error) -> String {
         if let network = error as? URLError {
             return String(localized: network.code == .timedOut ? "error.network_timeout" : "error.network")

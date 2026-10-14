@@ -327,6 +327,14 @@ private actor DeferredToolPage {
         await inspect.send(); let beforeInspection = await lost.requests.count; await inspect.acknowledgePendingSend()
         let afterInspection = await lost.requests.count
         checkMedia(inspect.pendingSend == nil && inspect.draft == "Keep this" && inspect.imageDraft.images.count == 1 && afterInspection == beforeInspection, "Inspection acknowledgement sent or erased the preserved draft")
+        // An offline phone fails before the write leaves it; that send is safe to release, not an unknown outcome.
+        let offlineChat = makePhotoChat(sender: { _ in throw URLError(.notConnectedToInternet) })
+        offlineChat.draft = "Offline note"
+        await offlineChat.send()
+        checkMedia(offlineChat.pendingSend == nil && offlineChat.draft == "Offline note" && offlineChat.outgoing.isEmpty && offlineChat.error == nil,
+                   "A send that never left the offline phone stayed blocked as an unknown outcome")
+        await offlineChat.refresh()
+        checkMedia(offlineChat.error == nil && offlineChat.pendingSend == nil, "A recovered link brought back a stale network error")
         var ended = session; ended.state = "ended"
         let readonlyPhoto = makePhotoChat(sender: { try await lost.send($0) }, descriptor: ended)
         readonlyPhoto.imageDraft.images = [photo]; await readonlyPhoto.send()
