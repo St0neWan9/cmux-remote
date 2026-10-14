@@ -164,8 +164,11 @@ public actor SessionService {
         let record = try await authorizedRecord(id, capability: .conversationRead, access: access)
         guard let path = record.transcript else { throw BridgeError("history_unavailable", "No readable conversation record is available.", status: 404) }
         let reader = reader; let agent = record.descriptor.agent
+        // A detached task dies with the agent process that started it, so a session no longer bound to a
+        // running agent reports none: its record keeps launches that were never marked finished.
         let result = try await reader.history(path: path, agent: agent, beforeSeq: beforeSeq, limit: limit,
-                                             allowsUncreatedTranscript: record.descriptor.writable)
+                                             allowsUncreatedTranscript: record.descriptor.writable,
+                                             reportsBackgroundTasks: record.descriptor.writable)
         try await recheck(record, capability: .conversationRead, access: access)
         return result
     }
