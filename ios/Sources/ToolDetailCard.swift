@@ -5,6 +5,8 @@ struct ToolDetailCard<Content: View>: View {
     let title: String
     var status: String?
     var failed = false
+    /// When the result arrived, shown the way the conversation's own footer shows its time.
+    var completedAt: Date?
     @ViewBuilder let content: () -> Content
     /// Room for the content before it starts scrolling, and the height it takes when it does.
     private let maxContentHeight: CGFloat = 280
@@ -20,10 +22,20 @@ struct ToolDetailCard<Content: View>: View {
             } else {
                 measured.frame(minHeight: minContentHeight, alignment: .top)
             }
-            if let status {
+            if status != nil || completedAt != nil {
                 HStack(spacing: 5) {
-                    Image(systemName: failed ? "xmark.circle.fill" : "checkmark.circle.fill").font(.caption)
-                    Text(status).font(.caption)
+                    if let status {
+                        Image(systemName: failed ? "xmark.circle.fill" : "checkmark.circle.fill").font(.caption)
+                        Text(status).font(.caption)
+                    }
+                    if let completedAt {
+                        if status != nil { Text("·").font(.caption) }
+                        Text(completedAt, format: Calendar.current.isDateInToday(completedAt)
+                             ? .dateTime.hour().minute()
+                             : .dateTime.month(.twoDigits).day(.twoDigits).hour().minute())
+                            .font(.caption).monospacedDigit()
+                            .accessibilityLabel(String(localized: "chat.response_time") + " " + completedAt.formatted())
+                    }
                 }.foregroundStyle(failed ? Color.red : Color.secondary)
                     .frame(maxWidth: .infinity, alignment: .trailing)
             }
