@@ -97,8 +97,8 @@ private actor FakeCmux: CmuxControlling {
         #expect(!preview.available)
         #expect(await cmux.screenReadCount == 0)
     }
-    /// The phone renders the agent's own working line, which exists only on the rendered screen.
-    @Test func thePreviewCarriesTheAgentsWorkingLine() async throws {
+    /// Compaction is printed on the agent's working line, and the chrome around it is never prose.
+    @Test func thePreviewReportsCompactionAndNoChrome() async throws {
         let cmux = FakeCmux(); let service = SessionService(cmux: cmux, home: URL(fileURLWithPath: "/example/home"), transcriptRoots: [])
         await cmux.setScreen([
             "⏺ The table now fits the message width.",
@@ -106,15 +106,19 @@ private actor FakeCmux: CmuxControlling {
             "╭──────────────────────────────────────╮",
             "│ ❯                                    │",
             "╰──────────────────────────────────────╯",
-            "✻ Blanching… (54s · ↓ 2.3k tokens)",
+            "✻ Compacting… (1m12s · ↓ 4.1k tokens)",
         ].joined(separator: "\n"))
         let preview = try await service.preview(id: "session")
         #expect(preview.available)
-        #expect(preview.status?.activity == "Blanching…")
-        #expect(preview.status?.elapsedSeconds == 54)
-        #expect(preview.status?.tokenCount == "2.3k")
+        #expect(preview.compacting == true)
         // The chrome around the working line is never reported as the agent's prose.
         #expect(preview.text == "The table now fits the message width.")
+    }
+    @Test func anOrdinaryTurnIsNotCompacting() async throws {
+        let cmux = FakeCmux(); let service = SessionService(cmux: cmux, home: URL(fileURLWithPath: "/example/home"), transcriptRoots: [])
+        await cmux.setScreen("⏺ Answering.\n✻ Blanching… (54s · ↓ 2.3k tokens)")
+        let preview = try await service.preview(id: "session")
+        #expect(preview.compacting == false)
     }
     @Test func authoritativeProcessExitWinsOverOldStopHook() async throws {
         let cmux = FakeCmux(); let service = SessionService(cmux: cmux, home: URL(fileURLWithPath: "/example/home"), transcriptRoots: [])

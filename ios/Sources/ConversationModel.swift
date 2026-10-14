@@ -32,8 +32,8 @@ final class ConversationModel {
         if case .prose(let value) = message.kind { return value.text }; return nil
     }
     var preview: String?
-    /// The agent's own working line from the terminal, as it renders it.
-    var liveStatus: TuiAgentStatus?
+    /// Whether the agent is compacting its context, as the terminal reports it.
+    var compacting = false
     var error: String?
     var draft = ""
     let imageDraft = ImageDraftModel()
@@ -140,7 +140,7 @@ final class ConversationModel {
             let committed = messages.reversed().compactMap { message -> String? in
                 if message.role == .agent, case .prose(let value) = message.kind { return value.text }; return nil
             }.first
-            preview = live?.text == committed ? nil : live?.text; liveStatus = live?.status; error = mutationWarning
+            preview = live?.text == committed ? nil : live?.text; compacting = live?.compacting ?? false; error = mutationWarning
         } catch {
             // A lost link is shown and retried by the connection bar; the page keeps only errors about the conversation.
             guard refreshReads.isCurrent(request) else { return }
