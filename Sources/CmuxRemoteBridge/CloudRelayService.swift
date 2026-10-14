@@ -9,6 +9,7 @@ public actor CloudRelayService {
     private let authority: ConnectionAuthority
     private let onConnected: (@Sendable () -> Void)?
     private let dial: @Sendable (URL, [String: String]) -> any CloudRelayConnecting
+    private let liveness: CloudRelayLiveness
     private var running: Task<Void, Never>?
     private var registry: Task<Void, Never>?
     private var heartbeat: Task<Void, Never>?
@@ -21,8 +22,8 @@ public actor CloudRelayService {
     private var sessions: [String: LinkServerSession] = [:]
     private var phase = "stopped"
     private var generation: UUID?
-    public init(origin: String, secret: String, router: BridgeRouter, authority: ConnectionAuthority, dial: @escaping @Sendable (URL, [String: String]) -> any CloudRelayConnecting = { CloudRelaySocket(url: $0, headers: $1) }, onConnected: (@Sendable () -> Void)? = nil) throws {
-        self.onConnected = onConnected; self.origin = try RelayOrigin(origin); self.secret = secret; self.router = router; self.authority = authority; self.dial = dial
+    public init(origin: String, secret: String, router: BridgeRouter, authority: ConnectionAuthority, dial: @escaping @Sendable (URL, [String: String]) -> any CloudRelayConnecting = { CloudRelaySocket(url: $0, headers: $1) }, liveness: CloudRelayLiveness = CloudRelayLiveness(), onConnected: (@Sendable () -> Void)? = nil) throws {
+        self.onConnected = onConnected; self.origin = try RelayOrigin(origin); self.secret = secret; self.router = router; self.authority = authority; self.dial = dial; self.liveness = liveness
         guard secret.utf8.count >= 32, secret.utf8.count <= 256, !secret.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else { throw BridgeError("invalid_identity", "Invalid private relay registration key.") }
     }
     /// Set before `start`; the entry is republished well before each window's ten-minute expiry.
@@ -51,12 +52,16 @@ public actor CloudRelayService {
                 self.socket = socket
                 let writer = LinkPacketWriter(send: { try await socket.send($0) }, terminate: { socket.close() }, packetLimit: 3_000_000)
                 self.writer = writer
+                // Observing first means a revocation during the dial is not missed; its initial signal is this sync.
+                let changes = try await authority.registryChanges()
                 try await synchronizeRegistry()
-                let ready = try JSONDecoder().decode(RelayEnvelope.self, from: await socket.receive())
+                let ready = try JSONDecoder().decode(RelayEnvelope.self, from: await Self.within(liveness.readyDeadline, orClose: socket) { try await socket.receive() })
                 guard ready.kind == "ready" else { throw BridgeError("invalid_response", "The relay did not acknowledge Bridge registration.") }
                 phase = "connected"; failure = nil; attempt = 0; onConnected?()
+                let liveness = liveness
                 heartbeat = Task {
-                    do { while !Task.isCancelled { try await Task.sleep(for: .seconds(25)); try await socket.ping() } }
+                    // A dead path closes the socket, which ends the receive loop and redials.
+                    do { while !Task.isCancelled { try await Task.sleep(for: liveness.pingInterval); try await Self.within(liveness.pongDeadline, orClose: socket) { try await socket.ping() } } }
                     catch { if !Task.isCancelled { socket.close() } }
                 }
                 if let listing {
@@ -69,10 +74,11 @@ public actor CloudRelayService {
                         }
                     }
                 }
-                let changes = try await authority.registryChanges()
                 registry = Task { [weak self] in
+                    var initial = true
                     for await _ in changes {
                         guard !Task.isCancelled else { break }
+                        if initial { initial = false; continue }
                         do { try await self?.synchronizeRegistry() } catch { socket.close(); break }
                     }
                 }
@@ -118,15 +124,26 @@ public actor CloudRelayService {
         default: throw BridgeError("invalid_response", "Unknown relay operation.")
         }
     }
+    /// Runs a socket operation or fails once `limit` passes. A late operation is ended by closing its socket,
+    /// since a pending WebSocket receive may not observe task cancellation.
+    private static func within<T: Sendable>(_ limit: Duration, orClose socket: any CloudRelayConnecting, _ operation: @escaping @Sendable () async throws -> T) async throws -> T {
+        try await withThrowingTaskGroup(of: T.self) { group in
+            group.addTask { try await operation() }
+            group.addTask { try await Task.sleep(for: limit); socket.close(); throw URLError(.timedOut) }
+            defer { group.cancelAll() }
+            guard let value = try await group.next() else { throw URLError(.timedOut) }
+            return value
+        }
+    }
     private func send(_ envelope: RelayEnvelope) async throws {
         guard let writer else { throw URLError(.networkConnectionLost) }
         try await writer.write(JSONEncoder().encode(envelope))
     }
+    /// Closes without sending first: a send on a dead path never returns, and the relay withdraws a host's
+    /// directory entry itself when its Bridge socket closes.
     private func disconnect() async {
         heartbeat?.cancel(); heartbeat = nil
         publisher?.cancel(); publisher = nil
-        // The relay also withdraws a host's entry when its Bridge socket closes.
-        if listing != nil, writer != nil { try? await send(RelayEnvelope(kind: "withdraw")) }
         registry?.cancel(); registry = nil
         let old = sessions; sessions.removeAll()
         let oldWriter = writer; writer = nil; socket?.close(); socket = nil

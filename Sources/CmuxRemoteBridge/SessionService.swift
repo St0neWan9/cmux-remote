@@ -127,8 +127,11 @@ public actor SessionService {
         }
         for (id, event) in liveBindings {
             guard records[id] != nil else { continue }
-            // Fresh cmux process-exit state outranks an older retained hook binding.
-            guard !authoritativeIDs.contains(id) || event["state"].string == "ended" else { continue }
+            // Hook bindings fill in where the daemon's row carries none, and a hook-reported end always wins.
+            // A daemon row that still holds a live binding outranks an older retained hook binding: fresh
+            // cmux process state, including a reused terminal, must not be overwritten by a stale hook.
+            let bound = records[id]?.descriptor.workspaceID != nil && records[id]?.descriptor.surfaceID != nil
+            guard !(authoritativeIDs.contains(id) && bound) || event["state"].string == "ended" else { continue }
             records[id]?.descriptor.workspaceID = event["workspace_id"].string
             records[id]?.descriptor.surfaceID = event["surface_id"].string
             records[id]?.descriptor.state = event["state"].string ?? "unknown"
