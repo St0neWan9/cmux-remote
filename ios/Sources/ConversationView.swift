@@ -12,6 +12,8 @@ struct ConversationView: View {
     @State private var userScrolling = false
     @State private var latestVisible = true
     @State private var initiallyScrolled = false
+    /// Retries the opening jump: a row's height is known only after it lays out.
+    @State private var settleTask: Task<Void, Never>?
     @State private var showProject = false
     @State private var selectedFile = ""
     @State private var showFeed = false
@@ -63,13 +65,17 @@ struct ConversationView: View {
                 }
             }
             .onChange(of: model.timelineItems.last?.id) { _, _ in
-                if !initiallyScrolled && !model.messages.isEmpty { proxy.scrollTo("latest", anchor: .bottom); initiallyScrolled = true }
+                if !initiallyScrolled && !model.messages.isEmpty { settleAtBottom(proxy); initiallyScrolled = true }
                 else if atLatest { proxy.scrollTo("latest", anchor: .bottom) }
             }
             .onChange(of: model.latestMessageText) { _, _ in if atLatest { proxy.scrollTo("latest", anchor: .bottom) } }
             .onChange(of: model.preview) { _, _ in if atLatest { proxy.scrollTo("latest", anchor: .bottom) } }
             // Opening a cached conversation re-enters with its follow state; start from the last message.
-            .onAppear { userScrolling = false; atLatest = true; if !model.messages.isEmpty { initiallyScrolled = true } }
+            .onAppear {
+                userScrolling = false; atLatest = true
+                if !model.messages.isEmpty { initiallyScrolled = true; settleAtBottom(proxy, retries: 6) }
+            }
+            .onDisappear { settleTask?.cancel(); settleTask = nil }
             .onChange(of: model.jumpToLatest) { _, _ in atLatest = true; withAnimation { proxy.scrollTo("latest", anchor: .bottom) } }
         }
         }
@@ -207,7 +213,7 @@ struct ConversationView: View {
                 timelineRow(item, firstResponse: firstResponse, lastResponse: lastResponse, imagesByMessage: imagesByMessage, activeAnchor: activeAnchor, runningSince: runningSince, bottom: bottom)
             }
             if activeAnchor == nil, let runningSince {
-                LiveRunLabel(since: runningSince).modifier(HeaderContentEffect(bottom: bottom))
+                LiveRunLabel(since: runningSince, status: model.liveStatus).modifier(HeaderContentEffect(bottom: bottom))
             }
             if let preview = model.preview {
                 VStack(alignment: .leading, spacing: 10) {
@@ -272,6 +278,21 @@ struct ConversationView: View {
     private func pullToRefresh(_ proxy: ScrollViewProxy) async {
         if linkState != nil && linkState != .connected { await reconnect(); return }
         if model.hasMore { await loadOlder(proxy) } else { await model.refresh() }
+    }
+    /// Scrolls to the newest message, then again while the freshly inserted rows finish measuring.
+    ///
+    /// A row's height is known only after it lays out, so the opening scroll of a long conversation can land
+    /// short and leave the page above the newest message with nothing left to correct it.
+    private func settleAtBottom(_ proxy: ScrollViewProxy, retries: Int = 3) {
+        settleTask?.cancel()
+        settleTask = Task { @MainActor in
+            for attempt in 0...retries {
+                guard !Task.isCancelled else { return }
+                if attempt > 0 { try? await Task.sleep(for: .milliseconds(60)) }
+                guard !Task.isCancelled, atLatest else { return }
+                proxy.scrollTo("latest", anchor: .bottom)
+            }
+        }
     }
     /// The menu's refresh redials a link that may be dead before reading, and shows the dial while it happens.
     private func reconnect() async {
