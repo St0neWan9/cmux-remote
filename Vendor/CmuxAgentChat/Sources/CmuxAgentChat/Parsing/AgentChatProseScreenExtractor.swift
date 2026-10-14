@@ -151,7 +151,21 @@ public struct AgentChatProseScreenExtractor: Sendable {
         if chromeLeadingGlyphs.contains(first) { return true }
         // The CLI's status bar carries the git branch behind its own marker (`⎇ main`); the branch is
         // the working directory's state, not something the agent wrote.
-        return trimmed.contains("⎇")
+        if trimmed.contains("⎇") { return true }
+        return isPastedPath(trimmed)
+    }
+
+    /// Whether a row is only a quoted absolute path, which is how a pasted file reaches the agent.
+    ///
+    /// The companion writes an attachment into its private store and pastes that literal path into the
+    /// terminal, so the row is the paste rather than the agent's prose. A row that merely *mentions* a
+    /// path keeps its own words and is left alone.
+    static func isPastedPath(_ trimmed: String) -> Bool {
+        guard trimmed.count >= 3, trimmed.hasPrefix("'"), trimmed.hasSuffix("'") else { return false }
+        let inner = trimmed.dropFirst().dropLast()
+        guard inner.hasPrefix("/") else { return false }
+        // A quoted path carries no spaces outside its escaping and no prose punctuation.
+        return !inner.contains("  ") && inner.allSatisfy { !$0.isNewline }
     }
 
     /// Box-drawing glyphs that draw the composer's frame and its dividers. `│` is the box's side, which
