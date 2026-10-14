@@ -18,10 +18,14 @@ public actor TranscriptReader {
     /// Long conversations are read from a bounded tail; the window start moves in whole steps so sequence numbers stay stable while the file grows.
     private let windowLimit: Int
     private let windowStep: Int
-    /// Tasks outlive the turn that started them, so their running set is kept beside the messages.
-    private var backgroundTasks: [BackgroundAgentTask] = []
-    public init(windowLimit: Int = 33_554_432, windowStep: Int = 8_388_608) {
-        self.windowLimit = max(1, windowLimit); self.windowStep = max(1, min(windowStep, windowLimit))
+    /// Detached calls per transcript. Tasks outlive the turn that started them, so they are kept beside the
+    /// messages; keyed by path, because one reader serves every conversation and an unchanged record is
+    /// answered from this cache.
+    private var launches: [String: [BackgroundTaskTracker.Launch]] = [:]
+    /// A Monitor's deadline passes while its record stays unchanged, so running is decided at read time.
+    private let now: @Sendable () -> Date
+    public init(windowLimit: Int = 33_554_432, windowStep: Int = 8_388_608, now: @escaping @Sendable () -> Date = { Date() }) {
+        self.windowLimit = max(1, windowLimit); self.windowStep = max(1, min(windowStep, windowLimit)); self.now = now
     }
     /// The newest complete lines of a transcript within the read window, and where that window starts.
     private func window(path: String, size: Int) throws -> (data: Data, start: Int) {
@@ -40,7 +44,10 @@ public actor TranscriptReader {
         guard let firstBreak = data.firstIndex(of: 10) else { return (Data(), start) }
         return (Data(data[data.index(after: firstBreak)...]), start)
     }
-    public func history(path: String, agent: String, beforeSeq: Int?, limit: Int, allowsUncreatedTranscript: Bool = false) throws -> ConversationSnapshot {
+    /// - Parameter reportsBackgroundTasks: Whether the agent process that owns this record is still running.
+    ///   Its detached tasks die with it, so an ended session reports none, whatever its record says.
+    public func history(path: String, agent: String, beforeSeq: Int?, limit: Int, allowsUncreatedTranscript: Bool = false,
+                        reportsBackgroundTasks: Bool = true) throws -> ConversationSnapshot {
         let url = URL(fileURLWithPath: path)
         let attributes: [FileAttributeKey: Any]
         do { attributes = try FileManager.default.attributesOfItem(atPath: path) }
@@ -59,17 +66,20 @@ public actor TranscriptReader {
         let modified = attributes[.modificationDate] as? Date
         let previous = observations[path]
         if let previous, previous.inode == inode, previous.size == size.intValue, previous.modified == modified {
-            return page(previous.messages, images: previous.images, presentation: previous.presentation, beforeSeq: beforeSeq, limit: limit, generation: previous.generation, clipped: previous.windowStart > 0, backgroundTasks: backgroundTasks)
+            return page(previous.messages, images: previous.images, presentation: previous.presentation, beforeSeq: beforeSeq, limit: limit, generation: previous.generation, clipped: previous.windowStart > 0,
+                        backgroundTasks: runningTasks(path, reports: reportsBackgroundTasks))
         }
         let (data, windowStart) = try window(path: url.path, size: size.intValue)
         // Cheap line scan over the same window the parse reads; a launch and its completion can sit far apart.
-        backgroundTasks = scannedBackgroundAgentTasks(data)
+        if launches.count >= 32, launches[path] == nil { launches.removeAll() }
+        launches[path] = scannedLaunches(data)
         // A moved window renumbers records, so clients re-anchor exactly as after truncation.
         let reset = previous == nil || previous?.inode != inode || size.intValue < (previous?.size ?? 0) || previous?.windowStart != windowStart
         let generation = reset ? UUID() : previous!.generation
         guard let end = data.lastIndex(of: 10) else {
             observations[path] = Observation(inode: inode, size: size.intValue, modified: modified, generation: generation, windowStart: windowStart, images: [], messages: [], presentation: .init())
-            return page([], images: [], presentation: .init(), beforeSeq: beforeSeq, limit: limit, generation: generation, clipped: windowStart > 0)
+            return page([], images: [], presentation: .init(), beforeSeq: beforeSeq, limit: limit, generation: generation, clipped: windowStart > 0,
+                        backgroundTasks: runningTasks(path, reports: reportsBackgroundTasks))
         }
         let raw = String(decoding: data[...end], as: UTF8.self).split(separator: "\n", omittingEmptySubsequences: false).dropLast().map(String.init)
         let compaction = agent == "claude" ? ClaudeCompactionSummary().replace(raw) : .init(lines: raw, markers: [])
@@ -84,13 +94,20 @@ public actor TranscriptReader {
         let presentation = TranscriptResponseReader().read(lines: lines, messages: messages, agent: agent)
         if observations.count >= 32, observations[path] == nil { observations.removeAll() }
         observations[path] = Observation(inode: inode, size: size.intValue, modified: modified, generation: generation, windowStart: windowStart, images: imageIndex.records, messages: messages, presentation: presentation)
-        return page(messages, images: imageIndex.records, presentation: presentation, beforeSeq: beforeSeq, limit: limit, generation: generation, clipped: windowStart > 0)
+        return page(messages, images: imageIndex.records, presentation: presentation, beforeSeq: beforeSeq, limit: limit, generation: generation, clipped: windowStart > 0,
+                    backgroundTasks: runningTasks(path, reports: reportsBackgroundTasks))
     }
-    /// The tasks still running, paired from the launches and completion notices in one window.
-    private func scannedBackgroundAgentTasks(_ data: Data) -> [BackgroundAgentTask] {
+    /// The detached calls still open in one window, paired from launches, stops and completion notices.
+    private func scannedLaunches(_ data: Data) -> [BackgroundTaskTracker.Launch] {
         guard let end = data.lastIndex(of: 10) else { return [] }
         let lines = String(decoding: data[...end], as: UTF8.self).split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
-        return BackgroundTaskTracker().running(in: lines)
+        return BackgroundTaskTracker().launches(in: lines)
+    }
+    /// This record's tasks still running now; none once the agent that owned them has ended.
+    private func runningTasks(_ path: String, reports: Bool) -> [BackgroundAgentTask] {
+        guard reports else { return [] }
+        let moment = now()
+        return (launches[path] ?? []).filter { $0.isRunning(at: moment) }.map(\.task)
     }
     /// Read a tool's complete supported text without inflating ordinary history snapshots.
     public func toolText(path: String, agent: String, messageID: String, generation: String,
@@ -140,7 +157,7 @@ public actor TranscriptReader {
         return record
     }
 
-    private func page(_ messages: [ChatMessage], images: [TranscriptImageRecord], presentation: TranscriptResponseReader.Result, beforeSeq: Int?, limit: Int, generation: UUID, clipped: Bool, backgroundTasks: [BackgroundAgentTask]? = nil) -> ConversationSnapshot {
+    private func page(_ messages: [ChatMessage], images: [TranscriptImageRecord], presentation: TranscriptResponseReader.Result, beforeSeq: Int?, limit: Int, generation: UUID, clipped: Bool, backgroundTasks: [BackgroundAgentTask]) -> ConversationSnapshot {
         let eligible = messages.filter { beforeSeq == nil || $0.seq < beforeSeq! }
         let count = min(max(limit, 1), 200)
         var start = max(0, eligible.count - count)
@@ -153,6 +170,6 @@ public actor TranscriptReader {
             currentTurnStartedAt: presentation.currentTurnStartedAt, currentTurnCompleted: presentation.currentTurnCompleted,
             images: images.filter { ids.contains($0.messageID) }.map { $0.reference(generation: generation.uuidString) },
             // Only the newest page reports them; an earlier page must not re-add a task the reader scrolled past.
-            backgroundTasks: beforeSeq == nil ? (backgroundTasks ?? self.backgroundTasks) : nil)
+            backgroundTasks: beforeSeq == nil ? backgroundTasks : nil)
     }
 }
