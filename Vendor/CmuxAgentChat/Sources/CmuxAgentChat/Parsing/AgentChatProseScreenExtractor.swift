@@ -60,6 +60,11 @@ public struct AgentChatProseScreenExtractor: Sendable {
                 foundAnswerTop = true
                 break
             }
+            // Composer chrome sits between the answer and the working line, so it must be stepped over
+            // rather than collected: printing it would show the input box or a CLI notice as the agent's
+            // own words, and stopping there would discard the answer above it. It is tested before the
+            // boundary glyphs because the box border shares `│` with a genuine prompt boundary.
+            if Self.isScreenChrome(row) { index -= 1; continue }
             if Self.isBoundary(row, agentKind: agentKind) { break }
             collected.append(row)
             index -= 1
@@ -133,6 +138,27 @@ public struct AgentChatProseScreenExtractor: Sendable {
         }
         return nil
     }
+
+    /// Whether a row is terminal chrome rather than anything the agent wrote: the composer's box
+    /// borders, and CLI notices such as `✔ Update installed · Restart to update`.
+    ///
+    /// The working line sits immediately above the composer, so this row is always in range of the
+    /// upward walk and must end it.
+    static func isScreenChrome(_ row: String) -> Bool {
+        let trimmed = row.trimmingCharacters(in: .whitespaces)
+        guard let first = trimmed.first else { return false }
+        if boxDrawingGlyphs.contains(first) { return true }
+        return chromeLeadingGlyphs.contains(first)
+    }
+
+    /// Box-drawing glyphs that draw the composer's frame and its dividers. `│` is the box's side, which
+    /// the boundary set also carries for a genuine prompt box; chrome is tested first, so the frame wins.
+    private static let boxDrawingGlyphs: Set<Character> = [
+        "╭", "╮", "╰", "╯", "┌", "┐", "└", "┘", "─", "━", "═", "├", "┤", "┬", "┴", "┼", "│", "┃",
+    ]
+
+    /// Leading glyphs the CLI uses for its own notices, which are not agent prose.
+    private static let chromeLeadingGlyphs: Set<Character> = ["✔", "✖", "⚠"]
 
     /// Whether a row is a status line by any signal. Retained for callers/tests
     /// that ask the question without caring which tier matched.
