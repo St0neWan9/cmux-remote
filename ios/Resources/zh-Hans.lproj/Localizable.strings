@@ -44,7 +44,7 @@
 "error.history" = "此历史记录不可用，或超过当前读取上限。";
 "error.file" = "此文件无法预览，或不允许从该项目分享。";
 "error.expired" = "此请求已不再等待处理，请刷新列表。";
-"error.connection" = "无法完成请求，请检查连接和配对证书指纹。";
+"error.connection" = "无法完成请求，请重试，或检查网络和 Mac 上的 Bridge。";
 "pair.scan" = "扫描配对二维码";
 "pair.scan_instructions" = "在 Mac 运行 cmux-remote serve --pair。扫码只会申请配对，主人批准后才能访问。";
 "pair.advanced" = "高级设置";
@@ -67,7 +67,8 @@
 "pair.enrollment_ended" = "配对被拒绝、取消或已过期。请在 Mac 开启新的配对窗口后重试。";
 "error.authorization" = "这台设备已被撤销，或未获准访问该工作区或执行此操作。请在 Mac 检查授权。";
 "error.enrollment" = "请在 Mac 开启配对窗口，再扫描新的二维码。";
-"error.identity" = "主机或设备身份验证失败。请核对身份，并明确重新配对。";
+"error.identity" = "主机或设备身份不匹配。请核对后重新配对。";
+"error.epoch" = "连接凭证已过期，正在自动恢复。如仍看到此提示，请重试。";
 "chat.activity_count" = "%ld 项操作";
 "chat.expanded" = "已展开";
 "chat.collapsed" = "已折叠";
