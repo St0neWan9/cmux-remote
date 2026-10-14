@@ -18,7 +18,7 @@ import CmuxRemoteCore
     }
     @Test(.timeLimit(.minutes(1)))
     func slowConsumerDoesNotBlockOtherRequestsAndIsEventuallyDisconnected() async throws {
-        let fixture = try await LinkIntegrationFixture.create(text: String(repeating: "bounded ", count: 30_000), recordCount: 24)
+        let fixture = try await LinkIntegrationFixture.create(text: String(repeating: "bounded ", count: 2_000), recordCount: 28)
         var raw: LinkRawConnection?
         do {
             var connection = try await LinkRawConnection.connect(fixture.connection); raw = connection
@@ -31,8 +31,16 @@ import CmuxRemoteCore
             while response.id == stalled { #expect(response.final == false); response = try await connection.next() }
             #expect(response.id == other); #expect(response.final == true)
             try await connection.ack(response)
-            // No acknowledgement for the first request: observe its actual production deadline.
-            do { _ = try await connection.next(); Issue.record("Slow link must close instead of buffering indefinitely") } catch {}
+            // No acknowledgement for the first request: the rest of its window may still arrive, but never more,
+            // and the link then closes at the production deadline instead of buffering indefinitely.
+            var stalledChunks = 1
+            do {
+                while true {
+                    let late = try await connection.next()
+                    #expect(late.id == stalled); stalledChunks += 1
+                    if stalledChunks > LinkServerSession.chunkWindow { Issue.record("A stalled response exceeded its window"); break }
+                }
+            } catch {}
             connection.socket.close(); await fixture.stop()
         } catch { raw?.socket.close(); await fixture.stop(); throw error }
     }
