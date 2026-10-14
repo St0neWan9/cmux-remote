@@ -69,7 +69,9 @@ struct MessageRow: View {
                 }
             }
         case .terminal(let value):
-            ToolDisclosure(title: value.command, symbol: "terminal", identifier: "tool.disclosure." + message.id) {
+            // The agent describes every command in one line; the terminal shows that description above
+            // the shell line, so the card leads with it and keeps the command as the detail.
+            ToolDisclosure(title: value.summary ?? value.command, symbol: "terminal", identifier: "tool.disclosure." + message.id) {
                 ToolDetailCard(title: String(localized: "tool.card.shell"),
                                status: value.exitCode.map { $0 == 0 ? String(localized: "tool.card.success") : String.localizedStringWithFormat(String(localized: "chat.exit_code"), $0) } ?? String(localized: "chat.tool.running"),
                                failed: value.exitCode.map { $0 != 0 } ?? false) {

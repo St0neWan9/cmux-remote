@@ -92,6 +92,7 @@
 "chat.quote" = "Quote in follow-up";
 "chat.response_time" = "Reply time";
 "chat.compacting" = "Compacting context %@";
+"chat.background.count" = "%ld background tasks running";
 "chat.running_duration" = "Working %@";
 "chat.worked_duration" = "Worked for %@";
 "chat.duration_seconds" = "%ds";
