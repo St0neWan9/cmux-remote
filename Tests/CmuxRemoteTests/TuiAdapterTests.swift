@@ -7,7 +7,8 @@ import CmuxRemoteCore
     private func adapter(_ source: TuiResourceFixture, root: URL? = nil, ledger: MutationLedger = MutationLedger()) -> TuiControlAdapter {
         let home = root ?? URL(fileURLWithPath: "/nonexistent-fixture")
         return TuiControlAdapter(client: source, transcripts: .init(claudeRoot: home.appendingPathComponent(".claude"), codexRoot: home.appendingPathComponent(".codex")),
-                                 attachments: root.map { TuiAttachmentStore(directory: $0) }, decisions: ledger, archive: root.map { TuiBindingRepository(directory: $0) })
+                                 attachments: root.map { TuiAttachmentStore(directory: $0) }, decisions: ledger, archive: root.map { TuiBindingRepository(directory: $0) },
+                                 restoreChecks: 3, restoreInterval: .milliseconds(5))
     }
     private func service(_ adapter: TuiControlAdapter, root: URL? = nil, ledger: MutationLedger = MutationLedger()) -> SessionService {
         let home = root ?? URL(fileURLWithPath: "/nonexistent-fixture")
@@ -56,6 +57,43 @@ import CmuxRemoteCore
         #expect(await source.effects.isEmpty)
         _ = try await session.interrupt(id: id, request: .init())
         #expect(await source.effects.last?.1["keys"]?.array == [.string("escape")])
+    }
+    @Test(arguments: [false, true])
+    func promptRestoredByAnInterruptIsErasedSoTheNextSendIsAccepted(_ hard: Bool) async throws {
+        let source = TuiResourceFixture(), session = service(adapter(source)), id = try #require(try await session.sessions().first?.id)
+        _ = try await session.send(id: id, request: .init(text: "合并 发版"))
+        await source.restore("合并 发版")
+        _ = try await session.interrupt(id: id, request: .init(hard: hard))
+        let effects = await source.effects
+        #expect(effects.count == 3)
+        #expect(effects[1].1["keys"]?.array == [.string(hard ? "ctrl+c" : "escape")])
+        #expect(effects[2].0 == "terminal.input.write"); #expect(effects[2].1["text"]?.string == String(repeating: "\u{7f}", count: 5))
+        #expect(effects[2].2?.hasPrefix("cmux-remote:interrupt-clear:") == true)
+        // No extra ctrl+c ever reaches an empty prompt, where a second one would quit the Agent.
+        #expect(effects.filter { $0.1["keys"]?.array == [.string("ctrl+c")] }.count == (hard ? 1 : 0))
+        await source.restore(nil)
+        _ = try await session.send(id: id, request: .init(text: "next"))
+        #expect(await source.effects.count == 4)
+    }
+    @Test func aDifferentDesktopDraftAfterAnInterruptIsNeverErased() async throws {
+        let source = TuiResourceFixture(), session = service(adapter(source)), id = try #require(try await session.sessions().first?.id)
+        _ = try await session.send(id: id, request: .init(text: "from the phone"))
+        await source.restore("typed on the Mac")
+        _ = try await session.interrupt(id: id, request: .init())
+        #expect(await source.effects.count == 2)
+        do { _ = try await session.send(id: id, request: .init(text: "next")); Issue.record("Expected input protection") }
+        catch { #expect((error as? BridgeError)?.code == "input_busy") }
+        #expect(await source.effects.count == 2)
+    }
+    @Test func anInterruptWithoutARestoredPromptSendsNothingMore() async throws {
+        let source = TuiResourceFixture(), session = service(adapter(source)), id = try #require(try await session.sessions().first?.id)
+        _ = try await session.send(id: id, request: .init(text: "keep going"))
+        _ = try await session.interrupt(id: id, request: .init())
+        #expect(await source.effects.count == 2)
+        // A later interrupt no longer owns the earlier text, even if it appears now.
+        await source.restore("keep going")
+        _ = try await session.interrupt(id: id, request: .init())
+        #expect(await source.effects.count == 3)
     }
     @Test func sessionReplacementBetweenInspectionAndSendRejectsTheOldTarget() async throws {
         let source = TuiResourceFixture(), session = service(adapter(source))

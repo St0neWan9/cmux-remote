@@ -16,6 +16,8 @@ actor TuiResourceFixture: TuiResourceRequesting {
     var lost = false
     var replaceDuringState = false
     var malformedReceipt = false
+    /// Text an interrupted Agent puts back into its prompt, as Claude Code does when stopped before replying.
+    var restoredOnInterrupt: String?
     init(provider: String = "claude") {
         raw = Self.graph(provider: provider)
         replay = "\u{1b}[?2004h\u{1b}[H" + (provider == "claude" ? "❯\u{00a0}" : "› ") + "\u{1b}[2mTry a task\u{1b}[22m"
@@ -29,6 +31,8 @@ actor TuiResourceFixture: TuiResourceRequesting {
             return .object(["state_base64": .string(Data(replay.utf8).base64EncodedString()), "cols": .number(80), "rows": .number(8)])
         case "terminal.input.write", "terminal.input.keys":
             effects.append((operation, params, idempotencyKey))
+            if operation == "terminal.input.keys", let restoredOnInterrupt { replay = "\u{1b}[?2004h\u{1b}[H❯\u{00a0}" + restoredOnInterrupt.replacingOccurrences(of: "\n", with: "\r\n  ") }
+            if let text = params["text"]?.string, !text.isEmpty, text.allSatisfy({ $0 == "\u{7f}" }) { replay = "\u{1b}[?2004h\u{1b}[H❯\u{00a0}\u{1b}[2mTry a task\u{1b}[22m" }
             if lost { throw BridgeError("outcome_unknown", "Fixture lost response", status: 504) }
             if malformedReceipt { return .null }
             return .object(["value": .object([:]), "generation": .string("fixture-generation"), "revision": .string("1"), "replayed": .bool(false)])
@@ -39,6 +43,7 @@ actor TuiResourceFixture: TuiResourceRequesting {
         if let replay { self.replay = replay }; if let screen { self.screen = screen }
         self.lost = lost; replaceDuringState = replaced; malformedReceipt = malformed
     }
+    func restore(_ text: String?) { restoredOnInterrupt = text }
     func setAgentField(_ field: String, _ value: JSONValue) {
         var root = raw.object!, row = root["agents"]!.array![0].object!; row[field] = value; root["agents"] = .array([.object(row)]); raw = .object(root)
     }
