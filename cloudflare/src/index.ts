@@ -12,7 +12,11 @@ interface Bootstrap {
   endpoint: { host: string; port: number; relay?: { origin: string; admission: Signed<Permit> } };
   workspaces: string[]; windowID: string; expiresAt: number;
 }
-const directory = (env: Env) => env.DIRECTORY.get(env.DIRECTORY.idFromName("directory"));
+/** Rooms and the directory are created in Western North America (Los Angeles), the edge that serves the
+ * owner's Mac and phone best; a hint only applies when an object is first created, so a new placement needs
+ * a new name. A room holds only state its Bridge re-registers on every connection. */
+const placement = { locationHint: "wnam" } as const;
+const directory = (env: Env) => env.DIRECTORY.get(env.DIRECTORY.idFromName("directory:wnam"), placement);
 const identity = (value: unknown): value is string => typeof value === "string" && /^[0-9a-f]{64}$/.test(value);
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -28,7 +32,7 @@ export default {
     if (!(request.headers.get("Sec-WebSocket-Protocol") ?? "").split(",").map(x => x.trim()).includes("cmux-remote.v3")) return new Response("unsupported_protocol", { status: 400 });
     if (!await env.ADMISSION_LIMITER.limit({ key: request.headers.get("CF-Connecting-IP") ?? "unknown" }).then(x => x.success)) return new Response("rate_limited", { status: 429 });
     if (role === "bridge" && !await secretMatches(request.headers.get("Authorization"), env.BRIDGE_REGISTRATION_KEY)) return new Response("unauthorized", { status: 401 });
-    return env.ROOMS.get(env.ROOMS.idFromName(match[1])).fetch(request);
+    return env.ROOMS.get(env.ROOMS.idFromName("wnam:" + match[1]), placement).fetch(request);
   }
 } satisfies ExportedHandler<Env>;
 
