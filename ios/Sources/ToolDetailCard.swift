@@ -21,7 +21,10 @@ struct ToolDetailCard<Content: View>: View {
                 measured.frame(minHeight: minContentHeight, alignment: .top)
             }
             if let status {
-                Text(status).font(.caption).foregroundStyle(failed ? Color.red : Color.secondary)
+                HStack(spacing: 5) {
+                    Image(systemName: failed ? "xmark.circle.fill" : "checkmark.circle.fill").font(.caption)
+                    Text(status).font(.caption)
+                }.foregroundStyle(failed ? Color.red : Color.secondary)
                     .frame(maxWidth: .infinity, alignment: .trailing)
             }
         }.padding(MobileDesign.surfaceInset).frame(maxWidth: .infinity, alignment: .leading)
