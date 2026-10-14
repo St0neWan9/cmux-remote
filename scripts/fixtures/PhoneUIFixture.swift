@@ -126,7 +126,14 @@ private actor PhoneUIBackend: CmuxControlling {
             let image: [String: Any] = ["type": "user", "uuid": "design-image", "timestamp": "2026-10-12T01:00:04Z", "message": ["content": [["type": "image", "source": ["type": "base64", "media_type": "image/png", "data": sample.base64EncodedString()]]]]]
             let readText = String(decoding: try JSONSerialization.data(withJSONObject: read), as: UTF8.self)
             let imageText = String(decoding: try JSONSerialization.data(withJSONObject: image), as: UTF8.self)
-            let rows = [
+            // Earlier turns fill more than two history pages, so reading back has pages to load.
+            let earlier = (1...260).map { index in
+                let role = index % 2 == 1 ? "user" : "assistant"
+                let text = String(format: "历史消息 %04d", index)
+                let content = role == "user" ? "\"\(text)\"" : "[{\"type\":\"text\",\"text\":\"\(text)\"}]"
+                return "{\"type\":\"\(role)\",\"uuid\":\"earlier-\(index)\",\"timestamp\":\"2026-10-11T01:00:00Z\",\"message\":{\"content\":\(content)}}"
+            }
+            let rows = earlier + [
                 #"{"type":"user","uuid":"u","timestamp":"2026-10-12T01:00:00Z","message":{"content":"检查本地连接和页面样式"}}"#,
                 readText,
                 ##"{"type":"user","uuid":"design-result","timestamp":"2026-10-12T01:00:03Z","message":{"content":[{"type":"tool_result","tool_use_id":"design-read","content":"# UI fixture project\n\nLeft aligned file contents.\n"}]}}"##,
