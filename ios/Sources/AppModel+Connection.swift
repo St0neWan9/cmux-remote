@@ -22,8 +22,8 @@ extension AppModel {
 
     /// Dials Macs again and reloads the lists.
     ///
-    /// A pull to refresh redials every Mac, since a link that looks up may be half-open. Automatic retries and the
-    /// bar's Retry touch only Macs already known to be down: redialing a working link drops its live updates.
+    /// Returning from a long background redials every Mac, since its links are likely half-open. Automatic retries,
+    /// the bar's Retry and a pull touch only Macs already known to be down: redialing a working link drops its live updates.
     func reconnect(onlyLost: Bool = false) async {
         let targets = onlyLost ? links.filter { linkStates[$0.id] != .connected } : links
         guard !targets.isEmpty else { return }
@@ -33,6 +33,11 @@ extension AppModel {
             for link in targets { let client = link.client; group.addTask { await client.reconnect() } }
         }
         await refresh()
+    }
+
+    /// A pull reloads the lists over working links and redials only the Macs that are down.
+    func pullToRefresh() async {
+        if links.contains(where: { linkStates[$0.id] != .connected }) { await reconnect(onlyLost: true) } else { await refresh() }
     }
 
     /// Runs while the app is in the foreground: follows each link, redials when the network returns, and retries a lost Mac.
