@@ -227,7 +227,8 @@ public actor SessionService {
         let payload: JSONValue = request.attachments.isEmpty ? .string(request.text) : .object(["text": .string(request.text), "attachments": try JSONDecoder().decode(JSONValue.self, from: encoder.encode(request.attachments))])
         let signature = try MutationLedger.fingerprint(action: "send", resource: id, payload: payload)
         if let receipt = try await existing(request.operationID, signature: signature, legacySignature: legacySignature, access: access) { return receipt }
-        let session = try await verifiedBinding(id, requiresEmptyPrompt: true, access: access)
+        // The daemon backend clears its own Agent input for a phone send; the desktop backend still requires an empty prompt.
+        let session = try await verifiedBinding(id, requiresEmptyPrompt: !id.hasPrefix("tui:"), access: access)
         if let receipt = try await begin(request.operationID, signature: signature, workspace: session.workspaceID, capability: .conversationControl, legacySignature: legacySignature, access: access) { return receipt }
         try await validateMutationBinding(session, access: access)
         do {

@@ -107,8 +107,7 @@ public actor TuiControlAdapter: CmuxControlling {
                   text.unicodeScalars.allSatisfy({ $0.value >= 32 && !(127...159).contains($0.value) || $0 == "\n" || $0 == "\t" }) else {
                 throw BridgeError("invalid_input", "Use bounded prompt text without terminal control characters.")
             }
-            let state = try await terminalState(current, binding: binding)
-            guard prompt.isEmpty(state, provider: binding.provider) else { throw BridgeError("input_busy", "The Agent prompt is not positively empty.", status: 409) }
+            let (cleared, state) = try await clearPromptForSend(current, binding: binding, operationKey: operationKey)
             let paste = state.pasteEnabled
             guard paste || !text.contains("\n") else { throw unsupported() }
             let imagePaths: [String]
@@ -117,7 +116,7 @@ public actor TuiControlAdapter: CmuxControlling {
             let content = (imagePaths + (text.isEmpty ? [] : [text])).joined(separator: " ")
             // Recheck binding/revision after screen/state reads; never retarget an old session.
             let final = try await snapshot()
-            guard final.generation == current.generation, final.revision == current.revision,
+            guard final.generation == cleared.generation, final.revision == cleared.revision,
                   final.bindings.first(where: { $0.id == id }) == binding else { throw stale() }
             var request = final.selectors(binding)
             request["text"] = .string((paste ? "\u{1b}[200~" + content + "\u{1b}[201~" : content) + "\r")
@@ -128,6 +127,30 @@ public actor TuiControlAdapter: CmuxControlling {
             return .object(["submitted": .bool(true)])
         default: throw unsupported()
         }
+    }
+    /// A phone send takes over the Agent input: a desktop draft is erased and a dialog is dismissed first.
+    /// Text is only typed into a positively empty prompt, so a screen that stays unrecognized still rejects it.
+    private func clearPromptForSend(_ start: TuiSessionSnapshot, binding: TuiSessionSnapshot.Binding, operationKey: String) async throws -> (TuiSessionSnapshot, TuiTerminalState) {
+        var current = start, state = try await terminalState(start, binding: binding)
+        for round in 0..<3 {
+            if prompt.isEmpty(state, provider: binding.provider) { return (current, state) }
+            var request = current.selectors(binding); request["expected_revision"] = .string(current.revision)
+            let key = "cmux-remote:send-clear:" + operationKey.lowercased() + ":\(round)"
+            if let typed = prompt.typedText(state, provider: binding.provider), !typed.isEmpty {
+                // Placeholders such as pasted-text chips render longer or shorter than their input; spare erases are harmless.
+                request["text"] = .string(String(repeating: "\u{7f}", count: min(typed.count + 16, 70_000)))
+                try await effect("terminal.input.write", fields: request, key: key, generation: current.generation)
+            } else {
+                request["keys"] = .array([.string("escape")])
+                try await effect("terminal.input.keys", fields: request, key: key, generation: current.generation)
+            }
+            try await Task.sleep(for: restoreInterval)
+            current = try await snapshot()
+            guard current.generation == start.generation, current.bindings.first(where: { $0.id == binding.id }) == binding else { throw stale() }
+            state = try await terminalState(current, binding: binding)
+        }
+        if prompt.isEmpty(state, provider: binding.provider) { return (current, state) }
+        throw BridgeError("input_busy", "The Agent prompt could not be cleared for the phone.", status: 409)
     }
     /// Claude Code puts a prompt interrupted before its reply back into the input, which would block every later send.
     /// Only that exact text is erased; a desktop draft, a dialog or anything else stays untouched.
