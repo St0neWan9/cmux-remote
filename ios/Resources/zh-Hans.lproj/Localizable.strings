@@ -91,7 +91,11 @@
 "chat.share" = "分享回复";
 "chat.quote" = "引用到跟进";
 "chat.response_time" = "回复时间";
-"chat.ran_duration" = "已运行 %@";
+"chat.compacting" = "正在压缩上下文…";
+"chat.worked_duration" = "运行了 %@";
+"chat.duration_seconds" = "%d秒";
+"chat.duration_minutes" = "%d分%d秒";
+"chat.duration_hours" = "%d小时%d分";
 "chat.estimated_duration" = "响应耗时约 %@";
 "chat.timing" = "对话时间";
 "chat.recorded_turns" = "已记录 %ld 轮回复的运行时间。";
