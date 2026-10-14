@@ -38,7 +38,7 @@
 "project.diff" = "Diff";
 "project.changes" = "Changed files";
 "error.outcome_unknown" = "The result is unknown. Check the conversation before sending again.";
-"error.read_only" = "No running agent is bound to this conversation. Refresh the task.";
+"error.read_only" = "This session is read-only or its agent has stopped. Go back to the session list and refresh.";
 "error.input_busy" = "The desktop has a draft or open question. Resolve it first.";
 "error.socket" = "Open cmux and check its socket access settings.";
 "error.history" = "This history is unavailable or exceeds the initial read limit.";
@@ -254,8 +254,8 @@
 "connection.remove_hint" = "Removes this Mac from this phone only. Revoke the device on the Mac to end its access there.";
 "pair.relay_loading" = "Reading the relay…";
 "error.network" = "The network is unreachable. Check Wi-Fi or cellular data and try again.";
-"error.network_timeout" = "The connection timed out. The network may be slow or blocked; try again or use your own relay domain.";
-"error.relay" = "The relay did not answer correctly. Check the relay address and try again.";
+"error.network_timeout" = "Connection timed out; retry. If timeouts persist, check your network or proxy.";
+"error.relay" = "Relay connection failed temporarily. Retry in a moment.";
 "error.relay_origin" = "Enter an address starting with https://, without a path.";
 "chat.loading" = "Loading conversation…";
 "sessions.workspaces_title" = "Workspaces";
