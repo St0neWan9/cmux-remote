@@ -12,6 +12,9 @@ struct ClippedScroller<Content: View>: View {
     let contentLength: CGFloat
     @ViewBuilder let content: () -> Content
     @State private var offset: CGFloat = 0
+    /// The bar fades in while the content moves and out once it settles, as a scroll view's own does.
+    @State private var showsIndicator = false
+    @State private var indicatorHide: Task<Void, Never>?
     @State private var dragStart: CGFloat?
     /// Whether the current drag runs along `axis`; decided once it has moved, so a page swipe is left alone.
     @State private var alongAxis: Bool?
@@ -41,6 +44,8 @@ struct ClippedScroller<Content: View>: View {
                                   withAnimation(.easeOut(duration: 0.35)) { offset = clamp(start - predicted) }
                               }))
             .onChange(of: contentLength) { _, _ in offset = clamp(offset) }
+            .onChange(of: offset) { _, _ in revealIndicator() }
+            .onDisappear { indicatorHide?.cancel(); indicatorHide = nil }
             .accessibilityScrollAction { edge in
                 let forward = edge == .bottom || edge == .trailing
                 withAnimation { offset = clamp(offset + (forward ? length * 0.8 : -length * 0.8)) }
@@ -66,9 +71,9 @@ struct ClippedScroller<Content: View>: View {
                 withAnimation(.easeOut(duration: 0.35)) { offset = clamp(start - distance(value.predictedEndTranslation)) }
             }
     }
-    /// A thin bar shows that there is more, and where the visible part sits.
+    /// A thin bar shows where the visible part sits while the content is being scrolled.
     @ViewBuilder private var indicator: some View {
-        if maxOffset > 0 {
+        if maxOffset > 0, showsIndicator {
             let bar = max(24, length * length / max(contentLength, 1))
             let position = (length - bar) * offset / maxOffset
             if axis == .vertical {
@@ -76,6 +81,17 @@ struct ClippedScroller<Content: View>: View {
             } else {
                 Capsule().fill(Color.black.opacity(0.18)).frame(width: bar, height: 3).offset(x: position, y: 6).allowsHitTesting(false)
             }
+        }
+    }
+    /// Shows the bar, and hides it again once the content has been still for a moment.
+    private func revealIndicator() {
+        guard maxOffset > 0 else { return }
+        if !showsIndicator { withAnimation(.easeOut(duration: 0.15)) { showsIndicator = true } }
+        indicatorHide?.cancel()
+        indicatorHide = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(900))
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeIn(duration: 0.35)) { showsIndicator = false }
         }
     }
     private func distance(_ translation: CGSize) -> CGFloat { axis == .vertical ? translation.height : translation.width }
