@@ -29,9 +29,12 @@ private actor PhoneUIBackend: CmuxControlling {
         if flag("no-vault-title") { return "" }
         return (try? String(contentsOf: root.deletingLastPathComponent().appendingPathComponent("vault-title"), encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "UI 测试：连接与页面"
     }
-    /// Opt-in fixture behaviors, switched by an empty file in the state directory.
+    /// Opt-in fixture behaviors, switched by an empty file in the state directory or by the launch
+    /// environment, so a UI test can select them without guessing where the fixture keeps its state.
     private func flag(_ name: String) -> Bool {
-        FileManager.default.fileExists(atPath: root.deletingLastPathComponent().appendingPathComponent(name).path)
+        let environment = ProcessInfo.processInfo.environment["CMUX_REMOTE_FIXTURE_FLAGS"] ?? ""
+        if environment.split(separator: ",").map({ $0.trimmingCharacters(in: .whitespaces) }).contains(name) { return true }
+        return FileManager.default.fileExists(atPath: root.deletingLastPathComponent().appendingPathComponent(name).path)
     }
     private static func append(_ rows: [JSONValue], to transcript: URL) throws {
         let handle = try FileHandle(forWritingTo: transcript); defer { try? handle.close() }; try handle.seekToEnd()
@@ -54,7 +57,18 @@ private actor PhoneUIBackend: CmuxControlling {
             return .object(["windows": .array([.object(["workspaces": .array([workspaceRow])])])])
         case "chat.sessions.dump": return .object(["sessions": .array([.object(["session_id": .string("fixture-session"), "agent": .string("claude"), "workspace_id": .string(workspace), "surface_id": .string(surface), "state": .string(flag("report-working") ? "working" : "idle"), "cwd": .string(root.path)])])])
         case "surface.input_state": return .object(["agent": .bool(true), "workspace_id": .string(workspace), "surface_id": .string(surface), "blocks_typing": .bool(false)])
-        case "surface.read_text": return .object(["text": .string("")])
+        // The agent's working line lives only on the rendered screen, and the screen also carries the
+        // terminal's own chrome, so the fixture renders both exactly as a live terminal would.
+        case "surface.read_text":
+            guard flag("report-working") else { return .object(["text": .string("")]) }
+            return .object(["text": .string([
+                "⏺ The table now fits the message width.",
+                "✔ Update installed · Restart to update",
+                "╭──────────────────────────────────────╮",
+                "│ ❯                                    │",
+                "╰──────────────────────────────────────╯",
+                "✻ Blanching… (54s · ↓ 2.3k tokens)",
+            ].joined(separator: "\n"))])
         case "feed.list": return .object(["items": .array(items)])
         case "feed.permission.reply", "feed.exit_plan.reply", "feed.question.reply":
             guard let id = params["request_id"]?.string, let index = items.firstIndex(where: { $0["request_id"].string == id && $0["status"].string == "pending" }), var fields = items[index].object else { throw BridgeError("request_expired", "Fixture request ended") }
