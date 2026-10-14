@@ -44,7 +44,7 @@
 "error.history" = "This history is unavailable or exceeds the initial read limit.";
 "error.file" = "This file cannot be previewed or shared from the project.";
 "error.expired" = "This request is no longer pending. Refresh the list.";
-"error.connection" = "Could not complete the request. Check the connection and pairing fingerprint.";
+"error.connection" = "Could not complete the request. Retry, or check your network and the Bridge on your Mac.";
 "pair.scan" = "Scan pairing QR code";
 "pair.scan_instructions" = "Run cmux-remote serve --pair on your Mac. Scanning requests enrollment; it does not grant access until the owner approves.";
 "pair.advanced" = "Advanced settings";
@@ -67,7 +67,8 @@
 "pair.enrollment_ended" = "Enrollment was denied, cancelled or expired. Open a new window on the Mac to try again.";
 "error.authorization" = "This device is revoked or not approved for this workspace or operation. Check its grant on the Mac.";
 "error.enrollment" = "Open an enrollment window on the Mac, then scan a fresh QR code.";
-"error.identity" = "Host or device identity verification failed. Compare identities and pair again explicitly.";
+"error.identity" = "Host or device identity does not match. Compare identities and pair again.";
+"error.epoch" = "Session credentials expired; recovering automatically. If you keep seeing this, retry.";
 "chat.activity_count" = "%ld operations";
 "chat.expanded" = "Expanded";
 "chat.collapsed" = "Collapsed";
