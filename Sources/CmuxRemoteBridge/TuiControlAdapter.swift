@@ -42,7 +42,7 @@ public actor TuiControlAdapter: CmuxControlling {
         case "vault.sessions", "chat.sessions.dump":
             let current = try await snapshot()
             let liveIDs = Set(current.bindings.map(\.id))
-            let activity = await hookActivity()
+            let activity = await hookActivity(current)
             let bindings = catalog.values.sorted { $0.id < $1.id }
             let paths = method == "vault.sessions" ? try transcripts.locate(Array(bindings)) : [:]
             var rows: [JSONValue] = []
@@ -136,19 +136,26 @@ public actor TuiControlAdapter: CmuxControlling {
         }
     }
     /// Folds agent hooks committed since the last read; an unreadable journal falls back to the daemon's own states.
-    private func hookActivity() async -> [String: String] {
+    private func hookActivity(_ current: TuiSessionSnapshot) async -> [String: String] {
         let filter: JSONValue = .object(["kinds": .array([.string("agent.*")]), "max_sensitivity": .string("sensitive")])
+        // Every read is its own daemon stream, addressed to the snapshot's machine and session.
+        func params(_ cursor: JSONValue?) -> [String: JSONValue] {
+            var fields = current.selectors(); fields["filter"] = filter; fields["follow"] = .bool(false)
+            fields["stream_id"] = .string("stream_" + UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased())
+            if let cursor { fields["cursor"] = cursor }
+            return fields
+        }
         do {
             if journalCursor == nil {
                 // Bootstrap from a bounded recent window: the head position, then the hooks shortly before it.
-                let head = try await client.stream("session.journal.subscribe", params: ["filter": filter, "follow": .bool(false)], limit: 1).cursor
+                let head = try await client.stream("session.journal.subscribe", params: params(nil), limit: 1).cursor
                 guard let generation = head["generation"].string, let revision = head["revision"].string.flatMap(UInt64.init) else { throw stale() }
                 hooks = TuiHookStates()
                 journalCursor = .object(["generation": .string(generation), "revision": .string(String(revision > journalWindow ? revision - journalWindow : 0))])
             }
             for _ in 0..<4 {
                 guard let cursor = journalCursor else { break }
-                let page = try await client.stream("session.journal.subscribe", params: ["filter": filter, "follow": .bool(false), "cursor": cursor], limit: 1_000)
+                let page = try await client.stream("session.journal.subscribe", params: params(cursor), limit: 1_000)
                 page.items.forEach { hooks.apply($0) }
                 if page.cursor["revision"].string != nil { journalCursor = page.cursor }
                 if page.complete { break }

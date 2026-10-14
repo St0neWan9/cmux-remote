@@ -47,8 +47,13 @@ actor TuiResourceFixture: TuiResourceRequesting {
     var journalHead: UInt64 = 0
     var journalReads: [JSONValue] = []
     var journalBroken = false
+    var streamIDs: Set<String> = []
     func stream(_ operation: String, params: [String: JSONValue], limit: Int) async throws -> TuiStreamRead {
         guard operation == "session.journal.subscribe", params["filter"]?["max_sensitivity"].string == "sensitive" else { throw BridgeError("unsupported", "Unexpected fixture stream") }
+        // The daemon requires its selectors and a fresh client stream identity on every subscription.
+        guard params["machine"]?.string == Self.machine, params["session"]?.string == Self.session,
+              let stream = params["stream_id"]?.string, stream.hasPrefix("stream_"), stream.count == 39, !streamIDs.contains(stream) else { throw BridgeError("socket_denied", "Fixture rejected the stream request") }
+        streamIDs.insert(stream)
         if journalBroken { throw BridgeError("socket_denied", "Fixture journal refused") }
         journalReads.append(params["cursor"] ?? .null)
         let after = params["cursor"]?["revision"].string.flatMap(UInt64.init) ?? journalHead
