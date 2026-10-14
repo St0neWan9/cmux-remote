@@ -1,65 +1,65 @@
 import SwiftUI
 import CmuxRemoteCore
 
-/// A pipe table drawn as a grid; a table wider than the message scrolls sideways inside it.
+/// A pipe table as wide as its message: rows divided by hairlines, columns wrapping their text,
+/// and a sideways scroll only when the columns cannot wrap any narrower.
 struct MarkdownTableView: View {
     let table: MarkdownTable
-    /// Long cells wrap at this width so one column cannot push the others off screen.
-    private let maxColumnWidth: CGFloat = 240
+    private let gap: CGFloat = 16
     @State private var available: CGFloat = 0
-    @State private var natural: CGSize = .zero
-    /// Each column's widest single-line cell, so a column is only as wide as it needs and wraps past the cap.
-    @State private var columnWidths: [Int: CGFloat] = [:]
+    @State private var height: CGFloat = 0
     var body: some View {
-        // The table sits in an overlay so its natural width can never widen the message;
+        let font = UIFont.preferredFont(forTextStyle: .subheadline)
+        let metrics = MarkdownTableMetrics(table: table, body: font, header: .systemFont(ofSize: font.pointSize, weight: .semibold))
+        let widths = metrics.widths(available: available, gap: gap)
+        let total = widths.reduce(0, +) + gap * CGFloat(max(0, widths.count - 1))
+        // The table sits in an overlay so its width can never widen the message;
         // the placeholder takes the message width and the table's measured height.
         Color.clear
             .frame(maxWidth: .infinity)
-            .frame(height: natural.height)
+            .frame(height: height)
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { available = $0 }
             .overlay(alignment: .topLeading) {
-                if natural.width > available + 0.5, available > 0 {
-                    ClippedScroller(.horizontal, length: available, contentLength: natural.width) { grid }
-                } else {
-                    grid
+                if available > 0 {
+                    if total > available + 0.5 {
+                        ClippedScroller(.horizontal, length: available, contentLength: total) { grid(widths) }
+                    } else {
+                        grid(widths)
+                    }
                 }
             }
     }
-    private var grid: some View {
-        Grid(alignment: .topLeading, horizontalSpacing: 0, verticalSpacing: 0) {
+    private func grid(_ widths: [CGFloat]) -> some View {
+        Grid(alignment: .topLeading, horizontalSpacing: gap, verticalSpacing: 0) {
             GridRow {
-                ForEach(table.header.indices, id: \.self) { column in cell(table.header[column], column: column, header: true) }
+                ForEach(table.header.indices, id: \.self) { column in cell(table.header[column], column: column, width: widths[column], header: true) }
             }
-            .background(Color.black.opacity(0.04))
             ForEach(table.rows.indices, id: \.self) { row in
                 Divider().gridCellUnsizedAxes(.horizontal)
                 GridRow {
-                    ForEach(table.rows[row].indices, id: \.self) { column in cell(table.rows[row][column], column: column, header: false) }
+                    ForEach(table.rows[row].indices, id: \.self) { column in cell(table.rows[row][column], column: column, width: widths[column], header: false) }
                 }
             }
         }
         .fixedSize(horizontal: true, vertical: true)
-        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.black.opacity(0.08), lineWidth: 0.5))
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-        .onGeometryChange(for: CGSize.self) { $0.size } action: { natural = $0 }
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height = $0 }
     }
-    private func cell(_ text: String, column: Int, header: Bool) -> some View {
+    private func cell(_ text: String, column: Int, width: CGFloat, header: Bool) -> some View {
         let alignment = column < table.alignments.count ? table.alignments[column] : .leading
-        let font: Font = header ? .subheadline.weight(.semibold) : .subheadline
         let frameAlignment: SwiftUI.Alignment = alignment == .center ? .center : alignment == .trailing ? .trailing : .leading
         // A fixed column width lets a wrapped cell report its real height to the row.
-        return Text(.init(text))
-            .font(font)
+        return Text(styled(text))
+            .font(header ? .subheadline.weight(.semibold) : .subheadline)
             .multilineTextAlignment(alignment == .center ? .center : alignment == .trailing ? .trailing : .leading)
-            .frame(width: min(maxColumnWidth, columnWidths[column] ?? maxColumnWidth), alignment: frameAlignment)
+            .frame(width: width, alignment: frameAlignment)
             .fixedSize(horizontal: false, vertical: true)
-            .background {
-                Text(.init(text)).font(font).fixedSize().hidden()
-                    .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width in
-                        if width > (columnWidths[column] ?? 0) { columnWidths[column] = width }
-                    }
-            }
-            .padding(.horizontal, 10).padding(.vertical, 8)
+            .padding(.vertical, 10)
             .textSelection(.enabled)
+    }
+    /// Inline Markdown with code spans dimmed, as they read in the desktop transcript.
+    private func styled(_ markdown: String) -> AttributedString {
+        var value = (try? AttributedString(markdown: markdown, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(markdown)
+        for run in value.runs where run.inlinePresentationIntent?.contains(.code) == true { value[run.range].foregroundColor = .secondary }
+        return value
     }
 }
