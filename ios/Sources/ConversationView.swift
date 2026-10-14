@@ -103,13 +103,12 @@ struct ConversationView: View {
                 if model.stopRequested {
                     Label(String(localized: "chat.stop_requested"), systemImage: "checkmark.circle").font(.footnote).foregroundStyle(.secondary)
                 } else if model.hasActiveResponse {
-                    HStack(spacing: 7) { ProgressView().controlSize(.mini); if let start = model.runningSince {
-                        TimelineView(.periodic(from: .now, by: 1)) { context in
-                            let elapsed = Duration.seconds(max(0, context.date.timeIntervalSince(start))).formatted(.units(allowed: [.hours, .minutes, .seconds], width: .wide, maximumUnitCount: 2))
-                            Text(String.localizedStringWithFormat(String(localized: "chat.elapsed_duration"), elapsed)).font(.footnote).monospacedDigit()
-                        }
-                    } else { Text(String(localized: "chat.working")).font(.footnote) }; Spacer(); Label(model.session.agent.capitalized, systemImage: "sparkles").font(.caption) }
-                        .foregroundStyle(.secondary).padding(.horizontal, 12)
+                    HStack(spacing: 7) {
+                        if let start = model.runningSince {
+                            LiveRunLabel(since: start, compacting: model.compacting)
+                        } else { ProgressView().controlSize(.mini); Text(String(localized: "chat.working")).font(.footnote) }
+                        Spacer(); Label(model.session.agent.capitalized, systemImage: "sparkles").font(.caption)
+                    }.foregroundStyle(.secondary).padding(.horizontal, 12)
                 } else if !model.canSend { Text(String(localized: "sessions.read_only")).font(.caption).foregroundStyle(.secondary) }
                 ChatComposer(draft: $model.draft, focused: $composerFocused, canSend: model.canSend, busy: model.busy, working: model.hasActiveResponse,
                              images: model.imageDraft.images, removeImage: model.imageDraft.remove,
@@ -212,9 +211,6 @@ struct ConversationView: View {
             ForEach(model.timelineItems) { item in
                 timelineRow(item, firstResponse: firstResponse, lastResponse: lastResponse, imagesByMessage: imagesByMessage, activeAnchor: activeAnchor, runningSince: runningSince, bottom: bottom)
             }
-            if activeAnchor == nil, let runningSince {
-                LiveRunLabel(since: runningSince, status: model.liveStatus).modifier(HeaderContentEffect(bottom: bottom))
-            }
             if let preview = model.preview {
                 VStack(alignment: .leading, spacing: 10) {
                     Label(String(localized: "chat.preview"), systemImage: "ellipsis.bubble").font(.caption).foregroundStyle(.secondary)
@@ -243,9 +239,7 @@ struct ConversationView: View {
                                           imagesByMessage: [String: [ConversationImageReference]], activeAnchor: String?, runningSince: Date?, bottom: CGFloat) -> some View {
         let images = item.messages.flatMap { imagesByMessage[$0.id] ?? [] }
         VStack(alignment: .leading, spacing: 12) {
-            if item.id == activeAnchor, let runningSince {
-                LiveRunLabel(since: runningSince)
-            } else if let response = firstResponse[item.id], let seconds = response.durationSeconds {
+            if let response = firstResponse[item.id], let seconds = response.durationSeconds {
                 ResponseRunLabel(seconds: seconds, recorded: response.recordedDuration)
             }
             if item.isActivity { ActivityGroupView(item: item, projectRoot: model.session.cwd, openFile: model.client.allows(.projectRead) ? { selectedFile = $0; showProject = true } : nil, images: images, openImage: { selectedImage = $0 }, openDetail: openToolDetail) }
