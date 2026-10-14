@@ -91,7 +91,8 @@
 "chat.share" = "分享回复";
 "chat.quote" = "引用到跟进";
 "chat.response_time" = "回复时间";
-"chat.compacting" = "正在压缩上下文…";
+"chat.compacting" = "正在压缩上下文 %@";
+"chat.running_duration" = "运行中 %@";
 "chat.worked_duration" = "运行 %@";
 "chat.duration_seconds" = "%d秒";
 "chat.duration_minutes" = "%d分%d秒";

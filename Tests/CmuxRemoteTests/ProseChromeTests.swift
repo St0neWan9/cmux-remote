@@ -41,6 +41,26 @@ import CmuxAgentChat
         let text = AgentChatProseScreenExtractor().extract(lines: screen, agentKind: .claude)
         #expect(text == "The current answer.")
     }
+    /// Claude Code's status bar carries the git branch, which is not the agent's prose.
+    @Test func theBranchStatusBarIsNotProse() {
+        let screen = [
+            "⏺ The table now fits the message width.",
+            "⏵⏵ auto mode on · ⎇ main",
+            "✻ Blanching… (54s · ↓ 2.3k tokens)",
+        ]
+        let text = AgentChatProseScreenExtractor().extract(lines: screen, agentKind: .claude)
+        #expect(text == "The table now fits the message width.")
+    }
+    /// A branch name alone, without the marker, is still chrome.
+    @Test func aBareBranchRowIsNotProse() {
+        let screen = [
+            "⏺ The answer.",
+            "⎇ main",
+            "✻ Thinking… (3s · ↓ 12 tokens)",
+        ]
+        let text = AgentChatProseScreenExtractor().extract(lines: screen, agentKind: .claude)
+        #expect(text == "The answer.")
+    }
     /// Prose that merely starts with a dash is not a divider.
     @Test func proseIsNotMistakenForChrome() {
         let screen = ["⏺ - a hyphenated list item keeps its text.", "✻ Thinking… (3s · ↓ 12 tokens)"]

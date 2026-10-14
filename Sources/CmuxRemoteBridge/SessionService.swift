@@ -218,10 +218,10 @@ public actor SessionService {
         let snapshot = try await cmux.request("surface.read_text", params: ["surface_id": .string(surface)])
         let lines = (snapshot["text"].string ?? "").components(separatedBy: .newlines)
         let text = AgentChatProseScreenExtractor().extract(lines: lines, agentKind: ChatAgentKind(source: record.descriptor.agent))
-        // The gerund and token count exist only on screen, so they come from the same rows as the prose.
-        let status = TuiAgentStatusLine.parse(rows: lines)
+        // Compaction is printed on the agent's own working line, so it is read from the same rows.
+        let compacting = TuiCompactionScreen.isCompacting(rows: lines)
         try await recheck(record, capability: .conversationRead, access: access)
-        return PreviewSnapshot(text: text, available: true, status: status)
+        return PreviewSnapshot(text: text, available: true, compacting: compacting)
     }
 
     public func send(id: String, request: SendRequest, access: SessionAccess? = nil) async throws -> MutationReceipt {

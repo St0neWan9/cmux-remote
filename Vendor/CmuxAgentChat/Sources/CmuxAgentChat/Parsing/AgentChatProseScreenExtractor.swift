@@ -148,7 +148,10 @@ public struct AgentChatProseScreenExtractor: Sendable {
         let trimmed = row.trimmingCharacters(in: .whitespaces)
         guard let first = trimmed.first else { return false }
         if boxDrawingGlyphs.contains(first) { return true }
-        return chromeLeadingGlyphs.contains(first)
+        if chromeLeadingGlyphs.contains(first) { return true }
+        // The CLI's status bar carries the git branch behind its own marker (`⎇ main`); the branch is
+        // the working directory's state, not something the agent wrote.
+        return trimmed.contains("⎇")
     }
 
     /// Box-drawing glyphs that draw the composer's frame and its dividers. `│` is the box's side, which
