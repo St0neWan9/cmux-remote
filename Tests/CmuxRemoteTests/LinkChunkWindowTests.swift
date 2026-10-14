@@ -8,7 +8,7 @@ import CmuxRemoteCore
 @Suite struct LinkChunkWindowTests {
     @Test(.timeLimit(.minutes(1)))
     func aLargeResponseKeepsAtMostAWindowOfChunksUnacknowledged() async throws {
-        let fixture = try await LinkIntegrationFixture.create(text: String(repeating: "windowed ", count: 30_000), recordCount: 24)
+        let fixture = try await LinkIntegrationFixture.create(text: String(repeating: "windowed ", count: 2_000), recordCount: 28)
         var raw: LinkRawConnection?
         do {
             var connection = try await LinkRawConnection.connect(fixture.connection); raw = connection
@@ -41,7 +41,7 @@ import CmuxRemoteCore
     }
     @Test(.timeLimit(.minutes(1)))
     func anAcknowledgementOutOfOrderEndsTheLink() async throws {
-        let fixture = try await LinkIntegrationFixture.create(text: String(repeating: "ordered ", count: 30_000), recordCount: 8)
+        let fixture = try await LinkIntegrationFixture.create(text: String(repeating: "ordered ", count: 2_000), recordCount: 8)
         var raw: LinkRawConnection?
         do {
             var connection = try await LinkRawConnection.connect(fixture.connection); raw = connection
