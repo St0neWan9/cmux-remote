@@ -48,13 +48,31 @@ import CmuxRemoteCore
         #expect(effects[0].1["expected_revision"]?.string == "1")
         #expect(effects[0].2?.hasPrefix("cmux-remote:send:") == true)
     }
-    @Test(arguments: ["\u{1b}[H❯\u{00a0}unfinished draft", "\u{1b}[Hunknown UI", "\u{1b}[H❯\u{00a0}\r\nEsc to cancel"])
-    func draftDialogAndUnknownScreenBlockSending(_ replay: String) async throws {
+    @Test func aPhoneSendErasesADesktopDraftFirst() async throws {
+        let source = TuiResourceFixture(); await source.configure(replay: "\u{1b}[?2004h\u{1b}[H❯\u{00a0}unfinished draft")
+        let session = service(adapter(source)), id = try #require(try await session.sessions().first?.id)
+        _ = try await session.send(id: id, request: .init(text: "from the phone"))
+        let effects = await source.effects
+        #expect(effects.count == 2)
+        #expect(effects[0].1["text"]?.string?.allSatisfy { $0 == "\u{7f}" } == true); #expect((effects[0].1["text"]?.string?.count ?? 0) >= "unfinished draft".count)
+        #expect(effects[0].2?.hasPrefix("cmux-remote:send-clear:") == true)
+        #expect(effects[1].1["text"]?.string == "\u{1b}[200~from the phone\u{1b}[201~\r")
+    }
+    @Test func aPhoneSendDismissesAnOpenDialogFirst() async throws {
+        let source = TuiResourceFixture(); await source.configure(replay: "\u{1b}[?2004h\u{1b}[H❯\u{00a0}\r\nEsc to cancel"); await source.dismissesOnEscape()
+        let session = service(adapter(source)), id = try #require(try await session.sessions().first?.id)
+        _ = try await session.send(id: id, request: .init(text: "from the phone"))
+        let effects = await source.effects
+        #expect(effects.count == 2); #expect(effects[0].1["keys"]?.array == [.string("escape")]); #expect(effects[1].0 == "terminal.input.write")
+    }
+    @Test(arguments: ["\u{1b}[Hunknown UI", "\u{1b}[H❯\u{00a0}\r\nEsc to cancel"])
+    func aScreenThatNeverShowsAnEmptyPromptIsNeverTypedInto(_ replay: String) async throws {
         let source = TuiResourceFixture(); await source.configure(replay: replay)
         let session = service(adapter(source)), id = try #require(try await session.sessions().first?.id)
-        do { _ = try await session.send(id: id, request: .init(text: "Never overwrite")); Issue.record("Expected input protection") }
+        do { _ = try await session.send(id: id, request: .init(text: "Never typed")); Issue.record("Expected input protection") }
         catch { #expect((error as? BridgeError)?.code == "input_busy") }
-        #expect(await source.effects.isEmpty)
+        let effects = await source.effects
+        #expect(effects.count == 3); #expect(effects.allSatisfy { $0.0 == "terminal.input.keys" && $0.1["keys"]?.array == [.string("escape")] })
         _ = try await session.interrupt(id: id, request: .init())
         #expect(await source.effects.last?.1["keys"]?.array == [.string("escape")])
     }
@@ -75,14 +93,12 @@ import CmuxRemoteCore
         _ = try await session.send(id: id, request: .init(text: "next"))
         #expect(await source.effects.count == 4)
     }
-    @Test func aDifferentDesktopDraftAfterAnInterruptIsNeverErased() async throws {
+    @Test func anInterruptNeverErasesADifferentDesktopDraft() async throws {
         let source = TuiResourceFixture(), session = service(adapter(source)), id = try #require(try await session.sessions().first?.id)
         _ = try await session.send(id: id, request: .init(text: "from the phone"))
         await source.restore("typed on the Mac")
         _ = try await session.interrupt(id: id, request: .init())
         #expect(await source.effects.count == 2)
-        do { _ = try await session.send(id: id, request: .init(text: "next")); Issue.record("Expected input protection") }
-        catch { #expect((error as? BridgeError)?.code == "input_busy") }
         #expect(await source.effects.count == 2)
     }
     @Test func anInterruptWithoutARestoredPromptSendsNothingMore() async throws {
