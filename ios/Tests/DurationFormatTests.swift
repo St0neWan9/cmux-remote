@@ -13,7 +13,8 @@ final class DurationFormatTests: XCTestCase {
     func testRunningTurnDurations() {
         XCTAssertEqual(LiveRunLabel.timer(0), "0s")
         XCTAssertEqual(LiveRunLabel.timer(54), "54s")
-        XCTAssertEqual(LiveRunLabel.timer(65), "1m05s")
-        XCTAssertEqual(LiveRunLabel.timer(3_600), "60m00s")
+        XCTAssertEqual(LiveRunLabel.timer(65), "1m 05s")
+        XCTAssertEqual(LiveRunLabel.timer(90), "1m 30s")
+        XCTAssertEqual(LiveRunLabel.timer(3_600), "60m 00s")
     }
 }

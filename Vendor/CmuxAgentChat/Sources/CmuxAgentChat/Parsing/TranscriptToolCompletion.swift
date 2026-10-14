@@ -46,6 +46,7 @@ struct TranscriptToolCompletion: Sendable {
         case .terminal(let capture):
             let completed = ChatTerminalCapture(
                 command: capture.command,
+                summary: capture.summary,
                 output: output.map { budget.body($0) },
                 exitCode: exitCode ?? (isError ? 1 : 0),
                 durationSeconds: durationSeconds,
