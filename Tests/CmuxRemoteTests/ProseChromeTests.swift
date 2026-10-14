@@ -61,6 +61,25 @@ import CmuxAgentChat
         let text = AgentChatProseScreenExtractor().extract(lines: screen, agentKind: .claude)
         #expect(text == "The answer.")
     }
+    /// A pasted attachment is written to the terminal as its literal path; that path is not the agent's prose.
+    @Test func aPastedAttachmentPathIsNotProse() {
+        let screen = [
+            "⏺ Reading the screenshot.",
+            "'/Users/example/.local/state/cmux-remote/tui-images/cfec33dd24fa7dfa410e594a94d100aa6ed4e6108e0ad7ad45382608ab8f8037/944ec0379593ceaae1413f657c8d95612e8215b9f36f548ee1d44c4316fc516b/0.jpeg'",
+            "✻ Blanching… (54s · ↓ 2.3k tokens)",
+        ]
+        let text = AgentChatProseScreenExtractor().extract(lines: screen, agentKind: .claude)
+        #expect(text == "Reading the screenshot.")
+    }
+    /// Prose that mentions the same directory is still the agent's own writing.
+    @Test func proseMentioningTheImageStoreIsStillProse() {
+        let screen = [
+            "⏺ 图片缓存放在 tui-images 目录下，按会话和操作分两级哈希。",
+            "✻ Thinking… (3s · ↓ 12 tokens)",
+        ]
+        let text = AgentChatProseScreenExtractor().extract(lines: screen, agentKind: .claude)
+        #expect(text == "图片缓存放在 tui-images 目录下，按会话和操作分两级哈希。")
+    }
     /// Prose that merely starts with a dash is not a divider.
     @Test func proseIsNotMistakenForChrome() {
         let screen = ["⏺ - a hyphenated list item keeps its text.", "✻ Thinking… (3s · ↓ 12 tokens)"]
