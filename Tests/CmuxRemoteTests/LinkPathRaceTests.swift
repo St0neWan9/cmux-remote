@@ -30,13 +30,16 @@ import CmuxRemoteCore
             let first = clock.now
             let _: [SessionDescriptor] = try await request(link, connection: fixture.connection, path: "/v2/sessions")
             // The first dial only learns the LAN is silent after its deadline.
-            #expect(clock.now - first >= .seconds(4))
+            let firstDial = clock.now - first
+            #expect(firstDial >= .seconds(4))
             #expect(dials.value == 1)
             // The reconnect itself dials; measure it together with the read it serves.
             let second = clock.now
             await link.reconnect()
             let _: [SessionDescriptor] = try await request(link, connection: fixture.connection, path: "/v2/sessions")
-            #expect(clock.now - second < .seconds(3))
+            // Compared with the first dial rather than a fixed bound, so a slow host does not decide the result:
+            // waiting for the LAN again would cost the same four seconds the first dial paid.
+            #expect(clock.now - second < firstDial - .seconds(2))
             #expect(dials.value == 2)
             link.close(); await fixture.stop()
         } catch { transport?.close(); await fixture.stop(); throw error }
