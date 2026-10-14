@@ -1,3 +1,5 @@
+import Foundation
+
 /// A non-terminal tool invocation by the agent (file read, search, web
 /// fetch, subagent, ...), paired with its result when one has arrived.
 public struct ChatToolUse: Sendable, Equatable, Codable {
@@ -32,6 +34,9 @@ public struct ChatToolUse: Sendable, Equatable, Codable {
     /// Absolute paths referenced by the tool input, when the parser can infer them.
     public let referencedPaths: [String]?
 
+    /// When the result arrived, which is when the tool finished rather than when it was invoked.
+    public let completedAt: Date?
+
     /// Creates a tool invocation record.
     ///
     /// - Parameters:
@@ -47,7 +52,8 @@ public struct ChatToolUse: Sendable, Equatable, Codable {
         inputDetail: String? = nil,
         output: String? = nil,
         status: Status = .running,
-        referencedPaths: [String]? = nil
+        referencedPaths: [String]? = nil,
+        completedAt: Date? = nil
     ) {
         self.toolName = toolName
         self.summary = summary
@@ -55,6 +61,7 @@ public struct ChatToolUse: Sendable, Equatable, Codable {
         self.output = output
         self.status = status
         self.referencedPaths = referencedPaths
+        self.completedAt = completedAt
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -64,5 +71,6 @@ public struct ChatToolUse: Sendable, Equatable, Codable {
         case output
         case status
         case referencedPaths = "referenced_paths"
+        case completedAt = "completed_at"
     }
 }

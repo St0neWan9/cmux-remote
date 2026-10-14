@@ -59,7 +59,7 @@ struct MessageRow: View {
         case .thought(let value): MarkdownMessageView(text: value.text)
         case .toolUse(let value):
             ToolDisclosure(title: value.summary, symbol: value.toolName.lowercased().contains("read") ? "book" : "magnifyingglass", identifier: "tool.disclosure." + message.id) {
-                ToolDetailCard(title: value.toolName, status: value.status == .succeeded ? String(localized: "tool.card.success") : value.status.localizedTitle, failed: value.status == .failed) {
+                ToolDetailCard(title: value.toolName, status: value.status == .succeeded ? String(localized: "tool.card.success") : value.status.localizedTitle, failed: value.status == .failed, completedAt: value.completedAt) {
                     VStack(alignment: .leading, spacing: 12) {
                         if let input = value.inputDetail, !input.isEmpty { ToolCodeBlock(text: input) }
                         if let output = value.output, !output.isEmpty { ToolCodeBlock(text: output) }
@@ -74,7 +74,7 @@ struct MessageRow: View {
             ToolDisclosure(title: value.summary ?? value.command, symbol: "terminal", identifier: "tool.disclosure." + message.id) {
                 ToolDetailCard(title: String(localized: "tool.card.shell"),
                                status: value.exitCode.map { $0 == 0 ? String(localized: "tool.card.success") : String.localizedStringWithFormat(String(localized: "chat.exit_code"), $0) } ?? String(localized: "chat.tool.running"),
-                               failed: value.exitCode.map { $0 != 0 } ?? false) {
+                               failed: value.exitCode.map { $0 != 0 } ?? false, completedAt: value.completedAt) {
                     VStack(alignment: .leading, spacing: 12) {
                         ToolCodeBlock(text: "$ " + value.command)
                         if let output = value.output, !output.isEmpty { ToolCodeBlock(text: output).foregroundStyle(.secondary) }
