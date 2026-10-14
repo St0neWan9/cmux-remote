@@ -10,6 +10,12 @@ final class DurationFormatTests: XCTestCase {
         XCTAssertEqual(ResponseRunLabel.compactDuration(3_600), "1h 0m")
         XCTAssertEqual(ResponseRunLabel.compactDuration(4_380), "1h 13m")
     }
+    /// Both places the running line appears share one formatter, so they cannot drift apart.
+    func testBothRunningLinesAgree() {
+        XCTAssertEqual(LiveRunLabel.line("chat.running_duration", seconds: 227), "运行中 3m 47s")
+        XCTAssertEqual(LiveRunLabel.line("chat.running_duration", seconds: 7), "运行中 7s")
+        XCTAssertEqual(LiveRunLabel.line("chat.compacting", seconds: 227), "正在压缩上下文 3m 47s")
+    }
     func testRunningTurnDurations() {
         XCTAssertEqual(LiveRunLabel.timer(0), "0s")
         XCTAssertEqual(LiveRunLabel.timer(54), "54s")
