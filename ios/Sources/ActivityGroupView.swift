@@ -9,7 +9,12 @@ struct ActivityGroupView: View {
     var images: [ConversationImageReference] = []
     var openImage: ((ConversationImageReference) -> Void)?
     var openDetail: ((String, String) -> Void)?
-    @State private var expanded = false
+    /// Whether this group is the newest item in the conversation. The newest group opens on its own so its
+    /// work can be followed as it happens, and closes once the next message arrives.
+    var isLatest = false
+    /// The reader's own choice, which wins until the group stops being the newest.
+    @State private var expanded: Bool?
+    private var isExpanded: Bool { expanded ?? isLatest }
     var body: some View {
         if item.operationCount == 0 {
             // Only reasoning, no operations: nothing to summarize, so it is shown directly.
@@ -28,18 +33,22 @@ struct ActivityGroupView: View {
     }
     private var group: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Button { withAnimation(.easeInOut(duration: 0.18)) { expanded.toggle() } } label: {
+            Button { withAnimation(.easeInOut(duration: 0.18)) { expanded = !isExpanded } } label: {
                 HStack(spacing: 9) {
                     Image(systemName: "book.pages")
                     if item.operationCount == 1 { Text(String(localized: "chat.activity_one")) }
                     else { Text(String.localizedStringWithFormat(String(localized: "chat.activity_count"), item.operationCount)) }
-                    Image(systemName: expanded ? "chevron.down" : "chevron.right").font(.caption.weight(.medium))
+                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right").font(.caption.weight(.medium))
                 }.font(.subheadline).foregroundStyle(.secondary).frame(maxWidth: .infinity, minHeight: 30, alignment: .leading).contentShape(Rectangle())
-            }.buttonStyle(.plain).accessibilityIdentifier("activity." + item.id).accessibilityValue(expanded ? String(localized: "chat.expanded") : String(localized: "chat.collapsed"))
-            if expanded {
+            }.buttonStyle(.plain).accessibilityIdentifier("activity." + item.id).accessibilityValue(isExpanded ? String(localized: "chat.expanded") : String(localized: "chat.collapsed"))
+            if isExpanded {
                 rows
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
+        }
+        // The next message closes it, whatever the reader chose while it was the newest.
+        .onChange(of: isLatest) { _, latest in
+            if !latest { withAnimation(.easeInOut(duration: 0.18)) { expanded = nil } }
         }
     }
 }

@@ -96,9 +96,8 @@
 "chat.running_duration" = "Working %@";
 "chat.worked_duration" = "Worked for %@";
 "chat.duration_seconds" = "%ds";
-"chat.duration_minutes" = "%dm %ds";
-"chat.duration_hours" = "%dh %dm";
-"chat.estimated_duration" = "Response took approximately %@";
+"chat.duration_minutes" = "%dm %02ds";
+"chat.duration_hours" = "%dh %02dm";
 "chat.timing" = "Conversation time";
 "chat.recorded_turns" = "Recorded duration from %ld completed turns.";
 "chat.no_timing" = "No recorded running duration is available.";

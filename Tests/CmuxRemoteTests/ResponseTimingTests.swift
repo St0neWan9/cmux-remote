@@ -39,6 +39,21 @@ import CmuxRemoteCore
         #expect(snapshot.recordedRunSeconds == 13.363)
         #expect(snapshot.recordedTurnCount == 1)
     }
+    /// A background task that finishes while Claude is idle starts a new turn; its answer is a response of
+    /// its own, with a footer, instead of joining the finished turn before it.
+    @Test func aTaskNoticeBetweenTurnsOpensItsOwnResponse() async throws {
+        let done = #"{"type":"system","subtype":"turn_duration","durationMs":10000,"timestamp":"2026-10-12T00:00:10Z"}"#
+        let notice = #"{"type":"user","uuid":"n","origin":{"kind":"task-notification"},"timestamp":"2026-10-12T00:05:00Z","message":{"content":"<task-notification><task-id>t</task-id><status>completed</status></task-notification>"}}"#
+        let answer = #"{"type":"assistant","uuid":"b","timestamp":"2026-10-12T00:05:04Z","message":{"content":[{"type":"text","text":"The build finished."}]}}"#
+        let doneAgain = #"{"type":"system","subtype":"turn_duration","durationMs":4000,"timestamp":"2026-10-12T00:05:04Z"}"#
+        let snapshot = try await page([user, reply, done, notice, answer, doneAgain])
+        let responses = try #require(snapshot.responses)
+        #expect(responses.map(\.firstMessageID) == ["a", "b"])
+        #expect(responses.last?.completed == true)
+        #expect(responses.last?.completedAt == ISO8601DateFormatter().date(from: "2026-10-12T00:05:04Z"))
+        // The notice is not a prompt: it never shows as one.
+        #expect(!snapshot.messages.contains { $0.id == "n" })
+    }
     @Test func absentCompletionIsNotFabricated() async throws {
         let snapshot = try await page([user, reply])
         let response = try #require(snapshot.responses?.first)
