@@ -1,3 +1,5 @@
+import Foundation
+
 /// A shell command and its captured output; renders as a terminal card.
 ///
 /// Produced when the agent runs a shell tool, or (in plain terminal
@@ -22,6 +24,9 @@ public struct ChatTerminalCapture: Sendable, Equatable, Codable {
     /// Whether the command is still running (no result observed yet).
     public let isRunning: Bool
 
+    /// When the result arrived, which is when the command finished rather than when it started.
+    public let completedAt: Date?
+
     /// Creates a terminal capture.
     ///
     /// - Parameters:
@@ -36,13 +41,15 @@ public struct ChatTerminalCapture: Sendable, Equatable, Codable {
         output: String? = nil,
         exitCode: Int? = nil,
         durationSeconds: Double? = nil,
-        isRunning: Bool = false
+        isRunning: Bool = false,
+        completedAt: Date? = nil
     ) {
         self.command = command; self.summary = summary
         self.output = output
         self.exitCode = exitCode
         self.durationSeconds = durationSeconds
         self.isRunning = isRunning
+        self.completedAt = completedAt
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -52,5 +59,6 @@ public struct ChatTerminalCapture: Sendable, Equatable, Codable {
         case exitCode = "exit_code"
         case durationSeconds = "duration_seconds"
         case isRunning = "is_running"
+        case completedAt = "completed_at"
     }
 }
