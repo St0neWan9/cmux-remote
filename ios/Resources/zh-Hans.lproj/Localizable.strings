@@ -15,7 +15,6 @@
 "sessions.title" = "会话";
 "sessions.empty" = "未找到支持的会话。";
 "sessions.read_only" = "只读会话";
-"chat.older" = "加载更早的消息";
 "chat.clipped" = "这段对话很长，更早的消息未显示。";
 "chat.outgoing.sending" = "发送中…";
 "chat.outgoing.sent" = "已发送 · 等待智能体接收";

@@ -29,6 +29,8 @@ struct ConversationView: View {
     @FocusState private var composerFocused: Bool
     /// This Mac's link, shown above the conversation while it is not up.
     @State private var linkState: LinkState?
+    /// Whether the marker above the first loaded message is within reach of the top of the page.
+    @State private var topNear = false
     private let hostName: String
     init(model: ConversationModel, hostName: String = "") {
         _model = State(initialValue: model); self.hostName = hostName
@@ -37,7 +39,7 @@ struct ConversationView: View {
         GeometryReader { viewport in
         ScrollViewReader { proxy in
             ScrollView {
-                timeline(bottom: viewport.size.height)
+                timeline(bottom: viewport.size.height) { Task { await loadOlder(proxy) } }
             }
             .scrollClipDisabled()
             .modifier(InitialBottomAnchor())
@@ -51,7 +53,7 @@ struct ConversationView: View {
             }
             .modifier(TimelineScrollInteraction(userScrolling: $userScrolling, atLatest: $atLatest, latestVisible: latestVisible))
             .scrollDismissesKeyboard(.interactively)
-            .refreshable { await reconnect() }
+            .refreshable { await pullToRefresh(proxy) }
             .overlay(alignment: .bottom) {
                 if !atLatest {
                     Button { atLatest = true; withAnimation { proxy.scrollTo("latest", anchor: .bottom) } } label: {
@@ -174,7 +176,7 @@ struct ConversationView: View {
         .accessibilityAction(.escape) { dismiss() }
     }
     /// The message list. Separate from `body` so the page stays type-checkable.
-    @ViewBuilder private func timeline(bottom: CGFloat) -> some View {
+    @ViewBuilder private func timeline(bottom: CGFloat, reachedTop: @escaping () -> Void) -> some View {
         // Lookups are built once per update instead of searched again by every row.
         let firstResponse = Dictionary(model.responses.map { ($0.firstMessageID, $0) }, uniquingKeysWith: { _, latest in latest })
         let lastResponse = Dictionary(model.responses.map { ($0.lastMessageID, $0) }, uniquingKeysWith: { _, latest in latest })
@@ -183,7 +185,18 @@ struct ConversationView: View {
         // The live label belongs at the top of the reply in progress; before the first reply it has its own row.
         let activeAnchor: String? = runningSince == nil ? nil : model.responses.last.flatMap { $0.completed ? nil : $0.firstMessageID }
         LazyVStack(alignment: .leading, spacing: 6) {
-            if model.hasMore { Button(String(localized: "chat.older")) { Task { await model.older() } }.disabled(model.loadingOlder).font(.subheadline).foregroundStyle(.secondary).frame(maxWidth: .infinity).padding(.top, 12) }
+            if model.hasMore {
+                // Reaching the top while reading back pages in the earlier messages; the page opens at the latest.
+                Group { if model.loadingOlder { ProgressView() } else { Color.clear } }
+                    .frame(maxWidth: .infinity).frame(height: 32).padding(.top, 12)
+                    // Position, not appearance: a lazy row stays alive offscreen, so its appearance fires only once.
+                    .onGeometryChange(for: Bool.self) { $0.frame(in: .named("chatTimeline")).minY > -240 } action: { near in
+                        topNear = near
+                        if near && !atLatest { reachedTop() }
+                    }
+                    // A lazy row can be dropped far offscreen without reporting its last position.
+                    .onDisappear { topNear = false }
+            }
             else if model.clipped { Text(String(localized: "chat.clipped")).font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: .infinity).padding(.top, 12).accessibilityIdentifier("chat.clipped") }
             if model.messages.isEmpty && model.error == nil {
                 // Until the first history read returns, an empty list means "loading", not "no conversation".
@@ -243,7 +256,24 @@ struct ConversationView: View {
         guard let generation = model.historyGeneration else { return }
         selectedToolDetail = ToolDetailReference(messageID: messageID, generation: generation, initialField: field)
     }
-    /// A manual refresh redials a link that may be dead before reading, and shows the dial while it happens.
+    /// Pages in earlier messages and keeps the message that was on top where it was.
+    private func loadOlder(_ proxy: ScrollViewProxy) async {
+        guard model.hasMore, !model.loadingOlder, let anchor = model.timelineItems.first?.id else { return }
+        await model.older()
+        guard model.timelineItems.first?.id != anchor else { return }
+        // A scroll in the same update as the insertion is overridden by its layout; restore once the rows exist.
+        try? await Task.sleep(for: .milliseconds(50))
+        proxy.scrollTo(anchor, anchor: .top)
+        // Still at the top after restoring: the reader wants more, and a marker that never left would not fire again.
+        try? await Task.sleep(for: .milliseconds(300))
+        if topNear && !atLatest { await loadOlder(proxy) }
+    }
+    /// A pull reads earlier messages while there are any, otherwise the latest; it redials only a link that is down.
+    private func pullToRefresh(_ proxy: ScrollViewProxy) async {
+        if linkState != nil && linkState != .connected { await reconnect(); return }
+        if model.hasMore { await loadOlder(proxy) } else { await model.refresh() }
+    }
+    /// The menu's refresh redials a link that may be dead before reading, and shows the dial while it happens.
     private func reconnect() async {
         if linkState != .connected { linkState = .connecting }
         await model.client.reconnect()
