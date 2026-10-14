@@ -47,7 +47,10 @@ struct TranscriptResponseReader {
                 finish(at: stamp, duration: nil, recorded: false)
                 continue
             }
-            if rowMessages.contains(where: { $0.role == .user }) {
+            // A finished background task that finds Claude idle is delivered as its own user record, which the
+            // chat hides as meta. Claude answers it in a new turn, so it opens a response like a prompt does;
+            // without that, the answer joins the finished turn before it and never gets its own footer.
+            if rowMessages.contains(where: { $0.role == .user }) || (agent == "claude" && isTaskNotice(root)) {
                 finish(at: lastResponseStamp, duration: nil, recorded: false)
                 response = []; start = stamp; lastResponseStamp = nil; finished = false
                 result.currentTurnStartedAt = stamp; result.currentTurnCompleted = false
@@ -72,6 +75,11 @@ struct TranscriptResponseReader {
         // An unfinished response has no fabricated completion time or running duration.
         finish(at: nil, duration: nil, recorded: false, completed: false)
         return result
+    }
+    /// A background-task completion delivered between turns. One delivered mid-turn arrives as an
+    /// attachment instead and belongs to the turn already running.
+    private func isTaskNotice(_ root: JSONValue) -> Bool {
+        root["type"].string == "user" && root["origin"]["kind"].string == "task-notification"
     }
     private func isInterruption(_ root: JSONValue) -> Bool {
         guard root["type"].string == "user" else { return false }

@@ -249,7 +249,7 @@ struct ConversationView: View {
             } else if let response = firstResponse[item.id], let seconds = response.durationSeconds {
                 ResponseRunLabel(seconds: seconds, recorded: response.recordedDuration)
             }
-            if item.isActivity { ActivityGroupView(item: item, projectRoot: model.session.cwd, openFile: model.client.allows(.projectRead) ? { selectedFile = $0; showProject = true } : nil, images: images, openImage: { selectedImage = $0 }, openDetail: openToolDetail) }
+            if item.isActivity { ActivityGroupView(item: item, projectRoot: model.session.cwd, openFile: model.client.allows(.projectRead) ? { selectedFile = $0; showProject = true } : nil, images: images, openImage: { selectedImage = $0 }, openDetail: openToolDetail, isLatest: item.id == model.timelineItems.last?.id) }
             else { MessageRow(message: item.first, projectRoot: model.session.cwd, openFile: model.client.allows(.projectRead) ? { selectedFile = $0; showProject = true } : nil, images: images, openImage: { selectedImage = $0 }, openDetail: openToolDetail) }
             if let response = lastResponse[item.id], response.completed, case .prose = item.first.kind {
                 ResponseFooter(response: response, text: model.responseText(response)) { text in
