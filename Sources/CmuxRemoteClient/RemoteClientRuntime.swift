@@ -30,12 +30,26 @@ actor RemoteClientRuntime {
         transport = WebSocketTransport(host: updated.host, key: updated.privateKey, endpoint: updated.endpoint, report: { states.report($0) }); pairing = endpoint; connection = updated
     }
     func request<T: Decodable & Sendable>(_ path: String, method: String, query: [String: String], body: Data?, as type: T.Type) async throws -> T {
+        do { return try await attempt(path, method: method, query: query, body: body, as: type) }
+        catch let error as BridgeError where error.code == "invalid_proof" && dropStaleEpoch() {
+            // A restarted Bridge has a new epoch while the link to it stays up, so the cached one signs every
+            // request wrong. The proof is checked before any route acts, so the rejected request did nothing
+            // and is sent once more under the epoch fetched afresh.
+            return try await attempt(path, method: method, query: query, body: body, as: type)
+        }
+    }
+    private func attempt<T: Decodable & Sendable>(_ path: String, method: String, query: [String: String], body: Data?, as type: T.Type) async throws -> T {
         let request = try await authorized(path, method: method)
         do { return try await request.transport.request(request.path, method: method, query: query, body: body, authorization: request.authorization, as: type) }
         catch {
             if method == "POST", !(error is BridgeError) { throw BridgeError("outcome_unknown", "Inspect the task before repeating this operation.", status: 504) }
             throw error
         }
+    }
+    /// Forgets the cached epoch; false when none was cached, so a rejection under a fresh one is final.
+    private func dropStaleEpoch() -> Bool {
+        guard announcement != nil else { return false }
+        announcement = nil; return true
     }
     func savedConnection() -> AuthorizedConnection? { connection }
     /// Learn a signed routing proof without replacing an in-flight transport or device grant.
@@ -52,11 +66,19 @@ actor RemoteClientRuntime {
         connection = updated; return updated
     }
     func subscribe(_ path: String) async throws -> AsyncThrowingStream<LinkFrame, any Error> {
+        do { return try await openSubscription(path) }
+        catch let error as BridgeError where error.code == "invalid_proof" && dropStaleEpoch() { return try await openSubscription(path) }
+    }
+    private func openSubscription(_ path: String) async throws -> AsyncThrowingStream<LinkFrame, any Error> {
         let request = try await authorized(path, method: "GET")
         guard let link = request.transport as? WebSocketTransport else { throw BridgeError("unsupported", "This connection has no subscriptions.", status: 422) }
         return try await link.subscribe(request.path, query: [:], authorization: request.authorization)
     }
     func image(sessionID: String, reference: ConversationImageReference) async throws -> Data {
+        do { return try await fetchImage(sessionID: sessionID, reference: reference) }
+        catch let error as BridgeError where error.code == "invalid_proof" && dropStaleEpoch() { return try await fetchImage(sessionID: sessionID, reference: reference) }
+    }
+    private func fetchImage(sessionID: String, reference: ConversationImageReference) async throws -> Data {
         let path = "/v1/sessions/\(sessionID)/image"
         let request = try await authorized(path, method: "GET")
         return try await request.transport.image(request.path, query: ["reference_id": reference.id, "generation": reference.generation], authorization: request.authorization)
