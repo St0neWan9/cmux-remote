@@ -3,7 +3,9 @@ import CmuxRemoteCore
 
 /// Multiplexes bounded requests and subscriptions over one ordered authenticated link.
 actor LinkClientConnection {
-    private struct Prepared: Sendable { let socket: LinkSocket; let cipher: LinkCipher }
+    private struct Prepared: Sendable { let socket: LinkSocket; let cipher: LinkCipher; let relayed: Bool }
+    /// One path's outcome while both are dialled at once.
+    private enum PathResult: Sendable { case ready(Prepared), lanUnreachable, lanFailed(any Error), relayFailed(any Error) }
     private struct Pending {
         var index = 0
         var status: Int?
@@ -28,6 +30,9 @@ actor LinkClientConnection {
     /// Recently cancelled IDs; the Bridge may already have frames for them in flight.
     private var abandoned: [String] = []
     private var closed = false
+    /// The last link came up over the relay: the next dial tries both paths at once instead of waiting
+    /// out the LAN deadline first, so a phone away from home does not pay that wait on every reconnect.
+    private var lastRelayed = false
     private let report: @Sendable (LinkState) -> Void
     /// A pong that does not arrive within this time means the path died without the socket noticing.
     private static let pongDeadline: Duration = .seconds(10)
@@ -75,23 +80,13 @@ actor LinkClientConnection {
         if socket != nil { return }
         if preparing == nil {
             report(.connecting)
-            let host = host, key = key, endpoint = endpoint, relayDial = relayDial
+            let host = host, key = key, endpoint = endpoint, race = lastRelayed && endpoint.relay != nil
             preparing = Task {
-                let handshake = try LinkClientHandshake(host: host, privateKey: key)
-                let pairing = try PairingConfiguration(host: endpoint.host, port: endpoint.port, token: String(repeating: "0", count: 32), certificateSHA256: host.certificateSHA256)
-                var parts = URLComponents(); parts.scheme = "wss"; parts.host = endpoint.host; parts.port = endpoint.port; parts.path = "/v3/link"
-                guard let url = parts.url else { throw BridgeError("invalid_endpoint", "Invalid WebSocket endpoint.") }
-                let direct = LinkSocket(url: url, delegate: PinnedSessionDelegate(pairing: pairing))
-                do { return try await self.prepare(direct, handshake: handshake) }
+                if race, let relay = endpoint.relay { return try await self.race(host: host, key: key, endpoint: endpoint, relay: relay) }
+                do { return try await self.dialDirect(host: host, key: key, endpoint: endpoint) }
                 catch {
-                    direct.close()
                     guard LinkPathFailure().isUnreachable(error), let relay = endpoint.relay else { throw error }
-                    try relay.validate(host: host, now: Int(Date().timeIntervalSince1970))
-                    let crypto = IdentityCryptography(), publicKey = try crypto.publicKey(privateKey: key)
-                    if relay.admission.value.kind == "approved", relay.admission.value.clientPublicKey != publicKey { throw BridgeError("invalid_identity", "The relay admission belongs to another client.") }
-                    let join = try crypto.sign(RelayJoin(hostID: host.id, clientPublicKey: publicKey, permitDigest: crypto.digest(crypto.bytes(relay.admission, domain: "relay3-permit-envelope"))), domain: "relay3-join", privateKey: key)
-                    let relayed = relayDial(try RelayOrigin(relay.origin).socketURL(hostID: host.id, role: "client"), ["X-Cmux-Relay-Permit": try JSONEncoder().encode(relay.admission).base64EncodedString(), "X-Cmux-Relay-Join": try JSONEncoder().encode(join).base64EncodedString()])
-                    do { return try await self.prepare(relayed, handshake: handshake, deadline: .seconds(15)) } catch { relayed.close(); throw error }
+                    return try await self.dialRelay(host: host, key: key, relay: relay)
                 }
             }
         }
@@ -101,7 +96,7 @@ actor LinkClientConnection {
             do { ready = try await current.value } catch { if !closed { report(.disconnected) }; throw error }
             guard !closed else { ready.socket.close(); throw CancellationError() }
             if socket == nil {
-                socket = ready.socket; cipher = ready.cipher; writer = WebSocketSendQueue(socket: ready.socket, cipher: ready.cipher)
+                socket = ready.socket; cipher = ready.cipher; writer = WebSocketSendQueue(socket: ready.socket, cipher: ready.cipher); lastRelayed = ready.relayed
                 report(.connected)
                 heartbeat = Task { [weak self] in
                     do { while !Task.isCancelled { try await Task.sleep(for: .seconds(25)); try await Self.ping(ready.socket) } }
@@ -116,14 +111,61 @@ actor LinkClientConnection {
             preparing = nil
         } catch { preparing = nil; throw error }
     }
-    private nonisolated func prepare(_ socket: LinkSocket, handshake: LinkClientHandshake, deadline: Duration = .seconds(4)) async throws -> Prepared {
-        let acceptance: SignedValue<LinkAcceptance> = try await withThrowingTaskGroup(of: Data.self) { group in
-            group.addTask { try await socket.send(JSONEncoder().encode(handshake.proposal)); return try await socket.receive() }
-            group.addTask { try await Task.sleep(for: deadline); socket.close(); throw URLError(.timedOut) }
-            defer { group.cancelAll() }
-            return try JSONDecoder().decode(SignedValue<LinkAcceptance>.self, from: await group.next()!)
+    private nonisolated func dialDirect(host: HostIdentity, key: Data, endpoint: BridgeEndpoint) async throws -> Prepared {
+        let handshake = try LinkClientHandshake(host: host, privateKey: key)
+        let pairing = try PairingConfiguration(host: endpoint.host, port: endpoint.port, token: String(repeating: "0", count: 32), certificateSHA256: host.certificateSHA256)
+        var parts = URLComponents(); parts.scheme = "wss"; parts.host = endpoint.host; parts.port = endpoint.port; parts.path = "/v3/link"
+        guard let url = parts.url else { throw BridgeError("invalid_endpoint", "Invalid WebSocket endpoint.") }
+        let direct = LinkSocket(url: url, delegate: PinnedSessionDelegate(pairing: pairing))
+        do { return try await prepare(direct, handshake: handshake, relayed: false) } catch { direct.close(); throw error }
+    }
+    private nonisolated func dialRelay(host: HostIdentity, key: Data, relay: RelayEndpoint) async throws -> Prepared {
+        let handshake = try LinkClientHandshake(host: host, privateKey: key)
+        try relay.validate(host: host, now: Int(Date().timeIntervalSince1970))
+        let crypto = IdentityCryptography(), publicKey = try crypto.publicKey(privateKey: key)
+        if relay.admission.value.kind == "approved", relay.admission.value.clientPublicKey != publicKey { throw BridgeError("invalid_identity", "The relay admission belongs to another client.") }
+        let join = try crypto.sign(RelayJoin(hostID: host.id, clientPublicKey: publicKey, permitDigest: crypto.digest(crypto.bytes(relay.admission, domain: "relay3-permit-envelope"))), domain: "relay3-join", privateKey: key)
+        let relayed = relayDial(try RelayOrigin(relay.origin).socketURL(hostID: host.id, role: "client"), ["X-Cmux-Relay-Permit": try JSONEncoder().encode(relay.admission).base64EncodedString(), "X-Cmux-Relay-Join": try JSONEncoder().encode(join).base64EncodedString()])
+        do { return try await prepare(relayed, handshake: handshake, relayed: true, deadline: .seconds(15)) } catch { relayed.close(); throw error }
+    }
+    /// Dials the LAN and the relay together and keeps whichever authenticates first. Only an unreachable LAN
+    /// lets the relay decide: a TLS pin or identity failure on the LAN still ends the attempt.
+    private nonisolated func race(host: HostIdentity, key: Data, endpoint: BridgeEndpoint, relay: RelayEndpoint) async throws -> Prepared {
+        try await withThrowingTaskGroup(of: PathResult.self) { group in
+            group.addTask {
+                do { return .ready(try await self.dialDirect(host: host, key: key, endpoint: endpoint)) }
+                catch { return LinkPathFailure().isUnreachable(error) ? .lanUnreachable : .lanFailed(error) }
+            }
+            group.addTask {
+                do { return .ready(try await self.dialRelay(host: host, key: key, relay: relay)) } catch { return .relayFailed(error) }
+            }
+            var outcome: Result<Prepared, any Error>?, relayFailure: (any Error)?
+            while outcome == nil, let next = try await group.next() {
+                switch next {
+                case .ready(let prepared): outcome = .success(prepared)
+                case .lanFailed(let error): outcome = .failure(error)
+                case .relayFailed(let error): relayFailure = error
+                case .lanUnreachable: break
+                }
+            }
+            // The losing path is abandoned; one that authenticated in the meantime is closed, not leaked.
+            group.cancelAll()
+            while let late = try await group.next() { if case .ready(let prepared) = late { prepared.socket.close() } }
+            return try (outcome ?? .failure(relayFailure ?? URLError(.cannotConnectToHost))).get()
         }
-        return Prepared(socket: socket, cipher: try handshake.accept(acceptance))
+    }
+    private nonisolated func prepare(_ socket: LinkSocket, handshake: LinkClientHandshake, relayed: Bool, deadline: Duration = .seconds(4)) async throws -> Prepared {
+        // A pending WebSocket receive may not observe cancellation; closing the socket ends a dial that lost a race.
+        let acceptance: SignedValue<LinkAcceptance> = try await withTaskCancellationHandler {
+            try await withThrowingTaskGroup(of: Data.self) { group in
+                group.addTask { try await socket.send(JSONEncoder().encode(handshake.proposal)); return try await socket.receive() }
+                group.addTask { try await Task.sleep(for: deadline); socket.close(); throw URLError(.timedOut) }
+                defer { group.cancelAll() }
+                return try JSONDecoder().decode(SignedValue<LinkAcceptance>.self, from: await group.next()!)
+            }
+        } onCancel: { socket.close() }
+        try Task.checkCancellation()
+        return Prepared(socket: socket, cipher: try handshake.accept(acceptance), relayed: relayed)
     }
     private func sendRequested(_ frame: LinkFrame) async {
         let source = socket

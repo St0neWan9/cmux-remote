@@ -18,7 +18,7 @@ import CmuxRemoteCore
     }
     @Test(.timeLimit(.minutes(1)))
     func slowConsumerDoesNotBlockOtherRequestsAndIsEventuallyDisconnected() async throws {
-        let fixture = try await LinkIntegrationFixture.create(text: String(repeating: "bounded ", count: 20_000), recordCount: 8)
+        let fixture = try await LinkIntegrationFixture.create(text: String(repeating: "bounded ", count: 30_000), recordCount: 24)
         var raw: LinkRawConnection?
         do {
             var connection = try await LinkRawConnection.connect(fixture.connection); raw = connection
@@ -26,7 +26,10 @@ import CmuxRemoteCore
             let first = try await connection.next()
             #expect(first.id == stalled); #expect(first.final == false); #expect(first.data?.count == 65_536)
             let other = try await connection.read("/v2/sessions", connection: fixture.connection)
-            let response = try await connection.next(); #expect(response.id == other); #expect(response.final == true)
+            // The stalled read may still have the rest of its unacknowledged window in flight.
+            var response = try await connection.next()
+            while response.id == stalled { #expect(response.final == false); response = try await connection.next() }
+            #expect(response.id == other); #expect(response.final == true)
             try await connection.ack(response)
             // No acknowledgement for the first request: observe its actual production deadline.
             do { _ = try await connection.next(); Issue.record("Slow link must close instead of buffering indefinitely") } catch {}
