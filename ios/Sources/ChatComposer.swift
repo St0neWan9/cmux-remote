@@ -37,9 +37,9 @@ struct ChatComposer: View {
         VStack(alignment: .leading, spacing: 4) {
             if expanded && !images.isEmpty { ImageDraftStrip(images: images, remove: removeImage).equatable() }
             HStack(alignment: .center, spacing: 6) {
-                if !expanded { actions }
+                if !expanded { actions.offset(y: textCenterOffset) }
                 textField.offset(y: expanded ? 0 : textCenterOffset).padding(.horizontal, expanded ? 8 : 0)
-                if !expanded { voice; sendOrStop }
+                if !expanded { voice.offset(y: textCenterOffset); sendOrStop }
             }
             if expanded {
                 HStack(spacing: 10) {
