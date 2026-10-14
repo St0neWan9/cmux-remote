@@ -13,9 +13,12 @@ public struct ConversationSnapshot: Codable, Sendable {
     public let recordedTurnCount: Int?
     public let currentTurnStartedAt: Date?
     public let currentTurnCompleted: Bool?
-    public init(messages: [ChatMessage], hasMore: Bool, generation: String, clipped: Bool, responses: [ConversationResponse]? = nil, recordedRunSeconds: Double? = nil, recordedTurnCount: Int? = nil, currentTurnStartedAt: Date? = nil, currentTurnCompleted: Bool? = nil, images: [ConversationImageReference]? = nil) {
+    /// Tasks the agent detached and has not finished. They outlive the turn that started them.
+    public let backgroundTasks: [BackgroundAgentTask]?
+    public init(messages: [ChatMessage], hasMore: Bool, generation: String, clipped: Bool, responses: [ConversationResponse]? = nil, recordedRunSeconds: Double? = nil, recordedTurnCount: Int? = nil, currentTurnStartedAt: Date? = nil, currentTurnCompleted: Bool? = nil, images: [ConversationImageReference]? = nil, backgroundTasks: [BackgroundAgentTask]? = nil) {
         self.images = images; self.messages = messages; self.hasMore = hasMore; self.generation = generation; self.clipped = clipped
         self.responses = responses; self.recordedRunSeconds = recordedRunSeconds; self.recordedTurnCount = recordedTurnCount
         self.currentTurnStartedAt = currentTurnStartedAt; self.currentTurnCompleted = currentTurnCompleted
+        self.backgroundTasks = backgroundTasks
     }
 }
