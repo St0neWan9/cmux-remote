@@ -324,7 +324,9 @@ public struct ClaudeTranscriptParser: Sendable {
         input: TranscriptJSONValue?
     ) -> [ChatMessageKind] {
         if toolName == "Bash", let command = input?["command"]?.string {
-            return [.terminal(ChatTerminalCapture(command: command, isRunning: true))]
+            // The agent writes a one-line description for every command; it is what the terminal prints
+            // above the command, and what a reader wants in place of the raw shell line.
+            return [.terminal(ChatTerminalCapture(command: command, summary: input?["description"]?.string, isRunning: true))]
         }
         if toolName == "Write" || Self.editToolNames.contains(toolName) {
             if let edit = fileEditKind(toolName: toolName, input: input) {

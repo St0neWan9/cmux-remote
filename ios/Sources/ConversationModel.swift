@@ -34,6 +34,8 @@ final class ConversationModel {
     var preview: String?
     /// Whether the agent is compacting its context, as the terminal reports it.
     var compacting = false
+    /// Tasks the agent detached and has not finished. They outlive the turn that started them.
+    private(set) var backgroundTasks: [BackgroundAgentTask] = []
     var error: String?
     var draft = ""
     let imageDraft = ImageDraftModel()
@@ -133,6 +135,8 @@ final class ConversationModel {
                 let anchors = Set(incoming.map(\.firstMessageID))
                 responses = responses.filter { !anchors.contains($0.firstMessageID) } + incoming
             }
+            // Only a newest-page read carries them, so an earlier page must not clear the set.
+            if history.backgroundTasks != nil { backgroundTasks = history.backgroundTasks ?? [] }
             recordedRunSeconds = history.recordedRunSeconds; recordedTurnCount = history.recordedTurnCount ?? 0
             currentTurnStartedAt = history.currentTurnStartedAt; currentTurnCompleted = history.currentTurnCompleted ?? false
             timelineItems = ConversationTimeline().items(from: messages)

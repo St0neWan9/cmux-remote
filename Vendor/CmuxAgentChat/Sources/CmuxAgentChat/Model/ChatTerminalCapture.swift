@@ -6,6 +6,9 @@ public struct ChatTerminalCapture: Sendable, Equatable, Codable {
     /// The command line as submitted to the shell.
     public let command: String
 
+    /// The agent's own one-line description of what the command does, when it wrote one.
+    public let summary: String?
+
     /// Captured output (stdout and stderr interleaved), possibly truncated
     /// at the producing side.
     public let output: String?
@@ -29,12 +32,13 @@ public struct ChatTerminalCapture: Sendable, Equatable, Codable {
     ///   - isRunning: Whether the command is still running.
     public init(
         command: String,
+        summary: String? = nil,
         output: String? = nil,
         exitCode: Int? = nil,
         durationSeconds: Double? = nil,
         isRunning: Bool = false
     ) {
-        self.command = command
+        self.command = command; self.summary = summary
         self.output = output
         self.exitCode = exitCode
         self.durationSeconds = durationSeconds
@@ -43,6 +47,7 @@ public struct ChatTerminalCapture: Sendable, Equatable, Codable {
 
     private enum CodingKeys: String, CodingKey {
         case command
+        case summary
         case output
         case exitCode = "exit_code"
         case durationSeconds = "duration_seconds"

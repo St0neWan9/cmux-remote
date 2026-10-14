@@ -20,9 +20,9 @@ struct LiveRunLabel: View {
             }.font(.footnote)
         }.accessibilityIdentifier("response.elapsed")
     }
-    /// `47s` or `3m47s`, matching the terminal's own spelling.
+    /// `47s` or `3m 47s`.
     static func timer(_ seconds: Int) -> String {
         guard seconds >= 60 else { return "\(seconds)s" }
-        return String(format: "%dm%02ds", seconds / 60, seconds % 60)
+        return String(format: "%dm %02ds", seconds / 60, seconds % 60)
     }
 }
