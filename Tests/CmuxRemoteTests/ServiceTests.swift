@@ -8,6 +8,9 @@ private actor FakeCmux: CmuxControlling {
     var interruptCount = 0
     var hardInterrupt: Bool?
     var screenReadCount = 0
+    /// The rendered screen the fake terminal serves; the working line and the CLI chrome both live here.
+    var screen = "Other agent output"
+    func setScreen(_ value: String) { screen = value }
     var ended = false
     func markEnded() { ended = true }
     let validBinding: Bool
@@ -26,7 +29,7 @@ private actor FakeCmux: CmuxControlling {
             sendCount += 1
             if failSend { throw BridgeError("outcome_unknown", "Response lost", status: 504) }
             return .object(["submitted": .bool(true)])
-        case "surface.read_text": screenReadCount += 1; return .object(["text": .string("Other agent output")])
+        case "surface.read_text": screenReadCount += 1; return .object(["text": .string(screen)])
         default: return .object([:])
         }
     }
@@ -93,6 +96,25 @@ private actor FakeCmux: CmuxControlling {
         let preview = try await service.preview(id: "session")
         #expect(!preview.available)
         #expect(await cmux.screenReadCount == 0)
+    }
+    /// The phone renders the agent's own working line, which exists only on the rendered screen.
+    @Test func thePreviewCarriesTheAgentsWorkingLine() async throws {
+        let cmux = FakeCmux(); let service = SessionService(cmux: cmux, home: URL(fileURLWithPath: "/example/home"), transcriptRoots: [])
+        await cmux.setScreen([
+            "⏺ The table now fits the message width.",
+            "✔ Update installed · Restart to update",
+            "╭──────────────────────────────────────╮",
+            "│ ❯                                    │",
+            "╰──────────────────────────────────────╯",
+            "✻ Blanching… (54s · ↓ 2.3k tokens)",
+        ].joined(separator: "\n"))
+        let preview = try await service.preview(id: "session")
+        #expect(preview.available)
+        #expect(preview.status?.activity == "Blanching…")
+        #expect(preview.status?.elapsedSeconds == 54)
+        #expect(preview.status?.tokenCount == "2.3k")
+        // The chrome around the working line is never reported as the agent's prose.
+        #expect(preview.text == "The table now fits the message width.")
     }
     @Test func authoritativeProcessExitWinsOverOldStopHook() async throws {
         let cmux = FakeCmux(); let service = SessionService(cmux: cmux, home: URL(fileURLWithPath: "/example/home"), transcriptRoots: [])
