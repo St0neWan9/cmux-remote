@@ -15,7 +15,6 @@
 "sessions.title" = "Conversations";
 "sessions.empty" = "No supported conversations found.";
 "sessions.read_only" = "Read-only conversation";
-"chat.older" = "Load earlier messages";
 "chat.clipped" = "This conversation is long; earlier messages are not shown.";
 "chat.outgoing.sending" = "Sending…";
 "chat.outgoing.sent" = "Sent · waiting for the agent";

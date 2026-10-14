@@ -13,12 +13,12 @@ final class MobileGestureUITests: XCTestCase {
         app.launch()
         XCTAssertTrue(app.buttons["sessions.sidebar"].waitForExistence(timeout: 10))
         app.buttons["sessions.sidebar"].tap()
-        app.buttons["sidebar.connection"].tap()
+        app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "sidebar.connection.")).firstMatch.tap()
         XCTAssertTrue(app.buttons["page.back"].waitForExistence(timeout: 5))
         capture(app, "connection")
         swipeBack(app)
         XCTAssertTrue(app.buttons["sessions.sidebar"].waitForExistence(timeout: 5))
-        app.buttons["session.fixture-session"].tap()
+        app.buttons.matching(NSPredicate(format: "identifier ENDSWITH %@", "fixture-session")).firstMatch.tap()
         XCTAssertTrue(app.buttons["chat.back"].waitForExistence(timeout: 5))
         capture(app, "conversation")
         for destination in ["chat.project", "chat.feed", "chat.timing"] {
@@ -76,7 +76,7 @@ final class MobileGestureUITests: XCTestCase {
         }
         app.buttons["sessions.sidebar"].tap()
         XCTAssertTrue(app.buttons["sidebar.close"].waitForExistence(timeout: 5))
-        app.buttons["sidebar.connection"].tap()
+        app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "sidebar.connection.")).firstMatch.tap()
         XCTAssertTrue(app.buttons["page.back"].waitForExistence(timeout: 5))
         swipeBack(app)
         XCTAssertTrue(app.buttons["sessions.sidebar"].waitForExistence(timeout: 5))

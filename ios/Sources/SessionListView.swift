@@ -121,8 +121,8 @@ struct SessionListView: View {
                 }
             }
             .onChange(of: workspaces.map(\.id)) { _, ids in if let workspaceID, !ids.contains(workspaceID) { self.workspaceID = nil } }
-            // A pull drops a link that may be dead and dials again, rather than reading over it.
-            .refreshable { await model.reconnect() }
+            // A pull reads again; only a Mac that is down is dialed again. The page menu keeps a full redial.
+            .refreshable { await model.pullToRefresh() }
             .task { await model.refresh() }
             .onDisappear { showSidebar = false }
             .overlay { if loading && hosted.isEmpty { ProgressView() } }
