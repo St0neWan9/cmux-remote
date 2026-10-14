@@ -39,6 +39,23 @@ import CmuxRemoteCore
                     launch(id: "3", tool: "Agent", description: "a"), launch(id: "4", tool: "Workflow", description: "w")]
         #expect(BackgroundTaskTracker().running(in: rows).map(\.tool) == ["Bash", "Monitor", "Agent", "Workflow"])
     }
+    /// `Monitor` and `Workflow` always detach: their input carries no `run_in_background`, so waiting
+    /// for that flag would miss every one of them. Read from a real session's own Monitor calls.
+    @Test func aMonitorCallIsDetachedWithoutAnyFlag() {
+        let row: [String: Any] = ["type": "assistant", "message": ["content": [["type": "tool_use", "id": "toolu_m", "name": "Monitor",
+            "input": ["command": "until grep -q ready build.log; do sleep 2; done", "description": "wait for the build", "timeout_ms": 1_800_000]]]]]
+        let line = String(decoding: try! JSONSerialization.data(withJSONObject: row), as: UTF8.self)
+        let tasks = BackgroundTaskTracker().running(in: [line])
+        #expect(tasks.count == 1)
+        #expect(tasks.first?.tool == "Monitor")
+        #expect(tasks.first?.summary == "wait for the build")
+    }
+    @Test func aWorkflowCallIsDetachedWithoutAnyFlag() {
+        let row: [String: Any] = ["type": "assistant", "message": ["content": [["type": "tool_use", "id": "toolu_w", "name": "Workflow",
+            "input": ["name": "review-changes", "description": "Review the diff"]]]]]
+        let line = String(decoding: try! JSONSerialization.data(withJSONObject: row), as: UTF8.self)
+        #expect(BackgroundTaskTracker().running(in: [line]).map(\.tool) == ["Workflow"])
+    }
     /// A foreground call of the same tool ends with its own turn, so it is not a detached task.
     @Test func aForegroundCallIsNotTracked() {
         let row: [String: Any] = ["type": "assistant", "message": ["content": [["type": "tool_use", "id": "toolu_f", "name": "Bash", "input": ["command": "ls"]]]]]

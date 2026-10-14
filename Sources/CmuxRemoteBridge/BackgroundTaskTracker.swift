@@ -10,15 +10,22 @@ import CmuxRemoteCore
 ///
 /// Tasks outlive the turn that started them, so this reads the whole record rather than the newest page.
 struct BackgroundTaskTracker {
-    /// The tools that run detached. A foreground call of the same tool ends with its own turn, and
-    /// `TaskStop` ends one rather than starting anything, so it is not here.
-    static let tools: Set<String> = ["Bash", "Monitor", "Agent", "Workflow"]
+    /// The tools that always detach: the call itself is the task, with no flag to read.
+    ///
+    /// `Monitor` watches a condition and `Workflow` runs a script; both return a task id at once, so
+    /// their input carries no `run_in_background`. Waiting for that flag here would miss them entirely.
+    static let alwaysDetached: Set<String> = ["Monitor", "Workflow"]
+
+    /// The tools that detach only when the agent asks them to. A foreground call of either ends with
+    /// its own turn, so the flag is what separates a task from ordinary work. `TaskStop` ends a task
+    /// rather than starting one, so it is not here.
+    static let optionallyDetached: Set<String> = ["Bash", "Agent"]
     func running(in lines: [String]) -> [BackgroundAgentTask] {
         var launched: [String: BackgroundAgentTask] = [:]
         for line in lines {
             // Every refresh walks the whole record, so a cheap substring test keeps the JSON parse for
             // the few rows that can carry either signal. Nothing else in a record can start or finish a task.
-            guard line.contains("run_in_background") || line.contains("task-notification") else { continue }
+            guard Self.carriesASignal(line) else { continue }
             guard let data = line.data(using: .utf8), let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
             for call in Self.toolCalls(in: value) where Self.runsInBackground(call) {
                 guard let id = call["id"] as? String else { continue }
@@ -33,14 +40,23 @@ struct BackgroundTaskTracker {
         }
         return launched.values.sorted { $0.id < $1.id }
     }
+    /// Whether a row can carry either signal: a detached call, or a notice that finishes one.
+    ///
+    /// A tool that always detaches says so by name rather than by a flag, so its name is part of the test.
+    private static func carriesASignal(_ line: String) -> Bool {
+        if line.contains("task-notification") || line.contains("run_in_background") { return true }
+        return alwaysDetached.contains { line.contains("\"" + $0 + "\"") }
+    }
     /// Every `tool_use` block on one transcript record.
     private static func toolCalls(in value: [String: Any]) -> [[String: Any]] {
         guard let message = value["message"] as? [String: Any], let content = message["content"] as? [[String: Any]] else { return [] }
         return content.filter { $0["type"] as? String == "tool_use" }
     }
-    /// Whether one tool call detached. The flag rides the tool input.
+    /// Whether one tool call detached.
     private static func runsInBackground(_ call: [String: Any]) -> Bool {
-        guard let name = call["name"] as? String, tools.contains(name) else { return false }
+        guard let name = call["name"] as? String else { return false }
+        if alwaysDetached.contains(name) { return true }
+        guard optionallyDetached.contains(name) else { return false }
         let input = call["input"] as? [String: Any] ?? [:]
         return input["run_in_background"] as? Bool == true || input["runInBackground"] as? Bool == true
     }
