@@ -95,10 +95,9 @@
 "chat.background.count" = "%ld 个后台任务正在运行";
 "chat.running_duration" = "运行中 %@";
 "chat.worked_duration" = "运行 %@";
-"chat.duration_seconds" = "%d秒";
-"chat.duration_minutes" = "%d分%d秒";
-"chat.duration_hours" = "%d小时%d分";
-"chat.estimated_duration" = "响应耗时约 %@";
+"chat.duration_seconds" = "%ds";
+"chat.duration_minutes" = "%dm %02ds";
+"chat.duration_hours" = "%dh %02dm";
 "chat.timing" = "对话时间";
 "chat.recorded_turns" = "已记录 %ld 轮回复的运行时间。";
 "chat.no_timing" = "暂无已记录的运行时长。";
