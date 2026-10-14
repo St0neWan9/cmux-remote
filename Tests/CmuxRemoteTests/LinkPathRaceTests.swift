@@ -23,7 +23,8 @@ import CmuxRemoteCore
                 relayDial: { _, _ in
                     dials.increment()
                     var parts = URLComponents(); parts.scheme = "wss"; parts.host = bridge.host; parts.port = bridge.port; parts.path = "/v3/link"
-                    return LinkSocket(url: parts.url!, delegate: PinnedSessionDelegate(pairing: pairing))
+                    // Production relay sockets allow slow TLS; a loaded test host needs the same allowance.
+                    return LinkSocket(url: parts.url!, delegate: PinnedSessionDelegate(pairing: pairing), timeout: 15)
                 }); transport = link
             let clock = ContinuousClock()
             let first = clock.now
