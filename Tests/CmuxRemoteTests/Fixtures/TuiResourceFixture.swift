@@ -42,6 +42,31 @@ actor TuiResourceFixture: TuiResourceRequesting {
         default: throw BridgeError("unsupported", "Unexpected fixture resource")
         }
     }
+    /// Agent hook journal items in commit order, each carrying its sequence.
+    var journal: [JSONValue] = []
+    var journalHead: UInt64 = 0
+    var journalReads: [JSONValue] = []
+    var journalBroken = false
+    func stream(_ operation: String, params: [String: JSONValue], limit: Int) async throws -> TuiStreamRead {
+        guard operation == "session.journal.subscribe", params["filter"]?["max_sensitivity"].string == "sensitive" else { throw BridgeError("unsupported", "Unexpected fixture stream") }
+        if journalBroken { throw BridgeError("socket_denied", "Fixture journal refused") }
+        journalReads.append(params["cursor"] ?? .null)
+        let after = params["cursor"]?["revision"].string.flatMap(UInt64.init) ?? journalHead
+        let pending = Array(journal.filter { UInt64($0["sequence"].string!)! > after }.prefix(limit))
+        let full = pending.count == limit && journal.contains { UInt64($0["sequence"].string!)! > UInt64(pending.last!["sequence"].string!)! }
+        let position = full ? pending.last!["sequence"].string! : String(journalHead)
+        return TuiStreamRead(items: pending, cursor: .object(["generation": .string(Self.session), "revision": .string(position)]), complete: !full)
+    }
+    func hook(_ native: String, provider: String = "claude", session: String = providerID, tool: String? = nil, notification: String? = nil, source: String? = nil, unrelated: UInt64 = 3) {
+        journalHead += unrelated + 1
+        var normalized: [String: JSONValue] = ["agent_session_id": .string(session)], raw: [String: JSONValue] = [:]
+        if let tool { normalized["tool_name"] = .string(tool) }
+        if let notification { raw["notification_type"] = .string(notification) }
+        if let source { raw["source"] = .string(source) }
+        journal.append(.object(["kind": .string("agent.state.changed"), "sequence": .string(String(journalHead)),
+                                "payload": .object(["adapter": .object(["id": .string(provider)]), "native_event": .string(native), "normalized": .object(normalized), "native": .object(raw)])]))
+    }
+    func breakJournal(_ broken: Bool) { journalBroken = broken }
     func configure(replay: String? = nil, screen: String? = nil, lost: Bool = false, replaced: Bool = false, malformed: Bool = false) {
         if let replay { self.replay = replay }; if let screen { self.screen = screen }
         self.lost = lost; replaceDuringState = replaced; malformedReceipt = malformed
