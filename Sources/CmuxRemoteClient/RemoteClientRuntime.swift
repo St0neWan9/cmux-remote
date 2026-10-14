@@ -6,6 +6,7 @@ actor RemoteClientRuntime {
     private var transport: any ResourceTransport
     private var pairing: PairingConfiguration
     private var connection: AuthorizedConnection?
+    private var announcement: SignedValue<HostAnnouncement>?
     private var closed = false
     nonisolated let linkStates = LinkStateBroadcaster()
     init(pairing: PairingConfiguration, connection: AuthorizedConnection?) {
@@ -15,7 +16,7 @@ actor RemoteClientRuntime {
         else { transport = PinnedTransport(pairing: pairing) }
     }
     func close() { closed = true; transport.close(); linkStates.finish() }
-    func reconnect() async { guard !closed else { return }; await transport.reconnect() }
+    func reconnect() async { guard !closed else { return }; announcement = nil; await transport.reconnect() }
     func relocate(_ updated: AuthorizedConnection) throws {
         guard !closed, let current = connection, current.privateKey == updated.privateKey,
               current.grant.signature == updated.grant.signature, current.grant.value == updated.grant.value else { throw BridgeError("host_changed", "Relocation cannot replace the device or its authorization.") }
@@ -23,6 +24,8 @@ actor RemoteClientRuntime {
         try updated.validate()
         let endpoint = try PairingConfiguration(host: updated.endpoint.host, port: updated.endpoint.port, token: String(repeating: "0", count: 32), certificateSHA256: updated.host.certificateSHA256)
         // In-flight requests own their old transport until completion; endpoint changes do not retry/cancel writes.
+        // The new endpoint may be a restarted Bridge with a fresh epoch, so the cached announcement cannot be reused.
+        announcement = nil
         let states = linkStates
         transport = WebSocketTransport(host: updated.host, key: updated.privateKey, endpoint: updated.endpoint, report: { states.report($0) }); pairing = endpoint; connection = updated
     }
@@ -63,12 +66,20 @@ actor RemoteClientRuntime {
         guard path.hasPrefix("/v1/") else { throw BridgeError("invalid_route", "Invalid resource path.") }
         let transport = transport; let connection = connection; let pairing = pairing
         if let connection {
-            let announcement = try await transport.request("/v2/identity", method: "GET", as: SignedValue<HostAnnouncement>.self)
-            let crypto = IdentityCryptography(); try crypto.verify(announcement, domain: "host", publicKey: connection.host.publicKey)
-            guard announcement.value.version == 2, announcement.value.host.id == connection.host.id,
-                  announcement.value.host.publicKey == connection.host.publicKey, announcement.value.host.certificateSHA256 == connection.host.certificateSHA256,
-                  UUID(uuidString: announcement.value.epoch) != nil else { throw BridgeError("host_changed", "The host identity changed. Pair again explicitly.") }
+            // The epoch is stable per Bridge process; fetch it once per live link to save a relay round-trip.
+            let announcement: SignedValue<HostAnnouncement>
+            if let cached = self.announcement {
+                announcement = cached
+            } else {
+                let fetched = try await transport.request("/v2/identity", method: "GET", as: SignedValue<HostAnnouncement>.self)
+                let crypto2 = IdentityCryptography(); try crypto2.verify(fetched, domain: "host", publicKey: connection.host.publicKey)
+                guard fetched.value.version == 2, fetched.value.host.id == connection.host.id,
+                      fetched.value.host.publicKey == connection.host.publicKey, fetched.value.host.certificateSHA256 == connection.host.certificateSHA256,
+                      UUID(uuidString: fetched.value.epoch) != nil else { throw BridgeError("host_changed", "The host identity changed. Pair again explicitly.") }
+                self.announcement = fetched; announcement = fetched
+            }
             try Task.checkCancellation()
+            let crypto = IdentityCryptography()
             return AuthorizedRequest(transport: transport, path: "/v2/" + path.dropFirst(4), authorization: { uri, bytes in
                 let proof = RequestProof(epoch: announcement.value.epoch, hostID: connection.host.id, clientID: connection.grant.value.clientID, method: method, uri: uri, bodySHA256: crypto.digest(bytes), nonce: UUID().uuidString, timestamp: Int(Date().timeIntervalSince1970))
                 return "CmuxV2 " + (try JSONEncoder().encode(crypto.sign(proof, domain: "request", privateKey: connection.privateKey))).base64EncodedString()
