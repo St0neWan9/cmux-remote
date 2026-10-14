@@ -258,3 +258,7 @@
 "sessions.sort.workspace" = "By workspace";
 "sessions.sort.time" = "By time";
 "sessions.recent" = "Recent";
+"connection.reconnecting" = "Reconnecting…";
+"connection.offline" = "Can’t reach your Mac";
+"connection.retry" = "Retry";
+"connection.offline_named" = "Can’t reach %@";

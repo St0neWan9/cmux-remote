@@ -7,12 +7,15 @@ actor RemoteClientRuntime {
     private var pairing: PairingConfiguration
     private var connection: AuthorizedConnection?
     private var closed = false
+    nonisolated let linkStates = LinkStateBroadcaster()
     init(pairing: PairingConfiguration, connection: AuthorizedConnection?) {
         self.pairing = pairing; self.connection = connection
-        if let connection { transport = WebSocketTransport(host: connection.host, key: connection.privateKey, endpoint: connection.endpoint) }
+        let states = linkStates
+        if let connection { transport = WebSocketTransport(host: connection.host, key: connection.privateKey, endpoint: connection.endpoint, report: { states.report($0) }) }
         else { transport = PinnedTransport(pairing: pairing) }
     }
-    func close() { closed = true; transport.close() }
+    func close() { closed = true; transport.close(); linkStates.finish() }
+    func reconnect() async { guard !closed else { return }; await transport.reconnect() }
     func relocate(_ updated: AuthorizedConnection) throws {
         guard !closed, let current = connection, current.privateKey == updated.privateKey,
               current.grant.signature == updated.grant.signature, current.grant.value == updated.grant.value else { throw BridgeError("host_changed", "Relocation cannot replace the device or its authorization.") }
@@ -20,7 +23,8 @@ actor RemoteClientRuntime {
         try updated.validate()
         let endpoint = try PairingConfiguration(host: updated.endpoint.host, port: updated.endpoint.port, token: String(repeating: "0", count: 32), certificateSHA256: updated.host.certificateSHA256)
         // In-flight requests own their old transport until completion; endpoint changes do not retry/cancel writes.
-        transport = WebSocketTransport(host: updated.host, key: updated.privateKey, endpoint: updated.endpoint); pairing = endpoint; connection = updated
+        let states = linkStates
+        transport = WebSocketTransport(host: updated.host, key: updated.privateKey, endpoint: updated.endpoint, report: { states.report($0) }); pairing = endpoint; connection = updated
     }
     func request<T: Decodable & Sendable>(_ path: String, method: String, query: [String: String], body: Data?, as type: T.Type) async throws -> T {
         let request = try await authorized(path, method: method)
