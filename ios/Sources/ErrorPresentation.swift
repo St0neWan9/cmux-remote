@@ -6,7 +6,12 @@ struct ErrorPresentation {
     func isConnectivity(_ error: any Error) -> Bool {
         if error is URLError { return true }
         if (error as NSError).domain == NSPOSIXErrorDomain { return true }
-        return ["relay_unavailable", "connection_failed"].contains((error as? BridgeError)?.code ?? "")
+        // These Bridge and relay codes are transient connection failures, not application errors.
+        // They resolve on the next reconnect without user action, so the connection bar handles them.
+        return ["relay_unavailable", "connection_failed",
+                "bridge_offline", "bridge_starting", "bridge_replaced",
+                "invalid_proof", "replayed_request", "relay_configuration",
+                "capacity"].contains((error as? BridgeError)?.code ?? "")
     }
     func message(_ error: any Error) -> String {
         if let network = error as? URLError {
