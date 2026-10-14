@@ -15,6 +15,9 @@ struct TranscriptToolCompletion: Sendable {
     /// Wall-clock duration in seconds, when one was parseable.
     let durationSeconds: Double?
 
+    /// When the result arrived, which is when the tool finished rather than when it was invoked.
+    let completedAt: Date?
+
     /// Creates a completion.
     ///
     /// - Parameters:
@@ -26,12 +29,14 @@ struct TranscriptToolCompletion: Sendable {
         output: String?,
         isError: Bool,
         exitCode: Int? = nil,
-        durationSeconds: Double? = nil
+        durationSeconds: Double? = nil,
+        completedAt: Date? = nil
     ) {
         self.output = output
         self.isError = isError
         self.exitCode = exitCode
         self.durationSeconds = durationSeconds
+        self.completedAt = completedAt
     }
 
     /// Produces the completed copy of a pending tool message.
@@ -50,7 +55,8 @@ struct TranscriptToolCompletion: Sendable {
                 output: output.map { budget.body($0) },
                 exitCode: exitCode ?? (isError ? 1 : 0),
                 durationSeconds: durationSeconds,
-                isRunning: false
+                isRunning: false,
+                completedAt: completedAt
             )
             return message.replacingKind(.terminal(completed))
         case .toolUse(let toolUse):
@@ -61,7 +67,8 @@ struct TranscriptToolCompletion: Sendable {
                 inputDetail: toolUse.inputDetail,
                 output: output.map { budget.body($0) },
                 status: failed ? .failed : .succeeded,
-                referencedPaths: toolUse.referencedPaths
+                referencedPaths: toolUse.referencedPaths,
+                completedAt: completedAt
             )
             return message.replacingKind(.toolUse(completed))
         case .question(let question):
