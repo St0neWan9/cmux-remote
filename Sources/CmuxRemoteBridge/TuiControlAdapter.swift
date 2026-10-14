@@ -17,12 +17,16 @@ public actor TuiControlAdapter: CmuxControlling {
     private let prompt = TuiPromptSafety()
     /// The last prompt text the phone wrote per conversation; an interrupted Agent may put it back in its input.
     private var lastSent: [String: String] = [:]
+    private var hooks = TuiHookStates()
+    /// The journal position after the last folded hook; nil until the first read and after a failed one.
+    private var journalCursor: JSONValue?
     private let restoreChecks: Int
+    private let journalWindow: UInt64
     private let restoreInterval: Duration
     public init(client: any TuiResourceRequesting, transcripts: TuiTranscriptLocator, attachments: TuiAttachmentStore? = nil, decisions: MutationLedger = MutationLedger(), archive: TuiBindingRepository? = nil,
-                restoreChecks: Int = 8, restoreInterval: Duration = .milliseconds(150)) {
+                restoreChecks: Int = 8, restoreInterval: Duration = .milliseconds(150), journalWindow: UInt64 = 20_000) {
         self.client = client; self.transcripts = transcripts; self.attachments = attachments; self.decisions = decisions; self.archive = archive
-        self.restoreChecks = restoreChecks; self.restoreInterval = restoreInterval
+        self.restoreChecks = restoreChecks; self.restoreInterval = restoreInterval; self.journalWindow = journalWindow
     }
     public func identity() -> String? { pinnedIdentity }
     public func ownsDecision(_ id: String) -> Bool { pending[id] != nil }
@@ -38,12 +42,14 @@ public actor TuiControlAdapter: CmuxControlling {
         case "vault.sessions", "chat.sessions.dump":
             let current = try await snapshot()
             let liveIDs = Set(current.bindings.map(\.id))
+            let activity = await hookActivity(current)
             let bindings = catalog.values.sorted { $0.id < $1.id }
             let paths = method == "vault.sessions" ? try transcripts.locate(Array(bindings)) : [:]
             var rows: [JSONValue] = []
             for binding in bindings {
                 var row = descriptor(binding)
                 if !liveIDs.contains(binding.id) { row["state"] = .string("ended"); row["status"] = .string("ended") }
+                else if let state = activity[binding.providerSession] { row["state"] = .string(state); row["status"] = .string(state) }
                 if let path = paths[binding.id] {
                     row["file"] = .string(path)
                 }
@@ -99,6 +105,7 @@ public actor TuiControlAdapter: CmuxControlling {
             if method == "mobile.chat.interrupt" {
                 var request = current.selectors(binding); request["keys"] = .array([.string(params["hard"]?.bool == true ? "ctrl+c" : "escape")]); request["expected_revision"] = .string(current.revision)
                 try await effect("terminal.input.keys", fields: request, key: "cmux-remote:interrupt:" + operationKey.lowercased(), generation: current.generation)
+                hooks.interrupted(binding.providerSession)
                 if let sent = lastSent.removeValue(forKey: binding.id) { await clearRestoredPrompt(sent, binding: binding, operationKey: operationKey) }
                 return .object(["interrupted": .bool(true)])
             }
@@ -126,6 +133,37 @@ public actor TuiControlAdapter: CmuxControlling {
             lastSent[binding.id] = imagePaths.isEmpty ? text : nil
             return .object(["submitted": .bool(true)])
         default: throw unsupported()
+        }
+    }
+    /// Folds agent hooks committed since the last read; an unreadable journal falls back to the daemon's own states.
+    private func hookActivity(_ current: TuiSessionSnapshot) async -> [String: String] {
+        let filter: JSONValue = .object(["kinds": .array([.string("agent.*")]), "max_sensitivity": .string("sensitive")])
+        // Every read is its own daemon stream, addressed to the snapshot's machine and session.
+        func params(_ cursor: JSONValue?) -> [String: JSONValue] {
+            var fields = current.selectors(); fields["filter"] = filter; fields["follow"] = .bool(false)
+            fields["stream_id"] = .string("stream_" + UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased())
+            if let cursor { fields["cursor"] = cursor }
+            return fields
+        }
+        do {
+            if journalCursor == nil {
+                // Bootstrap from a bounded recent window: the head position, then the hooks shortly before it.
+                let head = try await client.stream("session.journal.subscribe", params: params(nil), limit: 1).cursor
+                guard let generation = head["generation"].string, let revision = head["revision"].string.flatMap(UInt64.init) else { throw stale() }
+                hooks = TuiHookStates()
+                journalCursor = .object(["generation": .string(generation), "revision": .string(String(revision > journalWindow ? revision - journalWindow : 0))])
+            }
+            for _ in 0..<4 {
+                guard let cursor = journalCursor else { break }
+                let page = try await client.stream("session.journal.subscribe", params: params(cursor), limit: 1_000)
+                page.items.forEach { hooks.apply($0) }
+                if page.cursor["revision"].string != nil { journalCursor = page.cursor }
+                if page.complete { break }
+            }
+            return hooks.states
+        } catch {
+            journalCursor = nil; hooks = TuiHookStates()
+            return [:]
         }
     }
     /// A phone send takes over the Agent input: a desktop draft is erased and a dialog is dismissed first.
