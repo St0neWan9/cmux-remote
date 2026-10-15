@@ -38,7 +38,8 @@ struct ActivityGroupView: View {
             Button {
                 // The reader is looking at this group: the page stays put while its height changes.
                 holdPlace()
-                withAnimation(.easeInOut(duration: 0.18)) { expanded = !isExpanded }
+                // Not animated: an animated height change at the bottom of a running conversation moved the page.
+                expanded = !isExpanded
             } label: {
                 HStack(spacing: 9) {
                     Image(systemName: "book.pages")
