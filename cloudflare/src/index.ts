@@ -115,6 +115,9 @@ export class RelayRoom extends DurableObject<Env> {
       } else {
         if (this.bridge() !== socket || typeof message !== "string" || message.length > 3_000_000) throw new RelayFailure("invalid_bridge_packet");
         const envelope = JSON.parse(message) as { kind: string; channel_id?: string; data?: string; revoked?: unknown[] };
+        // The Bridge's liveness ping. Answering here is the only proof its registration is still this room's:
+        // the WebSocket ping is answered by the edge, so a replaced room would otherwise look alive.
+        if (envelope.kind === "ping") { socket.send(JSON.stringify({ kind: "pong" })); return; }
         if (envelope.kind === "directory" || envelope.kind === "withdraw") {
           const hostID = await this.ctx.storage.get<string>("hostID");
           if (!hostID) throw new RelayFailure("invalid_bridge_packet");
