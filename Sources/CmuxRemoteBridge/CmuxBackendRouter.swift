@@ -20,23 +20,36 @@ public actor CmuxBackendRouter: CmuxControlling {
         guard daemons.count <= 32 else { throw BridgeError("too_large", "The backend routing table is full.", status: 413) }
         if ["workspace.list", "vault.sessions", "chat.sessions.dump"].contains(method) {
             let key = method == "workspace.list" ? "workspaces" : "sessions"
-            var rows: [JSONValue] = [], errors: [JSONValue] = [], available = false
+            var rows: [JSONValue] = [], errors: [JSONValue] = [], available = false, sources: [String] = []
             var identities = Set<String>()
             if let desktop {
-                do { rows = try await desktop.request(method, params: params)[key].array ?? []; available = true }
+                do { rows = try await desktop.request(method, params: params)[key].array ?? []; available = true; sources += Array(repeating: "desktop", count: rows.count) }
                 catch { errors.append(.string((error as? BridgeError)?.code ?? "socket_unavailable")) }
             }
             for path in daemons.keys.sorted() {
                 do {
                     guard let items = try await daemons[path]!.request(method, params: params)[key].array, items.count <= 4096 else { throw BridgeError("invalid_response", "A backend returned an invalid inventory.", status: 502) }
                     if let identity = await daemons[path]!.identity(), !identities.insert(identity).inserted { continue }
-                    rows += items; available = true
+                    rows += items; available = true; sources += Array(repeating: String(path.split(separator: "/").last ?? "daemon"), count: items.count)
                 } catch { errors.append(.string((error as? BridgeError)?.code ?? "socket_unavailable")) }
             }
             guard available, rows.count <= 4096 else { throw BridgeError("socket_unavailable", "No local cmux backend is available.", status: 503) }
-            let field = key == "workspaces" ? "id" : "session_id", ids = rows.compactMap { $0[field].string?.lowercased() }
-            guard ids.count == rows.count, Set(ids).count == ids.count else { throw BridgeError("invalid_response", "Backend resource identities collide.", status: 502) }
-            return .object([key: .array(rows), "backend_errors": .array(errors)])
+            let field = key == "workspaces" ? "id" : "session_id"
+            let ids = rows.map { $0[field].string?.lowercased() }
+            var counts: [String: Int] = [:]
+            for id in ids.compactMap({ $0 }) { counts[id, default: 0] += 1 }
+            // An unidentified or ambiguous row cannot be routed safely, so it is left out on its own; every other
+            // row is still listed. Failing the whole inventory left the phone with no sessions at all.
+            let kept = rows.indices.filter { ids[$0].map { counts[$0] == 1 } ?? false }
+            if kept.count != rows.count {
+                let missing = rows.indices.filter { ids[$0] == nil }.map { sources[$0] }
+                let duplicated = counts.filter { $0.value > 1 }.map { id, count in
+                    "\(id.prefix(12))x\(count)[" + rows.indices.filter { ids[$0] == id }.map { sources[$0] }.joined(separator: ",") + "]"
+                }
+                BridgeLog.shared.warning("inventory", "\(method) left out \(rows.count - kept.count) of \(rows.count) rows; missing \(field) from \(missing); duplicated \(duplicated.sorted())")
+                errors.append(.string("identity_collision"))
+            }
+            return .object([key: .array(kept.map { rows[$0] }), "backend_errors": .array(errors)])
         }
         if method == "system.ping" {
             var active = 0
