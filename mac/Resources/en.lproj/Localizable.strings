@@ -85,6 +85,7 @@
 "mac.capability.reply" = "Respond to pending actions";
 "mac.capability.terminals" = "View terminals";
 "mac.capability.input" = "Control terminal input";
+"mac.capability.start" = "Start new sessions";
 "mac.selectHost" = "Select a Mac to view its workspaces.";
 "mac.devices.pending" = "Pending requests";
 "mac.pairing.scanHint" = "Scan this code on the new device, then approve its request here.";
@@ -134,6 +135,7 @@
 "mac.relay.error" = "Check the HTTPS relay address and owner-only registration key file.";
 "mac.relay.originPlaceholder" = "https://your-relay.workers.dev";
 "mac.device.narrowHint" = "Uncheck workspaces this device should not see. Approval never adds workspaces.";
+"mac.device.allowStart" = "Allow starting new Claude or Codex sessions in these workspaces";
 "mac.logs.title" = "Logs";
 "mac.logs.open" = "Show Logs…";
 "mac.logs.hint" = "Connection events from the background Bridge. View or copy them here when a device cannot connect.";

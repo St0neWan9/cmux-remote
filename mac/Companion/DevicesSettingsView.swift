@@ -10,6 +10,8 @@ struct DevicesSettingsView: View {
     @State private var showingRevoke = false
     /// Workspaces the owner left unchecked for a pending request, keyed by request ID.
     @State private var excluded: [String: Set<String>] = [:]
+    /// Pending requests the owner approves without permission to start sessions.
+    @State private var withheldStart: Set<String> = []
     private let design = MacDesignTokens()
     var body: some View {
         MacPreferencePage {
@@ -25,10 +27,18 @@ struct DevicesSettingsView: View {
                                 .toggleStyle(.checkbox).lineLimit(1).disabled(model.busy)
                         }
                         MacPreferenceNote(text: String(localized: "mac.device.narrowHint", bundle: .interface))
+                        let asksToStart = request.scope.capabilities.contains(.conversationStart)
+                        if asksToStart {
+                            Toggle(String(localized: "mac.device.allowStart", bundle: .interface), isOn: Binding(get: { !withheldStart.contains(request.requestID) },
+                                set: { allowed in if allowed { withheldStart.remove(request.requestID) } else { withheldStart.insert(request.requestID) } }))
+                                .toggleStyle(.checkbox).disabled(model.busy)
+                        }
                         let allowed = request.scope.workspaces.filter { !(excluded[request.requestID] ?? []).contains($0) }
                         HStack(spacing: 8) {
                             Button(String(localized: "mac.device.deny", bundle: .interface), role: .destructive) { Task { await model.deny(request) } }.fixedSize()
-                            Button(String(localized: "mac.device.approve", bundle: .interface)) { Task { await model.approve(request, workspaces: allowed) } }.fixedSize()
+                            Button(String(localized: "mac.device.approve", bundle: .interface)) {
+                                Task { await model.approve(request, workspaces: allowed, allowStart: !withheldStart.contains(request.requestID)) }
+                            }.fixedSize()
                                 .disabled(allowed.isEmpty)
                         }.disabled(model.busy)
                     }

@@ -14,6 +14,8 @@ public actor MutationLedger {
         var recordedAt: Date? = nil
     }
     private let directory: URL?
+    /// Capabilities whose actions change the host and therefore leave a durable intent.
+    private static let mutating: Set<ClientCapability> = [.conversationControl, .feedReply, .terminalInput, .conversationStart]
     private let capacity: Int
     private var loaded = false
     private var entries: [String: Entry] = [:]
@@ -46,7 +48,7 @@ public actor MutationLedger {
     func begin(clientID: String, operationID: UUID, fingerprint: String, workspaceID: String, capability: ClientCapability) throws -> Entry? {
         if let existing = try prior(clientID: clientID, operationID: operationID, fingerprint: fingerprint) { return existing }
         guard fingerprint.count == 64, fingerprint.allSatisfy({ $0.isASCII && $0.isHexDigit }), !workspaceID.isEmpty, workspaceID.utf8.count <= 256,
-              [.conversationControl, .feedReply, .terminalInput].contains(capability) else { throw BridgeError("invalid_input", "Invalid mutation intent.") }
+              Self.mutating.contains(capability) else { throw BridgeError("invalid_input", "Invalid mutation intent.") }
         guard entries.count < capacity else { throw BridgeError("receipt_capacity", "The durable receipt store is full; this operation was not executed.", status: 503) }
         let entry = Entry(key: try key(clientID, operationID), operationID: operationID, fingerprint: fingerprint, workspaceID: workspaceID.lowercased(), capability: capability, receipt: nil, recordedAt: Date())
         try persist(entry); entries[entry.key] = entry
@@ -83,7 +85,7 @@ public actor MutationLedger {
                 guard entry.key.hasSuffix(":" + entry.operationID.uuidString), entry.key.utf8.count <= 166,
                       entry.fingerprint.count == 64, entry.fingerprint.allSatisfy({ $0.isASCII && $0.isHexDigit }),
                       !entry.workspaceID.isEmpty, entry.workspaceID.utf8.count <= 256,
-                      [.conversationControl, .feedReply, .terminalInput].contains(entry.capability),
+                      Self.mutating.contains(entry.capability),
                       entry.receipt.map({ $0.operationID == entry.operationID && $0.accepted }) ?? true else { throw BridgeError("invalid_state", "Invalid durable mutation receipt.") }
                 if let old = next[entry.key] {
                     guard old.fingerprint == entry.fingerprint, old.workspaceID == entry.workspaceID, old.capability == entry.capability,

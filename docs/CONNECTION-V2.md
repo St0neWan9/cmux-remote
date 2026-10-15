@@ -18,7 +18,7 @@ This initializes private state if needed, starts HTTPS and local administration,
 .build/debug/cmux-remote enrollment approve REQUEST_ID --workspace WORKSPACE_UUID --control
 ```
 
-Use a current UUID from the requested scope. Repeat `--workspace` to approve more than one. Omitting `--control` grants viewing, project reads and Feed reads. `--control` adds conversation control and Feed replies; it does not implicitly add terminal mirroring or terminal input. Other clients can explicitly request separate capabilities, and the owner can use repeated `--capability` flags. An approval can narrow a request's scope and cannot expand it.
+Use a current UUID from the requested scope. Repeat `--workspace` to approve more than one. Omitting `--control` grants viewing, project reads and Feed reads. `--control` adds conversation control and Feed replies, plus starting conversations (`conversationStart`) when the device requested it; it does not implicitly add terminal mirroring or terminal input. The Mac approval page shows starting conversations as a separate checkbox, checked by default. Other clients can explicitly request separate capabilities, and the owner can use repeated `--capability` flags. An approval can narrow a request's scope and cannot expand it.
 
 The state directory defaults to `~/.local/state/cmux-remote`. When using a custom `--state`, use it consistently for every command. Further owner commands:
 

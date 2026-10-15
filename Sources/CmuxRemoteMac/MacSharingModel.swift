@@ -78,12 +78,13 @@ import CmuxRemoteBridge
     public func closePairing() async {
         await action { _ = try await owner.request("enrollment.close", params: [:]); qrLink = nil; expiresAt = nil }
     }
-    /// The owner may narrow the requested workspaces; approval never expands a request.
-    public func approve(_ request: EnrollmentRequest, workspaces: [String]? = nil) async {
+    /// The owner may narrow the requested workspaces and withhold starting sessions; approval never expands a request.
+    public func approve(_ request: EnrollmentRequest, workspaces: [String]? = nil, allowStart: Bool = true) async {
         await action {
             let chosen = workspaces.map { Set($0.map { $0.lowercased() }) } ?? Set(request.scope.workspaces)
             guard !chosen.isEmpty, chosen.isSubset(of: Set(request.scope.workspaces)) else { throw BridgeError("invalid_scope", "Choose at least one requested workspace.") }
-            let narrowed = ClientScope(workspaces: request.scope.workspaces.filter(chosen.contains), capabilities: request.scope.capabilities)
+            let capabilities = request.scope.capabilities.filter { allowStart || $0 != .conversationStart }
+            let narrowed = ClientScope(workspaces: request.scope.workspaces.filter(chosen.contains), capabilities: capabilities)
             let scope = try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(narrowed))
             _ = try await owner.request("enrollment.approve", params: ["request_id": .string(request.requestID), "scope": scope])
         }
