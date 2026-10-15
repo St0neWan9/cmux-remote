@@ -16,10 +16,8 @@ struct ConversationView: View {
     @State private var initialScroll: Task<Void, Never>?
     /// Retries the opening jump: a row's height is known only after it lays out.
     @State private var settleTask: Task<Void, Never>?
-    /// The row whose disclosure is changing height; the follower stands down until it settles.
-    @State private var adjustingRow: String?
-    /// Where that row sits in the timeline, measured while it changes.
-    @State private var adjustingRowTop: CGFloat?
+    /// The reader opened or closed a card: the page stays where it is until they scroll or ask for the latest.
+    @State private var holdingPlace = false
     @State private var showProject = false
     @State private var selectedFile = ""
     @State private var showFeed = false
@@ -53,27 +51,24 @@ struct ConversationView: View {
             .modifier(InitialBottomAnchor())
             .coordinateSpace(name: "chatTimeline")
             .onPreferenceChange(TimelineBottomPreferenceKey.self) { bottom in
-                // A disclosure owns the scroll position until its new height has settled.
-                guard adjustingRow == nil else { return }
                 // Scrolling reports every frame; only a real change may invalidate the timeline.
                 let visible = bottom > 0 && bottom <= viewport.size.height + 32
                 if latestVisible != visible { latestVisible = visible }
-                if userScrolling || !atLatest { if atLatest != visible { atLatest = visible } }
+                if userScrolling || !atLatest {
+                    // While the page holds its place, the newest row coming into view does not resume following.
+                    if !holdingPlace, atLatest != visible { atLatest = visible }
+                }
                 else if bottom.isFinite && !latestVisible { proxy.scrollTo("latest", anchor: .bottom) }
             }
             .modifier(TimelineScrollInteraction(userScrolling: $userScrolling, atLatest: $atLatest, latestVisible: latestVisible))
-            .onPreferenceChange(AdjustingRowTopPreferenceKey.self) { adjustingRowTop = $0 }
-            // A row that changes its own height asks to keep its place: without this the follower treats the
-            // new height like a new message, and the card the reader just opened scrolls away.
-            .environment(\.keepRowVisible) { messageID in
-                adjustingRow = messageID
-                restoreRow(messageID, proxy)
-            }
+            .onChange(of: userScrolling) { _, scrolling in if scrolling { holdingPlace = false } }
+            // A card opened at the newest message would otherwise be carried off by the next one to arrive.
+            .environment(\.holdPlace) { atLatest = false; holdingPlace = true }
             .scrollDismissesKeyboard(.interactively)
             .refreshable { await pullToRefresh(proxy) }
             .overlay(alignment: .bottom) {
                 if !atLatest {
-                    Button { atLatest = true; withAnimation { proxy.scrollTo("latest", anchor: .bottom) } } label: {
+                    Button { holdingPlace = false; atLatest = true; withAnimation { proxy.scrollTo("latest", anchor: .bottom) } } label: {
                         Image(systemName: "arrow.down").font(.system(size: 20, weight: .medium)).frame(width: 42, height: 42)
                             .background(Color.white, in: Circle()).shadow(color: .black.opacity(0.1), radius: 10, y: 4)
                     }.buttonStyle(.plain).accessibilityLabel(String(localized: "chat.latest")).accessibilityIdentifier("chat.latest").padding(.bottom, 10)
@@ -87,7 +82,7 @@ struct ConversationView: View {
             .onChange(of: model.preview) { _, _ in if atLatest { proxy.scrollTo("latest", anchor: .bottom) } }
             // Opening a cached conversation re-enters with its follow state; start from the last message.
             .onAppear {
-                userScrolling = false; atLatest = true
+                userScrolling = false; atLatest = true; holdingPlace = false
                 initialScroll = Task {
                     // Show the conversation read last, then settle once the fresh read lands.
                     await model.restoreStored()
@@ -96,7 +91,7 @@ struct ConversationView: View {
                 }
             }
             .onDisappear { settleTask?.cancel(); settleTask = nil; initialScroll?.cancel(); initialScroll = nil }
-            .onChange(of: model.jumpToLatest) { _, _ in atLatest = true; withAnimation { proxy.scrollTo("latest", anchor: .bottom) } }
+            .onChange(of: model.jumpToLatest) { _, _ in holdingPlace = false; atLatest = true; withAnimation { proxy.scrollTo("latest", anchor: .bottom) } }
         }
         }
         .background(Color.white.ignoresSafeArea())
@@ -233,15 +228,6 @@ struct ConversationView: View {
             ForEach(model.timelineItems) { item in
                 timelineRow(item, firstResponse: firstResponse, lastResponse: lastResponse, imagesByMessage: imagesByMessage, activeAnchor: activeAnchor, runningSince: runningSince, bottom: bottom)
                     .id(item.id)
-                    // Only the row that is changing is measured; every other row adds nothing per frame.
-                    .background {
-                        if adjustingRow == item.id {
-                            GeometryReader { row in
-                                Color.clear.preference(key: AdjustingRowTopPreferenceKey.self,
-                                    value: row.frame(in: .named("chatTimeline")).minY)
-                            }
-                        }
-                    }
             }
             if activeAnchor == nil, let runningSince {
                 LiveRunLabel(since: runningSince, compacting: model.compacting, showsDivider: true, font: .subheadline).modifier(HeaderContentEffect(bottom: bottom))
@@ -288,25 +274,6 @@ struct ConversationView: View {
                 }
             }
         }.modifier(HeaderContentEffect(bottom: bottom))
-    }
-    /// Restores the row a disclosure changed, then hands the scroll back to the follower.
-    ///
-    /// Opening a card near the bottom pushes the newest row off screen, and the follower answers by
-    /// scrolling to it; closing a card leaves the page past the end of the shortened content, which shows
-    /// as a large blank area. Both are fixed by putting the row's own top back where the reader had it.
-    private func restoreRow(_ messageID: String?, _ proxy: ScrollViewProxy) {
-        guard let messageID else { adjustingRow = nil; adjustingRowTop = nil; return }
-        Task { @MainActor in
-            // The height animation and the lazy stack's re-layout both finish inside this window.
-            try? await Task.sleep(for: .milliseconds(240))
-            guard adjustingRow == messageID else { return }
-            // Only a row pushed off the top has to be brought back; one still on screen keeps the content
-            // above it exactly as the reader left it. Following then resumes, which also pulls the page
-            // back when closing a card left the content too short to reach the bottom.
-            if let top = adjustingRowTop, top < 0 { proxy.scrollTo(messageID, anchor: .top) }
-            try? await Task.sleep(for: .milliseconds(40))
-            adjustingRow = nil; adjustingRowTop = nil
-        }
     }
     private func openToolDetail(_ messageID: String, _ field: String) {
         guard let generation = model.historyGeneration else { return }
