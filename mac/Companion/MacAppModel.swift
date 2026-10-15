@@ -8,6 +8,7 @@ import CmuxRemoteCore
 @MainActor @Observable final class MacAppModel {
     var remote: MacCompanionModel
     var sharing: MacSharingModel
+    let logs: MacLogModel
     var section = "share"
     /// Stored for the next launch; every string lookup reads it through `Bundle.interface`.
     var language: MacInterfaceLanguage { didSet { preferences.set(language.rawValue, forKey: MacInterfaceLanguage.preferenceKey) } }
@@ -29,6 +30,7 @@ import CmuxRemoteCore
         remote = MacCompanionModel(owner: owner, discovery: OwnerBridgeDiscovery(owner: owner))
         sharing = MacSharingModel(owner: owner)
         launcher = MacResidentLauncher(executable: executable, directory: directory, owner: owner)
+        logs = MacLogModel(directory: directory, tail: BridgeLogTail(), interval: .seconds(2))
     }
     var setupCommand: String { "'" + executable.path.replacingOccurrences(of: "'", with: "'\\''") + "' setup --state '" + statePath.replacingOccurrences(of: "'", with: "'\\''") + "'" }
     func start() async {
@@ -69,6 +71,7 @@ import CmuxRemoteCore
         remote = MacCompanionModel(owner: owner, discovery: OwnerBridgeDiscovery(owner: owner))
         sharing = MacSharingModel(owner: owner)
         launcher = MacResidentLauncher(executable: executable, directory: directory, owner: owner)
+        logs.directory = directory
         preferences.set(statePath, forKey: "bridgeStatePath")
         await reconnect()
     }

@@ -13,6 +13,7 @@ struct MacErrorPresentation {
         case "sharing_unsupported": return String(localized: "mac.error.sharingUpgrade", bundle: .interface)
         case "not_found": return forWorkspace ? String(localized: "mac.error.missingWorkspace", bundle: .interface) : String(localized: "mac.error.sharingUpgrade", bundle: .interface)
         case "pairing_selection": return String(localized: "mac.error.pairingSelection", bundle: .interface)
+        case "log_unreadable": return String(localized: "mac.logs.unreadable", bundle: .interface)
         case "invalid_state_path": return String(localized: "mac.error.statePath", bundle: .interface)
         case "socket_unavailable", "owner_socket_exists": return String(localized: "mac.error.localBridge", bundle: .interface)
         case "mirror_remote_unavailable": return String(localized: "mac.error.remoteBridge", bundle: .interface)
