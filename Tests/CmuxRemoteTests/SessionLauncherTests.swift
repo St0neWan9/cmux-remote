@@ -1,0 +1,174 @@
+import Foundation
+import Testing
+import CmuxRemoteCore
+import CmuxRemoteBridge
+
+private actor LaunchCmux: CmuxControlling {
+    static let workspace = "11111111-1111-1111-1111-111111111111"
+    static let daemonWorkspace = "33333333-3333-3333-3333-333333333333"
+    let current: String
+    var creates: [[String: JSONValue]] = []
+    var failCreate = false
+    init(current: String) { self.current = current }
+    func setFailure(_ value: Bool) { failCreate = value }
+    func request(_ method: String, params: [String: JSONValue]) async throws -> JSONValue {
+        switch method {
+        case "workspace.list":
+            return .object(["workspaces": .array([
+                .object(["id": .string(Self.workspace.uppercased()), "title": .string("App"), "current_directory": .string(current)]),
+                .object(["id": .string(Self.daemonWorkspace), "title": .string("Daemon"), "backend": .string("cmux-tui")])])])
+        case "surface.create":
+            creates.append(params)
+            if failCreate { throw BridgeError("outcome_unknown", "fixture", status: 503) }
+            return .object(["surface_id": .string("44444444-4444-4444-4444-44444444444" + String(creates.count))])
+        default: return .object([:])
+        }
+    }
+}
+
+private struct LaunchFixture {
+    let home: URL
+    let root: URL
+    let other: URL
+    let cmux: LaunchCmux
+    let launcher: SessionLauncher
+    let ledger: MutationLedger
+    init(currentIsHome: Bool = false, ledgerDirectory: Bool = false) throws {
+        home = FileManager.default.temporaryDirectory.appendingPathComponent("launch-" + UUID().uuidString).resolvingSymlinksInPath()
+        root = home.appendingPathComponent("projects/app"); other = home.appendingPathComponent("projects/other")
+        let fm = FileManager.default
+        for folder in ["src/core", ".git", "docs", "../other", "../../secret"] { try fm.createDirectory(at: root.appendingPathComponent(folder), withIntermediateDirectories: true) }
+        try fm.createSymbolicLink(at: root.appendingPathComponent("escape"), withDestinationURL: home.appendingPathComponent("secret"))
+        try fm.createSymbolicLink(at: root.appendingPathComponent("inside"), withDestinationURL: root.appendingPathComponent("src"))
+        try fm.createSymbolicLink(at: root.appendingPathComponent("hidden"), withDestinationURL: root.appendingPathComponent(".git"))
+        try Data("x".utf8).write(to: root.appendingPathComponent("README.md"))
+        cmux = LaunchCmux(current: currentIsHome ? home.path : root.path)
+        let state = home.appendingPathComponent("state")
+        if ledgerDirectory { try fm.createDirectory(at: state, withIntermediateDirectories: true) }
+        ledger = MutationLedger(directory: ledgerDirectory ? state : nil)
+        let other = other, home = home
+        launcher = SessionLauncher(cmux: cmux, home: home, mutations: ledger, sessions: {
+            [SessionDescriptor(id: "a", agent: "claude", title: "A", cwd: other.path, workspaceID: LaunchCmux.workspace, surfaceID: "s1", updatedAt: Date()),
+             SessionDescriptor(id: "b", agent: "codex", title: "B", cwd: home.appendingPathComponent("projects").path, workspaceID: "55555555-5555-5555-5555-555555555555", surfaceID: "s2")]
+        })
+    }
+    /// Approves exactly the fixture workspace for the given capabilities.
+    func access(_ capabilities: Set<ClientCapability> = [.conversationStart], client: String = "phone") -> SessionAccess {
+        SessionAccess(clientID: client) { capability, workspace in
+            guard capabilities.contains(capability), workspace.lowercased() == LaunchCmux.workspace else { throw BridgeError("scope_denied", "fixture", status: 403) }
+        }
+    }
+    func code<T>(_ body: () async throws -> T) async -> String? {
+        do { _ = try await body(); return nil } catch { return (error as? BridgeError)?.code ?? "\(error)" }
+    }
+}
+
+@Suite struct SessionLauncherTests {
+    @Test func rootsComeOnlyFromTheApprovedWorkspace() async throws {
+        let fixture = try LaunchFixture()
+        let roots = try await fixture.launcher.directories(workspaceID: LaunchCmux.workspace, access: fixture.access())
+        #expect(roots.map(\.path) == ["~/projects/app", "~/projects/other"])
+        #expect(roots.allSatisfy { $0.id.count == 64 })
+    }
+
+    @Test func homeAndSensitiveFoldersAreNeverRoots() async throws {
+        let fixture = try LaunchFixture(currentIsHome: true)
+        let roots = try await fixture.launcher.directories(workspaceID: LaunchCmux.workspace, access: fixture.access())
+        #expect(roots.map(\.path) == ["~/projects/other"])
+    }
+
+    @Test func missingCapabilityOrWorkspaceIsDeniedBeforeAnyTerminalOpens() async throws {
+        let fixture = try LaunchFixture()
+        let control = fixture.access([.conversationControl])
+        #expect(await fixture.code { try await fixture.launcher.directories(workspaceID: LaunchCmux.workspace, access: control) } == "scope_denied")
+        let root = try await fixture.launcher.directories(workspaceID: LaunchCmux.workspace, access: fixture.access())[0]
+        #expect(await fixture.code { try await fixture.launcher.start(workspaceID: LaunchCmux.workspace, request: StartSessionRequest(rootID: root.id, agent: .claude), access: control) } == "scope_denied")
+        let elsewhere = "55555555-5555-5555-5555-555555555555"
+        #expect(await fixture.code { try await fixture.launcher.start(workspaceID: elsewhere, request: StartSessionRequest(rootID: root.id, agent: .claude), access: fixture.access()) } == "scope_denied")
+        #expect(await fixture.cmux.creates.isEmpty)
+    }
+
+    @Test func listingShowsVisibleFoldersInsideTheRootOnly() async throws {
+        let fixture = try LaunchFixture()
+        let root = try await fixture.launcher.directories(workspaceID: LaunchCmux.workspace, access: fixture.access())[0]
+        let listing = try await fixture.launcher.listing(workspaceID: LaunchCmux.workspace, rootID: root.id, path: "", access: fixture.access())
+        #expect(listing.directories == ["docs", "inside", "src"])
+        #expect(try await fixture.launcher.listing(workspaceID: LaunchCmux.workspace, rootID: root.id, path: "src", access: fixture.access()).directories == ["core"])
+    }
+
+    @Test func traversalHiddenAndEscapingLinksAreRefused() async throws {
+        let fixture = try LaunchFixture()
+        let root = try await fixture.launcher.directories(workspaceID: LaunchCmux.workspace, access: fixture.access())[0]
+        for path in ["..", "../other", "src/../..", ".git", "escape", "hidden", "/etc", "README.md"] {
+            let code = await fixture.code { try await fixture.launcher.start(workspaceID: LaunchCmux.workspace, request: StartSessionRequest(rootID: root.id, path: path, agent: .codex), access: fixture.access()) }
+            #expect(code == "directory_forbidden" || code == "directory_missing", "\(path) gave \(code ?? "success")")
+            #expect(await fixture.code { try await fixture.launcher.listing(workspaceID: LaunchCmux.workspace, rootID: root.id, path: path, access: fixture.access()) } != nil)
+        }
+        #expect(await fixture.cmux.creates.isEmpty)
+    }
+
+    @Test func startTypesOnlyTheFixedCommandWithoutFocus() async throws {
+        let fixture = try LaunchFixture()
+        let root = try await fixture.launcher.directories(workspaceID: LaunchCmux.workspace, access: fixture.access())[0]
+        let receipt = try await fixture.launcher.start(workspaceID: LaunchCmux.workspace.uppercased(), request: StartSessionRequest(rootID: root.id, path: "inside/core", agent: .codex), access: fixture.access())
+        #expect(receipt.accepted && receipt.surfaceID == "44444444-4444-4444-4444-444444444441")
+        let params = try #require(await fixture.cmux.creates.first)
+        #expect(params["workspace_id"]?.string == LaunchCmux.workspace)
+        #expect(params["working_directory"]?.string == fixture.root.appendingPathComponent("src/core").path)
+        #expect(params["initial_input"]?.string == "codex\r")
+        #expect(params["focus"]?.bool == false && params["type"]?.string == "terminal" && params["initial_command"] == nil)
+    }
+
+    @Test func aRepeatedOperationReplaysItsReceiptAndNeverOpensASecondTerminal() async throws {
+        let fixture = try LaunchFixture(ledgerDirectory: true)
+        let root = try await fixture.launcher.directories(workspaceID: LaunchCmux.workspace, access: fixture.access())[0]
+        let request = StartSessionRequest(rootID: root.id, agent: .claude)
+        _ = try await fixture.launcher.start(workspaceID: LaunchCmux.workspace, request: request, access: fixture.access())
+        let replay = try await fixture.launcher.start(workspaceID: LaunchCmux.workspace, request: request, access: fixture.access())
+        #expect(replay.accepted && replay.surfaceID == nil)
+        let changed = StartSessionRequest(rootID: root.id, path: "docs", agent: .claude, operationID: request.operationID)
+        #expect(await fixture.code { try await fixture.launcher.start(workspaceID: LaunchCmux.workspace, request: changed, access: fixture.access()) } == "operation_conflict")
+        // Another device's identical identity is its own operation.
+        _ = try await fixture.launcher.start(workspaceID: LaunchCmux.workspace, request: request, access: fixture.access(client: "tablet"))
+        #expect(await fixture.cmux.creates.count == 2)
+        // The durable receipt survives a Bridge restart.
+        let restarted = SessionLauncher(cmux: fixture.cmux, home: fixture.home, mutations: MutationLedger(directory: fixture.home.appendingPathComponent("state")), sessions: { [] })
+        #expect(try await restarted.start(workspaceID: LaunchCmux.workspace, request: request, access: fixture.access()).accepted)
+        #expect(await fixture.cmux.creates.count == 2)
+    }
+
+    @Test func anUnknownOutcomeIsNeverRetriedUnderTheSameIdentity() async throws {
+        let fixture = try LaunchFixture()
+        let root = try await fixture.launcher.directories(workspaceID: LaunchCmux.workspace, access: fixture.access())[0]
+        await fixture.cmux.setFailure(true)
+        let request = StartSessionRequest(rootID: root.id, agent: .claude)
+        #expect(await fixture.code { try await fixture.launcher.start(workspaceID: LaunchCmux.workspace, request: request, access: fixture.access()) } == "outcome_unknown")
+        await fixture.cmux.setFailure(false)
+        #expect(await fixture.code { try await fixture.launcher.start(workspaceID: LaunchCmux.workspace, request: request, access: fixture.access()) } == "outcome_unknown")
+        #expect(await fixture.cmux.creates.count == 1)
+        // A new identity is a deliberate second terminal.
+        _ = try await fixture.launcher.start(workspaceID: LaunchCmux.workspace, request: StartSessionRequest(rootID: root.id, agent: .claude), access: fixture.access())
+        #expect(await fixture.cmux.creates.count == 2)
+    }
+
+    @Test func aRootThatLeftTheWorkspaceIsAStaleBinding() async throws {
+        let fixture = try LaunchFixture()
+        let unknown = String(repeating: "a", count: 64)
+        #expect(await fixture.code { try await fixture.launcher.start(workspaceID: LaunchCmux.workspace, request: StartSessionRequest(rootID: unknown, agent: .claude), access: fixture.access()) } == "stale_binding")
+        #expect(await fixture.code { try await fixture.launcher.listing(workspaceID: LaunchCmux.workspace, rootID: unknown, path: "", access: fixture.access()) } == "stale_binding")
+        #expect(await fixture.cmux.creates.isEmpty)
+    }
+
+    @Test func daemonWorkspacesCannotStartSessions() async throws {
+        let fixture = try LaunchFixture()
+        let daemon = SessionAccess(clientID: "phone") { _, _ in }
+        #expect(await fixture.code { try await fixture.launcher.directories(workspaceID: LaunchCmux.daemonWorkspace, access: daemon) } == "launch_unsupported")
+    }
+
+    @Test func requestsAndReceiptsUseStableWireNames() throws {
+        let request = StartSessionRequest(rootID: "r", path: "src", agent: .codex, operationID: UUID(uuidString: "66666666-6666-6666-6666-666666666666")!)
+        let json = try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(request))
+        #expect(json["root_id"].string == "r" && json["agent"].string == "codex" && json["operation_id"].string == "66666666-6666-6666-6666-666666666666")
+        #expect(throws: (any Error).self) { try JSONDecoder().decode(StartSessionRequest.self, from: Data(#"{"root_id":"r","path":"","agent":"bash","operation_id":"66666666-6666-6666-6666-666666666666"}"#.utf8)) }
+    }
+}

@@ -7,10 +7,12 @@ public struct BridgeRouter: Sendable {
     private let legacyToken: String?
     private let authority: ConnectionAuthority?
     private let mirrors: RemoteMirrorService?
+    private let launcher: SessionLauncher?
     /// An explicitly selected legacy router, retained for migration and fixtures.
-    public init(service: SessionService, token: String) { self.service = service; legacyToken = token; authority = nil; mirrors = nil }
-    public init(service: SessionService, authority: ConnectionAuthority, legacyToken: String? = nil, mirrors: RemoteMirrorService? = nil) {
-        self.service = service; self.authority = authority; self.legacyToken = legacyToken; self.mirrors = mirrors
+    /// A fixture's launcher acts with owner authority, since the legacy token is the owner's own.
+    public init(service: SessionService, token: String, launcher: SessionLauncher? = nil) { self.service = service; legacyToken = token; authority = nil; mirrors = nil; self.launcher = launcher }
+    public init(service: SessionService, authority: ConnectionAuthority, legacyToken: String? = nil, mirrors: RemoteMirrorService? = nil, launcher: SessionLauncher? = nil) {
+        self.service = service; self.authority = authority; self.legacyToken = legacyToken; self.mirrors = mirrors; self.launcher = launcher
     }
     public func respond(method: String, uri: String, authorization: String?, body: Data) async -> (Int, Data) {
         let response = await respondResource(method: method, uri: uri, authorization: authorization, body: body)
@@ -105,6 +107,21 @@ public struct BridgeRouter: Sendable {
                     return HTTPResourceResponse.json(try encode(receipt))
                 }
                 throw BridgeError("not_found", "Unknown terminal mirror operation.", status: 404)
+            }
+            // Starting a session: folders inside one approved workspace, then a fixed agent command in a new terminal.
+            if path.count >= 4, path.count <= 5, path[0...1] == ["v1", "workspaces"], ["directories", "sessions"].contains(path[3]) {
+                // A production router always has an authority, so a legacy token never starts sessions there.
+                let owner = authority == nil ? SessionAccess(clientID: "owner") { _, _ in } : nil
+                guard let access = access ?? owner, let launcher else { throw BridgeError("launch_unsupported", "Starting sessions requires scoped v2 enrollment and a current Bridge.", status: 422) }
+                let workspace = path[2]
+                switch (method, path[3], path.count) {
+                case ("GET", "directories", 4): return HTTPResourceResponse.json(try encode(await launcher.directories(workspaceID: workspace, access: access)))
+                case ("GET", "directories", 5): return HTTPResourceResponse.json(try encode(await launcher.listing(workspaceID: workspace, rootID: path[4], path: query["path"] ?? "", access: access)))
+                case ("POST", "sessions", 4):
+                    let request = try JSONDecoder().decode(StartSessionRequest.self, from: body)
+                    return HTTPResourceResponse.json(try encode(await launcher.start(workspaceID: workspace, request: request, access: access)))
+                default: throw BridgeError("not_found", "This resource is not available.", status: 404)
+                }
             }
             if method == "GET", path == ["v1", "status"] {
                 if let client, let authority {
