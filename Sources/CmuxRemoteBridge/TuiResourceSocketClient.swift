@@ -11,13 +11,13 @@ public struct TuiResourceSocketClient: TuiResourceRequesting {
     public func resource(_ operation: String, params: [String: JSONValue], idempotencyKey: String? = nil) async throws -> JSONValue {
         let id = requestID()
         let lines = try await exchange(try request(id: id, operation: operation, params: params, idempotencyKey: idempotencyKey), lines: 1)
-        return try Self.result(lines[0], id: id)
+        return try Self.result(lines[0], id: id, operation: operation, path: path)
     }
     public func stream(_ operation: String, params: [String: JSONValue], limit: Int) async throws -> TuiStreamRead {
         let id = requestID()
         // The response and up to `limit` items, or fewer before the end marker; a longer stream is cut and resumed from its last item.
         let lines = try await exchange(try request(id: id, operation: operation, params: params, idempotencyKey: nil), lines: limit + 1)
-        guard let stream = try Self.result(lines[0], id: id)["stream_id"].string else { throw BridgeError("invalid_response", "The daemon stream has no identity.", status: 502) }
+        guard let stream = try Self.result(lines[0], id: id, operation: operation, path: path)["stream_id"].string else { throw BridgeError("invalid_response", "The daemon stream has no identity.", status: 502) }
         var items: [JSONValue] = [], cursor = JSONValue.null, complete = false
         for raw in lines.dropFirst() {
             guard let line = try? JSONDecoder().decode(JSONValue.self, from: raw), line["stream_id"].string == stream else { throw BridgeError("invalid_response", "The daemon interleaved an unrelated stream.", status: 502) }
@@ -42,8 +42,11 @@ public struct TuiResourceSocketClient: TuiResourceRequesting {
         let task = Task.detached { try Self.exchange(path: path, bytes: bytes, timeout: timeout, lines: lines) }
         return try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
     }
-    private static func result(_ raw: Data, id: String) throws -> JSONValue {
+    private static func result(_ raw: Data, id: String, operation: String, path: String) throws -> JSONValue {
         guard let reply = try? JSONDecoder().decode(JSONValue.self, from: raw), reply["protocol"].string == "cmux.protocol/2", reply["type"].string == "response", reply["id"].string == id else {
+            // Structure only: the line can carry terminal text, which never goes to the log.
+            let parsed = try? JSONDecoder().decode(JSONValue.self, from: raw)
+            BridgeLog.shared.error("daemon", "incompatible reply op=\(operation) socket=\((path as NSString).lastPathComponent) bytes=\(raw.count) json=\(parsed != nil) protocol=\(parsed?["protocol"].string ?? "-") type=\(parsed?["type"].string ?? "-") id_matches=\(parsed?["id"].string == id) has_id=\(parsed?["id"].string != nil)")
             throw BridgeError("invalid_response", "The daemon returned an incompatible or unrelated response.", status: 502)
         }
         guard reply["ok"].bool == true else {
