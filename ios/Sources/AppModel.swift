@@ -41,6 +41,8 @@ final class AppModel {
     var enrollmentState = ""
     private let discovery: BridgeDiscovery
     private let store: PairingStore
+    /// Conversations read before, kept on disk so reopening one is immediate.
+    private let conversations = ConversationCache()
     private let makeSpeechInput: @MainActor () -> any SpeechInputServing
     private let pendingSends: PendingSendStore
     private let identityKey: @MainActor () throws -> Data
@@ -316,7 +318,8 @@ final class AppModel {
         let store = pendingSends; let scope = client.operationRecoveryScope; let id = session.id
         let model = ConversationModel(session: session, client: client, speechInput: makeSpeechInput(),
             loadRecovery: { try await store.load(scope: scope, sessionID: id) },
-            saveRecovery: { try await store.save($0, scope: scope, sessionID: id) })
+            saveRecovery: { try await store.save($0, scope: scope, sessionID: id) },
+            cache: conversations)
         conversationModels[key] = model
         return model
     }
@@ -326,6 +329,8 @@ final class AppModel {
         let removed = links.remove(at: index), scope = removed.client.operationRecoveryScope + ":"
         for (key, model) in conversationModels where key.hasPrefix(scope) { model.suspendReads(); model.speech.cancel(); conversationModels[key] = nil }
         removed.client.close(); perHost[hostID] = nil; hostErrors[hostID] = nil; refreshGeneration = UUID(); loading = false
+        // A removed Mac's conversations are unreadable; their stored copies go with it.
+        Task { await conversations.remove(scope: removed.client.operationRecoveryScope) }
         if removed.connection != nil { store.removeConnection(hostID: hostID) } else { store.remove(); store.disableLegacy() }
         host = links.first?.name ?? ""; publish()
         if links.isEmpty { enrollmentGeneration = UUID(); stopEnrollmentMonitor() }
