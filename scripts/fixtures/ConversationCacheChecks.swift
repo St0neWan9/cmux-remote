@@ -26,6 +26,11 @@ struct ConversationCacheChecks {
         check(await cache.load(scope: "mac-b", sessionID: "session-1") == nil, "One Mac's stored conversation was visible to another")
         check(await cache.load(scope: "mac-a", sessionID: "session-2") == nil, "One session's stored conversation was visible to another")
         check(await cache.load(scope: "mac-a", sessionID: "session-1") != nil, "Reading a stored conversation removed it")
+        let written = await cache.storedAt(scope: "mac-a", sessionID: "session-1")
+        try? await Task.sleep(for: .milliseconds(20))
+        _ = await cache.load(scope: "mac-a", sessionID: "session-1")
+        let afterOpening = await cache.storedAt(scope: "mac-a", sessionID: "session-1")
+        check(written != nil && afterOpening == written, "Opening a stored conversation changed when it was stored")
 
         // A page too large to reopen instantly is not stored at all, so memory is never spent on it.
         let huge = ConversationCache.Entry(snapshot: ConversationSnapshot(messages: (0..<9_000).map { message("m\($0)-" + String(repeating: "x", count: 512), $0) }, hasMore: false, generation: "g-huge", clipped: false), preview: nil, storedAt: Date())

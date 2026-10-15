@@ -39,6 +39,11 @@ actor ConversationCache {
             return entry
         } catch { return nil }
     }
+    /// When a conversation was last written, without reading it. An atomic save replaces the file, so its
+    /// creation date is the write; the modification date also moves when the copy is merely opened.
+    func storedAt(scope: String, sessionID: String) -> Date? {
+        (try? FileManager.default.attributesOfItem(atPath: file(scope: scope, sessionID: sessionID).path))?[.creationDate] as? Date
+    }
     func save(_ entry: Entry, scope: String, sessionID: String) {
         let file = file(scope: scope, sessionID: sessionID)
         guard let bytes = try? JSONEncoder().encode(entry), bytes.count <= entryLimit else { return }
