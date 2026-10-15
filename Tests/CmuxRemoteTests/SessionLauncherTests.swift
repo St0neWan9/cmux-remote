@@ -100,7 +100,7 @@ private struct LaunchFixture {
         let fixture = try LaunchFixture()
         let root = try await fixture.launcher.directories(workspaceID: LaunchCmux.workspace, access: fixture.access())[0]
         for path in ["..", "../other", "src/../..", ".git", "escape", "hidden", "/etc", "README.md"] {
-            let code = await fixture.code { try await fixture.launcher.start(workspaceID: LaunchCmux.workspace, request: StartSessionRequest(rootID: root.id, path: path, agent: .codex), access: fixture.access()) }
+            let code = await fixture.code { try await fixture.launcher.start(workspaceID: LaunchCmux.workspace, request: StartSessionRequest(rootID: root.id, path: path, agent: .claude), access: fixture.access()) }
             #expect(code == "directory_forbidden" || code == "directory_missing", "\(path) gave \(code ?? "success")")
             #expect(await fixture.code { try await fixture.launcher.listing(workspaceID: LaunchCmux.workspace, rootID: root.id, path: path, access: fixture.access()) } != nil)
         }
@@ -110,12 +110,12 @@ private struct LaunchFixture {
     @Test func startTypesOnlyTheFixedCommandWithoutFocus() async throws {
         let fixture = try LaunchFixture()
         let root = try await fixture.launcher.directories(workspaceID: LaunchCmux.workspace, access: fixture.access())[0]
-        let receipt = try await fixture.launcher.start(workspaceID: LaunchCmux.workspace.uppercased(), request: StartSessionRequest(rootID: root.id, path: "inside/core", agent: .codex), access: fixture.access())
+        let receipt = try await fixture.launcher.start(workspaceID: LaunchCmux.workspace.uppercased(), request: StartSessionRequest(rootID: root.id, path: "inside/core", agent: .codex, prompt: "it's fine; rm -rf ~"), access: fixture.access())
         #expect(receipt.accepted && receipt.surfaceID == "44444444-4444-4444-4444-444444444441")
         let params = try #require(await fixture.cmux.creates.first)
         #expect(params["workspace_id"]?.string == LaunchCmux.workspace)
         #expect(params["working_directory"]?.string == fixture.root.appendingPathComponent("src/core").path)
-        #expect(params["initial_input"]?.string == "codex\r")
+        #expect(params["initial_input"]?.string == "codex --no-daemon 'it'\\''s fine; rm -rf ~'\r")
         #expect(params["focus"]?.bool == false && params["type"]?.string == "terminal" && params["initial_command"] == nil)
         // Daemon-only fields never reach the desktop.
         #expect(params["launch_agent"] == nil && params["operation_key"] == nil)
@@ -159,6 +159,22 @@ private struct LaunchFixture {
         #expect(await fixture.code { try await fixture.launcher.start(workspaceID: LaunchCmux.workspace, request: StartSessionRequest(rootID: unknown, agent: .claude), access: fixture.access()) } == "stale_binding")
         #expect(await fixture.code { try await fixture.launcher.listing(workspaceID: LaunchCmux.workspace, rootID: unknown, path: "", access: fixture.access()) } == "stale_binding")
         #expect(await fixture.cmux.creates.isEmpty)
+    }
+
+    @Test func codexNeedsAFirstMessageAndTheMessageIsNotStored() async throws {
+        let fixture = try LaunchFixture(ledgerDirectory: true)
+        let root = try await fixture.launcher.directories(workspaceID: LaunchCmux.workspace, access: fixture.access())[0]
+        #expect(await fixture.code { try await fixture.launcher.start(workspaceID: LaunchCmux.workspace, request: StartSessionRequest(rootID: root.id, agent: .codex), access: fixture.access()) } == "prompt_required")
+        #expect(await fixture.code { try await fixture.launcher.start(workspaceID: LaunchCmux.workspace, request: StartSessionRequest(rootID: root.id, agent: .codex, prompt: "  \n"), access: fixture.access()) } == "prompt_required")
+        #expect(await fixture.cmux.creates.isEmpty)
+        let request = StartSessionRequest(rootID: root.id, agent: .claude, prompt: "secret plan for the release")
+        _ = try await fixture.launcher.start(workspaceID: LaunchCmux.workspace, request: request, access: fixture.access())
+        #expect(await fixture.cmux.creates.first?["initial_input"]?.string == "claude 'secret plan for the release'\r")
+        let ledger = try String(contentsOf: fixture.home.appendingPathComponent("state/mutation-receipts.ndjson"), encoding: .utf8)
+        #expect(!ledger.contains("secret plan"))
+        // The same identity with a different message is a different operation.
+        let changed = StartSessionRequest(rootID: root.id, agent: .claude, prompt: "another plan", operationID: request.operationID)
+        #expect(await fixture.code { try await fixture.launcher.start(workspaceID: LaunchCmux.workspace, request: changed, access: fixture.access()) } == "operation_conflict")
     }
 
     @Test func aDaemonWorkspaceWithoutTerminalFoldersOffersNoRoot() async throws {

@@ -49,7 +49,13 @@ public actor SessionLauncher {
     /// Records the intent before cmux is asked; a lost reply is reported as unknown and never retried.
     public func start(workspaceID: String, request: StartSessionRequest, access: SessionAccess) async throws -> StartSessionReceipt {
         let workspace = workspaceID.lowercased()
-        let payload: JSONValue = .object(["root": .string(request.rootID), "path": .string(normalized(request.path)), "agent": .string(request.agent.rawValue)])
+        let commandLine = AgentCommandLine()
+        let prompt = try commandLine.validatedPrompt(request.prompt)
+        guard prompt != nil || !request.agent.requiresPrompt else { throw BridgeError("prompt_required", "Codex needs a first message to start its conversation.") }
+        // Only a digest of the message enters the durable record, as with sends.
+        var payloadFields: [String: JSONValue] = ["root": .string(request.rootID), "path": .string(normalized(request.path)), "agent": .string(request.agent.rawValue)]
+        if let prompt { payloadFields["prompt"] = .string(IdentityCryptography().digest(Data(prompt.utf8))) }
+        let payload: JSONValue = .object(payloadFields)
         let signature = try MutationLedger.fingerprint(action: "session.start", resource: workspace, payload: payload)
         if let prior = try await mutations.prior(clientID: access.clientID, operationID: request.operationID, fingerprint: signature) {
             return try await replay(prior, access: access)
@@ -69,10 +75,11 @@ public actor SessionLauncher {
         do {
             var params: [String: JSONValue] = [
                 "workspace_id": .string(workspace), "type": .string("terminal"), "working_directory": .string(target.path),
-                "initial_input": .string(request.agent.command + "\r"), "focus": .bool(false)]
+                "initial_input": .string(commandLine.line(request.agent, prompt: prompt) + "\r"), "focus": .bool(false)]
             if row["backend"].string == "cmux-tui" {
                 // A daemon runs the fixed command itself and deduplicates by key, so a retried write cannot open two terminals.
                 params["launch_agent"] = .string(request.agent.rawValue)
+                if let prompt { params["launch_prompt"] = .string(prompt) }
                 params["operation_key"] = .string(IdentityCryptography().digest(Data((access.clientID + ":" + request.operationID.uuidString).utf8)))
             }
             let result = try await cmux.request("surface.create", params: params)
