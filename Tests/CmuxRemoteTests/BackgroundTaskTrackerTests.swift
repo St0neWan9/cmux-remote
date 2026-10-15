@@ -39,6 +39,26 @@ import CmuxRemoteCore
                     launch(id: "3", tool: "Agent", description: "a"), launch(id: "4", tool: "Workflow", description: "w")]
         #expect(BackgroundTaskTracker().running(in: rows, at: Date()).map(\.tool) == ["Bash", "Monitor", "Agent", "Workflow"])
     }
+    /// Claude Code starts every subagent asynchronously and its input carries no flag; only the launch
+    /// result says so. A subagent that ran inline returns its answer instead and is never listed.
+    @Test func anAsyncSubagentIsTrackedFromItsLaunchResult() {
+        func agentCall(_ id: String) -> String {
+            let row: [String: Any] = ["type": "assistant", "message": ["content": [["type": "tool_use", "id": id, "name": "Agent",
+                "input": ["description": "Add a log page", "prompt": "…", "subagent_type": "general-purpose"]]]]]
+            return String(decoding: try! JSONSerialization.data(withJSONObject: row), as: UTF8.self)
+        }
+        func result(_ id: String, _ text: String) -> String {
+            let row: [String: Any] = ["type": "user", "message": ["content": [["type": "tool_result", "tool_use_id": id, "content": [["type": "text", "text": text]]]]]]
+            return String(decoding: try! JSONSerialization.data(withJSONObject: row), as: UTF8.self)
+        }
+        let rows = [agentCall("toolu_async"), result("toolu_async", "Async agent launched successfully. agentId: a2868 (internal ID)"),
+                    agentCall("toolu_inline"), result("toolu_inline", "The answer is 42.")]
+        let tasks = BackgroundTaskTracker().running(in: rows, at: Date())
+        #expect(tasks.map(\.id) == ["toolu_async"])
+        #expect(tasks.first?.summary == "Add a log page")
+        // Its completion notice names the call, as for any other background task.
+        #expect(BackgroundTaskTracker().running(in: rows + [completion(toolUseID: "toolu_async")], at: Date()).isEmpty)
+    }
     /// `Monitor` and `Workflow` always detach: their input carries no `run_in_background`, so waiting
     /// for that flag would miss every one of them. Read from a real session's own Monitor calls.
     @Test func aMonitorCallIsDetachedWithoutAnyFlag() {

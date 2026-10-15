@@ -41,6 +41,9 @@ struct BackgroundTaskTracker {
         var launched: [String: Launch] = [:]
         /// The task id each launch reported, which is how `TaskStop` names it.
         var toolUseByTaskID: [String: String] = [:]
+        /// Agent calls without the flag: Claude Code now starts every subagent asynchronously, and only the
+        /// launch result ("Async agent launched …") says so. They count once that result arrives.
+        var asyncCandidates: [String: Launch] = [:]
         for line in lines {
             // Every refresh walks the whole record, so a cheap substring test keeps the JSON parse for
             // the few rows that can carry a signal. Nothing else in a record can start or finish a task.
@@ -56,12 +59,17 @@ struct BackgroundTaskTracker {
                     }
                     continue
                 }
-                guard Self.runsInBackground(call) else { continue }
                 let summary = (input["description"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
                     ?? (input["command"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
                     ?? (call["name"] as? String) ?? ""
-                launched[id] = Launch(task: BackgroundAgentTask(id: id, tool: call["name"] as? String ?? "Task", summary: Self.shorten(summary)),
-                                      deadline: call["name"] as? String == "Monitor" ? Self.monitorDeadline(input, launchedAt: stamp) : nil)
+                let launch = Launch(task: BackgroundAgentTask(id: id, tool: call["name"] as? String ?? "Task", summary: Self.shorten(summary)),
+                                    deadline: call["name"] as? String == "Monitor" ? Self.monitorDeadline(input, launchedAt: stamp) : nil)
+                if Self.runsInBackground(call) { launched[id] = launch }
+                else if call["name"] as? String == "Agent" { asyncCandidates[id] = launch }
+            }
+            for (toolUseID, text) in Self.toolResults(in: value) {
+                guard let candidate = asyncCandidates.removeValue(forKey: toolUseID), text.contains("Async agent launched") else { continue }
+                launched[toolUseID] = candidate
             }
             for (toolUseID, text) in Self.toolResults(in: value) where launched[toolUseID] != nil {
                 if let taskID = Self.matches(#"(?:with ID: |Monitor started \(task |agentId: )([A-Za-z0-9_-]+)"#, in: text).first {
@@ -97,7 +105,7 @@ struct BackgroundTaskTracker {
     ///
     /// A tool that always detaches says so by name rather than by a flag, so its name is part of the test.
     private static func carriesASignal(_ line: String) -> Bool {
-        if line.contains("task-notification") || line.contains("run_in_background") || line.contains("\"TaskStop\"") { return true }
+        if line.contains("task-notification") || line.contains("run_in_background") || line.contains("\"TaskStop\"") || line.contains("\"Agent\"") { return true }
         // A launch result reports the task id that a later `TaskStop` names.
         if line.contains("running in background with ID") || line.contains("Monitor started (task") || line.contains("agentId:") { return true }
         return alwaysDetached.contains { line.contains("\"" + $0 + "\"") }
