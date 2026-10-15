@@ -85,9 +85,10 @@ actor TuiResourceFixture: TuiResourceRequesting {
     }
     func restore(_ text: String?) { restoredOnInterrupt = text }
     /// Moves the fixture terminal to another working directory.
-    func setTerminalCWD(_ cwd: String) {
+    func setTerminalCWD(_ cwd: String) { setTerminalField("cwd", .string(cwd)) }
+    func setTerminalField(_ field: String, _ value: JSONValue) {
         guard case .object(var graph) = raw, case .array(var terminals) = graph["terminals"] ?? .null, case .object(var terminal) = terminals[0] else { return }
-        terminal["cwd"] = .string(cwd); terminals[0] = .object(terminal); graph["terminals"] = .array(terminals); raw = .object(graph)
+        terminal[field] = value; terminals[0] = .object(terminal); graph["terminals"] = .array(terminals); raw = .object(graph)
     }
     func dismissesOnEscape() { dismissOnEscape = true }
     func setAgentField(_ field: String, _ value: JSONValue) {

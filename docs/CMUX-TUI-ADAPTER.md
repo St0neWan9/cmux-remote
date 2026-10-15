@@ -56,6 +56,12 @@ in one unambiguous workspace. Names, cwd and screen text do not prove Agent
 ownership. Multiple views in different workspaces are refused for conversation
 control rather than selecting an arbitrary authorization scope.
 
+Activity comes from hooks, with one correction: an interrupted Claude turn sends
+no Stop hook, so its hooks keep saying working. When the terminal title starts
+with Claude Code's idle mark `✳` (a turn in progress shows a spinner glyph), a
+working Claude conversation is reported idle. The title never establishes
+ownership; it only ends a working state the hooks failed to end.
+
 Map typed workspace/terminal IDs to stable Bridge UUIDs derived from daemon
 machine/session identity plus the complete typed ID. Phone grants remain explicit
 workspace UUID grants. Agent replacement or a moved workspace invalidates old
