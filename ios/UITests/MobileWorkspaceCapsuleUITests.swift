@@ -21,6 +21,8 @@ final class MobileWorkspaceCapsuleUITests: XCTestCase {
         arrow.tap()
         let second = app.buttons["Second workspace"]
         XCTAssertTrue(second.waitForExistence(timeout: 5), "The capsule's menu does not list the Mac's workspaces")
+        // The menu opens from the capsule's leading edge, not from its arrow at the other end.
+        XCTAssertLessThan(abs(second.frame.minX - arrow.frame.minX), 40, "The workspace menu is not aligned with the capsule's leading edge")
         XCTAssertTrue(app.buttons["全部已授权工作区"].exists)
         capture(app, "workspaces")
         second.tap()
