@@ -108,7 +108,7 @@ final class ConversationModel {
     private func readLatest(_ request: UUID) async {
         do {
             do { try await restorePendingSend() }
-            catch { if refreshReads.isCurrent(request) { mutationWarning = ErrorPresentation().message(error) } }
+            catch { if refreshReads.isCurrent(request) { logFailure("refresh.recovery", error, shown: true); mutationWarning = ErrorPresentation().message(error) } }
             guard refreshReads.isCurrent(request) else { return }
             let descriptors = try await readSessions()
             guard refreshReads.isCurrent(request) else { return }
@@ -148,7 +148,9 @@ final class ConversationModel {
         } catch {
             // A lost link is shown and retried by the connection bar; the page keeps only errors about the conversation.
             guard refreshReads.isCurrent(request) else { return }
-            self.error = ErrorPresentation().isConnectivity(error) ? mutationWarning : ErrorPresentation().message(error)
+            let shown = !ErrorPresentation().isConnectivity(error)
+            logFailure("refresh", error, shown: shown)
+            self.error = shown ? ErrorPresentation().message(error) : mutationWarning
         }
     }
     func older() async {
@@ -168,7 +170,10 @@ final class ConversationModel {
                 let imageIDs = Set(images.map(\.id)); images += (page.images ?? []).filter { !imageIDs.contains($0.id) }
                 timelineItems = ConversationTimeline().items(from: messages); hasMore = page.hasMore
             } catch {
-                guard olderReads.isCurrent(request), generation == sourceGeneration, !ErrorPresentation().isConnectivity(error) else { return }
+                guard olderReads.isCurrent(request), generation == sourceGeneration else { return }
+                let shown = !ErrorPresentation().isConnectivity(error)
+                logFailure("older", error, shown: shown)
+                guard shown else { return }
                 self.error = ErrorPresentation().message(error)
             }
         }
@@ -210,6 +215,7 @@ final class ConversationModel {
                 if imageDraft.images.isEmpty { imageDraft.images = sent.attachments }
             }
             // The connection bar reports a lost link; the returned draft says the send did not happen.
+            logFailure("send", error, shown: !neverSent)
             self.error = neverSent ? nil : ErrorPresentation().message(error)
         }
     }
@@ -221,14 +227,14 @@ final class ConversationModel {
             guard status.operationID == request.operationID else { throw BridgeError("invalid_response", "The operation identity changed.", status: 502) }
             if status.state == .accepted { try await confirmSend(request); await refresh(); jumpToLatest += 1 }
             else { mutationWarning = String(localized: "error.outcome_unknown"); error = mutationWarning }
-        } catch { mutationWarning = ErrorPresentation().message(error); self.error = mutationWarning }
+        } catch { logFailure("checkPendingSend", error, shown: true); mutationWarning = ErrorPresentation().message(error); self.error = mutationWarning }
     }
     /// An explicit inspection acknowledgement releases the draft; it never sends it.
     func acknowledgePendingSend() async {
         guard !busy else { return }; busy = true; defer { busy = false }
         let released = pendingSend?.operationID
         do { try await saveRecovery(nil); outgoing.removeAll { $0.id == released }; pendingSend = nil; recoveryReady = true; recoveryFailed = false; recoveryTask = nil; mutationWarning = nil; error = nil }
-        catch { mutationWarning = ErrorPresentation().message(error); self.error = mutationWarning }
+        catch { logFailure("acknowledgePendingSend", error, shown: true); mutationWarning = ErrorPresentation().message(error); self.error = mutationWarning }
     }
     private func restorePendingSend() async throws {
         guard !recoveryReady else { return }
@@ -258,6 +264,11 @@ final class ConversationModel {
     func interrupt(hard: Bool = false) async {
         guard !busy else { return }; busy = true; defer { busy = false }
         do { _ = try await client.post("/v1/sessions/\(session.id)/interrupt", body: InterruptRequest(hard: hard), as: MutationReceipt.self); markInterrupted(); await refresh() }
-        catch { self.error = ErrorPresentation().message(error) }
+        catch { logFailure("interrupt", error, shown: true); self.error = ErrorPresentation().message(error) }
+    }
+    /// One line per failure the page handles: an error when it raises the red line, a warning when the connection bar owns it.
+    private func logFailure(_ operation: String, _ error: any Error, shown: Bool) {
+        diagLog(shown ? .error : .warning, category: "conversation",
+                "op=\(operation) error=\(TraceFormat().describe(error)) session=\(session.id.prefix(8)) shown=\(shown)")
     }
 }
