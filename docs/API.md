@@ -21,9 +21,25 @@ Version 2 uses a device-signed `Authorization: CmuxV2` proof and approved worksp
 | GET /v1/sessions/:id/file?path= | constrained local project file | bounded text and relative path |
 | GET /v1/operations/:operation_id | owner-only persisted operation journal | current device's scoped accepted/unknown status |
 
-No generic cmux RPC proxy, shell execution endpoint, arbitrary absolute-path fetch or desktop focus endpoint is exposed.
+No generic cmux RPC proxy, shell execution endpoint, arbitrary absolute-path fetch or desktop focus endpoint is exposed. Starting a conversation (below) types only a fixed agent command chosen from an enum.
 
 The first phone version polls foreground snapshots; `events.stream` is a Bridge backend seam rather than a claim that local cmux supplies full chat deltas. Mutation error `outcome_unknown` is intentionally not an automatic retry signal. Legacy pairing is endpoint + bearer token + pinned certificate fingerprint and requires explicit server enablement; v2 uses independently identified clients and owner-approved scopes. Neither has a cmux account identity.
+
+## Starting conversations
+
+These routes require signed v2 requests and the `conversationStart` capability for the workspace. Legacy clients cannot use them. Only desktop cmux workspaces are supported; a cmux-tui daemon workspace returns `launch_unsupported`.
+
+| Route | Source | Result |
+| --- | --- | --- |
+| GET /v1/workspaces/:id/directories | the workspace's `current_directory` and the directories of its own conversations | up to 32 `{id, path}` roots; `id` is opaque, `path` is for display |
+| GET /v1/workspaces/:id/directories/:root?path= | visible subfolders of a folder inside that root | `{root_id, path, directories, truncated}`, at most 500 names |
+| POST /v1/workspaces/:id/sessions | `{root_id, path, agent: "claude"\|"codex", operation_id}` | `{operation_id, accepted, surface_id?}` |
+
+A root is never the home directory, `/`, a parent of home or a credential folder (`ProjectFilePolicy.projectRoot`). `path` is relative to the root; `..`, hidden components and symbolic links that leave the root or land on a hidden folder are refused with `directory_forbidden`. A root that is no longer part of the workspace is `stale_binding`.
+
+Starting records a durable intent, rechecks the grant and folder, then calls `surface.create` with `type: terminal`, the resolved `working_directory`, `initial_input: "<agent>\r"` and `focus: false`. The new tab opens in the workspace's focused pane; the desktop does not switch workspace or window. Repeating an operation returns its receipt without opening another terminal (`surface_id` is then absent). A failed or unconfirmed `surface.create` is `outcome_unknown` and is never retried under the same identity; the phone offers to check again or to open another terminal with a new identity. The conversation appears in `/v1/sessions` once the agent reports its binding.
+
+An older Bridge cannot decode `conversationStart` and closes the link during enrollment; the phone then asks again without it.
 
 ## Terminal mirror resources
 

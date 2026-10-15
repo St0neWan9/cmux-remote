@@ -16,6 +16,13 @@ struct SessionListView: View {
     @State private var filter = SessionFilter.all
     @State private var workspaceID: String?
     @AppStorage(SessionSortMode.storageKey) private var sortMode = SessionSortMode.workspace
+    /// The new-session sheet; a target is set when it was opened from one workspace's group.
+    @State private var showStart = false
+    @State private var startFrom: StartTarget?
+    /// A terminal cmux just opened; the list waits for its conversation and then opens it.
+    @State private var awaiting: AwaitedStart?
+    @State private var startNotice: String?
+    private struct AwaitedStart: Equatable { let hostID: String; let surfaceID: String?; let id = UUID() }
     /// Collapsed workspace groups, keyed by Mac and workspace; scene storage keeps them while other pages cover the list.
     @SceneStorage("sessions.collapsed") private var collapsedKeys = ""
     private var collapsed: Set<String> {
@@ -65,6 +72,10 @@ struct SessionListView: View {
                         .overlay(Capsule().stroke(Color.black.opacity(0.04), lineWidth: 0.5))
                         .shadow(color: .black.opacity(0.065), radius: 14, y: 4)
                     }.tint(.primary).accessibilityIdentifier("sessions.workspaces")
+                    if let startNotice {
+                        Label(startNotice, systemImage: awaiting == nil ? "checkmark.circle" : "hourglass")
+                            .font(.footnote).foregroundStyle(.secondary).accessibilityIdentifier("sessions.start_notice")
+                    }
                     if sortMode == .time {
                         ForEach(recent) { hosted in
                             Button { openConversation(hosted) } label: { sessionRow(hosted.session, host: multiple ? hosted.hostName : nil) }
@@ -81,6 +92,7 @@ struct SessionListView: View {
                                 let key = section.hostID + "/" + group.id
                                 VStack(alignment: .leading, spacing: 14) {
                                     if grouped {
+                                        HStack(spacing: 4) {
                                         Button { withAnimation(.easeInOut(duration: 0.18)) { if collapsed.contains(key) { collapsed.remove(key) } else { collapsed.insert(key) } } } label: {
                                             HStack(spacing: 10) {
                                                 Label(group.name ?? String(localized: "sessions.other"), systemImage: group.name == nil ? "clock.arrow.circlepath" : "macwindow")
@@ -90,6 +102,13 @@ struct SessionListView: View {
                                             }.frame(minHeight: 36).contentShape(Rectangle())
                                         }.buttonStyle(.plain).accessibilityAddTraits(.isHeader).accessibilityIdentifier("sessions.group." + key)
                                             .accessibilityValue(collapsed.contains(key) ? String(localized: "chat.collapsed") : String(localized: "chat.expanded"))
+                                        if let target = model.startTargets.first(where: { $0.hostID == section.hostID && $0.workspace.id.lowercased() == group.id }) {
+                                            Button { startFrom = target; showStart = true } label: {
+                                                Image(systemName: "plus").font(.body.weight(.medium)).frame(width: 36, height: 36).contentShape(Rectangle())
+                                            }.buttonStyle(.plain).accessibilityLabel(String(format: String(localized: "start.in_workspace"), group.name ?? ""))
+                                                .accessibilityIdentifier("sessions.group." + key + ".start")
+                                        }
+                                        }
                                     }
                                     if !grouped || !collapsed.contains(key) {
                                     ForEach(group.sessions) { session in
@@ -150,6 +169,26 @@ struct SessionListView: View {
                 }
             }
             .fullScreenCover(isPresented: $model.addingDevice) { PairingView(model: model) }
+            .sheet(isPresented: $showStart, onDismiss: { startFrom = nil }) {
+                StartSessionSheet(targets: model.startTargets, preselected: startFrom, multipleMacs: links.count > 1) { hostID, surfaceID in
+                    startNotice = String(localized: "start.waiting"); awaiting = AwaitedStart(hostID: hostID, surfaceID: surfaceID)
+                }
+            }
+            .task(id: awaiting) { await awaitStartedConversation() }
+    }
+    /// The agent reports its conversation a few seconds after its terminal opens; open it once it is listed.
+    private func awaitStartedConversation() async {
+        guard let awaited = awaiting else { return }
+        for _ in 0..<20 {
+            await model.refresh()
+            if let surface = awaited.surfaceID,
+               let found = model.hostedSessions.first(where: { $0.hostID == awaited.hostID && $0.session.surfaceID?.lowercased() == surface }) {
+                awaiting = nil; startNotice = nil; openConversation(found); return
+            }
+            if awaited.surfaceID == nil { break }
+            do { try await Task.sleep(for: .seconds(1.5)) } catch { return }
+        }
+        awaiting = nil; startNotice = String(localized: "start.opened")
     }
     private func openConversation(_ hosted: HostedSession) {
         guard let link = model.link(for: hosted.hostID) else { return }
@@ -194,6 +233,10 @@ struct SessionListView: View {
             Button { if showSearch || !query.isEmpty { showSearch = false; query = "" } else { showSearch = true } } label: {
                 Image(systemName: "magnifyingglass")
             }.buttonStyle(FloatingIconStyle()).accessibilityLabel(String(localized: "sessions.search")).accessibilityIdentifier("sessions.search")
+            if !model.startTargets.isEmpty {
+                Button { startFrom = nil; showStart = true } label: { Image(systemName: "plus") }
+                    .buttonStyle(FloatingIconStyle()).accessibilityLabel(String(localized: "start.title")).accessibilityIdentifier("sessions.start")
+            }
 
         }.padding(.horizontal, MobileDesign.pageInset).padding(.vertical, 10)
     }

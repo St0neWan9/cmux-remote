@@ -110,7 +110,8 @@ struct Main {
                 let companion = MacCompanionService(repository: connections, mirrors: mirrors, discovery: discovery, catalog: catalog)
                 mac = companion
             } else { mac = nil }
-            let router = BridgeRouter(service: service, authority: authority, legacyToken: options.contains("legacy") ? try state.token() : nil, mirrors: RemoteMirrorService(cmux: cmux, mutations: mutations))
+            let launcher = SessionLauncher(cmux: cmux, home: home, mutations: mutations, sessions: { try await service.sessions() })
+            let router = BridgeRouter(service: service, authority: authority, legacyToken: options.contains("legacy") ? try state.token() : nil, mirrors: RemoteMirrorService(cmux: cmux, mutations: mutations), launcher: launcher)
             let relayRepository = RelayConfigurationRepository(directory: state.directory)
             if let origin = options.value("relay") {
                 if origin == "off" { try relayRepository.remove() }

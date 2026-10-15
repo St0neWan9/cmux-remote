@@ -268,6 +268,27 @@
 "connection.offline" = "无法连接到 Mac";
 "connection.retry" = "重试";
 "connection.offline_named" = "无法连接到 %@";
+"start.title" = "新会话";
+"start.in_workspace" = "在 %@ 中新建会话";
+"start.choose_workspace" = "选择工作区";
+"start.no_workspaces" = "没有允许开新会话的工作区。请重新配对这台 iPhone，并在 Mac 上保持勾选“开新会话”。";
+"start.choose_folder" = "选择目录";
+"start.no_folders" = "这个工作区里还没有项目目录。请先在 Mac 上的这个工作区里打开一个项目。";
+"start.agent" = "Agent";
+"start.here" = "在这里开始";
+"start.retry" = "再确认一次";
+"start.fresh" = "仍然再开一个终端";
+"start.starting" = "正在 Mac 上打开终端…";
+"start.subfolders" = "子目录";
+"start.no_subfolders" = "没有子目录。";
+"start.truncated" = "只显示前 500 个子目录。";
+"start.outcome_unknown" = "不确定 Mac 上有没有打开终端。请先在 Mac 上看一下这个工作区，再选择重新确认或再开一个。";
+"start.folder_gone" = "这个目录已不在工作区里，请重新选择。";
+"start.waiting" = "正在 Mac 上启动 agent…";
+"start.opened" = "终端已在 Mac 上打开，agent 准备好后会话会出现在这里。";
+"capability.conversationStart" = "开新会话";
+"error.launch_unsupported" = "只能在 cmux 桌面端的工作区里开新会话，并且 Mac 上需要装最新版 CmuxRemote。";
+"error.directory" = "这个目录不能使用。";
 
 "diagnostics.title" = "诊断日志";
 "diagnostics.copy" = "复制全部";

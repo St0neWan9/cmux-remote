@@ -268,6 +268,27 @@
 "connection.offline" = "Can’t reach your Mac";
 "connection.retry" = "Retry";
 "connection.offline_named" = "Can’t reach %@";
+"start.title" = "New Conversation";
+"start.in_workspace" = "New conversation in %@";
+"start.choose_workspace" = "Choose a workspace";
+"start.no_workspaces" = "No workspace allows starting conversations. Pair this iPhone again and keep “Start new sessions” checked on the Mac.";
+"start.choose_folder" = "Choose a folder";
+"start.no_folders" = "This workspace has no project folder yet. Open a project in it on the Mac first.";
+"start.agent" = "Agent";
+"start.here" = "Start here";
+"start.retry" = "Check again";
+"start.fresh" = "Open another terminal anyway";
+"start.starting" = "Opening a terminal on the Mac…";
+"start.subfolders" = "Subfolders";
+"start.no_subfolders" = "No subfolders.";
+"start.truncated" = "Only the first 500 subfolders are shown.";
+"start.outcome_unknown" = "It is unclear whether the Mac opened the terminal. Check the workspace on the Mac, then check again or open another.";
+"start.folder_gone" = "This folder is no longer part of the workspace. Choose another one.";
+"start.waiting" = "Starting the agent on the Mac…";
+"start.opened" = "The terminal is open on the Mac. The conversation appears here once the agent is ready.";
+"capability.conversationStart" = "Start conversations";
+"error.launch_unsupported" = "New conversations can only be started in desktop cmux workspaces, on a Mac with the current CmuxRemote.";
+"error.directory" = "This folder cannot be used.";
 
 "diagnostics.title" = "Diagnostics";
 "diagnostics.copy" = "Copy All";

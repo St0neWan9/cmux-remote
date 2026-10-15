@@ -29,6 +29,22 @@ private actor FixtureEnrollment: DeviceEnrolling {
     nonisolated func connection(from status: EnrollmentStatus) throws -> AuthorizedConnection { throw BridgeError("not_approved", "Fixture is pending") }
 }
 
+@MainActor private final class AskedCapabilities { var values: [[ClientCapability]] = [] }
+
+/// A Bridge from before session starting: it cannot decode `conversationStart` and drops the link mid-submit.
+private actor PreviousBridgeEnrollment: DeviceEnrolling {
+    nonisolated let request: SignedValue<EnrollmentRequest>
+    init(request: SignedValue<EnrollmentRequest>) { self.request = request }
+    func submit() async throws -> EnrollmentStatus {
+        if request.value.scope.capabilities.contains(.conversationStart) { throw BridgeError("outcome_unknown", "Link closed", status: 504) }
+        return EnrollmentStatus(request: request.value, state: "pending")
+    }
+    func status() async throws -> EnrollmentStatus { EnrollmentStatus(request: request.value, state: "pending") }
+    func cancel() async throws {}
+    nonisolated func close() {}
+    nonisolated func connection(from status: EnrollmentStatus) throws -> AuthorizedConnection { throw BridgeError("not_approved", "Fixture is pending") }
+}
+
 private actor DeferredProjectRead {
     private var continuation: CheckedContinuation<TextFileSnapshot, any Error>?
     nonisolated let started = AsyncStream<Void>.makeStream()
@@ -128,7 +144,7 @@ private actor DeferredToolPage {
 
         let suspended = FixtureEnrollment(request: request, delaySubmission: true)
         let idleTicks = AsyncStream<Void>.makeStream()
-        let cancelling = AppModel(identityKey: { key }, makeEnrollment: { _, _, _ in suspended }, enrollmentTicks: { (idleTicks.stream, {}) })
+        let cancelling = AppModel(identityKey: { key }, makeEnrollment: { _, _, _, _ in suspended }, enrollmentTicks: { (idleTicks.stream, {}) })
         let submission = Task { @MainActor in await cancelling.enrollQR(qr) }
         var started = suspended.started.stream.makeAsyncIterator(); _ = await started.next()
         await cancelling.cancelEnrollment(); await suspended.finishSubmission(); await submission.value
@@ -136,7 +152,7 @@ private actor DeferredToolPage {
 
         let recovering = FixtureEnrollment(request: request, delaySubmission: false)
         let ticks = AsyncStream<Void>.makeStream()
-        let pending = AppModel(identityKey: { key }, makeEnrollment: { _, _, _ in recovering }, enrollmentTicks: { (ticks.stream, {}) })
+        let pending = AppModel(identityKey: { key }, makeEnrollment: { _, _, _, _ in recovering }, enrollmentTicks: { (ticks.stream, {}) })
         await pending.enrollQR(qr)
         var calls = recovering.statusCalls.stream.makeAsyncIterator()
         ticks.continuation.yield(()); _ = await calls.next()
@@ -147,7 +163,7 @@ private actor DeferredToolPage {
 
         let pausedFixture = FixtureEnrollment(request: request, delaySubmission: true)
         let pausedTicks = AsyncStream<Void>.makeStream()
-        let paused = AppModel(identityKey: { key }, makeEnrollment: { _, _, _ in pausedFixture }, enrollmentTicks: { (pausedTicks.stream, {}) })
+        let paused = AppModel(identityKey: { key }, makeEnrollment: { _, _, _, _ in pausedFixture }, enrollmentTicks: { (pausedTicks.stream, {}) })
         let pausedSubmit = Task { @MainActor in await paused.enrollQR(qr) }
         var pausedStarted = pausedFixture.started.stream.makeAsyncIterator(); _ = await pausedStarted.next()
         paused.pauseEnrollment(); await pausedFixture.succeedSubmission(); await pausedSubmit.value
@@ -156,6 +172,19 @@ private actor DeferredToolPage {
         let pausedDeadline = Task { try await ContinuousClock().sleep(for: .milliseconds(150)); pausedFixture.statusCalls.continuation.finish() }
         if await pausedCalls.next() != nil { failures.append("Submission completion restarted polling after scene pause") }
         pausedDeadline.cancel(); paused.pauseEnrollment()
+
+        // A Bridge that cannot decode the new capability still pairs, without permission to start sessions.
+        let asked = AskedCapabilities()
+        let previousTicks = AsyncStream<Void>.makeStream()
+        let previous = AppModel(identityKey: { key }, makeEnrollment: { bootstrap, key, _, capabilities in
+            asked.values.append(capabilities)
+            let devicePublicKey = try crypto.publicKey(privateKey: key)
+            let value = EnrollmentRequest(hostID: bootstrap.value.host.id, windowID: bootstrap.value.windowID, requestID: UUID().uuidString, clientID: try crypto.identityID(publicKey: devicePublicKey), clientPublicKey: devicePublicKey, clientName: "Fixture", clientKind: "iphone", nonce: UUID().uuidString, scope: ClientScope(workspaces: bootstrap.value.workspaces, capabilities: capabilities), expiresAt: bootstrap.value.expiresAt)
+            return PreviousBridgeEnrollment(request: try crypto.sign(value, domain: "enrollment-request", privateKey: key))
+        }, enrollmentTicks: { (previousTicks.stream, {}) })
+        await previous.enrollQR(qr); previous.pauseEnrollment()
+        if asked.values != [EnrollmentClient.phoneCapabilities, EnrollmentClient.previousPhoneCapabilities] { failures.append("Enrollment did not fall back for an older Bridge: \(asked.values)") }
+        if previous.enrollmentState != "pending" || previous.error != nil { failures.append("Older Bridge enrollment did not reach pending: \(previous.enrollmentState) \(previous.error ?? "")") }
 
         let client = RemoteClient(pairing: try PairingConfiguration(host: "localhost", port: 1, token: String(repeating: "0", count: 32), certificateSHA256: String(repeating: "0", count: 64)))
         defer { client.close() }

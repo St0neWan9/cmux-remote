@@ -9,6 +9,9 @@ private actor PhoneUIBackend: CmuxControlling {
     private let workspace = "11111111-1111-1111-1111-111111111111"
     private let surface = "22222222-2222-2222-2222-222222222222"
     private var items: [JSONValue]
+    /// Set once the phone starts a session; the new conversation is then bound to `startedSurface`.
+    private var started: (agent: String, cwd: String)?
+    private let startedSurface = "77777777-7777-7777-7777-777777777777"
     init(root: URL, transcript: URL) {
         self.root = root; self.transcript = transcript
         let questions: [JSONValue] = [
@@ -44,8 +47,17 @@ private actor PhoneUIBackend: CmuxControlling {
         switch method {
         case "system.ping": return .object(["pong": .bool(true)])
         case "system.capabilities": return .object(["methods": .array([])])
-        case "workspace.list": return .object(["workspaces": .array([.object(["id": .string(workspace), "title": .string("UI fixture workspace")])])])
-        case "vault.sessions": return .object(["sessions": .array([.object(["session_id": .string("fixture-session"), "agent": .string("claude"), "title": .string(vaultTitle), "cwd": .string(root.path), "file": .string(transcript.path)])])])
+        case "workspace.list": return .object(["workspaces": .array([.object(["id": .string(workspace), "title": .string("UI fixture workspace"), "current_directory": .string(root.path)])])])
+        case "vault.sessions":
+            var rows: [JSONValue] = [.object(["session_id": .string("fixture-session"), "agent": .string("claude"), "title": .string(vaultTitle), "cwd": .string(root.path), "file": .string(transcript.path)])]
+            if let started { rows.append(.object(["session_id": .string("fixture-started"), "agent": .string(started.agent), "title": .string("UI 测试：新会话"), "cwd": .string(started.cwd), "file": .string(root.appendingPathComponent("started.jsonl").path)])) }
+            return .object(["sessions": .array(rows)])
+        // A started session is only recorded here: no terminal opens and no agent runs.
+        case "surface.create":
+            guard params["type"]?.string == "terminal", let input = params["initial_input"]?.string, let cwd = params["working_directory"]?.string else { throw BridgeError("invalid_params", "fixture") }
+            started = (String(input.dropLast()), cwd)
+            try Data((#"{"type":"user","uuid":"started","timestamp":"2026-10-12T02:00:00Z","message":{"content":"新会话已在 Mac 上启动"}}"# + "\n").utf8).write(to: root.appendingPathComponent("started.jsonl"))
+            return .object(["surface_id": .string(startedSurface)])
         case "system.tree":
             // The tab name stands in for a cmux rename, which the bridge reads from the tree.
             let configured = try? String(contentsOf: root.deletingLastPathComponent().appendingPathComponent("tab-title"), encoding: .utf8)
@@ -55,7 +67,10 @@ private actor PhoneUIBackend: CmuxControlling {
             let paneRow: JSONValue = .object(["id": .string(surface), "surfaces": .array([surfaceRow])])
             let workspaceRow: JSONValue = .object(["id": .string(workspace), "title": .string("UI fixture workspace"), "panes": .array([paneRow])])
             return .object(["windows": .array([.object(["workspaces": .array([workspaceRow])])])])
-        case "chat.sessions.dump": return .object(["sessions": .array([.object(["session_id": .string("fixture-session"), "agent": .string("claude"), "workspace_id": .string(workspace), "surface_id": .string(surface), "state": .string(flag("report-working") ? "working" : "idle"), "cwd": .string(root.path)])])])
+        case "chat.sessions.dump":
+            var rows: [JSONValue] = [.object(["session_id": .string("fixture-session"), "agent": .string("claude"), "workspace_id": .string(workspace), "surface_id": .string(surface), "state": .string(flag("report-working") ? "working" : "idle"), "cwd": .string(root.path)])]
+            if let started { rows.append(.object(["session_id": .string("fixture-started"), "agent": .string(started.agent), "workspace_id": .string(workspace), "surface_id": .string(startedSurface), "state": .string("idle"), "cwd": .string(started.cwd)])) }
+            return .object(["sessions": .array(rows)])
         case "surface.input_state": return .object(["agent": .bool(true), "workspace_id": .string(workspace), "surface_id": .string(surface), "blocks_typing": .bool(false)])
         // The agent's working line lives only on the rendered screen, and the screen also carries the
         // terminal's own chrome, so the fixture renders both exactly as a live terminal would.
@@ -123,6 +138,8 @@ private actor PhoneUIBackend: CmuxControlling {
         if !FileManager.default.fileExists(atPath: state.certificate) { try state.initialize() }
         let root = state.directory.appendingPathComponent("project")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        // Empty folders for the new-session folder browser; version control does not list them as changes.
+        for folder in ["Sources/App", "docs"] { try FileManager.default.createDirectory(at: root.appendingPathComponent(folder), withIntermediateDirectories: true) }
         let file = root.appendingPathComponent("README.md")
         if !FileManager.default.fileExists(atPath: file.path) {
             try Data("# UI fixture project\n\nThis is isolated test content.\n".utf8).write(to: file)
@@ -162,7 +179,8 @@ private actor PhoneUIBackend: CmuxControlling {
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: configuration.path)
         let backend = PhoneUIBackend(root: root, transcript: transcript)
         let service = SessionService(cmux: backend, home: FileManager.default.homeDirectoryForCurrentUser, transcriptRoots: [root], journal: try MutationJournal(file: state.directory.appendingPathComponent("operations.json")))
+        let launcher = SessionLauncher(cmux: backend, home: FileManager.default.homeDirectoryForCurrentUser, mutations: MutationLedger(), sessions: { try await service.sessions() })
         print("Isolated phone UI fixture listening on loopback port \(port). No real cmux sessions are used.")
-        try await HTTPServer().run(host: "127.0.0.1", port: port, certificate: state.certificate, key: state.key, router: BridgeRouter(service: service, token: pairing.token))
+        try await HTTPServer().run(host: "127.0.0.1", port: port, certificate: state.certificate, key: state.key, router: BridgeRouter(service: service, token: pairing.token, launcher: launcher))
     }
 }

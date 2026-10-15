@@ -36,5 +36,23 @@ public struct ProjectFilePolicy: Sendable {
               let size = attributes[.size] as? NSNumber, size.intValue <= 1_048_576 else { throw denied() }
         return file
     }
+    /// A folder inside a project root, chosen by a relative path; empty means the root itself.
+    public func directory(root: String, relativePath: String) throws -> URL {
+        let base = try projectRoot(root)
+        guard relativePath.utf8.count <= 1024, !relativePath.hasPrefix("/"), !relativePath.contains("\u{0}") else { throw directoryDenied() }
+        let components = relativePath.split(separator: "/", omittingEmptySubsequences: true).map(String.init)
+        guard !components.contains(where: { $0 == ".." || $0.hasPrefix(".") }) else { throw directoryDenied() }
+        let folder = (components.isEmpty ? base : base.appendingPathComponent(components.joined(separator: "/"))).resolvingSymlinksInPath().standardizedFileURL
+        guard folder.path == base.path || folder.path.hasPrefix(base.path + "/") else { throw directoryDenied() }
+        // A link inside the root may still land on a hidden or sensitive folder of the root.
+        let canonical = folder.path == base.path ? [] : folder.path.dropFirst(base.path.count + 1).split(separator: "/")
+        guard !canonical.contains(where: { $0.hasPrefix(".") }) else { throw directoryDenied() }
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: folder.path, isDirectory: &isDirectory), isDirectory.boolValue else {
+            throw BridgeError("directory_missing", "The selected folder no longer exists.", status: 404)
+        }
+        return folder
+    }
+    private func directoryDenied() -> BridgeError { BridgeError("directory_forbidden", "This folder cannot be used from the selected project.", status: 403) }
     private func denied() -> BridgeError { BridgeError("file_forbidden", "This file cannot be shared from the selected project.", status: 403) }
 }
