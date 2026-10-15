@@ -20,9 +20,16 @@ struct StartFolderView: View {
                         Picker(String(localized: "start.agent"), selection: $model.agent) {
                             ForEach(LaunchAgent.allCases, id: \.self) { agent in Text(agent.rawValue.capitalized).tag(agent) }
                         }.pickerStyle(.segmented).accessibilityIdentifier("start.agent")
+                        TextField(model.agent.requiresPrompt ? String(localized: "start.prompt_required") : String(localized: "start.prompt_optional"), text: $model.prompt, axis: .vertical)
+                            .lineLimit(2...6).padding(12)
+                            .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
+                            .accessibilityIdentifier("start.prompt")
+                        if model.agent.requiresPrompt {
+                            Text(String(localized: "start.prompt_codex_hint")).font(.footnote).foregroundStyle(.secondary)
+                        }
                         Button { Task { await start(fresh: false) } } label: {
                             Label(model.uncertain ? String(localized: "start.retry") : String(localized: "start.here"), systemImage: "play.fill")
-                        }.buttonStyle(FloatingButtonStyle(prominent: true, fullWidth: true)).disabled(model.starting)
+                        }.buttonStyle(FloatingButtonStyle(prominent: true, fullWidth: true)).disabled(!model.canStart)
                             .accessibilityIdentifier("start.here")
                         if model.uncertain {
                             Button(String(localized: "start.fresh")) { Task { await start(fresh: true) } }

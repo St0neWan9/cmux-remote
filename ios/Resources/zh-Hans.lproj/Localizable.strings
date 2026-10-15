@@ -296,3 +296,7 @@
 "diagnostics.clear" = "清除";
 "sync.background" = "后台同步";
 "sync.background_note" = "App 在后台时，由系统定期唤醒，同步正在运行或有更新的对话（每次最多 3 个），回来时直接看到最新内容。唤醒时机由 iOS 决定，通常每小时数次。对所有 Mac 生效。";
+"start.prompt_optional" = "第一条消息（可选）";
+"start.prompt_required" = "第一条消息";
+"start.prompt_codex_hint" = "Codex 收到第一条消息后才会出现会话，所以这里需要先写一条。";
+"error.prompt_required" = "请给 Codex 写第一条消息。";
