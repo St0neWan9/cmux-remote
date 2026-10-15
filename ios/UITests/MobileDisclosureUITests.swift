@@ -16,6 +16,8 @@ final class MobileDisclosureUITests: XCTestCase {
         session.tap()
         XCTAssertTrue(app.buttons["chat.back"].waitForExistence(timeout: 5))
         sleep(2)
+        // The newest card, at the bottom of the page.
+        assertCardStaysInPlace(app, scenario: "for the newest card", newest: true)
         // At the latest message, where the page otherwise follows new content.
         assertCardStaysInPlace(app, scenario: "at the latest message")
         // After reading back a little.
@@ -60,14 +62,15 @@ final class MobileDisclosureUITests: XCTestCase {
         XCTAssertTrue(shown.exists && shown.isHittable, "The newest message (\(latest)) is not on screen")
     }
 
-    private func assertCardStaysInPlace(_ app: XCUIApplication, scenario: String, prefix: String = "activity.") {
+    private func assertCardStaysInPlace(_ app: XCUIApplication, scenario: String, prefix: String = "activity.", newest: Bool = false) {
         let height = app.windows.firstMatch.frame.height
         let cards = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", prefix))
         // A card in the middle of the screen, with room above and below it.
         // Clear of the header and of the composer: a covered element is scrolled into view by the test runner
         // before it is tapped, which would be the runner moving the page rather than the app.
         let onScreen = cards.allElementsBoundByIndex.filter { $0.isHittable && $0.frame.minY > height * 0.15 && $0.frame.maxY < height * 0.6 }
-        guard let card = onScreen.min(by: { abs($0.frame.midY - height * 0.45) < abs($1.frame.midY - height * 0.45) }) else {
+        let lowest = cards.allElementsBoundByIndex.filter { $0.isHittable && $0.frame.minY > height * 0.15 }.max { $0.frame.minY < $1.frame.minY }
+        guard let card = newest ? lowest : onScreen.min(by: { abs($0.frame.midY - height * 0.45) < abs($1.frame.midY - height * 0.45) }) else {
             let frames = cards.allElementsBoundByIndex.map { "\($0.identifier)@\(Int($0.frame.minY))" }.joined(separator: ", ")
             return XCTFail("No tool card on screen \(scenario); height \(Int(height)), cards: \(frames)")
         }

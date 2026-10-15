@@ -11,6 +11,8 @@ public final class RemoteClient: Sendable {
     private let capabilities: Set<ClientCapability>
     private let legacy: Bool
     private let trace: @Sendable (String) -> Void
+    /// One Bridge subscription per path, shared by every page and follower watching it.
+    private let hub: PathWatchHub
     public func allows(_ capability: ClientCapability) -> Bool { capabilities.contains(capability) }
     /// Explicit legacy mode; the owner must separately enable it on the Bridge.
     ///
@@ -20,6 +22,7 @@ public final class RemoteClient: Sendable {
         legacy = true; self.trace = trace
         operationRecoveryScope = IdentityCryptography().digest(Data((pairing.certificateSHA256 + ":" + pairing.token).utf8))
         runtime = RemoteClientRuntime(pairing: pairing, connection: nil, trace: trace); canControlConversations = true; canReplyFeed = true; capabilities = Set(ClientCapability.allCases)
+        hub = Self.hub(runtime: runtime, trace: trace)
     }
     public init(connection: AuthorizedConnection, trace: @escaping @Sendable (String) -> Void = { _ in }) throws {
         try connection.validate(); legacy = false; self.trace = trace
@@ -29,6 +32,32 @@ public final class RemoteClient: Sendable {
         capabilities = Set(connection.grant.value.scope.capabilities)
         canControlConversations = connection.grant.value.scope.capabilities.contains(.conversationControl)
         canReplyFeed = connection.grant.value.scope.capabilities.contains(.feedReply)
+        hub = Self.hub(runtime: runtime, trace: trace)
+    }
+    /// Keeps one path subscribed across link loss: each event or failure invalidates its watchers, and a failure
+    /// is retried with backoff unless the device lost its grant.
+    private static func hub(runtime: RemoteClientRuntime, trace: @escaping @Sendable (String) -> Void) -> PathWatchHub {
+        PathWatchHub { path, changed in
+            var attempt = 0
+            while !Task.isCancelled {
+                do {
+                    let subscription = try await runtime.subscribe(path)
+                    for try await _ in subscription { guard !Task.isCancelled else { return }; attempt = 0; await changed() }
+                } catch {
+                    guard !Task.isCancelled else { return }
+                    await changed()
+                    let final = (error as? BridgeError).map { ["unauthorized", "scope_denied", "invalid_identity", "invalid_signature", "host_changed"].contains($0.code) } ?? false
+                    let next = final ? "stopped" : "retry in \(1 << min(attempt + 1, 5))s"
+                    trace("subscription ended \(path) error=\(TraceFormat().describe(error)) \(next)")
+                    if final { return }
+                    // The next subscribe must fetch the restarted Bridge's epoch, not sign with the old one again.
+                    if (error as? BridgeError)?.code == "invalid_proof" { await runtime.discardEpoch() }
+                }
+                attempt = min(attempt + 1, 5)
+                // Reconnection backoff is an intended, cancellable delay.
+                do { try await Task.sleep(for: .seconds(1 << attempt)) } catch { return }
+            }
+        }
     }
     public func get<T: Decodable & Sendable>(_ path: String, query: [String: String] = [:], as type: T.Type) async throws -> T { try await runtime.request(path, method: "GET", query: query, body: nil, as: type) }
     public func post<B: Encodable & Sendable, T: Decodable & Sendable>(_ path: String, body: B, as type: T.Type) async throws -> T { try await runtime.request(path, method: "POST", query: [:], body: JSONEncoder().encode(body), as: type) }
@@ -38,44 +67,19 @@ public final class RemoteClient: Sendable {
     public func changes(paths: [String]) -> AsyncStream<Void> {
         let output = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
         guard !paths.isEmpty, paths.count <= 4, Set(paths).count == paths.count else { output.continuation.finish(); return output.stream }
-        let runtime = runtime, legacy = legacy, trace = trace
+        let legacy = legacy, hub = hub, id = UUID(), continuation = output.continuation
         let task = Task {
             if legacy {
                 while !Task.isCancelled {
-                    output.continuation.yield(())
+                    continuation.yield(())
                     do { try await Task.sleep(for: .seconds(2)) } catch { break }
                 }
-                output.continuation.finish(); return
+                continuation.finish(); return
             }
-            await withTaskGroup(of: Void.self) { group in
-                for path in paths {
-                    group.addTask {
-                        var attempt = 0
-                        while !Task.isCancelled {
-                            do {
-                                let subscription = try await runtime.subscribe(path)
-                                for try await _ in subscription { guard !Task.isCancelled else { return }; attempt = 0; output.continuation.yield(()) }
-                            } catch {
-                                guard !Task.isCancelled else { return }
-                                output.continuation.yield(())
-                                let final = (error as? BridgeError).map { ["unauthorized", "scope_denied", "invalid_identity", "invalid_signature", "host_changed"].contains($0.code) } ?? false
-                                let next = final ? "stopped" : "retry in \(1 << min(attempt + 1, 5))s"
-                                trace("subscription ended \(path) error=\(TraceFormat().describe(error)) \(next)")
-                                if final { return }
-                                // The next subscribe must fetch the restarted Bridge's epoch, not sign with the old one again.
-                                if (error as? BridgeError)?.code == "invalid_proof" { await runtime.discardEpoch() }
-                            }
-                            attempt = min(attempt + 1, 5)
-                            // Reconnection backoff is an intended, cancellable delay.
-                            do { try await Task.sleep(for: .seconds(1 << attempt)) } catch { return }
-                        }
-                    }
-                }
-                await group.waitForAll()
-            }
-            output.continuation.finish()
+            await hub.add(id, paths: Set(paths), changed: { continuation.yield(()) }, finished: { continuation.finish() })
         }
-        output.continuation.onTermination = { _ in task.cancel() }
+        // Removal waits for the registration, so a stream dropped at once still releases its subscriptions.
+        output.continuation.onTermination = { _ in task.cancel(); Task { await task.value; await hub.remove(id) } }
         return output.stream
     }
     /// Refreshes host-certified cloud reachability without expanding the saved grant.

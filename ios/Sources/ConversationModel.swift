@@ -62,6 +62,8 @@ final class ConversationModel {
     private var readsEnabled = true
     /// Whether the conversation is on screen and following its own changes.
     private var observing = false
+    /// The off-screen follower, replaced by the conversation's own observer while it is on screen.
+    private var follower: Task<Void, Never>?
     private(set) var loadingOlder = false
     var busy = false
     var hasMore = false
@@ -135,20 +137,30 @@ final class ConversationModel {
     }
     /// Suspending reads leaves durable mutations and their captured drafts intact.
     func observeChanges() async {
-        observing = true; defer { observing = false }
+        // On screen the conversation follows its own changes; an off-screen follower would subscribe to them again.
+        observing = true; unfollow(); defer { observing = false }
         let paths = ["/v1/sessions/\(session.id)/history", "/v1/sessions/\(session.id)/preview", "/v1/sessions"]
         for await _ in client.changes(paths: paths) {
             guard !Task.isCancelled, readsEnabled else { return }; await refresh()
         }
     }
-    /// Follows a conversation that is running off screen, so switching to it shows its latest messages.
+    /// Whether an off-screen follower is running for this conversation.
+    var following: Bool { follower != nil }
+    /// Follows this conversation while it runs off screen, so switching to it shows its latest messages.
+    /// Nothing starts while it is on screen, where its own observer already follows it.
+    func follow(every interval: Duration) {
+        guard follower == nil, !observing else { return }
+        follower = Task { [weak self] in await self?.followHidden(every: interval) }
+    }
+    func unfollow() { follower?.cancel(); follower = nil }
+    /// Reads once, then again only after the Bridge reports a change, and at most once per interval: a running turn
+    /// changes every few seconds, and waiting lets those changes coalesce into one read.
     ///
-    /// It reads once, then again only after the Bridge reports a change, and at most once per interval: a running
-    /// turn changes every few seconds, and waiting lets those changes coalesce into one read.
-    func followHidden(every interval: Duration) async {
+    /// Only the history is watched. A Bridge link carries at most eight subscriptions, and the conversation on
+    /// screen, the session list and the feed already use some; the live tail is read with the history anyway.
+    private func followHidden(every interval: Duration) async {
         await syncHidden()
-        let paths = ["/v1/sessions/\(session.id)/history", "/v1/sessions/\(session.id)/preview"]
-        for await _ in client.changes(paths: paths) {
+        for await _ in client.changes(paths: ["/v1/sessions/\(session.id)/history"]) {
             guard !Task.isCancelled else { return }
             try? await Task.sleep(for: interval)
             guard !Task.isCancelled else { return }
