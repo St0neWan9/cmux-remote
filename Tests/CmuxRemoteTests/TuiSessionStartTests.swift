@@ -56,7 +56,7 @@ private actor RecordingDesktop: CmuxControlling {
         let run = try #require(await source.effects.first { $0.0 == "workspace.run" })
         #expect(run.1["workspace"]?.string == TuiResourceFixture.workspace && run.1["machine"]?.string == TuiResourceFixture.machine)
         #expect(run.1["cwd"]?.string == folder.appendingPathComponent("src").path)
-        #expect(run.1["shell"]?.string == "codex; exec \"${SHELL:-/bin/zsh}\" -l")
+        #expect(run.1["shell"]?.string == "exec \"${SHELL:-/bin/zsh}\" -ic 'codex; exec \"${SHELL:-/bin/zsh}\" -l'")
         #expect(run.1["argv"] == nil && run.1["name"]?.string == "codex")
         // The daemon's own idempotency key comes from the operation, so a resent write is deduplicated there too.
         #expect(run.2 != nil && run.1["correlation_key"]?.string == run.2)

@@ -107,8 +107,9 @@ public actor TuiControlAdapter: CmuxControlling {
             guard let workspace = current.rawWorkspaces[workspaceID] else { throw stale() }
             var request = current.selectors()
             request["workspace"] = .string(workspace); request["cwd"] = .string(cwd); request["name"] = .string(agent.rawValue)
-            // The shell stays open after the agent exits, as a desktop terminal does.
-            request["shell"] = .string(agent.command + "; exec \"${SHELL:-/bin/zsh}\" -l")
+            // The daemon runs `<shell> -lc`, which skips interactive startup files where agents are often put on PATH;
+            // an interactive shell finds them as a typed command would, and stays open after the agent exits.
+            request["shell"] = .string("exec \"${SHELL:-/bin/zsh}\" -ic '" + agent.command + "; exec \"${SHELL:-/bin/zsh}\" -l'")
             request["correlation_key"] = .string(key)
             let created = try await client.resource("workspace.run", params: request, idempotencyKey: key)
             guard let terminal = created["value"]["terminal_id"].string, (try? TuiResourceIdentity().validate(terminal, prefix: "term")) != nil else {
