@@ -58,7 +58,7 @@ struct MessageRow: View {
         // Reasoning between operations is part of the reply: shown in full, without a title or disclosure.
         case .thought(let value): MarkdownMessageView(text: value.text)
         case .toolUse(let value):
-            ToolDisclosure(title: value.summary, symbol: value.toolName.lowercased().contains("read") ? "book" : "magnifyingglass", identifier: "tool.disclosure." + message.id) {
+            ToolDisclosure(title: value.summary, symbol: value.toolName.lowercased().contains("read") ? "book" : "magnifyingglass", identifier: "tool.disclosure." + message.id, messageID: message.id) {
                 ToolDetailCard(title: value.toolName, status: value.status == .succeeded ? String(localized: "tool.card.success") : value.status.localizedTitle, failed: value.status == .failed, completedAt: value.completedAt) {
                     VStack(alignment: .leading, spacing: 12) {
                         if let input = value.inputDetail, !input.isEmpty { ToolCodeBlock(text: input) }
@@ -71,7 +71,7 @@ struct MessageRow: View {
         case .terminal(let value):
             // The agent describes every command in one line; the terminal shows that description above
             // the shell line, so the card leads with it and keeps the command as the detail.
-            ToolDisclosure(title: value.summary ?? value.command, symbol: "terminal", identifier: "tool.disclosure." + message.id) {
+            ToolDisclosure(title: value.summary ?? value.command, symbol: "terminal", identifier: "tool.disclosure." + message.id, messageID: message.id) {
                 ToolDetailCard(title: String(localized: "tool.card.shell"),
                                status: value.exitCode.map { $0 == 0 ? String(localized: "tool.card.success") : String.localizedStringWithFormat(String(localized: "chat.exit_code"), $0) } ?? String(localized: "chat.tool.running"),
                                failed: value.exitCode.map { $0 != 0 } ?? false, completedAt: value.completedAt) {
@@ -84,7 +84,7 @@ struct MessageRow: View {
                 }
             }
         case .fileEdit(let value):
-            ToolDisclosure(title: value.filePath, symbol: "doc.text", identifier: "tool.disclosure." + message.id) {
+            ToolDisclosure(title: value.filePath, symbol: "doc.text", identifier: "tool.disclosure." + message.id, messageID: message.id) {
                 ToolDetailCard(title: String(localized: "project.diff")) {
                     VStack(alignment: .leading, spacing: 12) {
                         if let diff = value.unifiedDiff, !diff.isEmpty { ToolCodeBlock(text: diff) }
