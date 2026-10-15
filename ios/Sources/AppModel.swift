@@ -407,6 +407,8 @@ final class AppModel {
         syncRunning()
     }
     func link(for hostID: String) -> HostLink? { links.first { $0.id == hostID } }
+    /// The workspaces one Mac shares, from its last successful read.
+    func workspaces(of hostID: String) -> [WorkspaceSummary] { perHost[hostID]?.workspaces ?? [] }
     /// Own in-flight and unresolved sends across pushed-view navigation.
     func conversation(session: SessionDescriptor, client: RemoteClient) -> ConversationModel {
         let key = client.operationRecoveryScope + ":" + session.id
