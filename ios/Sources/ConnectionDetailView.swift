@@ -14,7 +14,7 @@ struct ConnectionDetailView: View {
     @State private var error: String?
     @State private var loading = false
     var body: some View {
-        WhitePage(title: String(localized: "connection.title")) {
+        WhitePage(title: String(localized: "connection.title"), dismissal: .close) {
             ScrollView {
                 VStack(alignment: .leading, spacing: MobileDesign.sectionGap) {
                     Label(host, systemImage: "laptopcomputer").font(.title3.weight(.semibold)).fixedSize(horizontal: false, vertical: true)
