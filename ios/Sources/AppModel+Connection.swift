@@ -53,6 +53,8 @@ extension AppModel {
                 group.addTask { [weak self] in
                     for await state in client.linkStates() {
                         guard let self else { return }
+                        diagLog(state == .disconnected ? .warning : .info, category: "link",
+                                "state=\(state) host=\(id.prefix(8))")
                         await MainActor.run { self.linkStates[id] = state }
                     }
                 }
