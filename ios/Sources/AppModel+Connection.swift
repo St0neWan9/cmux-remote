@@ -25,7 +25,10 @@ extension AppModel {
     /// Returning from a long background redials every Mac, since its links are likely half-open. Automatic retries,
     /// the bar's Retry and a pull touch only Macs already known to be down: redialing a working link drops its live updates.
     func reconnect(onlyLost: Bool = false) async {
-        let targets = onlyLost ? links.filter { linkStates[$0.id] != .connected } : links
+        await redial(onlyLost ? links.filter { linkStates[$0.id] != .connected } : links)
+    }
+
+    private func redial(_ targets: [HostLink]) async {
         guard !targets.isEmpty else { return }
         // The bar turns at once, before a slow relay dial has reported anything.
         for link in targets where linkStates[link.id] != .connected { linkStates[link.id] = .connecting }
@@ -49,14 +52,21 @@ extension AppModel {
             await reconnect()
         }
         let observed = links.map { ($0.id, $0.client) }
+        let schedule = ReconnectSchedule()
         await withTaskGroup(of: Void.self) { group in
             for (id, client) in observed {
                 group.addTask { [weak self] in
+                    // The client's own previous report, not `linkStates`: a failed list read may mark it down first.
+                    var previous: LinkState?
                     for await state in client.linkStates() {
                         guard let self else { return }
                         diagLog(state == .disconnected ? .warning : .info, category: "link",
                                 "state=\(state) host=\(id.prefix(8))")
-                        await MainActor.run { self.linkStates[id] = state }
+                        await MainActor.run {
+                            self.linkStates[id] = state
+                            schedule.observe(host: id, from: previous, to: state)
+                        }
+                        previous = state
                     }
                 }
             }
@@ -69,20 +79,29 @@ extension AppModel {
                 }
             }
             group.addTask { [weak self] in
-                // A Mac that stays unreachable is tried again with growing pauses, so the bar never sits still.
-                var attempt = 0
+                // A working link that drops is dialed again at once; a Mac that stays unreachable is tried again
+                // with growing pauses, so the bar never sits still. Automatic retries start only here, so they never overlap.
                 while !Task.isCancelled {
-                    let pause = [3, 5, 10, 20, 30][min(attempt, 4)]
-                    do { try await Task.sleep(for: .seconds(pause)) } catch { return }
-                    guard let self else { return }
-                    if await self.connectionState == .disconnected {
-                        attempt += 1
-                        diagLog(.info, category: "link", "auto retry #\(attempt) after waiting \(pause)s")
-                        await self.reconnect(onlyLost: true)
-                    } else { attempt = 0 }
+                    let full = await schedule.wait()
+                    guard !Task.isCancelled, let self else { return }
+                    await self.retry(schedule, waited: full)
                 }
             }
             await group.waitForAll()
+        }
+    }
+
+    private func retry(_ schedule: ReconnectSchedule, waited full: Bool) async {
+        var states: [String: LinkState] = [:]
+        for link in links { if let state = linkStates[link.id] { states[link.id] = state } }
+        switch schedule.step(states: states, waited: full) {
+        case .idle: return
+        case .redialDropped(let hosts):
+            diagLog(.info, category: "link", "auto retry #1 at once: link dropped host=\(hosts.map { String($0.prefix(8)) }.joined(separator: ","))")
+            await redial(links.filter { hosts.contains($0.id) })
+        case .retryLost(let attempt, let waited):
+            diagLog(.info, category: "link", "auto retry #\(attempt) after waiting \(waited.components.seconds)s")
+            await reconnect(onlyLost: true)
         }
     }
 }
