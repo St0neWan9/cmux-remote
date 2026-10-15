@@ -60,6 +60,8 @@ final class ConversationModel {
     private let refreshReads = ReadRequestOwner()
     private let olderReads = ReadRequestOwner()
     private var readsEnabled = true
+    /// Whether the conversation is on screen and following its own changes.
+    private var observing = false
     private(set) var loadingOlder = false
     var busy = false
     var hasMore = false
@@ -133,10 +135,30 @@ final class ConversationModel {
     }
     /// Suspending reads leaves durable mutations and their captured drafts intact.
     func observeChanges() async {
+        observing = true; defer { observing = false }
         let paths = ["/v1/sessions/\(session.id)/history", "/v1/sessions/\(session.id)/preview", "/v1/sessions"]
         for await _ in client.changes(paths: paths) {
             guard !Task.isCancelled, readsEnabled else { return }; await refresh()
         }
+    }
+    /// Follows a conversation that is running off screen, so switching to it shows its latest messages.
+    ///
+    /// It reads once, then again only after the Bridge reports a change, and at most once per interval: a running
+    /// turn changes every few seconds, and waiting lets those changes coalesce into one read.
+    func followHidden(every interval: Duration) async {
+        await syncHidden()
+        let paths = ["/v1/sessions/\(session.id)/history", "/v1/sessions/\(session.id)/preview"]
+        for await _ in client.changes(paths: paths) {
+            guard !Task.isCancelled else { return }
+            try? await Task.sleep(for: interval)
+            guard !Task.isCancelled else { return }
+            await syncHidden()
+        }
+    }
+    /// One read for a conversation not on screen; one that is on screen is kept current by its own observer.
+    func syncHidden() async {
+        guard !observing, !busy, !Task.isCancelled else { return }
+        await refreshReads.run { [self] request in await readLatest(request) }
     }
     func suspendReads() { readsEnabled = false; refreshReads.suspend(); olderReads.suspend(); loadingOlder = false }
     func resumeReads() { readsEnabled = true }

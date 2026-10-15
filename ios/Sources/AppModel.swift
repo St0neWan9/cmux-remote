@@ -55,6 +55,8 @@ final class AppModel {
     private let directory: @Sendable (String) async throws -> [SignedValue<EnrollmentBootstrap>]
     private var enrollmentTask: Task<Void, Never>?
     @ObservationIgnored private var conversationModels: [String: ConversationModel] = [:]
+    @ObservationIgnored private let runningSync = RunningSessionSync()
+    @ObservationIgnored private var followingSessions = false
     private var restored = false
     private var enrollmentActive = true
     private var enrollmentGeneration = UUID()
@@ -279,14 +281,7 @@ final class AppModel {
             guard links.contains(where: { $0.id == link.id && $0.client === link.client }), let result = results[link.id] else { continue }
             switch result {
             case .success(let (sessions, workspaces)):
-                // Most recent activity first; Bridges without activity times fall back to live-then-title order.
-                let ordered = sessions.sorted {
-                    let lhs = $0.updatedAt ?? .distantPast, rhs = $1.updatedAt ?? .distantPast
-                    if lhs != rhs { return lhs > rhs }
-                    if $0.writable != $1.writable { return $0.writable }
-                    return $0.title.localizedStandardCompare($1.title) == .orderedAscending
-                }
-                perHost[link.id] = (ordered, workspaces ?? perHost[link.id]?.workspaces ?? []); hostErrors[link.id] = nil
+                perHost[link.id] = (ordered(sessions), workspaces ?? perHost[link.id]?.workspaces ?? []); hostErrors[link.id] = nil
                 // A read that just succeeded proves the link, including for a transport that reports no states.
                 if linkStates[link.id] != nil { linkStates[link.id] = .connected }
             case .failure(let failure):
@@ -301,6 +296,74 @@ final class AppModel {
             try? store.saveConnection(updated); links[index].connection = updated; learnRelay(updated)
         }
     }
+    /// Most recent activity first; Bridges without activity times fall back to live-then-title order.
+    private func ordered(_ sessions: [SessionDescriptor]) -> [SessionDescriptor] {
+        sessions.sorted {
+            let lhs = $0.updatedAt ?? .distantPast, rhs = $1.updatedAt ?? .distantPast
+            if lhs != rhs { return lhs > rhs }
+            if $0.writable != $1.writable { return $0.writable }
+            return $0.title.localizedStandardCompare($1.title) == .orderedAscending
+        }
+    }
+    /// Runs while the app is in the foreground: follows each Mac's session list, so running states stay current,
+    /// and keeps conversations running off screen up to date. A list change is read at most once per interval.
+    func followSessions(every interval: Duration = .seconds(8)) async {
+        followingSessions = true; syncRunning()
+        defer { followingSessions = false; runningSync.stop() }
+        let followed = links.filter { $0.client.allows(.conversationRead) }.map { ($0.id, $0.client) }
+        await withTaskGroup(of: Void.self) { group in
+            for (id, client) in followed {
+                group.addTask { [weak self] in
+                    for await _ in client.changes(paths: ["/v1/sessions"]) {
+                        guard !Task.isCancelled else { return }
+                        try? await Task.sleep(for: interval)
+                        guard !Task.isCancelled else { return }
+                        await self?.refreshSessions(hostID: id, client: client)
+                    }
+                }
+            }
+        }
+    }
+    /// A background wake: dials each Mac, reads the lists, then the conversations that are running or changed
+    /// since this phone stored them, so switching to one later shows what it said meanwhile.
+    func syncInBackground() async {
+        restorePairing()
+        guard BackgroundSync.enabled, !links.isEmpty else { return }
+        let started = Date()
+        let clients = links.map(\.client)
+        await withTaskGroup(of: Void.self) { group in for client in clients { group.addTask { await client.reconnect() } } }
+        guard !Task.isCancelled else { return }
+        await refresh()
+        var targets: [RunningSessionSync.Target] = []
+        let recent = hostedSessions.sorted { ($0.session.updatedAt ?? .distantPast) > ($1.session.updatedAt ?? .distantPast) }.prefix(12)
+        for hosted in recent {
+            guard let client = link(for: hosted.hostID)?.client else { continue }
+            let session = hosted.session, scope = client.operationRecoveryScope
+            let stored = await conversations.storedAt(scope: scope, sessionID: session.id)
+            var target = RunningSessionSync.Target(key: scope + ":" + session.id, running: session.state.hasPrefix("working"),
+                                                   model: { [unowned self] in conversation(session: session, client: client) })
+            if let updated = session.updatedAt { target.changedSinceStored = updated > (stored ?? .distantPast) }
+            targets.append(target)
+        }
+        let read = await runningSync.pass(targets)
+        diagLog(.info, category: "sync", "background pass read \(read) conversations in \(Int(Date().timeIntervalSince(started) * 1000))ms")
+    }
+    /// Reads one Mac's sessions only; workspaces and relay hints wait for a full refresh.
+    private func refreshSessions(hostID: String, client: RemoteClient) async {
+        guard let sessions = try? await fetchSessions(client),
+              links.contains(where: { $0.id == hostID && $0.client === client }) else { return }
+        perHost[hostID] = (ordered(sessions), perHost[hostID]?.workspaces ?? []); hostErrors[hostID] = nil
+        publish()
+    }
+    private func syncRunning() {
+        guard followingSessions else { return }
+        runningSync.update(hostedSessions.compactMap { hosted in
+            guard let client = link(for: hosted.hostID)?.client else { return nil }
+            let session = hosted.session
+            return RunningSessionSync.Target(key: client.operationRecoveryScope + ":" + session.id, running: session.state.hasPrefix("working"),
+                                             model: { [unowned self] in conversation(session: session, client: client) })
+        })
+    }
     /// Rebuilds the combined lists in Mac order from each Mac's last successful read.
     private func publish() {
         let current = links.filter { perHost[$0.id] != nil }
@@ -308,6 +371,7 @@ final class AppModel {
         workspaces = current.flatMap { perHost[$0.id]!.workspaces }
         workspaceHosts = Dictionary(current.flatMap { link in perHost[link.id]!.workspaces.map { ($0.id, link.name) } }, uniquingKeysWith: { first, _ in first })
         error = links.compactMap { link in hostErrors[link.id].map { links.count > 1 ? link.name + "：" + $0 : $0 } }.first
+        syncRunning()
     }
     func link(for hostID: String) -> HostLink? { links.first { $0.id == hostID } }
     /// Own in-flight and unresolved sends across pushed-view navigation.

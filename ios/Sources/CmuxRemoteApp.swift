@@ -20,13 +20,22 @@ struct CmuxRemoteApp: App {
             }.environment(\.colorScheme, .light).tint(MobileDesign.accent).task(id: phase) {
                 model.restorePairing()
                 if phase == .active { model.resumeEnrollment(); await model.discover() }
-                else { model.pauseEnrollment(); if phase == .background { model.backgroundedAt = Date() } }
+                else { model.pauseEnrollment(); if phase == .background { model.backgroundedAt = Date(); BackgroundSync.schedule() } }
             }
             // Restarted when a Mac is added or removed, so every link is followed.
             .task(id: ConnectionSupervision(active: phase == .active, hosts: model.links.map(\.id))) {
                 guard phase == .active, !model.links.isEmpty else { return }
                 await model.superviseConnections()
             }
+            .task(id: ConnectionSupervision(active: phase == .active, hosts: model.links.map(\.id))) {
+                guard phase == .active, !model.links.isEmpty else { return }
+                await model.followSessions()
+            }
+        }
+        // Woken by iOS while in the background; the next wake is asked for before this one reads anything.
+        .backgroundTask(.appRefresh(BackgroundSync.identifier)) { [model] in
+            await MainActor.run { BackgroundSync.schedule() }
+            await model.syncInBackground()
         }
     }
 }
