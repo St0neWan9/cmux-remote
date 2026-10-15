@@ -300,3 +300,11 @@
 "start.prompt_required" = "First message";
 "start.prompt_codex_hint" = "Codex shows a conversation only after its first message, so this starts it.";
 "error.prompt_required" = "Enter a first message for Codex.";
+"sessions.refresh" = "Refresh";
+"sessions.manage" = "Manage";
+"sessions.workspace_filter" = "Workspace";
+"sessions.pending_count" = "%lld waiting for you";
+"sessions.all_hosts" = "All";
+"sessions.close_search" = "Close search";
+"sessions.title_menu" = "Conversation options";
+"feed.title_count" = "Waiting for you (%lld)";
