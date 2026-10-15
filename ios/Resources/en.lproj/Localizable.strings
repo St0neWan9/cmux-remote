@@ -289,3 +289,10 @@
 "capability.conversationStart" = "Start conversations";
 "error.launch_unsupported" = "New conversations can only be started in desktop cmux workspaces, on a Mac with the current CmuxRemote.";
 "error.directory" = "This folder cannot be used.";
+
+"diagnostics.title" = "Diagnostics";
+"diagnostics.copy" = "Copy All";
+"diagnostics.copied" = "Copied";
+"diagnostics.clear" = "Clear";
+"sync.background" = "Background sync";
+"sync.background_note" = "While the app is in the background, iOS wakes it from time to time to read conversations that are running or have changed (up to 3 each time), so they are current when you return. iOS decides when, usually a few times an hour. Applies to every Mac.";

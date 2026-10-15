@@ -55,9 +55,13 @@ final class ConversationModel {
     private let readSessions: @Sendable () async throws -> [SessionDescriptor]
     private let readHistory: @Sendable (Int?) async throws -> ConversationSnapshot
     private let readPreview: @Sendable () async throws -> PreviewSnapshot
+    /// The last read of this conversation, shown on open while the fresh one is on its way.
+    private let cache: ConversationCache?
     private let refreshReads = ReadRequestOwner()
     private let olderReads = ReadRequestOwner()
     private var readsEnabled = true
+    /// Whether the conversation is on screen and following its own changes.
+    private var observing = false
     private(set) var loadingOlder = false
     var busy = false
     var hasMore = false
@@ -72,7 +76,8 @@ final class ConversationModel {
          getOperation: (@Sendable (UUID) async throws -> OperationStatus)? = nil,
          readSessions: (@Sendable () async throws -> [SessionDescriptor])? = nil,
          readHistory: (@Sendable (Int?) async throws -> ConversationSnapshot)? = nil,
-         readPreview: (@Sendable () async throws -> PreviewSnapshot)? = nil) {
+         readPreview: (@Sendable () async throws -> PreviewSnapshot)? = nil,
+         cache: ConversationCache? = nil) {
         self.session = session; self.client = client; speech = SpeechDraftModel(input: speechInput ?? UnavailableSpeechInput())
         let id = session.id
         let recovery = PendingSendStore(); let scope = client.operationRecoveryScope
@@ -83,6 +88,42 @@ final class ConversationModel {
         self.readSessions = readSessions ?? { try await client.get("/v1/sessions", as: [SessionDescriptor].self) }
         self.readHistory = readHistory ?? { before in try await client.get("/v1/sessions/\(id)/history", query: before.map { ["before_seq": String($0)] } ?? [:], as: ConversationSnapshot.self) }
         self.readPreview = readPreview ?? { try await client.get("/v1/sessions/\(id)/preview", as: PreviewSnapshot.self) }
+        self.cache = cache
+    }
+    /// Shows what was read last, so opening a conversation never starts blank.
+    ///
+    /// This displays stored content rather than deciding anything: the refresh that follows replaces it
+    /// whether or not the conversation changed, and a stored generation the Bridge has replaced is ignored.
+    func restoreStored() async {
+        guard messages.isEmpty, generation == nil, let cache else { return }
+        guard let entry = await cache.load(scope: client.operationRecoveryScope, sessionID: session.id) else { return }
+        // The read may have landed while the stored copy was being read; the fresh one wins.
+        guard readsEnabled, messages.isEmpty, generation == nil else { return }
+        generation = entry.snapshot.generation; hasMore = entry.snapshot.hasMore
+        applyStored(entry.snapshot, live: entry.preview)
+    }
+    /// Displays a stored copy as it was written; merging belongs to reads that arrive from the link.
+    private func applyStored(_ history: ConversationSnapshot, live: PreviewSnapshot?) {
+        clipped = history.clipped
+        messages = history.messages
+        images = history.images ?? []
+        responses = history.responses ?? []
+        backgroundTasks = history.backgroundTasks ?? []
+        recordedRunSeconds = history.recordedRunSeconds; recordedTurnCount = history.recordedTurnCount ?? 0
+        currentTurnStartedAt = history.currentTurnStartedAt; currentTurnCompleted = history.currentTurnCompleted ?? false
+        timelineItems = ConversationTimeline().items(from: messages)
+        let committed = messages.reversed().compactMap { message -> String? in
+            if message.role == .agent, case .prose(let value) = message.kind { return value.text }; return nil
+        }.first
+        preview = live?.text == committed ? nil : live?.text; compacting = live?.compacting ?? false
+        if stopRequested, messages.last(where: { $0.role == .user })?.id != interruptedUserID { stopRequested = false }
+    }
+    /// Stores the read that just landed, so the next open of this conversation is immediate.
+    private func store(_ history: ConversationSnapshot, live: PreviewSnapshot?) {
+        guard let cache else { return }
+        let entry = ConversationCache.Entry(snapshot: history, preview: live, storedAt: Date())
+        let scope = client.operationRecoveryScope, id = session.id
+        Task { await cache.save(entry, scope: scope, sessionID: id) }
     }
     func updateSession(_ current: SessionDescriptor) {
         if current.state != session.state { stopRequested = false }
@@ -94,10 +135,30 @@ final class ConversationModel {
     }
     /// Suspending reads leaves durable mutations and their captured drafts intact.
     func observeChanges() async {
+        observing = true; defer { observing = false }
         let paths = ["/v1/sessions/\(session.id)/history", "/v1/sessions/\(session.id)/preview", "/v1/sessions"]
         for await _ in client.changes(paths: paths) {
             guard !Task.isCancelled, readsEnabled else { return }; await refresh()
         }
+    }
+    /// Follows a conversation that is running off screen, so switching to it shows its latest messages.
+    ///
+    /// It reads once, then again only after the Bridge reports a change, and at most once per interval: a running
+    /// turn changes every few seconds, and waiting lets those changes coalesce into one read.
+    func followHidden(every interval: Duration) async {
+        await syncHidden()
+        let paths = ["/v1/sessions/\(session.id)/history", "/v1/sessions/\(session.id)/preview"]
+        for await _ in client.changes(paths: paths) {
+            guard !Task.isCancelled else { return }
+            try? await Task.sleep(for: interval)
+            guard !Task.isCancelled else { return }
+            await syncHidden()
+        }
+    }
+    /// One read for a conversation not on screen; one that is on screen is kept current by its own observer.
+    func syncHidden() async {
+        guard !observing, !busy, !Task.isCancelled else { return }
+        await refreshReads.run { [self] request in await readLatest(request) }
     }
     func suspendReads() { readsEnabled = false; refreshReads.suspend(); olderReads.suspend(); loadingOlder = false }
     func resumeReads() { readsEnabled = true }
@@ -118,11 +179,15 @@ final class ConversationModel {
             let live = try? await readPreview()
             guard refreshReads.isCurrent(request) else { return }
             updateSession(current)
-            if generation == history.generation {
+            // A page read from a replaced transcript is not merged into the one on screen; it replaces it.
+            let continues = generation == history.generation
+            if continues, !messages.isEmpty {
                 var next = messages
+                var positions = [String: Int](minimumCapacity: next.count)
+                for (index, message) in next.enumerated() { positions[message.id] = index }
                 for message in history.messages {
-                    if let index = next.firstIndex(where: { $0.id == message.id }) { next[index] = message }
-                    else { next.append(message) }
+                    if let index = positions[message.id] { next[index] = message }
+                    else { positions[message.id] = next.count; next.append(message) }
                 }
                 messages = next.sorted { $0.seq < $1.seq }
             } else { olderReads.suspend(); loadingOlder = false; messages = history.messages; responses = []; generation = history.generation; hasMore = history.hasMore }
@@ -130,7 +195,7 @@ final class ConversationModel {
             let updatedIDs = Set(history.messages.map(\.id))
             images = images.filter { $0.generation == history.generation && !updatedIDs.contains($0.messageID) } + (history.images ?? [])
             if stopRequested, messages.last(where: { $0.role == .user })?.id != interruptedUserID { stopRequested = false }
-            if generation == history.generation {
+            if continues {
                 let incoming = history.responses ?? []
                 let anchors = Set(incoming.map(\.firstMessageID))
                 responses = responses.filter { !anchors.contains($0.firstMessageID) } + incoming
@@ -145,6 +210,7 @@ final class ConversationModel {
                 if message.role == .agent, case .prose(let value) = message.kind { return value.text }; return nil
             }.first
             preview = live?.text == committed ? nil : live?.text; compacting = live?.compacting ?? false; error = mutationWarning
+            store(history, live: live)
         } catch {
             // A lost link is shown and retried by the connection bar; the page keeps only errors about the conversation.
             guard refreshReads.isCurrent(request) else { return }
