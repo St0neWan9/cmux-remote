@@ -52,7 +52,13 @@ struct ErrorPresentation {
         case "invalid_image": return String(localized: "error.image")
         case "image_load_failed": return String(localized: "error.image_load")
         case "request_expired": return String(localized: "error.expired")
-        default: return String(localized: "error.connection")
+        default:
+            // Keep the code visible in the banner until all unhandled codes are confirmed handled.
+            if let code {
+                diagLog(.warning, category: "error", "unhandled error code=\(code)")
+                return "[" + code + "] " + String(localized: "error.connection")
+            }
+            return String(localized: "error.connection")
         }
     }
 }

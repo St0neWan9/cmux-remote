@@ -36,6 +36,9 @@ struct ConnectionDetailView: View {
                     }.modifier(FloatingSurface())
                     VStack(spacing: MobileDesign.rowGap) {
                         Button(String(localized: "chat.refresh")) { Task { await refresh() } }.disabled(loading)
+                        NavigationLink(destination: DiagnosticLogView()) {
+                            Text("诊断日志").frame(maxWidth: .infinity)
+                        }.buttonStyle(FloatingButtonStyle(fullWidth: true))
                         Button(String(localized: "connection.remove"), role: .destructive, action: disconnect)
                         Text(String(localized: "connection.remove_hint")).font(.footnote).foregroundStyle(.secondary)
                     }.buttonStyle(FloatingButtonStyle(fullWidth: true))
