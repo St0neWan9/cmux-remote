@@ -14,6 +14,9 @@ public actor SessionService {
     private let reader = TranscriptReader()
     private var records: [String: Record] = [:]
     private var transcriptTails: [String: (size: Int, cwd: String?, lastMessage: Date?, title: String?)] = [:]
+    /// Least recently used, so a burst of newly seen transcripts leaves the conversations still open in place.
+    private var tailOrder: [String: Int] = [:]
+    private var tailSequence = 0
     private let mutations: MutationLedger
     private var journal: MutationJournal?
     private var liveBindings: [String: JSONValue] = [:]
@@ -50,12 +53,18 @@ public actor SessionService {
         guard let attributes = try? FileManager.default.attributesOfItem(atPath: path),
               let size = (attributes[.size] as? NSNumber)?.intValue else { return nil }
         let modified = attributes[.modificationDate] as? Date
-        if let cached = transcriptTails[path], cached.size == size { return (cached.cwd, cached.lastMessage ?? modified, cached.title) }
+        if let cached = transcriptTails[path], cached.size == size {
+            tailSequence += 1; tailOrder[path] = tailSequence
+            return (cached.cwd, cached.lastMessage ?? modified, cached.title)
+        }
         let cwd = size > 0 ? TranscriptWorkingDirectory().read(path: path, size: size) : nil
         let lastMessage = size > 0 ? TranscriptActivity().lastMessage(path: path, size: size) : nil
         // A record rewritten as the conversation develops, so a longer transcript may carry a newer name.
         let title = transcriptTails[path]?.title ?? TranscriptTitle().readTitle(path: path)
-        if transcriptTails.count >= 512 { transcriptTails.removeAll() }
+        if transcriptTails[path] == nil, transcriptTails.count >= 512, let oldest = tailOrder.min(by: { $0.value < $1.value })?.key {
+            transcriptTails[oldest] = nil; tailOrder[oldest] = nil
+        }
+        tailSequence += 1; tailOrder[path] = tailSequence
         transcriptTails[path] = (size, cwd, lastMessage, title); return (cwd, lastMessage ?? modified, title)
     }
     /// The name the person gave each tab, which a cmux rename changes immediately; the vault keeps the agent's own title.
@@ -160,8 +169,26 @@ public actor SessionService {
         liveBindings.removeAll(); records.removeAll(); eventSequence = nil; eventBoot = nil
     }
 
-    public func history(id: String, beforeSeq: Int?, limit: Int, access: SessionAccess? = nil) async throws -> ConversationSnapshot {
-        let record = try await authorizedRecord(id, capability: .conversationRead, access: access)
+    /// A cheap identity of what one subscribed resource would answer, or nil when it cannot be proven.
+    ///
+    /// Answers from the records the last discovery and hook events left behind plus the transcript's own
+    /// metadata: no daemon round trip, no file read. Only a transcript-backed history has such a signal.
+    /// The session list is assembled from three daemon reads and a preview is the daemon's screen text,
+    /// so both answer nil and are rebuilt on every tick, as before.
+    func subscriptionStamp(_ resource: LinkSubscriptionResource) async -> (stamp: String, workspace: String)? {
+        guard case .sessionHistory(let id) = resource, let record = records[id], let path = record.transcript,
+              let workspace = record.descriptor.workspaceID else { return nil }
+        let descriptor = record.descriptor
+        guard let transcript = await reader.stamp(path: path),
+              // Suspension may let a discovery or hook event move the binding; that is a change too.
+              records[id]?.descriptor == descriptor else { return nil }
+        // The binding decides the history's background tasks and its scope, so it is part of the identity.
+        return ("\(transcript):\(workspace):\(descriptor.surfaceID ?? ""):\(descriptor.writable)", workspace)
+    }
+
+    /// - Parameter discovered: The caller resolved this id against a fresh discovery for the same request.
+    public func history(id: String, beforeSeq: Int?, limit: Int, discovered: Bool = false, access: SessionAccess? = nil) async throws -> ConversationSnapshot {
+        let record = try await authorizedRecord(id, capability: .conversationRead, discovered: discovered, access: access)
         guard let path = record.transcript else { throw BridgeError("history_unavailable", "No readable conversation record is available.", status: 404) }
         let reader = reader; let agent = record.descriptor.agent
         // A detached task dies with the agent process that started it, so a session no longer bound to a
@@ -214,9 +241,11 @@ public actor SessionService {
         return result
     }
 
-    public func preview(id: String, access: SessionAccess? = nil) async throws -> PreviewSnapshot {
-        _ = try await sessions()
-        let record = try await authorizedRecord(id, capability: .conversationRead, access: access)
+    /// - Parameter discovered: The caller already authorized against a fresh discovery for this request.
+    ///   Running it again here doubled the daemon round trips of every preview read to no effect.
+    public func preview(id: String, discovered: Bool = false, access: SessionAccess? = nil) async throws -> PreviewSnapshot {
+        if !discovered { _ = try await sessions() }
+        let record = try await authorizedRecord(id, capability: .conversationRead, discovered: discovered, access: access)
         guard record.descriptor.writable, let surface = record.descriptor.surfaceID else { return PreviewSnapshot(text: nil, available: false) }
         let snapshot = try await cmux.request("surface.read_text", params: ["surface_id": .string(surface)])
         let lines = (snapshot["text"].string ?? "").components(separatedBy: .newlines)
@@ -369,8 +398,8 @@ public actor SessionService {
         guard records[id]?.descriptor.workspaceID == workspace, records[id]?.descriptor.surfaceID == surface, records[id]?.descriptor.writable == true else { throw BridgeError("stale_binding", "The terminal changed while authorizing the action.", status: 409) }
         return value
     }
-    private func authorizedRecord(_ id: String, capability: ClientCapability, access: SessionAccess?) async throws -> Record {
-        if access != nil { _ = try await sessions() }
+    private func authorizedRecord(_ id: String, capability: ClientCapability, discovered: Bool = false, access: SessionAccess?) async throws -> Record {
+        if access != nil, !discovered { _ = try await sessions() }
         let value = try await record(id)
         try await access?.require(capability, workspace: value.descriptor.workspaceID)
         guard records[id]?.descriptor.workspaceID == value.descriptor.workspaceID, records[id]?.descriptor.surfaceID == value.descriptor.surfaceID else { throw BridgeError("stale_binding", "The session changed while authorizing access.", status: 409) }

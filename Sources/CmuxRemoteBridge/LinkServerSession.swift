@@ -160,18 +160,25 @@ actor LinkServerSession {
     }
     private func observe(_ frame: LinkFrame, clientID: String) async {
         defer { subscriptions[frame.id] = nil }
-        var digest: String?, sequence = 0
+        var digest: String?, stamp: String?, sequence = 0
         do {
             while !Task.isCancelled && !closed {
-                let response = await router.respondResource(method: "GET", uri: frame.uri!, authorization: nil, body: Data(), subscriptionClientID: clientID)
-                guard response.status == 200 else {
-                    try await send(LinkFrame(kind: "event", id: frame.id, status: response.status, final: true)); return
-                }
-                let next = try LinkObservationDigest().digest(response.data)
-                if next != digest {
-                    _ = try await authority.currentClient(clientID)
-                    sequence += 1; digest = next
-                    try await send(LinkFrame(kind: "event", id: frame.id, data: Data(authority.epoch.utf8), status: 200, index: sequence, final: false))
+                // An unchanged stamp means the handler would answer what this subscription already sent, so
+                // the tick costs no discovery, parse or encode. It is read before the handler: a change
+                // racing the read is seen again next tick rather than lost. The first tick always runs.
+                let current = await router.subscriptionStamp(uri: frame.uri!, clientID: clientID)
+                if current == nil || current != stamp {
+                    let response = await router.respondResource(method: "GET", uri: frame.uri!, authorization: nil, body: Data(), subscriptionClientID: clientID)
+                    guard response.status == 200 else {
+                        try await send(LinkFrame(kind: "event", id: frame.id, status: response.status, final: true)); return
+                    }
+                    stamp = current
+                    let next = try LinkObservationDigest().digest(response.data)
+                    if next != digest {
+                        _ = try await authority.currentClient(clientID)
+                        sequence += 1; digest = next
+                        try await send(LinkFrame(kind: "event", id: frame.id, data: Data(authority.epoch.utf8), status: 200, index: sequence, final: false))
+                    }
                 }
                 // Intended cadence of observation for snapshot-only backends; cancelled with the subscription.
                 try await Task.sleep(for: .seconds(2))

@@ -15,6 +15,9 @@ public actor TranscriptReader {
         let presentation: TranscriptResponseReader.Result
     }
     private var observations: [String: Observation] = [:]
+    /// Last-read order per path; an eviction takes the lowest, which is the least recently read.
+    private var observationOrder: [String: Int] = [:]
+    private var observationSequence = 0
     /// Long conversations are read from a bounded tail; the window start moves in whole steps so sequence numbers stay stable while the file grows.
     private let windowLimit: Int
     private let windowStep: Int
@@ -22,10 +25,44 @@ public actor TranscriptReader {
     /// messages; keyed by path, because one reader serves every conversation and an unchanged record is
     /// answered from this cache.
     private var launches: [String: [BackgroundTaskTracker.Launch]] = [:]
+    private static let capacity = 32
     /// A Monitor's deadline passes while its record stays unchanged, so running is decided at read time.
     private let now: @Sendable () -> Date
     public init(windowLimit: Int = 33_554_432, windowStep: Int = 8_388_608, now: @escaping @Sendable () -> Date = { Date() }) {
         self.windowLimit = max(1, windowLimit); self.windowStep = max(1, min(windowStep, windowLimit)); self.now = now
+    }
+
+    /// A cheap identity of the record a read of this path would answer from, or nil when unprovable.
+    ///
+    /// Two equal stamps mean a repeated read answers from the same cached record with the same running
+    /// tasks, so a subscription may skip it. Read from file metadata alone: no file read, no parse. Nil
+    /// — do the work — when the record is not cached, the file no longer matches it, or the metadata
+    /// cannot be read.
+    public func stamp(path: String) -> String? {
+        guard let cached = observations[path],
+              let attributes = try? FileManager.default.attributesOfItem(atPath: path),
+              let size = (attributes[.size] as? NSNumber)?.intValue,
+              let modified = attributes[.modificationDate] as? Date else { return nil }
+        let inode = "\(attributes[.systemFileNumber] ?? "unknown")"
+        guard cached.inode == inode, cached.size == size, cached.modified == modified else { return nil }
+        // A Monitor's deadline changes the answer while the file stays still.
+        let moment = now()
+        let running = (launches[path] ?? []).filter { $0.isRunning(at: moment) }.count
+        return "\(cached.generation.uuidString):\(inode):\(size):\(modified.timeIntervalSinceReferenceDate):\(running)"
+    }
+
+    private func touch(_ path: String) {
+        observationSequence += 1; observationOrder[path] = observationSequence
+    }
+    /// Evicts the least recently read record, one per insertion, instead of the whole cache: a burst of
+    /// new paths used to guarantee a full re-parse of every conversation still open. A record and its
+    /// launches leave together, so a cached record never answers without its running tasks.
+    private func store(_ observation: Observation, launches scanned: [BackgroundTaskTracker.Launch], for path: String) {
+        if observations[path] == nil, observations.count >= Self.capacity,
+           let oldest = observationOrder.min(by: { $0.value < $1.value })?.key {
+            observations[oldest] = nil; launches[oldest] = nil; observationOrder[oldest] = nil
+        }
+        observations[path] = observation; launches[path] = scanned; touch(path)
     }
     /// The newest complete lines of a transcript within the read window, and where that window starts.
     private func window(path: String, size: Int) throws -> (data: Data, start: Int) {
@@ -66,18 +103,18 @@ public actor TranscriptReader {
         let modified = attributes[.modificationDate] as? Date
         let previous = observations[path]
         if let previous, previous.inode == inode, previous.size == size.intValue, previous.modified == modified {
+            touch(path)
             return page(previous.messages, images: previous.images, presentation: previous.presentation, beforeSeq: beforeSeq, limit: limit, generation: previous.generation, clipped: previous.windowStart > 0,
                         backgroundTasks: runningTasks(path, reports: reportsBackgroundTasks))
         }
         let (data, windowStart) = try window(path: url.path, size: size.intValue)
         // Cheap line scan over the same window the parse reads; a launch and its completion can sit far apart.
-        if launches.count >= 32, launches[path] == nil { launches.removeAll() }
-        launches[path] = scannedLaunches(data)
+        let scanned = scannedLaunches(data)
         // A moved window renumbers records, so clients re-anchor exactly as after truncation.
         let reset = previous == nil || previous?.inode != inode || size.intValue < (previous?.size ?? 0) || previous?.windowStart != windowStart
         let generation = reset ? UUID() : previous!.generation
         guard let end = data.lastIndex(of: 10) else {
-            observations[path] = Observation(inode: inode, size: size.intValue, modified: modified, generation: generation, windowStart: windowStart, images: [], messages: [], presentation: .init())
+            store(Observation(inode: inode, size: size.intValue, modified: modified, generation: generation, windowStart: windowStart, images: [], messages: [], presentation: .init()), launches: scanned, for: path)
             return page([], images: [], presentation: .init(), beforeSeq: beforeSeq, limit: limit, generation: generation, clipped: windowStart > 0,
                         backgroundTasks: runningTasks(path, reports: reportsBackgroundTasks))
         }
@@ -85,15 +122,17 @@ public actor TranscriptReader {
         let compaction = agent == "claude" ? ClaudeCompactionSummary().replace(raw) : .init(lines: raw, markers: [])
         let lines = agent == "claude" ? ClaudeTaskNoticeRewriter().normalize(ClaudeQueuedPromptNormalizer().normalize(compaction.lines)) : raw
         let result = agent == "claude" ? ClaudeTranscriptParser().parse(lines: lines, startingSeq: 0) : CodexTranscriptParser().parse(lines: lines, startingSeq: 0)
+        // A record may repeat an id as it develops; one index by id beats a scan per update.
+        var positions: [String: Int] = [:]
+        for (index, message) in result.messages.enumerated() where positions[message.id] == nil { positions[message.id] = index }
         var messages = result.messages
         for update in result.updatedMessages {
-            if let index = messages.firstIndex(where: { $0.id == update.id }) { messages[index] = update }
+            if let index = positions[update.id] { messages[index] = update }
         }
         let imageIndex = try TranscriptImageIndex().read(lines: lines, messages: messages, agent: agent)
         messages.append(contentsOf: imageIndex.supplementalMessages + compaction.markers); messages.sort { $0.seq < $1.seq }
         let presentation = TranscriptResponseReader().read(lines: lines, messages: messages, agent: agent)
-        if observations.count >= 32, observations[path] == nil { observations.removeAll() }
-        observations[path] = Observation(inode: inode, size: size.intValue, modified: modified, generation: generation, windowStart: windowStart, images: imageIndex.records, messages: messages, presentation: presentation)
+        store(Observation(inode: inode, size: size.intValue, modified: modified, generation: generation, windowStart: windowStart, images: imageIndex.records, messages: messages, presentation: presentation), launches: scanned, for: path)
         return page(messages, images: imageIndex.records, presentation: presentation, beforeSeq: beforeSeq, limit: limit, generation: generation, clipped: windowStart > 0,
                     backgroundTasks: runningTasks(path, reports: reportsBackgroundTasks))
     }
