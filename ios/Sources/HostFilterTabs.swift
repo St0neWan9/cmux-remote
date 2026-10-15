@@ -23,32 +23,31 @@ struct HostFilterTabs: View {
             }.padding(.vertical, 4)
         }.accessibilityIdentifier("sessions.hosts")
     }
-    private func hostTab(_ host: Host) -> some View {
+    @ViewBuilder private func hostTab(_ host: Host) -> some View {
         let selected = hosts.count == 1 || selection == host.id
         let workspace = host.workspaces.first { $0.id == workspaceID }
-        return capsule(selected: selected) {
-            HStack(spacing: 7) {
-                Button { if hosts.count > 1 { selection = host.id } } label: {
-                    HStack(spacing: 7) {
-                        Circle().fill(color(host)).frame(width: 7, height: 7)
-                        Image(systemName: "laptopcomputer")
-                        Text(workspace.map { host.name + " · " + $0.title } ?? host.name).lineLimit(1)
-                    }.contentShape(Rectangle())
-                }.buttonStyle(.plain).accessibilityIdentifier("sessions.host." + host.id).accessibilityAddTraits(selected ? .isSelected : [])
-                if host.workspaces.count > 1 {
-                    Menu {
-                        Picker(String(localized: "sessions.workspace_filter"), selection: Binding(
-                            get: { workspace?.id },
-                            set: { id in workspaceID = id; if hosts.count > 1 { selection = host.id } })) {
-                            Text(String(localized: "sessions.all_workspaces")).tag(String?.none)
-                            ForEach(host.workspaces) { workspace in Text(workspace.title).tag(String?.some(workspace.id)) }
-                        }.pickerStyle(.inline)
-                    } label: {
-                        Image(systemName: "chevron.down").font(.caption.weight(.semibold)).frame(width: 22, height: 22).contentShape(Rectangle())
-                    }.tint(.primary).accessibilityLabel(String(localized: "sessions.workspace_filter"))
-                        .accessibilityIdentifier("sessions.host." + host.id + ".workspaces")
-                }
-            }
+        let label = HStack(spacing: 7) {
+            Circle().fill(color(host)).frame(width: 7, height: 7)
+            Image(systemName: "laptopcomputer")
+            Text(workspace.map { host.name + " · " + $0.title } ?? host.name).lineLimit(1)
+            if host.workspaces.count > 1 { Image(systemName: "chevron.down").font(.caption.weight(.semibold)) }
+        }.contentShape(Rectangle())
+        if selected, host.workspaces.count > 1 {
+            // The whole capsule opens the workspaces, so their menu starts at the capsule's leading edge.
+            Menu {
+                Picker(String(localized: "sessions.workspace_filter"), selection: Binding(
+                    get: { workspace?.id },
+                    set: { id in workspaceID = id; if hosts.count > 1 { selection = host.id } })) {
+                    Text(String(localized: "sessions.all_workspaces")).tag(String?.none)
+                    ForEach(host.workspaces) { workspace in Text(workspace.title).tag(String?.some(workspace.id)) }
+                }.pickerStyle(.inline)
+            } label: { capsule(selected: true) { label } }
+                .tint(.primary).accessibilityIdentifier("sessions.host." + host.id + ".workspaces")
+                .accessibilityAddTraits(.isSelected)
+        } else {
+            // A Mac not yet shown is chosen first; its workspaces open from the capsule once it is.
+            Button { if hosts.count > 1 { selection = host.id } } label: { capsule(selected: selected) { label } }
+                .buttonStyle(.plain).accessibilityIdentifier("sessions.host." + host.id).accessibilityAddTraits(selected ? .isSelected : [])
         }
     }
     private func capsule(selected: Bool, @ViewBuilder label: () -> some View) -> some View {
