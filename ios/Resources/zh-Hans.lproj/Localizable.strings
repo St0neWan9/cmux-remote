@@ -300,3 +300,11 @@
 "start.prompt_required" = "第一条消息";
 "start.prompt_codex_hint" = "Codex 收到第一条消息后才会出现会话，所以这里需要先写一条。";
 "error.prompt_required" = "请给 Codex 写第一条消息。";
+"sessions.refresh" = "刷新";
+"sessions.manage" = "管理";
+"sessions.workspace_filter" = "工作区";
+"sessions.pending_count" = "%lld 项待处理";
+"sessions.all_hosts" = "全部";
+"sessions.close_search" = "关闭搜索";
+"sessions.title_menu" = "会话选项";
+"feed.title_count" = "待处理事项（%lld）";

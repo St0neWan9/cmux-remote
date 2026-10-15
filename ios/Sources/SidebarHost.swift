@@ -4,6 +4,5 @@ import Foundation
 struct SidebarHost: Identifiable {
     let id: String
     let name: String
-    let canReadFeed: Bool
     let failed: Bool
 }

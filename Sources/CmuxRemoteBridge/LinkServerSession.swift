@@ -68,7 +68,7 @@ actor LinkServerSession {
                 BridgeLog.shared.debug("link", "link request id=\(frame.id.prefix(8)) \(frame.kind) \(method) \(uri.split(separator: "?").first.map(String.init) ?? uri)")
                 try router.verifyChannelIdentity(frame, clientID: clientID)
                 if frame.kind == "subscribe" {
-                    guard subscriptions.count < 8 else { throw BridgeError("too_large", "The subscription limit was reached.") }
+                    guard subscriptions.count < 16 else { throw BridgeError("too_large", "The subscription limit was reached.") }
                     let identity: String
                     do { identity = try await router.subscriptionIdentity(frame, clientID: clientID) }
                     catch let refusal as BridgeError where refusal.status == 401 || refusal.status == 403 {

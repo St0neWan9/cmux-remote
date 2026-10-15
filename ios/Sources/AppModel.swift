@@ -15,6 +15,8 @@ final class AppModel {
     }
     var sessions: [SessionDescriptor] { hostedSessions.map(\.session) }
     var hostedSessions: [HostedSession] = []
+    /// Each Mac's items waiting for a reply, kept current while the app is in the foreground.
+    var pending: [String: PendingFeed] = [:]
     var workspaces: [WorkspaceSummary] = []
     /// Workspace ID to the Mac that owns it, for labels when several Macs are connected.
     var workspaceHosts: [String: String] = [:]
@@ -322,7 +324,18 @@ final class AppModel {
         followingSessions = true; syncRunning()
         defer { followingSessions = false; runningSync.stop() }
         let followed = links.filter { $0.client.allows(.conversationRead) }.map { ($0.id, $0.client) }
+        let feeds = links.filter { $0.client.allows(.feedRead) }.map { ($0.id, $0.client) }
         await withTaskGroup(of: Void.self) { group in
+            // The reminder above the list counts items as they arrive; each change is read at once, since a pending
+            // question is waiting on the reader.
+            for (id, client) in feeds {
+                group.addTask { [weak self] in
+                    for await _ in client.changes(paths: ["/v1/feed"]) {
+                        guard !Task.isCancelled else { return }
+                        await self?.refreshPending(hostID: id, client: client)
+                    }
+                }
+            }
             for (id, client) in followed {
                 group.addTask { [weak self] in
                     for await _ in client.changes(paths: ["/v1/sessions"]) {
@@ -358,6 +371,12 @@ final class AppModel {
         }
         let read = await runningSync.pass(targets)
         diagLog(.info, category: "sync", "background pass read \(read) conversations in \(Int(Date().timeIntervalSince(started) * 1000))ms")
+    }
+    private func refreshPending(hostID: String, client: RemoteClient) async {
+        guard let items = try? await client.get("/v1/feed", as: JSONValue.self)["items"].array,
+              links.contains(where: { $0.id == hostID && $0.client === client }) else { return }
+        let next = PendingFeed(items: items)
+        if pending[hostID] != next { pending[hostID] = next }
     }
     /// Reads one Mac's sessions only; workspaces and relay hints wait for a full refresh.
     private func refreshSessions(hostID: String, client: RemoteClient) async {
@@ -406,7 +425,7 @@ final class AppModel {
         guard let index = links.firstIndex(where: { $0.id == hostID }) else { return }
         let removed = links.remove(at: index), scope = removed.client.operationRecoveryScope + ":"
         for (key, model) in conversationModels where key.hasPrefix(scope) { model.suspendReads(); model.speech.cancel(); conversationModels[key] = nil }
-        removed.client.close(); perHost[hostID] = nil; hostErrors[hostID] = nil; refreshGeneration = UUID(); loading = false
+        removed.client.close(); perHost[hostID] = nil; hostErrors[hostID] = nil; pending[hostID] = nil; refreshGeneration = UUID(); loading = false
         // A removed Mac's conversations are unreadable; their stored copies go with it.
         Task { await conversations.remove(scope: removed.client.operationRecoveryScope) }
         if removed.connection != nil { store.removeConnection(hostID: hostID) } else { store.remove(); store.disableLegacy() }

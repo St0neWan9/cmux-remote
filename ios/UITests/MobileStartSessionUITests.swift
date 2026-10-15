@@ -11,9 +11,13 @@ final class MobileStartSessionUITests: XCTestCase {
         app.launchEnvironment["CMUX_REMOTE_TEST_PAIRING_PATH"] = pairingPath
         app.launchArguments = ["-AppleLanguages", "(zh-Hans)"]
         app.launch()
-        let start = app.buttons["sessions.start"]
-        XCTAssertTrue(start.waitForExistence(timeout: 10))
+        // Starting a conversation is under the list's title menu.
+        let menu = app.buttons["sessions.title_menu"]
+        XCTAssertTrue(menu.waitForExistence(timeout: 10))
         capture(app, "list")
+        menu.tap()
+        let start = app.buttons["sessions.start"]
+        XCTAssertTrue(start.waitForExistence(timeout: 5))
         start.tap()
         let workspace = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "start.workspace.")).firstMatch
         XCTAssertTrue(workspace.waitForExistence(timeout: 5))
