@@ -9,10 +9,12 @@ actor RemoteClientRuntime {
     private var announcement: SignedValue<HostAnnouncement>?
     private var closed = false
     nonisolated let linkStates = LinkStateBroadcaster()
-    init(pairing: PairingConfiguration, connection: AuthorizedConnection?) {
-        self.pairing = pairing; self.connection = connection
+    /// Failed and timed-out requests, epoch retries and the link's own events, without credentials or bodies.
+    private let trace: @Sendable (String) -> Void
+    init(pairing: PairingConfiguration, connection: AuthorizedConnection?, trace: @escaping @Sendable (String) -> Void = { _ in }) {
+        self.pairing = pairing; self.connection = connection; self.trace = trace
         let states = linkStates
-        if let connection { transport = WebSocketTransport(host: connection.host, key: connection.privateKey, endpoint: connection.endpoint, report: { states.report($0) }) }
+        if let connection { transport = WebSocketTransport(host: connection.host, key: connection.privateKey, endpoint: connection.endpoint, report: { states.report($0) }, trace: trace) }
         else { transport = PinnedTransport(pairing: pairing) }
     }
     func close() { closed = true; transport.close(); linkStates.finish() }
@@ -27,7 +29,8 @@ actor RemoteClientRuntime {
         // The new endpoint may be a restarted Bridge with a fresh epoch, so the cached announcement cannot be reused.
         announcement = nil
         let states = linkStates
-        transport = WebSocketTransport(host: updated.host, key: updated.privateKey, endpoint: updated.endpoint, report: { states.report($0) }); pairing = endpoint; connection = updated
+        trace("relocated to \(updated.endpoint.host):\(updated.endpoint.port)")
+        transport = WebSocketTransport(host: updated.host, key: updated.privateKey, endpoint: updated.endpoint, report: { states.report($0) }, trace: trace); pairing = endpoint; connection = updated
     }
     func request<T: Decodable & Sendable>(_ path: String, method: String, query: [String: String], body: Data?, as type: T.Type) async throws -> T {
         do { return try await attempt(path, method: method, query: query, body: body, as: type) }
@@ -35,17 +38,27 @@ actor RemoteClientRuntime {
             // A restarted Bridge has a new epoch while the link to it stays up, so the cached one signs every
             // request wrong. The proof is checked before any route acts, so the rejected request did nothing
             // and is sent once more under the epoch fetched afresh.
+            trace("invalid_proof: dropped the cached epoch, retrying once \(method) \(path)")
             return try await attempt(path, method: method, query: query, body: body, as: type)
         }
     }
     private func attempt<T: Decodable & Sendable>(_ path: String, method: String, query: [String: String], body: Data?, as type: T.Type) async throws -> T {
-        let request = try await authorized(path, method: method)
-        do { return try await request.transport.request(request.path, method: method, query: query, body: body, authorization: request.authorization, as: type) }
-        catch {
-            if method == "POST", !(error is BridgeError) { throw BridgeError("outcome_unknown", "Inspect the task before repeating this operation.", status: 504) }
+        let started = ContinuousClock.now
+        do {
+            let request = try await authorized(path, method: method)
+            do { return try await request.transport.request(request.path, method: method, query: query, body: body, authorization: request.authorization, as: type) }
+            catch {
+                if method == "POST", !(error is BridgeError) { throw BridgeError("outcome_unknown", "Inspect the task before repeating this operation.", status: 504) }
+                throw error
+            }
+        } catch {
+            // Successful requests are too many to keep; a cancelled read was abandoned on purpose.
+            if !(error is CancellationError) { trace("request failed \(method) \(path) \(TraceFormat().milliseconds(since: started))ms error=\(TraceFormat().describe(error))") }
             throw error
         }
     }
+    /// Forgets the cached epoch after a subscription reported it stale.
+    func discardEpoch() { announcement = nil }
     /// Forgets the cached epoch; false when none was cached, so a rejection under a fresh one is final.
     private func dropStaleEpoch() -> Bool {
         guard announcement != nil else { return false }
@@ -67,7 +80,10 @@ actor RemoteClientRuntime {
     }
     func subscribe(_ path: String) async throws -> AsyncThrowingStream<LinkFrame, any Error> {
         do { return try await openSubscription(path) }
-        catch let error as BridgeError where error.code == "invalid_proof" && dropStaleEpoch() { return try await openSubscription(path) }
+        catch let error as BridgeError where error.code == "invalid_proof" && dropStaleEpoch() {
+            trace("invalid_proof: dropped the cached epoch, resubscribing \(path)")
+            return try await openSubscription(path)
+        }
     }
     private func openSubscription(_ path: String) async throws -> AsyncThrowingStream<LinkFrame, any Error> {
         let request = try await authorized(path, method: "GET")
@@ -76,7 +92,10 @@ actor RemoteClientRuntime {
     }
     func image(sessionID: String, reference: ConversationImageReference) async throws -> Data {
         do { return try await fetchImage(sessionID: sessionID, reference: reference) }
-        catch let error as BridgeError where error.code == "invalid_proof" && dropStaleEpoch() { return try await fetchImage(sessionID: sessionID, reference: reference) }
+        catch let error as BridgeError where error.code == "invalid_proof" && dropStaleEpoch() {
+            trace("invalid_proof: dropped the cached epoch, retrying once GET image")
+            return try await fetchImage(sessionID: sessionID, reference: reference)
+        }
     }
     private func fetchImage(sessionID: String, reference: ConversationImageReference) async throws -> Data {
         let path = "/v1/sessions/\(sessionID)/image"

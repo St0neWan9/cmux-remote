@@ -10,18 +10,22 @@ public final class RemoteClient: Sendable {
     public let canReplyFeed: Bool
     private let capabilities: Set<ClientCapability>
     private let legacy: Bool
+    private let trace: @Sendable (String) -> Void
     public func allows(_ capability: ClientCapability) -> Bool { capabilities.contains(capability) }
     /// Explicit legacy mode; the owner must separately enable it on the Bridge.
-    public init(pairing: PairingConfiguration) {
-        legacy = true
+    ///
+    /// `trace` receives one short line per dial, path outcome, link loss, failed or timed-out request and ended
+    /// subscription. Lines never carry keys, grants, proofs, permits, bodies or query values.
+    public init(pairing: PairingConfiguration, trace: @escaping @Sendable (String) -> Void = { _ in }) {
+        legacy = true; self.trace = trace
         operationRecoveryScope = IdentityCryptography().digest(Data((pairing.certificateSHA256 + ":" + pairing.token).utf8))
-        runtime = RemoteClientRuntime(pairing: pairing, connection: nil); canControlConversations = true; canReplyFeed = true; capabilities = Set(ClientCapability.allCases)
+        runtime = RemoteClientRuntime(pairing: pairing, connection: nil, trace: trace); canControlConversations = true; canReplyFeed = true; capabilities = Set(ClientCapability.allCases)
     }
-    public init(connection: AuthorizedConnection) throws {
-        try connection.validate(); legacy = false
+    public init(connection: AuthorizedConnection, trace: @escaping @Sendable (String) -> Void = { _ in }) throws {
+        try connection.validate(); legacy = false; self.trace = trace
         operationRecoveryScope = IdentityCryptography().digest(try JSONEncoder().encode([connection.host.id, connection.grant.value.clientID]))
         let pairing = try PairingConfiguration(host: connection.endpoint.host, port: connection.endpoint.port, token: String(repeating: "0", count: 32), certificateSHA256: connection.host.certificateSHA256)
-        runtime = RemoteClientRuntime(pairing: pairing, connection: connection)
+        runtime = RemoteClientRuntime(pairing: pairing, connection: connection, trace: trace)
         capabilities = Set(connection.grant.value.scope.capabilities)
         canControlConversations = connection.grant.value.scope.capabilities.contains(.conversationControl)
         canReplyFeed = connection.grant.value.scope.capabilities.contains(.feedReply)
@@ -34,7 +38,7 @@ public final class RemoteClient: Sendable {
     public func changes(paths: [String]) -> AsyncStream<Void> {
         let output = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
         guard !paths.isEmpty, paths.count <= 4, Set(paths).count == paths.count else { output.continuation.finish(); return output.stream }
-        let runtime = runtime, legacy = legacy
+        let runtime = runtime, legacy = legacy, trace = trace
         let task = Task {
             if legacy {
                 while !Task.isCancelled {
@@ -54,7 +58,12 @@ public final class RemoteClient: Sendable {
                             } catch {
                                 guard !Task.isCancelled else { return }
                                 output.continuation.yield(())
-                                if let failure = error as? BridgeError, ["unauthorized", "scope_denied", "invalid_identity", "invalid_signature", "host_changed"].contains(failure.code) { return }
+                                let final = (error as? BridgeError).map { ["unauthorized", "scope_denied", "invalid_identity", "invalid_signature", "host_changed"].contains($0.code) } ?? false
+                                let next = final ? "stopped" : "retry in \(1 << min(attempt + 1, 5))s"
+                                trace("subscription ended \(path) error=\(TraceFormat().describe(error)) \(next)")
+                                if final { return }
+                                // The next subscribe must fetch the restarted Bridge's epoch, not sign with the old one again.
+                                if (error as? BridgeError)?.code == "invalid_proof" { await runtime.discardEpoch() }
                             }
                             attempt = min(attempt + 1, 5)
                             // Reconnection backoff is an intended, cancellable delay.

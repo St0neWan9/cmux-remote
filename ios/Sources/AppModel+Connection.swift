@@ -44,6 +44,7 @@ extension AppModel {
     func superviseConnections(network: NetworkPathMonitor = NetworkPathMonitor()) async {
         if let backgroundedAt, Date().timeIntervalSince(backgroundedAt) > 20 {
             // iOS suspends sockets in the background; a link from before is unlikely to still be alive.
+            diagLog(.info, category: "link", "redial all: returned after \(Int(Date().timeIntervalSince(backgroundedAt)))s in background")
             self.backgroundedAt = nil
             await reconnect()
         }
@@ -63,6 +64,7 @@ extension AppModel {
                 // A new or changed path (Wi-Fi to cellular included) leaves sockets bound to the old one.
                 for await usable in network.availability() where usable {
                     guard let self else { return }
+                    diagLog(.info, category: "link", "redial all: network path changed")
                     await self.reconnect()
                 }
             }
@@ -73,7 +75,11 @@ extension AppModel {
                     let pause = [3, 5, 10, 20, 30][min(attempt, 4)]
                     do { try await Task.sleep(for: .seconds(pause)) } catch { return }
                     guard let self else { return }
-                    if await self.connectionState == .disconnected { attempt += 1; await self.reconnect(onlyLost: true) } else { attempt = 0 }
+                    if await self.connectionState == .disconnected {
+                        attempt += 1
+                        diagLog(.info, category: "link", "auto retry #\(attempt) after waiting \(pause)s")
+                        await self.reconnect(onlyLost: true)
+                    } else { attempt = 0 }
                 }
             }
             await group.waitForAll()

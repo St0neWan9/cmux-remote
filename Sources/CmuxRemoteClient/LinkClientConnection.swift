@@ -13,6 +13,8 @@ actor LinkClientConnection {
         var contentType: String?
         var data = Data()
         let method: String
+        /// The request URI without its query, for a trace line.
+        let route: String
         let done: CheckedContinuation<LinkResourceResponse, any Error>
         let deadline: Task<Void, Never>
     }
@@ -35,11 +37,13 @@ actor LinkClientConnection {
     /// out the LAN deadline first, so a phone away from home does not pay that wait on every reconnect.
     private var lastRelayed = false
     private let report: @Sendable (LinkState) -> Void
+    /// One short credential-free line per dial, path outcome, heartbeat loss, link loss and timed-out request.
+    private let trace: @Sendable (String) -> Void
     /// A pong that does not arrive within this time means the path died without the socket noticing.
     private static let pongDeadline: Duration = .seconds(10)
     init(host: HostIdentity, key: Data, endpoint: BridgeEndpoint, relayDial: @escaping @Sendable (URL, [String: String]) -> LinkSocket = { LinkSocket(url: $0, headers: $1, timeout: 15) },
-         report: @escaping @Sendable (LinkState) -> Void = { _ in }) {
-        self.host = host; self.key = key; self.endpoint = endpoint; self.relayDial = relayDial; self.report = report
+         report: @escaping @Sendable (LinkState) -> Void = { _ in }, trace: @escaping @Sendable (String) -> Void = { _ in }) {
+        self.host = host; self.key = key; self.endpoint = endpoint; self.relayDial = relayDial; self.report = report; self.trace = trace
     }
     /// Drops a link the person or the network says may be dead, then dials again.
     ///
@@ -47,7 +51,11 @@ actor LinkClientConnection {
     /// keeps the link: dropping it would turn a write that may have landed into an unknown outcome.
     func reconnect() async {
         guard !closed else { return }
-        if Self.mayDropLink(pendingMethods: pending.values.map(\.method)) { await failed(URLError(.networkConnectionLost)) }
+        let methods = pending.values.map(\.method)
+        if socket == nil { trace("reconnect requested: no live link, dialing") }
+        else if Self.mayDropLink(pendingMethods: methods) { trace("reconnect requested: dropping link pending=\(methods.count)") }
+        else { trace("reconnect requested: keeping link, a POST is in flight pending=\(methods.count)") }
+        if Self.mayDropLink(pendingMethods: methods) { await failed(URLError(.networkConnectionLost)) }
         try? await connect()
     }
     func updateRelay(_ relay: RelayEndpoint?) { endpoint.relay = relay }
@@ -59,7 +67,7 @@ actor LinkClientConnection {
                 let deadline = Task { [weak self] in
                     do { try await Task.sleep(for: .seconds(20)); await self?.cancel(frame.id, timedOut: true) } catch {}
                 }
-                pending[frame.id] = Pending(method: frame.method ?? "GET", done: done, deadline: deadline)
+                pending[frame.id] = Pending(method: frame.method ?? "GET", route: TraceFormat().route(frame.uri ?? ""), done: done, deadline: deadline)
                 Task { [weak self] in
                     await self?.sendRequested(frame)
                 }
@@ -82,12 +90,17 @@ actor LinkClientConnection {
         if preparing == nil {
             report(.connecting)
             Logger.clientLink.info("link connecting relayed=\(self.lastRelayed, privacy: .public)")
-            let host = host, key = key, endpoint = endpoint, race = lastRelayed && endpoint.relay != nil
+            let host = host, key = key, endpoint = endpoint, race = lastRelayed && endpoint.relay != nil, trace = trace
+            let lan = "\(endpoint.host):\(endpoint.port)", relayName = endpoint.relay.map { TraceFormat().origin($0) }
+            if race, let relayName { trace("dial start path=race lan=\(lan) relay=\(relayName)") }
+            else { trace("dial start path=lan lan=\(lan) relay=\(relayName ?? "none")") }
             preparing = Task {
                 if race, let relay = endpoint.relay { return try await self.race(host: host, key: key, endpoint: endpoint, relay: relay) }
                 do { return try await self.dialDirect(host: host, key: key, endpoint: endpoint) }
                 catch {
-                    guard LinkPathFailure().isUnreachable(error), let relay = endpoint.relay else { throw error }
+                    guard LinkPathFailure().isUnreachable(error) else { throw error }
+                    guard let relay = endpoint.relay else { trace("dial lan unreachable and no relay is configured"); throw error }
+                    trace("dial fallback path=relay relay=\(TraceFormat().origin(relay))")
                     return try await self.dialRelay(host: host, key: key, relay: relay)
                 }
             }
@@ -95,15 +108,25 @@ actor LinkClientConnection {
         let current = preparing!
         do {
             let ready: Prepared
-            do { ready = try await current.value } catch { if !closed { report(.disconnected); Logger.clientLink.warning("link disconnected error=\(String(describing: error), privacy: .public)") }; throw error }
+            do { ready = try await current.value } catch {
+                if !closed { report(.disconnected); trace("dial failed error=\(TraceFormat().describe(error))"); Logger.clientLink.warning("link disconnected error=\(String(describing: error), privacy: .public)") }
+                throw error
+            }
             guard !closed else { ready.socket.close(); throw CancellationError() }
             if socket == nil {
                 socket = ready.socket; cipher = ready.cipher; writer = WebSocketSendQueue(socket: ready.socket, cipher: ready.cipher); lastRelayed = ready.relayed
                 Logger.clientLink.info("link connected relayed=\(ready.relayed, privacy: .public)")
+                trace("link connected relayed=\(ready.relayed)")
                 report(.connected)
+                let trace = trace
                 heartbeat = Task { [weak self] in
                     do { while !Task.isCancelled { try await Task.sleep(for: .seconds(25)); try await Self.ping(ready.socket) } }
-                    catch { if !Task.isCancelled { await self?.failed(error, source: ready.socket) } }
+                    catch {
+                        guard !Task.isCancelled else { return }
+                        let timedOut = (error as? URLError)?.code == .timedOut
+                        trace(timedOut ? "heartbeat ping timeout after 10s error=\(TraceFormat().describe(error))" : "heartbeat ping failed error=\(TraceFormat().describe(error))")
+                        await self?.failed(error, source: ready.socket)
+                    }
                 }
                 receiver = Task { [weak self] in
                     do {
@@ -119,8 +142,16 @@ actor LinkClientConnection {
         let pairing = try PairingConfiguration(host: endpoint.host, port: endpoint.port, token: String(repeating: "0", count: 32), certificateSHA256: host.certificateSHA256)
         var parts = URLComponents(); parts.scheme = "wss"; parts.host = endpoint.host; parts.port = endpoint.port; parts.path = "/v3/link"
         guard let url = parts.url else { throw BridgeError("invalid_endpoint", "Invalid WebSocket endpoint.") }
-        let direct = LinkSocket(url: url, delegate: PinnedSessionDelegate(pairing: pairing))
-        do { return try await prepare(direct, handshake: handshake, relayed: false) } catch { direct.close(); throw error }
+        let direct = LinkSocket(url: url, delegate: PinnedSessionDelegate(pairing: pairing)), started = ContinuousClock.now
+        do {
+            let ready = try await prepare(direct, handshake: handshake, relayed: false)
+            trace("dial lan ok \(TraceFormat().milliseconds(since: started))ms relayed=false")
+            return ready
+        } catch {
+            direct.close()
+            trace("dial lan failed \(TraceFormat().milliseconds(since: started))ms unreachable=\(LinkPathFailure().isUnreachable(error)) error=\(TraceFormat().describe(error))")
+            throw error
+        }
     }
     private nonisolated func dialRelay(host: HostIdentity, key: Data, relay: RelayEndpoint) async throws -> Prepared {
         let handshake = try LinkClientHandshake(host: host, privateKey: key)
@@ -129,7 +160,16 @@ actor LinkClientConnection {
         if relay.admission.value.kind == "approved", relay.admission.value.clientPublicKey != publicKey { throw BridgeError("invalid_identity", "The relay admission belongs to another client.") }
         let join = try crypto.sign(RelayJoin(hostID: host.id, clientPublicKey: publicKey, permitDigest: crypto.digest(crypto.bytes(relay.admission, domain: "relay3-permit-envelope"))), domain: "relay3-join", privateKey: key)
         let relayed = relayDial(try RelayOrigin(relay.origin).socketURL(hostID: host.id, role: "client"), ["X-Cmux-Relay-Permit": try JSONEncoder().encode(relay.admission).base64EncodedString(), "X-Cmux-Relay-Join": try JSONEncoder().encode(join).base64EncodedString()])
-        do { return try await prepare(relayed, handshake: handshake, relayed: true, deadline: .seconds(15)) } catch { relayed.close(); throw error }
+        let started = ContinuousClock.now
+        do {
+            let ready = try await prepare(relayed, handshake: handshake, relayed: true, deadline: .seconds(15))
+            trace("dial relay ok \(TraceFormat().milliseconds(since: started))ms relayed=true")
+            return ready
+        } catch {
+            relayed.close()
+            trace("dial relay failed \(TraceFormat().milliseconds(since: started))ms error=\(TraceFormat().describe(error))")
+            throw error
+        }
     }
     /// Dials the LAN and the relay together and keeps whichever authenticates first. Only an unreachable LAN
     /// lets the relay decide: a TLS pin or identity failure on the LAN still ends the attempt.
@@ -187,7 +227,11 @@ actor LinkClientConnection {
             if frame.status != 200 || frame.final == true {
                 // Only a refused grant is final; a missing or failing resource ends this stream and is resubscribed.
                 let status = frame.status ?? 401
-                let failure = status == 401 || status == 403
+                // A Bridge that restarted refuses a subscription signed under the old epoch and names the reason,
+                // so the client can fetch the new epoch instead of treating the grant as refused.
+                let stale = status == 401 && frame.data.map { String(decoding: $0, as: UTF8.self) } == "invalid_proof"
+                let failure = stale ? BridgeError("invalid_proof", "The subscription was signed under an old epoch.", status: 401)
+                    : status == 401 || status == 403
                     ? BridgeError("unauthorized", "The subscription ended; refresh its authorization.", status: status)
                     : BridgeError("subscription_ended", "The subscription ended; it will be renewed.", status: status)
                 subscriptions[frame.id] = nil; continuation.finish(throwing: failure)
@@ -208,6 +252,7 @@ actor LinkClientConnection {
     private func cancel(_ id: String, timedOut: Bool = false) async {
         if let item = pending.removeValue(forKey: id) {
             item.deadline.cancel()
+            if timedOut { trace("request timeout after 20s \(item.method) \(item.route) error=URLError(timedOut)") }
             let failure: any Error
             if item.method == "POST" { failure = BridgeError("outcome_unknown", "Inspect the operation receipt before retrying.", status: 504) }
             else if timedOut { failure = URLError(.timedOut) }
@@ -217,7 +262,10 @@ actor LinkClientConnection {
         subscriptions.removeValue(forKey: id)?.finish()
         abandoned.append(id); if abandoned.count > 64 { abandoned.removeFirst() }
         // A read that outlived its deadline points at a dead link: the next request dials again instead of waiting too.
-        if timedOut, Self.mayDropLink(pendingMethods: pending.values.map(\.method)) { await failed(URLError(.timedOut)); return }
+        if timedOut, Self.mayDropLink(pendingMethods: pending.values.map(\.method)) {
+            if socket != nil { trace("dropping link after a timed-out request") }
+            await failed(URLError(.timedOut)); return
+        }
         try? await send(LinkFrame(kind: "cancel", id: id))
     }
     /// Whether the link may be torn down: never under an in-flight write, which would then have an unknown outcome.
@@ -233,6 +281,11 @@ actor LinkClientConnection {
     }
     private func failed(_ error: any Error, source: LinkSocket? = nil) async {
         if let source, socket !== source { return }
+        if socket != nil || !pending.isEmpty || !subscriptions.isEmpty {
+            let writes = pending.values.filter { $0.method == "POST" }.count
+            let counts = "pending=\(pending.count) (post=\(writes)) subscriptions=\(subscriptions.count)"
+            trace(closed ? "link closed \(counts)" : "link down error=\(TraceFormat().describe(error)) \(counts)")
+        }
         if !closed { report(.disconnected) }
         heartbeat?.cancel(); heartbeat = nil
         receiver?.cancel(); receiver = nil; socket?.close(); socket = nil; cipher = nil
