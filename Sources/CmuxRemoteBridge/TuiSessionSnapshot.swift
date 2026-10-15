@@ -24,6 +24,8 @@ struct TuiSessionSnapshot: Sendable {
     let rawWorkspaces: [String: String]
     let bindings: [Binding]
     let surfaces: Set<String>
+    /// Each terminal's own title, which an agent may use for its activity (Claude Code marks idle with `✳`).
+    let terminalTitles: [String: String]
     init(_ raw: JSONValue) throws {
         let identity = TuiResourceIdentity()
         machine = try identity.validate(raw["machine"]["id"].string, prefix: "machine")
@@ -74,6 +76,7 @@ struct TuiSessionSnapshot: Sendable {
         }
         rawWorkspaces = Dictionary(uniqueKeysWithValues: workspaceRows.keys.map { (identity.uuid(machine: machineID, session: sessionID, resource: $0), $0) })
         surfaces = Set(terminals.keys.map { identity.uuid(machine: machineID, session: sessionID, resource: $0) })
+        terminalTitles = terminals.compactMapValues { $0["title"].string }
         var bound: [Binding] = [], claimed = Set<String>()
         for agent in arrays["agents"]! {
             guard agent["source"].string == "hook", let provider = agent["extra"]["agent"].string, ["claude", "codex"].contains(provider),
