@@ -27,6 +27,14 @@ product areas are:
 - **Connect to a Mac**: the existing nearby/saved host, trust, enrollment and
   workspace-mirror flow. Native Remote rows remain the everyday workspace entry.
 
+**Advanced** also has **Show Logs…**, which opens one reusable Bridge log window.
+It reads only the last 2 MiB of `<state>/bridge.log`, continuing into
+`bridge.log.1` after a rotation, and shows the newest 2,000 complete lines with
+the newest at the bottom. Reads run off the main thread every two seconds only
+while the window is on screen and not paused. Level and keyword filters apply
+to the view and to **Copy All**, whose first line names the app build and macOS
+version. A missing file means the resident is not running or predates the log.
+
 Closing Settings leaves the background service and mirrors running. The resident remembers the owner's last explicit sharing choice
 (`sharing.json`, owner-only) and restores it after a restart; a listener that ends
 on its own is not recorded as "off". A failed restore is shown as a status error. Quitting the
