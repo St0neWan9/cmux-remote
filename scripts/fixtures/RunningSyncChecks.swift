@@ -47,7 +47,11 @@ struct RunningSyncChecks {
         let before = reads.count["b"] ?? 0
         await shown.syncHidden()
         check(reads.count["b"] == before, "A conversation on screen was also read by the off-screen follower")
-        observer.cancel()
+        // On screen it is not followed a second time: its own observer holds the subscription.
+        check(!shown.following && !sync.followed.contains("b"), "A conversation on screen was also followed off screen")
+        observer.cancel(); await settle()
+        sync.update([target("a", running: true), target("b", running: true), target("c", running: true)])
+        check(shown.following, "A conversation that left the screen was not followed again")
 
         // A turn that stops off screen is read once more, so its final answer is there; then it is no longer followed.
         let finishedBefore = reads.count["a"] ?? 0
