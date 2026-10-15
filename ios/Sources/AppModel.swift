@@ -81,13 +81,13 @@ final class AppModel {
         #endif
         relayOrigins = store.relayOrigins()
         for value in store.loadConnections() {
-            guard let remote = try? RemoteClient(connection: value) else { continue }
+            guard let remote = try? RemoteClient(connection: value, trace: diagLinkTrace(host: value.host.id)) else { continue }
             links.append(HostLink(id: value.host.id, name: value.host.name, client: remote, connection: value))
             learnRelay(value)
         }
         host = links.first?.name ?? ""
         if links.isEmpty {
-            if store.legacyEnabled(), let legacy = store.load() { host = legacy.host; links = [HostLink(id: "legacy", name: legacy.host, client: RemoteClient(pairing: legacy), connection: nil)] }
+            if store.legacyEnabled(), let legacy = store.load() { host = legacy.host; links = [HostLink(id: "legacy", name: legacy.host, client: RemoteClient(pairing: legacy, trace: diagLinkTrace(host: "legacy")), connection: nil)] }
             else if store.load() != nil { error = String(localized: "pair.legacy_migration") }
         }
     }
@@ -135,7 +135,7 @@ final class AppModel {
                     let endpoint = try await discovery.resolve(peer)
                     let relocated = try saved.relocated(to: endpoint, advertisedHost: peer.host)
                     if relocated.endpoint != saved.endpoint {
-                        let candidate = try RemoteClient(connection: relocated)
+                        let candidate = try RemoteClient(connection: relocated, trace: diagLinkTrace(host: relocated.host.id))
                         do { _ = try await candidate.get("/v1/status", as: JSONValue.self) }
                         catch { candidate.close(); throw error }
                         guard !Task.isCancelled, let current = links.first(where: { $0.id == link.id }), current.client === link.client,
@@ -203,7 +203,7 @@ final class AppModel {
                         guard !Task.isCancelled, pendingEnrollment === enrollment else { break }
                         enrollmentState = status.state; error = nil
                         if status.state == "approved" {
-                            let value = try enrollment.connection(from: status); let candidate = try RemoteClient(connection: value)
+                            let value = try enrollment.connection(from: status); let candidate = try RemoteClient(connection: value, trace: diagLinkTrace(host: value.host.id))
                             do {
                                 _ = try await candidate.get("/v1/status", as: JSONValue.self)
                                 guard !Task.isCancelled, pendingEnrollment === enrollment else { candidate.close(); break }
@@ -235,7 +235,7 @@ final class AppModel {
     /// Legacy is an explicit advanced fallback; it is never promoted to a new device identity.
     func pair(_ pairing: PairingConfiguration) async {
         loading = true; error = nil; defer { loading = false }
-        let candidate = RemoteClient(pairing: pairing)
+        let candidate = RemoteClient(pairing: pairing, trace: diagLinkTrace(host: "legacy"))
         do {
             _ = try await candidate.get("/v1/status", as: JSONValue.self); try store.save(pairing); try store.enableLegacy()
             install(HostLink(id: "legacy", name: pairing.host, client: candidate, connection: nil)); addingDevice = false
