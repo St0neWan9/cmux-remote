@@ -8,10 +8,13 @@ struct ErrorPresentation {
         if (error as NSError).domain == NSPOSIXErrorDomain { return true }
         // These Bridge and relay codes are transient connection failures, not application errors.
         // They resolve on the next reconnect without user action, so the connection bar handles them.
+        // Protocol-level and transient relay/bridge codes: these resolve on reconnect.
         return ["relay_unavailable", "connection_failed",
                 "bridge_offline", "bridge_starting", "bridge_replaced",
                 "invalid_proof", "replayed_request", "relay_configuration",
-                "capacity"].contains((error as? BridgeError)?.code ?? "")
+                "capacity", "invalid_response", "invalid_connection",
+                "invalid_packet", "invalid_channel", "invalid_bridge_packet",
+                "host_changed_replaced"].contains((error as? BridgeError)?.code ?? "")
     }
     func message(_ error: any Error) -> String {
         if let network = error as? URLError {
@@ -49,10 +52,7 @@ struct ErrorPresentation {
         case "invalid_image": return String(localized: "error.image")
         case "image_load_failed": return String(localized: "error.image_load")
         case "request_expired": return String(localized: "error.expired")
-        default:
-            // Temporary: log the error code in the banner so it can be identified and handled.
-            if let code { return "[" + code + "] " + String(localized: "error.connection") }
-            return String(localized: "error.connection")
+        default: return String(localized: "error.connection")
         }
     }
 }
