@@ -49,7 +49,10 @@ struct ErrorPresentation {
         case "invalid_image": return String(localized: "error.image")
         case "image_load_failed": return String(localized: "error.image_load")
         case "request_expired": return String(localized: "error.expired")
-        default: return String(localized: "error.connection")
+        default:
+            // Temporary: log the error code in the banner so it can be identified and handled.
+            if let code { return "[" + code + "] " + String(localized: "error.connection") }
+            return String(localized: "error.connection")
         }
     }
 }
