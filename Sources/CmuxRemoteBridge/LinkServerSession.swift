@@ -55,7 +55,10 @@ actor LinkServerSession {
                 if item.acknowledged == item.count { requests[frame.id] = nil }
                 let waiter = item.waiter; item.waiter = nil; deliveries[frame.id] = item; waiter?.resume()
             case "cancel":
-                subscriptions.removeValue(forKey: frame.id)?.cancel()
+                if let ended = subscriptions.removeValue(forKey: frame.id) {
+                    ended.cancel()
+                    BridgeLog.shared.debug("link", "link subscription cancelled client=\(clientID?.prefix(8) ?? "?") id=\(frame.id.prefix(8)) open=\(subscriptions.count)")
+                }
                 requests.removeValue(forKey: frame.id)?.cancel()
                 deliveries.removeValue(forKey: frame.id)?.waiter?.resume(throwing: CancellationError())
             case "request", "subscribe":
@@ -76,6 +79,8 @@ actor LinkServerSession {
                         return
                     }
                     subscriptions[frame.id] = Task { [weak self] in await self?.observe(frame, clientID: identity) }
+                    // The count shows a client that opens the same subscription more than once.
+                    BridgeLog.shared.debug("link", "link subscription open client=\(clientID.prefix(8)) id=\(frame.id.prefix(8)) open=\(subscriptions.count)")
                 } else {
                     requests[frame.id] = Task { [weak self] in
                         guard let self else { return }
