@@ -16,32 +16,35 @@ import Foundation
     }
     private let limit: Int
     private let interval: Duration
-    private var followers: [String: Task<Void, Never>] = [:]
+    private var followers: [String: ConversationModel] = [:]
     /// Conversations followed while they ran, kept for the pass that reads how they ended.
     private var wasRunning: Set<String> = []
     /// The single read for each conversation that just finished.
     private var finishing: [String: Task<Void, Never>] = [:]
 
-    init(limit: Int = 3, interval: Duration = .seconds(8)) {
+    /// Two at most: each follower holds one of the eight subscriptions a Bridge link allows.
+    init(limit: Int = 2, interval: Duration = .seconds(8)) {
         self.limit = limit; self.interval = interval
     }
 
-    var followed: Set<String> { Set(followers.keys) }
+    /// The conversations being followed off screen; one now on screen follows itself and is not counted.
+    var followed: Set<String> { Set(followers.filter(\.value.following).keys) }
 
     /// `targets` are the listed conversations, most recent first.
     func update(_ targets: [Target]) {
         let finished = targets.filter { !$0.running && wasRunning.contains($0.key) }
         for target in finished {
-            wasRunning.remove(target.key); followers[target.key]?.cancel(); followers[target.key] = nil
+            wasRunning.remove(target.key); followers[target.key]?.unfollow(); followers[target.key] = nil
             let model = target.model()
             finishing[target.key] = Task { await model.syncHidden() }
         }
         let wanted = Array(targets.filter(\.running).prefix(limit))
         let keys = Set(wanted.map(\.key))
-        for (key, follower) in followers where !keys.contains(key) { follower.cancel(); followers[key] = nil }
-        for target in wanted where followers[target.key] == nil {
-            let model = target.model(), interval = interval
-            followers[target.key] = Task { await model.followHidden(every: interval) }
+        for (key, model) in followers where !keys.contains(key) { model.unfollow(); followers[key] = nil }
+        // Asked again on every update: a conversation that left the screen resumes being followed.
+        for target in wanted {
+            let model = followers[target.key] ?? target.model()
+            followers[target.key] = model; model.follow(every: interval)
         }
         wasRunning.formUnion(keys)
     }
@@ -57,7 +60,8 @@ import Foundation
     }
 
     func stop() {
-        for task in Array(followers.values) + Array(finishing.values) { task.cancel() }
+        for model in followers.values { model.unfollow() }
+        for task in finishing.values { task.cancel() }
         followers = [:]; finishing = [:]; wasRunning = []
     }
 }
