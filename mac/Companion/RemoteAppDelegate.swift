@@ -7,6 +7,8 @@ import CmuxRemoteMac
     let model: MacAppModel
     private var settingsWindow: NSWindow?
     private var settingsToolbar: RemoteSettingsToolbar?
+    private var logWindow: NSWindow?
+    private var logOcclusion: (any NSObjectProtocol)?
     private var statusItem: NSStatusItem?
     private var statusMenu: RemoteStatusMenu?
     private var applicationMenu: RemoteStatusMenu?
@@ -43,6 +45,8 @@ import CmuxRemoteMac
         statusItem?.button?.image?.accessibilityDescription = String(localized: "mac.menu.accessibility", bundle: .interface)
         settingsWindow?.title = String(localized: "mac.settings.title", bundle: .interface)
         settingsToolbar?.refreshLabels()
+        logWindow?.title = String(localized: "mac.logs.windowTitle", bundle: .interface)
+        (logWindow?.contentView as? NSHostingView<MacLogView>)?.rootView = MacLogView(model: model.logs, language: model.language)
     }
     @objc private func openSettingsFromMenu() { showSettings() }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { openSettingsFromMenu(); return false }
@@ -53,7 +57,7 @@ import CmuxRemoteMac
             window.title = String(localized: "mac.settings.title", bundle: .interface); window.isReleasedWhenClosed = false
             let toolbar = RemoteSettingsToolbar(model: model)
             settingsToolbar = toolbar; window.toolbar = toolbar.toolbar; window.toolbarStyle = .preference
-            let content = NSHostingView(rootView: RemoteSettingsView(app: model, sectionChanged: { [weak toolbar] in toolbar?.updateSelection() }))
+            let content = NSHostingView(rootView: RemoteSettingsView(app: model, sectionChanged: { [weak toolbar] in toolbar?.updateSelection() }, openLogs: { [weak self] in self?.showLogs() }))
             window.contentView = content; window.setContentSize(content.fittingSize)
             window.center(); settingsWindow = window
         }
@@ -61,6 +65,26 @@ import CmuxRemoteMac
         NSApplication.shared.activate(ignoringOtherApps: true); settingsWindow?.makeKeyAndOrderFront(nil)
         // Preference panes open without a focused field, so no control shows a focus ring until used.
         settingsWindow?.makeFirstResponder(nil)
+    }
+    /// One reusable, resizable log window; it reads the log only while it is on screen.
+    func showLogs() {
+        if logWindow == nil {
+            let design = MacDesignTokens()
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: design.logWindowWidth, height: design.logWindowHeight),
+                                  styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
+            window.title = String(localized: "mac.logs.windowTitle", bundle: .interface); window.isReleasedWhenClosed = false
+            window.contentMinSize = NSSize(width: design.logMinimumWidth, height: design.logMinimumHeight)
+            window.contentView = NSHostingView(rootView: MacLogView(model: model.logs, language: model.language))
+            window.setFrameAutosaveName("CmuxRemoteBridgeLog")
+            if window.frame.origin == .zero { window.center() }
+            // Closing, miniaturizing or covering the window stops the periodic read; showing it again resumes.
+            logOcclusion = NotificationCenter.default.addObserver(forName: NSWindow.didChangeOcclusionStateNotification, object: window, queue: .main) { [weak self, weak window] _ in
+                MainActor.assumeIsolated { self?.model.logs.windowVisible = window?.occlusionState.contains(.visible) == true }
+            }
+            logWindow = window
+        }
+        NSApplication.shared.activate(ignoringOtherApps: true); logWindow?.makeKeyAndOrderFront(nil)
+        model.logs.windowVisible = true
     }
     /// A task-owned debug fixture obtains a stable capture handle before exercising the real UI.
     private var acceptanceOpenSettings: Bool {
