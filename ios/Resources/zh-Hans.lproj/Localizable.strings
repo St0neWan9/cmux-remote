@@ -86,6 +86,7 @@
 "sessions.projects" = "项目";
 "sessions.other" = "其他会话";
 "sessions.options" = "连接选项";
+"page.close" = "关闭";
 "page.back" = "返回";
 "chat.copy" = "复制回复";
 "chat.copied" = "已复制";
