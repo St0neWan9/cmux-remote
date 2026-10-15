@@ -5,8 +5,8 @@ import CmuxRemoteCore
 final class WebSocketTransport: ResourceTransport {
     private let connection: LinkClientConnection
     init(host: HostIdentity, key: Data, endpoint: BridgeEndpoint, relayDial: @escaping @Sendable (URL, [String: String]) -> LinkSocket = { LinkSocket(url: $0, headers: $1, timeout: 15) },
-         report: @escaping @Sendable (LinkState) -> Void = { _ in }, trace: @escaping @Sendable (String) -> Void = { _ in }) {
-        connection = LinkClientConnection(host: host, key: key, endpoint: endpoint, relayDial: relayDial, report: report, trace: trace)
+         report: @escaping @Sendable (LinkState) -> Void = { _ in }, trace: @escaping @Sendable (String) -> Void = { _ in }, lanDeadline: Duration = .seconds(4)) {
+        connection = LinkClientConnection(host: host, key: key, endpoint: endpoint, relayDial: relayDial, report: report, trace: trace, lanDeadline: lanDeadline)
     }
     func reconnect() async { await connection.reconnect() }
     func updateRelay(_ relay: RelayEndpoint?) async { await connection.updateRelay(relay) }

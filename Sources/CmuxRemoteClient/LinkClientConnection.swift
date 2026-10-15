@@ -22,6 +22,8 @@ actor LinkClientConnection {
     private let key: Data
     private var endpoint: BridgeEndpoint
     private let relayDial: @Sendable (URL, [String: String]) -> LinkSocket
+    /// How long the LAN handshake may take before the dial counts the LAN as unreachable and tries the relay.
+    private let lanDeadline: Duration
     private var socket: LinkSocket?
     private var writer: WebSocketSendQueue?
     private var cipher: LinkCipher?
@@ -42,8 +44,8 @@ actor LinkClientConnection {
     /// A pong that does not arrive within this time means the path died without the socket noticing.
     private static let pongDeadline: Duration = .seconds(10)
     init(host: HostIdentity, key: Data, endpoint: BridgeEndpoint, relayDial: @escaping @Sendable (URL, [String: String]) -> LinkSocket = { LinkSocket(url: $0, headers: $1, timeout: 15) },
-         report: @escaping @Sendable (LinkState) -> Void = { _ in }, trace: @escaping @Sendable (String) -> Void = { _ in }) {
-        self.host = host; self.key = key; self.endpoint = endpoint; self.relayDial = relayDial; self.report = report; self.trace = trace
+         report: @escaping @Sendable (LinkState) -> Void = { _ in }, trace: @escaping @Sendable (String) -> Void = { _ in }, lanDeadline: Duration = .seconds(4)) {
+        self.host = host; self.key = key; self.endpoint = endpoint; self.relayDial = relayDial; self.report = report; self.trace = trace; self.lanDeadline = lanDeadline
     }
     /// Drops a link the person or the network says may be dead, then dials again.
     ///
@@ -144,7 +146,7 @@ actor LinkClientConnection {
         guard let url = parts.url else { throw BridgeError("invalid_endpoint", "Invalid WebSocket endpoint.") }
         let direct = LinkSocket(url: url, delegate: PinnedSessionDelegate(pairing: pairing)), started = ContinuousClock.now
         do {
-            let ready = try await prepare(direct, handshake: handshake, relayed: false)
+            let ready = try await prepare(direct, handshake: handshake, relayed: false, deadline: lanDeadline)
             trace("dial lan ok \(TraceFormat().milliseconds(since: started))ms relayed=false")
             return ready
         } catch {
@@ -199,14 +201,22 @@ actor LinkClientConnection {
     }
     private nonisolated func prepare(_ socket: LinkSocket, handshake: LinkClientHandshake, relayed: Bool, deadline: Duration = .seconds(4)) async throws -> Prepared {
         // A pending WebSocket receive may not observe cancellation; closing the socket ends a dial that lost a race.
-        let acceptance: SignedValue<LinkAcceptance> = try await withTaskCancellationHandler {
+        let started = ContinuousClock.now
+        let acceptance: SignedValue<LinkAcceptance>
+        do { acceptance = try await withTaskCancellationHandler {
             try await withThrowingTaskGroup(of: Data.self) { group in
                 group.addTask { try await socket.send(JSONEncoder().encode(handshake.proposal)); return try await socket.receive() }
                 group.addTask { try await Task.sleep(for: deadline); socket.close(); throw URLError(.timedOut) }
                 defer { group.cancelAll() }
                 return try JSONDecoder().decode(SignedValue<LinkAcceptance>.self, from: await group.next()!)
             }
-        } onCancel: { socket.close() }
+        } onCancel: { socket.close() } }
+        catch {
+            // Closing the socket at the deadline can surface the receive's "cancelled" before the timeout itself.
+            // Report the timeout, so a slow LAN still counts as unreachable and the dial moves on to the relay.
+            if !Task.isCancelled, ContinuousClock.now - started >= deadline { throw URLError(.timedOut) }
+            throw error
+        }
         try Task.checkCancellation()
         return Prepared(socket: socket, cipher: try handshake.accept(acceptance), relayed: relayed)
     }
