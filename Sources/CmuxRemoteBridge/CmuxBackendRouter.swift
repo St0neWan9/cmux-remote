@@ -35,7 +35,23 @@ public actor CmuxBackendRouter: CmuxControlling {
             }
             guard available, rows.count <= 4096 else { throw BridgeError("socket_unavailable", "No local cmux backend is available.", status: 503) }
             let field = key == "workspaces" ? "id" : "session_id"
-            let ids = rows.map { $0[field].string?.lowercased() }
+            var ids = rows.map { $0[field].string?.lowercased() }
+            // A resumed Codex session keeps its ID and writes a new transcript file, so one backend lists it once
+            // per file. Rows from one backend that agree on agent and directory are that one session: the most
+            // recently modified row stands for it.
+            var newest: [String: Int] = [:]
+            for index in rows.indices {
+                guard let id = ids[index], let agent = rows[index]["agent"].string, let directory = rows[index]["cwd"].string else { continue }
+                let group = id + "\u{0}" + sources[index] + "\u{0}" + agent + "\u{0}" + directory
+                if let kept = newest[group] {
+                    let later = (rows[index]["modified"].string ?? "") > (rows[kept]["modified"].string ?? "")
+                    ids[later ? kept : index] = "\u{0}superseded"; if later { newest[group] = index }
+                } else { newest[group] = index }
+            }
+            let superseded = ids.filter { $0 == "\u{0}superseded" }.count
+            if superseded > 0 { BridgeLog.shared.info("inventory", "\(method) folded \(superseded) older transcript rows of resumed sessions") }
+            let folded = rows.indices.filter { ids[$0] != "\u{0}superseded" }
+            rows = folded.map { rows[$0] }; sources = folded.map { sources[$0] }; ids = folded.map { ids[$0] }
             var counts: [String: Int] = [:]
             for id in ids.compactMap({ $0 }) { counts[id, default: 0] += 1 }
             // An unidentified or ambiguous row cannot be routed safely, so it is left out on its own; every other
