@@ -66,7 +66,15 @@ actor LinkServerSession {
                 try router.verifyChannelIdentity(frame, clientID: clientID)
                 if frame.kind == "subscribe" {
                     guard subscriptions.count < 8 else { throw BridgeError("too_large", "The subscription limit was reached.") }
-                    let identity = try await router.subscriptionIdentity(frame, clientID: clientID)
+                    let identity: String
+                    do { identity = try await router.subscriptionIdentity(frame, clientID: clientID) }
+                    catch let refusal as BridgeError where refusal.status == 401 || refusal.status == 403 {
+                        // A stale epoch after a Bridge restart refuses this subscription only. Closing the link
+                        // instead made the client redial and resubscribe under the same epoch, forever.
+                        BridgeLog.shared.warning("link", "subscription refused id=\(frame.id.prefix(8)) code=\(refusal.code)")
+                        try await send(LinkFrame(kind: "event", id: frame.id, data: Data(refusal.code.utf8), status: refusal.status, final: true))
+                        return
+                    }
                     subscriptions[frame.id] = Task { [weak self] in await self?.observe(frame, clientID: identity) }
                 } else {
                     requests[frame.id] = Task { [weak self] in
