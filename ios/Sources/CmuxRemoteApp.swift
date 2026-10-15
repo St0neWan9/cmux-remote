@@ -14,8 +14,8 @@ struct CmuxRemoteApp: App {
     var body: some Scene {
         WindowGroup {
             Group {
-                // Approved Macs open straight into the combined conversation list.
-                if model.links.isEmpty || model.addingDevice { PairingView(model: model) }
+                // Approval is required before any list exists; adding a further Mac is a push over that list.
+                if model.links.isEmpty { PairingView(model: model) }
                 else { SessionListView(model: model) }
             }.environment(\.colorScheme, .light).tint(MobileDesign.accent).task(id: phase) {
                 model.restorePairing()

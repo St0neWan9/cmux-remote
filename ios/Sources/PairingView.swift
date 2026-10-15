@@ -16,7 +16,8 @@ struct PairingView: View {
     @State private var scanning = false
     var body: some View {
         AppNavigationStack {
-            WhitePage(title: String(localized: "app.title"), showsBack: false,
+            // Pushed over the list it carries its own back chevron; as the first screen it shows none.
+            WhitePage(title: String(localized: "app.title"), showsBack: model.addingDevice,
                       back: model.addingDevice && !model.links.isEmpty ? { Task { await model.cancelEnrollment() }; model.addingDevice = false } : nil) {
                 ScrollView {
                     VStack(alignment: .leading, spacing: MobileDesign.sectionGap) {

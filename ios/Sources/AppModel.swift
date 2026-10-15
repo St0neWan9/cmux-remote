@@ -32,8 +32,11 @@ final class AppModel {
     var relayOrigins: [String] = []
     var relayError: String?
     var relayLoading = false
-    /// The pairing screen over the conversation list while another Mac is added.
+    /// The pairing screen pushed over the conversation list while another Mac is added.
     var addingDevice = false
+    /// Whether the sidebar is open. It lives here so a pushed page keeps the drawer open behind it, and so
+    /// returning from one lands on the drawer rather than the bare list.
+    var sidebarOpen = false
     var pendingEnrollment: (any DeviceEnrolling)?
     var enrollmentState = ""
     private let discovery: BridgeDiscovery
