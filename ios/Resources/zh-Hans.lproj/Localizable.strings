@@ -268,3 +268,8 @@
 "connection.offline" = "无法连接到 Mac";
 "connection.retry" = "重试";
 "connection.offline_named" = "无法连接到 %@";
+
+"diagnostics.title" = "诊断日志";
+"diagnostics.copy" = "复制全部";
+"diagnostics.copied" = "已复制";
+"diagnostics.clear" = "清除";

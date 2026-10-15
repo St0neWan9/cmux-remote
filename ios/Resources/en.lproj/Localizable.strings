@@ -268,3 +268,8 @@
 "connection.offline" = "Can’t reach your Mac";
 "connection.retry" = "Retry";
 "connection.offline_named" = "Can’t reach %@";
+
+"diagnostics.title" = "Diagnostics";
+"diagnostics.copy" = "Copy All";
+"diagnostics.copied" = "Copied";
+"diagnostics.clear" = "Clear";
