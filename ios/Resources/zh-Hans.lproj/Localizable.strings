@@ -308,3 +308,5 @@
 "sessions.close_search" = "关闭搜索";
 "sessions.title_menu" = "会话选项";
 "feed.title_count" = "待处理事项（%lld）";
+"chat.select_text" = "选择文本";
+"chat.copy_text" = "复制";
