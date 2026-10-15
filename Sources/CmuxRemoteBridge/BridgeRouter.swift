@@ -37,11 +37,16 @@ public struct BridgeRouter: Sendable {
         guard client.id == clientID else { throw BridgeError("unauthorized", "The subscription belongs to another device.", status: 401) }
         return client.id
     }
-    private func isSubscriptionURI(_ uri: String) -> Bool {
-        guard let components = URLComponents(string: uri), components.scheme == nil, components.host == nil else { return false }
-        let path = components.path.split(separator: "/").map(String.init)
-        if path == ["v2", "sessions"] || path == ["v2", "feed"] { return true }
-        return path.count == 4 && path[0...1] == ["v2", "sessions"] && ["history", "preview"].contains(path[3])
+    private func isSubscriptionURI(_ uri: String) -> Bool { LinkSubscriptionResource(uri: uri) != nil }
+    /// What one subscription tick would answer, when that is provable without running the handler; nil
+    /// means run it. The device's grant and the session's workspace are checked here as on the handler
+    /// path, so a refusal is never hidden behind a skipped tick: a failed check runs the handler, which
+    /// answers the refusal exactly as before.
+    func subscriptionStamp(uri: String, clientID: String) async -> String? {
+        guard let authority, let resource = LinkSubscriptionResource(uri: uri),
+              let current = await service.subscriptionStamp(resource),
+              (try? await authority.require(clientID, capability: .conversationRead, workspace: current.workspace)) != nil else { return nil }
+        return current.stamp
     }
     func respondResource(method: String, uri: String, authorization: String?, body: Data, subscriptionClientID: String? = nil) async -> HTTPResourceResponse {
         do {
@@ -163,7 +168,7 @@ public struct BridgeRouter: Sendable {
                     try await require(client, capability, workspace: workspace)
                 }
                 switch (method, path[3]) {
-                case ("GET", "history"): data = try encode(await service.history(id: id, beforeSeq: query["before_seq"].flatMap(Int.init), limit: query["limit"].flatMap(Int.init) ?? 100, access: access))
+                case ("GET", "history"): data = try encode(await service.history(id: id, beforeSeq: query["before_seq"].flatMap(Int.init), limit: query["limit"].flatMap(Int.init) ?? 100, discovered: client != nil, access: access))
                 case ("GET", "tool-detail"):
                     guard let messageID = query["message_id"], let generation = query["generation"], let field = query["field"] else { throw BridgeError("invalid_input", "A tool record, generation and field are required.") }
                     if let offset = query["offset"], Int(offset) == nil { throw BridgeError("invalid_input", "The text offset is invalid.") }
@@ -173,7 +178,8 @@ public struct BridgeRouter: Sendable {
                 case ("GET", "image"):
                     guard let reference = query["reference_id"], let generation = query["generation"], reference.range(of: "^[0-9a-f]{64}$", options: .regularExpression) != nil else { throw BridgeError("invalid_input", "A recorded image reference and generation are required.") }
                     data = try await service.image(id: id, referenceID: reference, generation: generation, access: access); image = true
-                case ("GET", "preview"): data = try encode(await service.preview(id: id, access: access))
+                // The scope check above just ran discovery; the service resolves this id from it rather than again.
+                case ("GET", "preview"): data = try encode(await service.preview(id: id, discovered: client != nil, access: access))
                 case ("GET", "changes"): data = try encode(await service.changes(id: id, access: access))
                 case ("GET", "diff"): data = try encode(await service.diff(id: id, path: query["path"], access: access))
                 case ("GET", "file"):
@@ -199,7 +205,11 @@ public struct BridgeRouter: Sendable {
     private func require(_ client: EnrolledClient?, _ capability: ClientCapability, workspace: String? = nil) async throws {
         if let client, let authority { _ = try await authority.require(client.id, capability: capability, workspace: workspace) }
     }
-    private func encode<T: Encodable>(_ value: T) throws -> Data { let encoder = JSONEncoder(); encoder.dateEncodingStrategy = .iso8601; return try encoder.encode(value) }
+    /// Sorted keys make equal answers byte-equal: subscriptions compare bytes, and two equal dictionaries
+    /// (the feed's daemon objects) otherwise encode their keys in different orders.
+    private func encode<T: Encodable>(_ value: T) throws -> Data {
+        let encoder = JSONEncoder(); encoder.dateEncodingStrategy = .iso8601; encoder.outputFormatting = [.sortedKeys]; return try encoder.encode(value)
+    }
     private func constantTimeEqual(_ a: String, _ b: String) -> Bool {
         let left = Array(a.utf8); let right = Array(b.utf8); var difference = left.count ^ right.count
         for index in 0..<max(left.count, right.count) { difference |= Int((index < left.count ? left[index] : 0) ^ (index < right.count ? right[index] : 0)) }; return difference == 0

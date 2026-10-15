@@ -12,6 +12,8 @@ struct ConversationView: View {
     @State private var userScrolling = false
     @State private var latestVisible = true
     @State private var initiallyScrolled = false
+    /// The opening scroll, which waits for the stored copy to appear before it settles.
+    @State private var initialScroll: Task<Void, Never>?
     /// Retries the opening jump: a row's height is known only after it lays out.
     @State private var settleTask: Task<Void, Never>?
     /// The row whose disclosure is changing height; the follower stands down until it settles.
@@ -86,9 +88,14 @@ struct ConversationView: View {
             // Opening a cached conversation re-enters with its follow state; start from the last message.
             .onAppear {
                 userScrolling = false; atLatest = true
-                if !model.messages.isEmpty { initiallyScrolled = true; settleAtBottom(proxy, retries: 6) }
+                initialScroll = Task {
+                    // Show the conversation read last, then settle once the fresh read lands.
+                    await model.restoreStored()
+                    guard !Task.isCancelled, !model.messages.isEmpty else { return }
+                    initiallyScrolled = true; settleAtBottom(proxy, retries: 6)
+                }
             }
-            .onDisappear { settleTask?.cancel(); settleTask = nil }
+            .onDisappear { settleTask?.cancel(); settleTask = nil; initialScroll?.cancel(); initialScroll = nil }
             .onChange(of: model.jumpToLatest) { _, _ in atLatest = true; withAnimation { proxy.scrollTo("latest", anchor: .bottom) } }
         }
         }
