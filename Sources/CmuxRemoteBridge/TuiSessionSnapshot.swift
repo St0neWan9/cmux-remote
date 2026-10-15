@@ -20,6 +20,8 @@ struct TuiSessionSnapshot: Sendable {
     let generation: String
     let revision: String
     let workspaces: [JSONValue]
+    /// Published workspace UUIDs back to the daemon's own `ws_` identities.
+    let rawWorkspaces: [String: String]
     let bindings: [Binding]
     let surfaces: Set<String>
     init(_ raw: JSONValue) throws {
@@ -58,7 +60,19 @@ struct TuiSessionSnapshot: Sendable {
             memberships[terminal, default: []].insert(workspace)
         }
         let machineID = machine, sessionID = session
-        workspaces = arrays["workspaces"]!.map { row in .object(["id": .string(identity.uuid(machine: machineID, session: sessionID, resource: row["id"].string!)), "title": row["name"], "backend": .string("cmux-tui")]) }
+        // A workspace's folders are its terminals' working directories; there is no workspace-level directory.
+        var folders: [String: [String]] = [:]
+        for (terminal, scopes) in memberships.sorted(by: { $0.key < $1.key }) where scopes.count == 1 {
+            guard let cwd = terminals[terminal]?["cwd"].string, cwd.hasPrefix("/"), let workspace = scopes.first,
+                  !(folders[workspace] ?? []).contains(cwd), (folders[workspace] ?? []).count < 32 else { continue }
+            folders[workspace, default: []].append(cwd)
+        }
+        workspaces = arrays["workspaces"]!.map { row in
+            let raw = row["id"].string!
+            return .object(["id": .string(identity.uuid(machine: machineID, session: sessionID, resource: raw)), "title": row["name"], "backend": .string("cmux-tui"),
+                            "directories": .array((folders[raw] ?? []).map(JSONValue.string))])
+        }
+        rawWorkspaces = Dictionary(uniqueKeysWithValues: workspaceRows.keys.map { (identity.uuid(machine: machineID, session: sessionID, resource: $0), $0) })
         surfaces = Set(terminals.keys.map { identity.uuid(machine: machineID, session: sessionID, resource: $0) })
         var bound: [Binding] = [], claimed = Set<String>()
         for agent in arrays["agents"]! {
