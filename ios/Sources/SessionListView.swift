@@ -34,7 +34,8 @@ struct SessionListView: View {
         let error = model.error
         let multiple = links.count > 1
         let canRead = links.contains { $0.client.allows(.conversationRead) }
-        SideDrawer(isPresented: $model.sidebarOpen, allowsEdgeOpening: !showConversation && !showConnection && !showFeed) {
+        // The drawer stays as the user left it; a pushed page opens over it rather than closing it.
+        SideDrawer(isPresented: $model.sidebarOpen, allowsEdgeOpening: !showConversation && !showConnection && !showFeed && !model.addingDevice) {
         AppNavigationStack {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: MobileDesign.sectionGap) {
@@ -123,7 +124,6 @@ struct SessionListView: View {
             // A pull reads again; only a Mac that is down is dialed again. The page menu keeps a full redial.
             .refreshable { await model.pullToRefresh() }
             .task { await model.refresh() }
-            .onDisappear { model.sidebarOpen = false }
             .overlay { if loading && hosted.isEmpty { ProgressView() } }
             .navigationDestination(isPresented: $showConversation) { if let selectedConversation { ConversationView(model: selectedConversation, hostName: selectedHostName) } }
             .navigationDestination(isPresented: $showConnection) {
