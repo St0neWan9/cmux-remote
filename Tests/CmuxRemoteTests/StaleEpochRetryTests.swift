@@ -47,4 +47,43 @@ import CmuxRemoteClient
         #expect(epochs[0] != epochs[1])
         client?.close()
     }
+    /// The first thing a phone does after a Bridge restart may be to resubscribe. That subscription is refused
+    /// for its stale epoch; the phone must fetch the new epoch and resubscribe instead of stopping for good.
+    @Test(.timeLimit(.minutes(1))) func aSubscriptionRecoversAcrossABridgeRestart() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let state = BridgeState(directory: directory); try state.initialize()
+        let workspace = "11111111-1111-1111-1111-111111111111", fixture = DurableMutationFixture(workspace: workspace)
+        let key = IdentityCryptography().generatePrivateKey()
+        var port = 0, client: RemoteClient?
+        for iteration in 0..<2 {
+            let authority = try state.authority(name: "Restarting host")
+            let service = SessionService(cmux: fixture, home: directory, transcriptRoots: [], mutations: MutationLedger(directory: directory))
+            let ready = AsyncThrowingStream<Int, any Error>.makeStream(), requestedPort = port
+            let server = Task {
+                do { try await HTTPServer().run(host: "127.0.0.1", port: requestedPort, certificate: state.certificate, key: state.key,
+                    router: BridgeRouter(service: service, authority: authority), onListening: { ready.continuation.yield($0); ready.continuation.finish() }) }
+                catch { ready.continuation.finish(throwing: error); throw error }
+            }
+            var readyIterator = ready.stream.makeAsyncIterator(); port = try #require(await readyIterator.next())
+            if client == nil {
+                let bootstrap = try await authority.open(endpoint: .init(host: "127.0.0.1", port: port), workspaces: [workspace])
+                let enrollment = try EnrollmentClient(bootstrap: bootstrap, privateKey: key, name: "Phone", kind: "iphone", capabilities: [.conversationRead, .conversationControl])
+                _ = try await authority.submit(enrollment.request)
+                try await authority.approve(requestID: enrollment.request.value.requestID, scope: .init(workspaces: [workspace], capabilities: [.conversationRead, .conversationControl]))
+                client = try RemoteClient(connection: try enrollment.connection(from: await authority.status(enrollment.request).value))
+                enrollment.close()
+                // Caches the first Bridge's epoch, which the restart below makes stale.
+                _ = try await client?.get("/v1/sessions", as: [SessionDescriptor].self)
+            } else {
+                let phone = try #require(client)
+                var changes = phone.changes(paths: ["/v1/sessions"]).makeAsyncIterator()
+                // The refused subscription is reported once; the renewed one then delivers its initial invalidation.
+                #expect(await changes.next() != nil)
+                #expect(await changes.next() != nil)
+            }
+            server.cancel(); try? await server.value
+        }
+        client?.close()
+    }
 }
