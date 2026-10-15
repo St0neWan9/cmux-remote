@@ -207,7 +207,9 @@ final class ConversationModel {
             let updatedIDs = Set(history.messages.map(\.id))
             images = images.filter { $0.generation == history.generation && !updatedIDs.contains($0.messageID) } + (history.images ?? [])
             if stopRequested, messages.last(where: { $0.role == .user })?.id != interruptedUserID { stopRequested = false }
-            if continues {
+            // A replaced page starts from no replies; either way the page's own replies are kept. Dropping them on
+            // the first read made every turn grow its footer on the next one, after the page had settled.
+            do {
                 let incoming = history.responses ?? []
                 let anchors = Set(incoming.map(\.firstMessageID))
                 responses = responses.filter { !anchors.contains($0.firstMessageID) } + incoming

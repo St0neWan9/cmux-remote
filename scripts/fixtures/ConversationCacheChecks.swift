@@ -60,6 +60,13 @@ struct ConversationCacheChecks {
         check(model.messages.map(\.id) == ["stored"] && model.historyGeneration == "stored-generation", "Opening a conversation did not show what was read last")
         await model.refresh()
         check(model.messages.map(\.id) == ["fresh"] && model.historyGeneration == "fresh-generation", "The read that followed did not replace the stored copy")
+        // The first read keeps its replies, so every turn has its footer before the page settles at the bottom.
+        let reply = ConversationResponse(firstMessageID: "fresh", lastMessageID: "fresh", startedAt: nil, completedAt: nil, durationSeconds: 3, recordedDuration: true, completed: true, firstSeq: 1, lastSeq: 1)
+        let firstRead = ConversationSnapshot(messages: [message("fresh", 1)], hasMore: false, generation: "g-replies", clipped: false, responses: [reply])
+        let opened = ConversationModel(session: descriptor, client: client, loadRecovery: { nil }, saveRecovery: { _ in },
+            readSessions: { [descriptor] }, readHistory: { _ in firstRead }, readPreview: { PreviewSnapshot(text: nil, available: false) })
+        await opened.refresh()
+        check(opened.responses.map(\.firstMessageID) == ["fresh"], "The first read of a conversation dropped its replies")
         return (count, failures)
     }
 }
