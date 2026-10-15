@@ -483,6 +483,8 @@ private actor DeferredToolPage {
         failures += cacheChecks.failures
         let syncChecks = await RunningSyncChecks.run()
         failures += syncChecks.failures
+        let fastChecks = await FastReadChecks.run()
+        failures += fastChecks.failures
         let historicalImageChecks = try await HistoricalImageChecks.run()
         failures += historicalImageChecks.failures
         let speechChecks = await SpeechStateChecks.run(client:client)
@@ -494,6 +496,6 @@ private actor DeferredToolPage {
         let edgeBackChecks = EdgeBackChecks.run()
         failures += edgeBackChecks.failures
         if !failures.isEmpty { print(failures.joined(separator: "\n")); exit(1) }
-        print("Phone state: 20 existing behavioral checks, \(mediaChecks) image/draft/receipt checks and \(detailChecks) tool-detail checks, \(readChecks.count) conversation read checks and \(cacheChecks.count) conversation cache checks and \(syncChecks.count) running-sync checks and \(historicalImageChecks.count) historical-image checks and \(speechChecks.count) speech checks and \(multiHostChecks.count) multi-Mac checks and \(reconnectChecks.count) reconnect checks and \(edgeBackChecks.count) edge-back checks passed.")
+        print("Phone state: 20 existing behavioral checks, \(mediaChecks) image/draft/receipt checks and \(detailChecks) tool-detail checks, \(readChecks.count) conversation read checks and \(cacheChecks.count) conversation cache checks and \(syncChecks.count) running-sync checks and \(fastChecks.count) fast-read checks and \(historicalImageChecks.count) historical-image checks and \(speechChecks.count) speech checks and \(multiHostChecks.count) multi-Mac checks and \(reconnectChecks.count) reconnect checks and \(edgeBackChecks.count) edge-back checks passed.")
     }
 }

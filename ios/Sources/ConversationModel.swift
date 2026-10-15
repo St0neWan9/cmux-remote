@@ -55,6 +55,13 @@ final class ConversationModel {
     private let readSessions: @Sendable () async throws -> [SessionDescriptor]
     private let readHistory: @Sendable (Int?) async throws -> ConversationSnapshot
     private let readPreview: @Sendable () async throws -> PreviewSnapshot
+    /// Reads only the newest messages; nil reads the full newest page every time.
+    private let readTail: (@Sendable (Int) async throws -> ConversationSnapshot)?
+    /// When the newest full page was last read. A refresh soon after reads only the tail: over the relay each
+    /// full page is the slowest read, and a running turn changes it every few seconds.
+    private var fullReadAt: Date?
+    private let tailLimit = 30
+    private let fullReadInterval: TimeInterval = 60
     /// The last read of this conversation, shown on open while the fresh one is on its way.
     private let cache: ConversationCache?
     private let refreshReads = ReadRequestOwner()
@@ -79,6 +86,7 @@ final class ConversationModel {
          readSessions: (@Sendable () async throws -> [SessionDescriptor])? = nil,
          readHistory: (@Sendable (Int?) async throws -> ConversationSnapshot)? = nil,
          readPreview: (@Sendable () async throws -> PreviewSnapshot)? = nil,
+         readTail: (@Sendable (Int) async throws -> ConversationSnapshot)? = nil,
          cache: ConversationCache? = nil) {
         self.session = session; self.client = client; speech = SpeechDraftModel(input: speechInput ?? UnavailableSpeechInput())
         let id = session.id
@@ -90,6 +98,11 @@ final class ConversationModel {
         self.readSessions = readSessions ?? { try await client.get("/v1/sessions", as: [SessionDescriptor].self) }
         self.readHistory = readHistory ?? { before in try await client.get("/v1/sessions/\(id)/history", query: before.map { ["before_seq": String($0)] } ?? [:], as: ConversationSnapshot.self) }
         self.readPreview = readPreview ?? { try await client.get("/v1/sessions/\(id)/preview", as: PreviewSnapshot.self) }
+        // A substituted history reader is used as given, so its reads are not split behind its back.
+        if let readTail { self.readTail = readTail }
+        else if readHistory == nil {
+            self.readTail = { limit in try await client.get("/v1/sessions/\(id)/history", query: ["limit": String(limit)], as: ConversationSnapshot.self) }
+        } else { self.readTail = nil }
         self.cache = cache
     }
     /// Shows what was read last, so opening a conversation never starts blank.
@@ -183,13 +196,29 @@ final class ConversationModel {
             do { try await restorePendingSend() }
             catch { if refreshReads.isCurrent(request) { logFailure("refresh.recovery", error, shown: true); mutationWarning = ErrorPresentation().message(error) } }
             guard refreshReads.isCurrent(request) else { return }
-            let descriptors = try await readSessions()
+            // The three reads go out together: over the relay each costs a round trip, and one after another
+            // their times added up to several seconds before anything new appeared.
+            let tail = fullReadAt.map { Date().timeIntervalSince($0) < fullReadInterval } == true && !messages.isEmpty ? readTail : nil
+            let readSessions = readSessions, readHistory = readHistory, readPreview = readPreview, tailLimit = tailLimit
+            async let descriptorsRead = readSessions()
+            let readPage: @Sendable () async throws -> ConversationSnapshot
+            if let tail { readPage = { try await tail(tailLimit) } } else { readPage = { try await readHistory(nil) } }
+            async let historyRead = readPage()
+            async let liveRead = try? readPreview()
+            let descriptors = try await descriptorsRead
             guard refreshReads.isCurrent(request) else { return }
             guard let current = descriptors.first(where: { $0.id == session.id }) else { throw BridgeError("read_only", "The cmux session is no longer available.", status: 404) }
-            let history = try await readHistory(nil)
+            var history = try await historyRead
+            var full = tail == nil
+            // A tail that does not reach the messages on screen would leave a gap, and one from a replaced
+            // transcript has nothing to join: both read the full page instead.
+            if !full, history.generation != generation || history.messages.first.map({ oldest in !messages.contains { $0.id == oldest.id } }) == true {
+                history = try await readHistory(nil); full = true
+            }
             guard refreshReads.isCurrent(request) else { return }
-            let live = try? await readPreview()
+            let live = await liveRead
             guard refreshReads.isCurrent(request) else { return }
+            if full { fullReadAt = Date() }
             updateSession(current)
             // A page read from a replaced transcript is not merged into the one on screen; it replaces it.
             let continues = generation == history.generation
@@ -224,7 +253,8 @@ final class ConversationModel {
                 if message.role == .agent, case .prose(let value) = message.kind { return value.text }; return nil
             }.first
             preview = live?.text == committed ? nil : live?.text; compacting = live?.compacting ?? false; error = mutationWarning
-            store(history, live: live)
+            // A tail holds only the newest messages; the stored copy keeps the last full page.
+            if full { store(history, live: live) }
         } catch {
             // A lost link is shown and retried by the connection bar; the page keeps only errors about the conversation.
             guard refreshReads.isCurrent(request) else { return }
