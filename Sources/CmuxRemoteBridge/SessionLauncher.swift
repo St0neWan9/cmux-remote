@@ -64,11 +64,18 @@ public actor SessionLauncher {
         }
         // The folder and the grant are read again after the durable write, right before cmux acts.
         let target = try await folder(workspaceID: workspace, rootID: request.rootID, path: request.path)
+        let row = try await workspaceRow(workspace)
         try await access.require(.conversationStart, workspace: workspace)
         do {
-            let result = try await cmux.request("surface.create", params: [
+            var params: [String: JSONValue] = [
                 "workspace_id": .string(workspace), "type": .string("terminal"), "working_directory": .string(target.path),
-                "initial_input": .string(request.agent.command + "\r"), "focus": .bool(false)])
+                "initial_input": .string(request.agent.command + "\r"), "focus": .bool(false)]
+            if row["backend"].string == "cmux-tui" {
+                // A daemon runs the fixed command itself and deduplicates by key, so a retried write cannot open two terminals.
+                params["launch_agent"] = .string(request.agent.rawValue)
+                params["operation_key"] = .string(IdentityCryptography().digest(Data((access.clientID + ":" + request.operationID.uuidString).utf8)))
+            }
+            let result = try await cmux.request("surface.create", params: params)
             guard let surface = result["surface_id"].string, UUID(uuidString: surface) != nil else {
                 throw BridgeError("outcome_unknown", "cmux did not confirm the new terminal; check the workspace before trying again.", status: 409)
             }
@@ -92,21 +99,16 @@ public actor SessionLauncher {
         return try files.directory(root: root.url.path, relativePath: normalized(path))
     }
 
-    /// The workspace's own directory, then the folders of its conversations, most recent first.
+    /// The workspace's own directory, then the folders of its conversations, most recent first, then its other
+    /// terminals' folders (a daemon workspace has no directory of its own).
     func roots(workspaceID: String) async throws -> [(id: String, url: URL)] {
-        guard UUID(uuidString: workspaceID) != nil else { throw BridgeError("invalid_input", "Use an explicit workspace UUID.") }
         let workspace = workspaceID.lowercased()
-        let rows = try await cmux.request("workspace.list", params: [:])["workspaces"].array ?? []
-        guard let row = rows.first(where: { $0["id"].string?.lowercased() == workspace }) else {
-            throw BridgeError("not_found", "The workspace no longer exists.", status: 404)
-        }
-        guard row["backend"].string != "cmux-tui" else {
-            throw BridgeError("launch_unsupported", "New sessions can only be opened in desktop cmux workspaces.", status: 422)
-        }
+        let row = try await workspaceRow(workspace)
         let conversations = try await sessions().filter { $0.workspaceID?.lowercased() == workspace }
             .sorted { ($0.updatedAt ?? .distantPast) > ($1.updatedAt ?? .distantPast) }
+        let terminals = (row["directories"].array ?? []).map(\.string)
         var found: [(id: String, url: URL)] = []
-        for candidate in [row["current_directory"].string] + conversations.map(\.cwd) {
+        for candidate in [row["current_directory"].string] + conversations.map(\.cwd) + terminals {
             guard let candidate, !candidate.isEmpty, let url = try? files.projectRoot(candidate),
                   !found.contains(where: { $0.url.path == url.path }) else { continue }
             var isDirectory: ObjCBool = false
@@ -115,6 +117,15 @@ public actor SessionLauncher {
             if found.count == Self.rootLimit { break }
         }
         return found
+    }
+
+    private func workspaceRow(_ workspace: String) async throws -> JSONValue {
+        guard UUID(uuidString: workspace) != nil else { throw BridgeError("invalid_input", "Use an explicit workspace UUID.") }
+        let rows = try await cmux.request("workspace.list", params: [:])["workspaces"].array ?? []
+        guard let row = rows.first(where: { $0["id"].string?.lowercased() == workspace.lowercased() }) else {
+            throw BridgeError("not_found", "The workspace no longer exists.", status: 404)
+        }
+        return row
     }
 
     private func normalized(_ path: String) -> String {

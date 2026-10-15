@@ -27,7 +27,7 @@ The first phone version polls foreground snapshots; `events.stream` is a Bridge 
 
 ## Starting conversations
 
-These routes require signed v2 requests and the `conversationStart` capability for the workspace. Legacy clients cannot use them. Only desktop cmux workspaces are supported; a cmux-tui daemon workspace returns `launch_unsupported`.
+These routes require signed v2 requests and the `conversationStart` capability for the workspace. Legacy clients cannot use them. Both desktop cmux workspaces and cmux-tui daemon workspaces are supported.
 
 | Route | Source | Result |
 | --- | --- | --- |
@@ -38,6 +38,8 @@ These routes require signed v2 requests and the `conversationStart` capability f
 A root is never the home directory, `/`, a parent of home or a credential folder (`ProjectFilePolicy.projectRoot`). `path` is relative to the root; `..`, hidden components and symbolic links that leave the root or land on a hidden folder are refused with `directory_forbidden`. A root that is no longer part of the workspace is `stale_binding`.
 
 Starting records a durable intent, rechecks the grant and folder, then calls `surface.create` with `type: terminal`, the resolved `working_directory`, `initial_input: "<agent>\r"` and `focus: false`. The new tab opens in the workspace's focused pane; the desktop does not switch workspace or window. Repeating an operation returns its receipt without opening another terminal (`surface_id` is then absent). A failed or unconfirmed `surface.create` is `outcome_unknown` and is never retried under the same identity; the phone offers to check again or to open another terminal with a new identity. The conversation appears in `/v1/sessions` once the agent reports its binding.
+
+In a cmux-tui daemon workspace the roots also include the working directories of the workspace's terminals, since a daemon workspace has no directory of its own. The Bridge calls the daemon's `workspace.run` with the workspace's `ws_` identity, `cwd`, `shell: "<agent>; exec \"${SHELL:-/bin/zsh}\" -l"` (the shell stays open after the agent exits) and an idempotency and correlation key derived from the device and operation, so a resent write is deduplicated by the daemon too. The daemon keeps the session's focused workspace and pane, but the new tab becomes the visible tab of the workspace's active pane: the daemon offers no background tab creation, and selecting the previous tab again (`tab.focus`) would move session focus, so it is not done.
 
 An older Bridge cannot decode `conversationStart` and closes the link during enrollment; the phone then asks again without it.
 

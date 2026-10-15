@@ -82,6 +82,8 @@ public actor CmuxBackendRouter: CmuxControlling {
             if let id = params["request_id"]?.string, await daemon.ownsDecision(id) { return try await daemon.request(method, params: params) }
             if let id = params["session_id"]?.string, await daemon.ownsConversation(id) { return try await daemon.request(method, params: params) }
             if let surface = params["surface_id"]?.string, await daemon.ownsSurface(surface) { return try await daemon.request(method, params: params) }
+            // Creating a terminal names only its workspace.
+            if params["surface_id"] == nil, let workspace = params["workspace_id"]?.string, await daemon.ownsWorkspace(workspace) { return try await daemon.request(method, params: params) }
         }
         // A missing namespaced target must never fall through to another backend.
         if params["session_id"]?.string?.hasPrefix("tui:") == true { throw BridgeError("stale_binding", "The daemon conversation is no longer available.", status: 409) }

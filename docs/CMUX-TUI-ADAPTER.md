@@ -5,8 +5,11 @@
 Mac A opens a managed `cmux ssh` workspace whose terminal processes belong to
 Mac B's cmux-tui daemon. The phone connects only to B's Bridge. One Bridge
 supports the desktop cmux socket and local daemon sockets together, without
-mode selection or phone/Mac page changes. It never connects back to A, starts
-a second agent, or changes the official cmux application.
+mode selection or phone/Mac page changes. It never connects back to A or changes the
+official cmux application. It starts an agent only when a device granted
+`conversationStart` asks for one: `workspace.run` opens a terminal tab in the
+workspace's active pane with a fixed `claude` or `codex` shell command (see
+API.md, "Starting conversations").
 
 The desktop socket and cmux-tui socket use different wire protocols. The daemon
 adapter implements existing `CmuxControlling` domain methods using the public

@@ -14,6 +14,7 @@ public actor TuiControlAdapter: CmuxControlling {
     private var pinnedIdentity: String?
     private var knownConversations: Set<String> = []
     private var knownSurfaces: Set<String> = []
+    private var knownWorkspaces: Set<String> = []
     private let prompt = TuiPromptSafety()
     /// The last prompt text the phone wrote per conversation; an interrupted Agent may put it back in its input.
     private var lastSent: [String: String] = [:]
@@ -32,6 +33,7 @@ public actor TuiControlAdapter: CmuxControlling {
     public func ownsDecision(_ id: String) -> Bool { pending[id] != nil }
     public func ownsConversation(_ id: String) -> Bool { knownConversations.contains(id) }
     public func ownsSurface(_ id: String) -> Bool { knownSurfaces.contains(id.lowercased()) }
+    public func ownsWorkspace(_ id: String) -> Bool { knownWorkspaces.contains(id.lowercased()) }
     public func request(_ method: String, params: [String: JSONValue]) async throws -> JSONValue {
         switch method {
         case "system.ping":
@@ -94,6 +96,27 @@ public actor TuiControlAdapter: CmuxControlling {
             guard let text = screen["text"].string, text.utf8.count <= 1_048_576 else { throw BridgeError("invalid_response", "The daemon screen is invalid.", status: 502) }
             if method == "surface.read_text" { return .object(["text": .string(text)]) }
             return .object(["workspace_id": .string(binding.workspaceID), "surface_id": .string(binding.surfaceID), "agent": .bool(true), "terminal": .bool(true), "blocks_typing": .bool(!prompt.isEmpty(try await terminalState(current, binding: binding), provider: binding.provider)), "lifecycle": .string(binding.state)])
+        case "surface.create":
+            // Session starting: a new terminal tab in the workspace's active pane running a fixed agent command.
+            // The daemon keeps the session's focused workspace and pane; only that pane's visible tab changes.
+            guard params["type"]?.string == "terminal", let workspaceID = params["workspace_id"]?.string?.lowercased(),
+                  let cwd = params["working_directory"]?.string, cwd.hasPrefix("/"),
+                  let agent = params["launch_agent"]?.string.flatMap(LaunchAgent.init(rawValue:)),
+                  let key = params["operation_key"]?.string, !key.isEmpty, key.utf8.count <= 128 else { throw BridgeError("invalid_input", "Invalid daemon terminal request.") }
+            let current = try await snapshot()
+            guard let workspace = current.rawWorkspaces[workspaceID] else { throw stale() }
+            var request = current.selectors()
+            request["workspace"] = .string(workspace); request["cwd"] = .string(cwd); request["name"] = .string(agent.rawValue)
+            // The shell stays open after the agent exits, as a desktop terminal does.
+            request["shell"] = .string(agent.command + "; exec \"${SHELL:-/bin/zsh}\" -l")
+            request["correlation_key"] = .string(key)
+            let created = try await client.resource("workspace.run", params: request, idempotencyKey: key)
+            guard let terminal = created["value"]["terminal_id"].string, (try? TuiResourceIdentity().validate(terminal, prefix: "term")) != nil else {
+                throw BridgeError("outcome_unknown", "The daemon did not confirm the new terminal.", status: 409)
+            }
+            let surface = TuiResourceIdentity().uuid(machine: current.machine, session: current.session, resource: terminal)
+            knownSurfaces.insert(surface)
+            return .object(["surface_id": .string(surface)])
         case "mobile.chat.send", "mobile.chat.interrupt":
             guard let id = params["session_id"]?.string, let operation = params["operation_id"]?.string, let operationUUID = UUID(uuidString: operation), let operationKey = params["backend_operation_key"]?.string, operationKey.count == 64, operationKey.allSatisfy({ $0.isASCII && $0.isHexDigit }) else {
                 throw BridgeError("invalid_input", "A stable conversation operation identity is required.")
@@ -229,7 +252,8 @@ public actor TuiControlAdapter: CmuxControlling {
         catalog = next
         knownConversations.formUnion(catalog.keys)
         knownSurfaces.formUnion(current.surfaces)
-        guard knownSurfaces.count <= 16_384, knownConversations.count <= 16_384 else { throw BridgeError("too_large", "The daemon resource routing table is full.", status: 413) }
+        knownWorkspaces.formUnion(current.rawWorkspaces.keys)
+        guard knownSurfaces.count <= 16_384, knownConversations.count <= 16_384, knownWorkspaces.count <= 16_384 else { throw BridgeError("too_large", "The daemon resource routing table is full.", status: 413) }
         return current
     }
     private func terminalState(_ current: TuiSessionSnapshot, binding: TuiSessionSnapshot.Binding) async throws -> TuiTerminalState {
