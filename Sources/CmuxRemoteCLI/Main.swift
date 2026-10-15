@@ -50,6 +50,8 @@ struct Main {
             }
         case "serve", "resident":
             if (options.contains("pair") || command == "resident"), !FileManager.default.fileExists(atPath: state.directory.appendingPathComponent("token").path) { try state.initialize() }
+            BridgeLog.shared.configure(directory: state.directory)
+            BridgeLog.shared.info("bridge", "\(command) starting pid=\(ProcessInfo.processInfo.processIdentifier)")
             let machine = try BridgeMachineLease(home: home)
             let lease = try BridgeRunLease(directory: state.directory)
             defer { withExtendedLifetime((machine, lease)) {} }

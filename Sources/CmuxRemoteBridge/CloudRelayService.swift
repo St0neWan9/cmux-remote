@@ -1,5 +1,4 @@
 import Foundation
-import os
 import CmuxRemoteCore
 
 /// Maintains outbound relay routing while all Agent and device authority stays on Bridge.
@@ -33,12 +32,12 @@ public actor CloudRelayService {
     public func start() async throws {
         guard running == nil else { return }
         try await authority.configureRelay(origin: origin.value)
-        Logger.relay.info("relay connecting origin=\(self.origin.value, privacy: .public)")
+        BridgeLog.shared.info("relay", "relay connecting origin=\(self.origin.value)")
         let id = UUID(); generation = id; phase = "connecting"
         running = Task { [weak self] in await self?.run(id) }
     }
     public func stop() async {
-        Logger.relay.info("relay stopped")
+        BridgeLog.shared.info("relay", "relay stopped")
         generation = nil; phase = "stopped"; failure = nil
         let task = running; running = nil; task?.cancel()
         await disconnect(); _ = await task?.value
@@ -61,7 +60,7 @@ public actor CloudRelayService {
                 let ready = try JSONDecoder().decode(RelayEnvelope.self, from: await Self.within(liveness.readyDeadline, orClose: socket) { try await socket.receive() })
                 guard ready.kind == "ready" else { throw BridgeError("invalid_response", "The relay did not acknowledge Bridge registration.") }
                 phase = "connected"; failure = nil; attempt = 0; onConnected?()
-                Logger.relay.info("relay connected attempt=\(attempt, privacy: .public)")
+                BridgeLog.shared.info("relay", "relay connected attempt=\(attempt)")
                 let liveness = liveness
                 heartbeat = Task {
                     // A dead path closes the socket, which ends the receive loop and redials.
@@ -90,11 +89,14 @@ public actor CloudRelayService {
                     let bytes = try await socket.receive()
                     try await accept(JSONDecoder().decode(RelayEnvelope.self, from: bytes))
                 }
-            } catch { failure = socket?.failureCode() ?? "connection_failed" }
+            } catch {
+                failure = socket?.failureCode() ?? "connection_failed"
+                BridgeLog.shared.warning("relay", "relay socket ended code=\(failure ?? "?") error=\(error)")
+            }
             await disconnect()
             guard generation == id, !Task.isCancelled else { break }
             phase = "reconnecting"; attempt = min(attempt + 1, 5)
-            Logger.relay.warning("relay reconnecting attempt=\(attempt, privacy: .public) error=\(self.failure ?? "unknown", privacy: .public)")
+            BridgeLog.shared.warning("relay", "relay reconnecting attempt=\(attempt) wait=\(1 << attempt)s error=\(self.failure ?? "unknown")")
             do { try await Task.sleep(for: .seconds(1 << attempt)) } catch { break }
         }
     }
@@ -116,7 +118,7 @@ public actor CloudRelayService {
             guard let client = envelope.clientID, client.count == 64, client.allSatisfy({ $0.isASCII && $0.isHexDigit }) else { throw BridgeError("invalid_response", "Invalid relay channel.") }
             // A full or duplicate channel is refused alone; other phones keep their links.
             guard sessions[channel] == nil, sessions.count < 20 else { try await send(RelayEnvelope(kind: "close", channelID: channel)); return }
-            Logger.relay.debug("relay channel opened channel=\(channel.prefix(8), privacy: .public) client=\(client.prefix(8), privacy: .public)")
+            BridgeLog.shared.debug("relay", "relay channel opened channel=\(channel.prefix(8)) client=\(client.prefix(8))")
             let session = LinkServerSession(router: router, authority: authority, send: { [weak self] data in
                 guard let self else { throw CancellationError() }; try await self.send(RelayEnvelope(kind: "data", channelID: channel, data: data))
             }, terminate: { [weak self] in Task { try? await self?.send(RelayEnvelope(kind: "close", channelID: channel)) } }, expectedClientID: client)
@@ -127,7 +129,7 @@ public actor CloudRelayService {
             guard let session = sessions[channel] else { try await send(RelayEnvelope(kind: "close", channelID: channel)); return }
             await session.receive(bytes)
         case "close":
-            Logger.relay.debug("relay channel closed channel=\(channel.prefix(8), privacy: .public)")
+            BridgeLog.shared.debug("relay", "relay channel closed channel=\(channel.prefix(8))")
             await sessions.removeValue(forKey: channel)?.close()
         default: throw BridgeError("invalid_response", "Unknown relay operation.")
         }
