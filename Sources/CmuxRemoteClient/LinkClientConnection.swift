@@ -35,9 +35,6 @@ actor LinkClientConnection {
     /// Recently cancelled IDs; the Bridge may already have frames for them in flight.
     private var abandoned: [String] = []
     private var closed = false
-    /// The last link came up over the relay: the next dial tries both paths at once instead of waiting
-    /// out the LAN deadline first, so a phone away from home does not pay that wait on every reconnect.
-    private var lastRelayed = false
     private let report: @Sendable (LinkState) -> Void
     /// One short credential-free line per dial, path outcome, heartbeat loss, link loss and timed-out request.
     private let trace: @Sendable (String) -> Void
@@ -53,6 +50,8 @@ actor LinkClientConnection {
     /// keeps the link: dropping it would turn a write that may have landed into an unknown outcome.
     func reconnect() async {
         guard !closed else { return }
+        // A dial already under way is the redial; dropping its empty link would only report a spurious disconnect.
+        if socket == nil, preparing != nil { trace("reconnect requested: a dial is already in progress"); try? await connect(); return }
         let methods = pending.values.map(\.method)
         if socket == nil { trace("reconnect requested: no live link, dialing") }
         else if Self.mayDropLink(pendingMethods: methods) { trace("reconnect requested: dropping link pending=\(methods.count)") }
@@ -91,19 +90,19 @@ actor LinkClientConnection {
         if socket != nil { return }
         if preparing == nil {
             report(.connecting)
-            Logger.clientLink.info("link connecting relayed=\(self.lastRelayed, privacy: .public)")
-            let host = host, key = key, endpoint = endpoint, race = lastRelayed && endpoint.relay != nil, trace = trace
-            let lan = "\(endpoint.host):\(endpoint.port)", relayName = endpoint.relay.map { TraceFormat().origin($0) }
-            if race, let relayName { trace("dial start path=race lan=\(lan) relay=\(relayName)") }
-            else { trace("dial start path=lan lan=\(lan) relay=\(relayName ?? "none")") }
+            Logger.clientLink.info("link connecting race=\(self.endpoint.relay != nil, privacy: .public)")
+            let host = host, key = key, endpoint = endpoint, trace = trace
+            let lan = "\(endpoint.host):\(endpoint.port)"
+            // With a relay, both paths are dialled at once on every connect: a phone away from home does not wait out
+            // the LAN deadline first, and one on the Mac's Wi-Fi still keeps the direct path, which authenticates sooner.
+            if let relay = endpoint.relay { trace("dial start path=race lan=\(lan) relay=\(TraceFormat().origin(relay))") }
+            else { trace("dial start path=lan lan=\(lan) relay=none") }
             preparing = Task {
-                if race, let relay = endpoint.relay { return try await self.race(host: host, key: key, endpoint: endpoint, relay: relay) }
+                if let relay = endpoint.relay { return try await self.race(host: host, key: key, endpoint: endpoint, relay: relay) }
                 do { return try await self.dialDirect(host: host, key: key, endpoint: endpoint) }
                 catch {
-                    guard LinkPathFailure().isUnreachable(error) else { throw error }
-                    guard let relay = endpoint.relay else { trace("dial lan unreachable and no relay is configured"); throw error }
-                    trace("dial fallback path=relay relay=\(TraceFormat().origin(relay))")
-                    return try await self.dialRelay(host: host, key: key, relay: relay)
+                    if LinkPathFailure().isUnreachable(error) { trace("dial lan unreachable and no relay is configured") }
+                    throw error
                 }
             }
         }
@@ -116,7 +115,7 @@ actor LinkClientConnection {
             }
             guard !closed else { ready.socket.close(); throw CancellationError() }
             if socket == nil {
-                socket = ready.socket; cipher = ready.cipher; writer = WebSocketSendQueue(socket: ready.socket, cipher: ready.cipher); lastRelayed = ready.relayed
+                socket = ready.socket; cipher = ready.cipher; writer = WebSocketSendQueue(socket: ready.socket, cipher: ready.cipher)
                 Logger.clientLink.info("link connected relayed=\(ready.relayed, privacy: .public)")
                 trace("link connected relayed=\(ready.relayed)")
                 report(.connected)
@@ -139,7 +138,8 @@ actor LinkClientConnection {
             preparing = nil
         } catch { preparing = nil; throw error }
     }
-    private nonisolated func dialDirect(host: HostIdentity, key: Data, endpoint: BridgeEndpoint) async throws -> Prepared {
+    /// `race` is the shared winner while the relay is dialled too: losing to it is reported as a cancellation, not a failure.
+    private nonisolated func dialDirect(host: HostIdentity, key: Data, endpoint: BridgeEndpoint, race: LinkRaceWinner? = nil) async throws -> Prepared {
         let handshake = try LinkClientHandshake(host: host, privateKey: key)
         let pairing = try PairingConfiguration(host: endpoint.host, port: endpoint.port, token: String(repeating: "0", count: 32), certificateSHA256: host.certificateSHA256)
         var parts = URLComponents(); parts.scheme = "wss"; parts.host = endpoint.host; parts.port = endpoint.port; parts.path = "/v3/link"
@@ -147,15 +147,17 @@ actor LinkClientConnection {
         let direct = LinkSocket(url: url, delegate: PinnedSessionDelegate(pairing: pairing)), started = ContinuousClock.now
         do {
             let ready = try await prepare(direct, handshake: handshake, relayed: false, deadline: lanDeadline)
+            race?.claim(.lan)
             trace("dial lan ok \(TraceFormat().milliseconds(since: started))ms relayed=false")
             return ready
         } catch {
             direct.close()
-            trace("dial lan failed \(TraceFormat().milliseconds(since: started))ms unreachable=\(LinkPathFailure().isUnreachable(error)) error=\(TraceFormat().describe(error))")
+            if let lost = Self.lostRace(.lan, race) { trace("dial lan cancelled after \(TraceFormat().milliseconds(since: started))ms: \(lost.rawValue) connected first") }
+            else { trace("dial lan failed \(TraceFormat().milliseconds(since: started))ms unreachable=\(LinkPathFailure().isUnreachable(error)) error=\(TraceFormat().describe(error))") }
             throw error
         }
     }
-    private nonisolated func dialRelay(host: HostIdentity, key: Data, relay: RelayEndpoint) async throws -> Prepared {
+    private nonisolated func dialRelay(host: HostIdentity, key: Data, relay: RelayEndpoint, race: LinkRaceWinner? = nil) async throws -> Prepared {
         let handshake = try LinkClientHandshake(host: host, privateKey: key)
         try relay.validate(host: host, now: Int(Date().timeIntervalSince1970))
         let crypto = IdentityCryptography(), publicKey = try crypto.publicKey(privateKey: key)
@@ -165,24 +167,32 @@ actor LinkClientConnection {
         let started = ContinuousClock.now
         do {
             let ready = try await prepare(relayed, handshake: handshake, relayed: true, deadline: .seconds(15))
+            race?.claim(.relay)
             trace("dial relay ok \(TraceFormat().milliseconds(since: started))ms relayed=true")
             return ready
         } catch {
             relayed.close()
-            trace("dial relay failed \(TraceFormat().milliseconds(since: started))ms error=\(TraceFormat().describe(error))")
+            if let lost = Self.lostRace(.relay, race) { trace("dial relay cancelled after \(TraceFormat().milliseconds(since: started))ms: \(lost.rawValue) connected first") }
+            else { trace("dial relay failed \(TraceFormat().milliseconds(since: started))ms error=\(TraceFormat().describe(error))") }
             throw error
         }
+    }
+    /// The path that beat `path`, when `path` ended only because the race was decided; a real failure returns nil.
+    private nonisolated static func lostRace(_ path: LinkRaceWinner.Path, _ race: LinkRaceWinner?) -> LinkRaceWinner.Path? {
+        guard Task.isCancelled, let winner = race?.path, winner != path else { return nil }
+        return winner
     }
     /// Dials the LAN and the relay together and keeps whichever authenticates first. Only an unreachable LAN
     /// lets the relay decide: a TLS pin or identity failure on the LAN still ends the attempt.
     private nonisolated func race(host: HostIdentity, key: Data, endpoint: BridgeEndpoint, relay: RelayEndpoint) async throws -> Prepared {
-        try await withThrowingTaskGroup(of: PathResult.self) { group in
+        let winner = LinkRaceWinner()
+        return try await withThrowingTaskGroup(of: PathResult.self) { group in
             group.addTask {
-                do { return .ready(try await self.dialDirect(host: host, key: key, endpoint: endpoint)) }
+                do { return .ready(try await self.dialDirect(host: host, key: key, endpoint: endpoint, race: winner)) }
                 catch { return LinkPathFailure().isUnreachable(error) ? .lanUnreachable : .lanFailed(error) }
             }
             group.addTask {
-                do { return .ready(try await self.dialRelay(host: host, key: key, relay: relay)) } catch { return .relayFailed(error) }
+                do { return .ready(try await self.dialRelay(host: host, key: key, relay: relay, race: winner)) } catch { return .relayFailed(error) }
             }
             var outcome: Result<Prepared, any Error>?, relayFailure: (any Error)?
             while outcome == nil, let next = try await group.next() {
