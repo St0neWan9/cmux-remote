@@ -13,6 +13,7 @@ struct ConnectionDetailView: View {
     @State private var status: JSONValue?
     @State private var error: String?
     @State private var loading = false
+    @State private var showDiagnostics = false
     var body: some View {
         WhitePage(title: String(localized: "connection.title"), dismissal: .close) {
             ScrollView {
@@ -36,15 +37,15 @@ struct ConnectionDetailView: View {
                     }.modifier(FloatingSurface())
                     VStack(spacing: MobileDesign.rowGap) {
                         Button(String(localized: "chat.refresh")) { Task { await refresh() } }.disabled(loading)
-                        NavigationLink(destination: DiagnosticLogView()) {
-                            Text("诊断日志").frame(maxWidth: .infinity)
-                        }.buttonStyle(FloatingButtonStyle(fullWidth: true))
+                        Button(String(localized: "diagnostics.title")) { showDiagnostics = true }
                         Button(String(localized: "connection.remove"), role: .destructive, action: disconnect)
                         Text(String(localized: "connection.remove_hint")).font(.footnote).foregroundStyle(.secondary)
                     }.buttonStyle(FloatingButtonStyle(fullWidth: true))
                 }.frame(maxWidth: .infinity, alignment: .leading).padding(MobileDesign.pageInset)
             }.refreshable { await refresh() }
         }.task { await refresh() }
+            // Presented on its own: the detail page is not inside a navigation stack, so a push has nowhere to go.
+            .fullScreenCover(isPresented: $showDiagnostics) { DiagnosticLogView() }
     }
     private func detail(_ title: String, value: String, monospaced: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 6) {

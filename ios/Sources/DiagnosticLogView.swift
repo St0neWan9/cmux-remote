@@ -16,44 +16,43 @@ struct DiagnosticLogView: View {
         return "cmux-remote \(version) (\(number)) · iOS \(UIDevice.current.systemVersion)"
     }
 
+    /// How this page is left: presented on its own it closes, and pushed it slides back.
+    var dismissal: WhitePage<EmptyView>.Dismissal = .close
+
     var body: some View {
-        NavigationStack {
-            List {
-                Section {
-                    ForEach(entries.reversed()) { entry in row(entry) }
-                } header: {
-                    Text(build)
-                        .font(.caption2.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                        .textSelection(.enabled)
-                }
-            }
-            .listStyle(.plain)
-            .navigationTitle("诊断日志")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button(copied ? "已复制" : "复制全部") {
-                        let lines = entries.reversed().map { e in
-                            "[\(Self.time.string(from: e.timestamp))] [\(e.level.rawValue)] [\(e.category)] \(e.message)"
-                        }
-                        let day = Date().formatted(.iso8601.year().month().day())
-                        UIPasteboard.general.string = ([build + " · " + day] + lines).joined(separator: "\n")
-                        copied = true
-                        Task { try? await Task.sleep(for: .seconds(2)); copied = false }
+        WhitePage(title: String(localized: "diagnostics.title"), dismissal: dismissal) {
+            VStack(spacing: 0) {
+                List {
+                    Section {
+                        ForEach(entries.reversed()) { entry in row(entry) }
+                    } header: {
+                        Text(build)
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
                     }
-                    .font(.subheadline)
                 }
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("清除") {
+                .listStyle(.plain)
+                VStack(spacing: MobileDesign.rowGap) {
+                    Button(copied ? String(localized: "diagnostics.copied") : String(localized: "diagnostics.copy")) { copy() }
+                    Button(String(localized: "diagnostics.clear"), role: .destructive) {
                         Task { await DiagnosticLog.shared.clear(); await refresh() }
                     }
-                    .font(.subheadline)
-                }
+                }.buttonStyle(FloatingButtonStyle(fullWidth: true)).padding(MobileDesign.pageInset)
             }
             .task { await refresh() }
             .refreshable { await refresh() }
         }
+    }
+
+    private func copy() {
+        let lines = entries.reversed().map { e in
+            "[\(Self.time.string(from: e.timestamp))] [\(e.level.rawValue)] [\(e.category)] \(e.message)"
+        }
+        let day = Date().formatted(.iso8601.year().month().day())
+        UIPasteboard.general.string = ([build + " · " + day] + lines).joined(separator: "\n")
+        copied = true
+        Task { try? await Task.sleep(for: .seconds(2)); copied = false }
     }
 
     private func row(_ entry: DiagnosticLog.Entry) -> some View {
