@@ -25,6 +25,8 @@ struct WhitePage<Content: View>: View {
                     Color.clear.frame(width: 44, height: 44)
                 }.padding(.horizontal, MobileDesign.pageInset).padding(.vertical, 8).background(Color.white)
             }.environment(\.colorScheme, .light)
+            // A page that replaces the root has no stack entry to pop, so it carries the edge swipe itself.
+            .modifier(ConditionalEdgeBackSwipe(back: back))
             .accessibilityAction(.escape) { if showsBack { dismiss() } }
     }
 }
