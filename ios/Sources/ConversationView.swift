@@ -18,6 +18,7 @@ struct ConversationView: View {
     @State private var settleTask: Task<Void, Never>?
     /// The reader opened or closed a card: the page stays where it is until they scroll or ask for the latest.
     @State private var holdingPlace = false
+    @State private var scrollTrace = ScrollTrace()
     @State private var showProject = false
     @State private var selectedFile = ""
     @State private var showFeed = false
@@ -58,17 +59,19 @@ struct ConversationView: View {
                     // While the page holds its place, the newest row coming into view does not resume following.
                     if !holdingPlace, atLatest != visible { atLatest = visible }
                 }
-                else if bottom.isFinite && !latestVisible { proxy.scrollTo("latest", anchor: .bottom) }
+                else if bottom.isFinite && !latestVisible { scrollTrace.note("scroll follower"); proxy.scrollTo("latest", anchor: .bottom) }
             }
             .modifier(TimelineScrollInteraction(userScrolling: $userScrolling, atLatest: $atLatest, latestVisible: latestVisible))
-            .onChange(of: userScrolling) { _, scrolling in if scrolling { holdingPlace = false } }
+            .onChange(of: userScrolling) { _, scrolling in scrollTrace.note("userScrolling=\(scrolling)"); if scrolling { holdingPlace = false } }
+            .onChange(of: atLatest) { _, value in scrollTrace.note("atLatest=\(value) hold=\(holdingPlace)") }
+            .modifier(ScrollJumpTrace(trace: scrollTrace))
             // A card opened at the newest message would otherwise be carried off by the next one to arrive.
-            .environment(\.holdPlace) { atLatest = false; holdingPlace = true }
+            .environment(\.holdPlace) { scrollTrace.toggled("atLatest=\(atLatest) latestVisible=\(latestVisible)"); atLatest = false; holdingPlace = true }
             .scrollDismissesKeyboard(.interactively)
             .refreshable { await pullToRefresh(proxy) }
             .overlay(alignment: .bottom) {
                 if !atLatest {
-                    Button { holdingPlace = false; atLatest = true; withAnimation { proxy.scrollTo("latest", anchor: .bottom) } } label: {
+                    Button { holdingPlace = false; atLatest = true; withAnimation { scrollTrace.note("scroll latest-button"); proxy.scrollTo("latest", anchor: .bottom) } } label: {
                         Image(systemName: "arrow.down").font(.system(size: 20, weight: .medium)).frame(width: 42, height: 42)
                             .background(Color.white, in: Circle()).shadow(color: .black.opacity(0.1), radius: 10, y: 4)
                     }.buttonStyle(.plain).accessibilityLabel(String(localized: "chat.latest")).accessibilityIdentifier("chat.latest").padding(.bottom, 10)
@@ -76,10 +79,10 @@ struct ConversationView: View {
             }
             .onChange(of: model.timelineItems.last?.id) { _, _ in
                 if !initiallyScrolled && !model.messages.isEmpty { settleAtBottom(proxy); initiallyScrolled = true }
-                else if atLatest { proxy.scrollTo("latest", anchor: .bottom) }
+                else if atLatest { scrollTrace.note("scroll new-item"); proxy.scrollTo("latest", anchor: .bottom) }
             }
-            .onChange(of: model.latestMessageText) { _, _ in if atLatest { proxy.scrollTo("latest", anchor: .bottom) } }
-            .onChange(of: model.preview) { _, _ in if atLatest { proxy.scrollTo("latest", anchor: .bottom) } }
+            .onChange(of: model.latestMessageText) { _, _ in if atLatest { scrollTrace.note("scroll new-text"); proxy.scrollTo("latest", anchor: .bottom) } }
+            .onChange(of: model.preview) { _, _ in if atLatest { scrollTrace.note("scroll preview"); proxy.scrollTo("latest", anchor: .bottom) } }
             // Opening a cached conversation re-enters with its follow state; start from the last message.
             .onAppear {
                 userScrolling = false; atLatest = true; holdingPlace = false
@@ -91,7 +94,7 @@ struct ConversationView: View {
                 }
             }
             .onDisappear { settleTask?.cancel(); settleTask = nil; initialScroll?.cancel(); initialScroll = nil }
-            .onChange(of: model.jumpToLatest) { _, _ in holdingPlace = false; atLatest = true; withAnimation { proxy.scrollTo("latest", anchor: .bottom) } }
+            .onChange(of: model.jumpToLatest) { _, _ in holdingPlace = false; atLatest = true; withAnimation { scrollTrace.note("scroll after-send"); proxy.scrollTo("latest", anchor: .bottom) } }
         }
         }
         .background(Color.white.ignoresSafeArea())
@@ -286,7 +289,7 @@ struct ConversationView: View {
         guard model.timelineItems.first?.id != anchor else { return }
         // A scroll in the same update as the insertion is overridden by its layout; restore once the rows exist.
         try? await Task.sleep(for: .milliseconds(50))
-        proxy.scrollTo(anchor, anchor: .top)
+        scrollTrace.note("scroll older-page"); proxy.scrollTo(anchor, anchor: .top)
         // Still at the top after restoring: the reader wants more, and a marker that never left would not fire again.
         try? await Task.sleep(for: .milliseconds(300))
         if topNear && !atLatest { await loadOlder(proxy) }
@@ -307,7 +310,7 @@ struct ConversationView: View {
                 guard !Task.isCancelled else { return }
                 if attempt > 0 { try? await Task.sleep(for: .milliseconds(60)) }
                 guard !Task.isCancelled, atLatest else { return }
-                proxy.scrollTo("latest", anchor: .bottom)
+                scrollTrace.note("scroll settle"); proxy.scrollTo("latest", anchor: .bottom)
             }
         }
     }
