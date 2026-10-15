@@ -51,8 +51,8 @@ struct SessionListView: View {
         AppNavigationStack {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: MobileDesign.sectionGap) {
-                    HostFilterTabs(hosts: links.map { HostFilterTabs.Host(id: $0.id, name: $0.name, state: model.linkStates[$0.id], failed: model.hostErrors[$0.id] != nil) },
-                                   selection: $hostFilter)
+                    HostFilterTabs(hosts: links.map { HostFilterTabs.Host(id: $0.id, name: $0.name, state: model.linkStates[$0.id], failed: model.hostErrors[$0.id] != nil, workspaces: model.workspaces(of: $0.id)) },
+                                   selection: $hostFilter, workspaceID: $workspaceID)
                     PendingReminder(feed: PendingFeed.combined(pendingHosts(shownLinks).map { PendingFeed(count: $0.count, firstTitle: model.pending[$0.id]?.firstTitle) }),
                                     hosts: pendingHosts(shownLinks).filter { $0.count > 0 }) { id in feedHostID = id; showFeed = true }
                     // The status filter sits on the list it filters, under the Macs and what they wait on.
@@ -139,6 +139,10 @@ struct SessionListView: View {
             }
             .onChange(of: workspaces.map(\.id)) { _, ids in if let workspaceID, !ids.contains(workspaceID) { self.workspaceID = nil } }
             .onChange(of: links.map(\.id)) { _, ids in if let hostFilter, !ids.contains(hostFilter) { self.hostFilter = nil } }
+            // A workspace belongs to one Mac; choosing another Mac leaves it behind.
+            .onChange(of: hostFilter) { _, id in
+                if let id, let workspaceID, !model.workspaces(of: id).contains(where: { $0.id == workspaceID }) { self.workspaceID = nil }
+            }
             // A pull reads again; only a Mac that is down is dialed again. The page menu keeps a full redial.
             .refreshable { await model.pullToRefresh() }
             .task { await model.refresh() }
@@ -196,10 +200,6 @@ struct SessionListView: View {
     private func scopeTitle(_ links: [HostLink]) -> String {
         links.count > 1 ? String(format: String(localized: "sessions.all_macs"), links.count) : (links.first?.name ?? model.host)
     }
-    private func workspaceTitle(_ workspace: WorkspaceSummary, multiple: Bool) -> String {
-        guard multiple, let host = model.workspaceHosts[workspace.id] else { return workspace.title }
-        return workspace.title + " · " + host
-    }
     private func sessionRow(_ session: SessionDescriptor, host: String? = nil) -> some View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 7) {
@@ -231,8 +231,7 @@ struct SessionListView: View {
                     Image(systemName: "line.3.horizontal")
                 }.buttonStyle(FloatingIconStyle()).accessibilityLabel(String(localized: "sessions.sidebar")).accessibilityIdentifier("sessions.sidebar")
                 Spacer(minLength: 0)
-                SessionTitleMenu(sortMode: $sortMode, workspaceID: $workspaceID,
-                                 workspaces: model.workspaces.map { ($0.id, workspaceTitle($0, multiple: model.links.count > 1)) },
+                SessionTitleMenu(sortMode: $sortMode,
                                  feeds: pendingHosts(model.links), canStart: !model.startTargets.isEmpty,
                                  showFeed: { id in feedHostID = id; showFeed = true },
                                  refresh: { Task { await model.reconnect() } },

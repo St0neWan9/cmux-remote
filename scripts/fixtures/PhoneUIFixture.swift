@@ -47,7 +47,11 @@ private actor PhoneUIBackend: CmuxControlling {
         switch method {
         case "system.ping": return .object(["pong": .bool(true)])
         case "system.capabilities": return .object(["methods": .array([])])
-        case "workspace.list": return .object(["workspaces": .array([.object(["id": .string(workspace), "title": .string("UI fixture workspace"), "current_directory": .string(root.path)])])])
+        case "workspace.list":
+            var listed: [JSONValue] = [.object(["id": .string(workspace), "title": .string("UI fixture workspace"), "current_directory": .string(root.path)])]
+            // A second, empty workspace, so a test can choose between the Mac's workspaces.
+            if flag("two-workspaces") { listed.append(.object(["id": .string("33333333-3333-3333-3333-333333333333"), "title": .string("Second workspace"), "current_directory": .string(root.path)])) }
+            return .object(["workspaces": .array(listed)])
         case "vault.sessions":
             var rows: [JSONValue] = [.object(["session_id": .string("fixture-session"), "agent": .string("claude"), "title": .string(vaultTitle), "cwd": .string(root.path), "file": .string(transcript.path)])]
             if let started { rows.append(.object(["session_id": .string("fixture-started"), "agent": .string(started.agent), "title": .string("UI 测试：新会话"), "cwd": .string(started.cwd), "file": .string(root.appendingPathComponent("started.jsonl").path)])) }
