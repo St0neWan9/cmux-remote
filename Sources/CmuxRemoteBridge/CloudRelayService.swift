@@ -29,6 +29,8 @@ public actor CloudRelayService {
     /// Set before `start`; the entry is republished well before each window's ten-minute expiry.
     public func setListing(_ provider: (@Sendable () async throws -> SignedValue<EnrollmentBootstrap>?)?) { listing = provider }
     public func status() -> JSONValue { .object(["state": .string(phase), "origin": .string(origin.value), "error_code": failure.map(JSONValue.string) ?? .null]) }
+    /// The relay's own answer to a liveness ping, which is the only proof this socket still belongs to the room.
+    private var pong: CheckedContinuation<Void, any Error>?
     public func start() async throws {
         guard running == nil else { return }
         try await authority.configureRelay(origin: origin.value)
@@ -63,8 +65,11 @@ public actor CloudRelayService {
                 BridgeLog.shared.info("relay", "relay connected attempt=\(attempt)")
                 let liveness = liveness
                 heartbeat = Task {
-                    // A dead path closes the socket, which ends the receive loop and redials.
-                    do { while !Task.isCancelled { try await Task.sleep(for: liveness.pingInterval); try await Self.within(liveness.pongDeadline, orClose: socket) { try await socket.ping() } } }
+                    // The WebSocket ping is answered by the edge, not by the room, so a replaced Durable Object
+                    // leaves this socket looking alive while the relay no longer knows this Bridge. The room
+                    // answers this ping itself: no pong means registration was lost, so the socket is dropped
+                    // and the dial redials.
+                    do { while !Task.isCancelled { try await Task.sleep(for: liveness.pingInterval); try await self.ping(socket, liveness: liveness) } }
                     catch { if !Task.isCancelled { socket.close() } }
                 }
                 if let listing {
@@ -110,8 +115,26 @@ public actor CloudRelayService {
         try await send(RelayEnvelope(kind: "registry", revoked: revoked))
         for (channel, session) in sessions where await session.isRevoked() { sessions[channel] = nil; await session.close() }
     }
+    /// Sends a liveness ping and waits for the room's own answer, or fails so the caller redials.
+    private func ping(_ socket: any CloudRelayConnecting, liveness: CloudRelayLiveness) async throws {
+        try await socket.send(JSONEncoder().encode(RelayEnvelope(kind: "ping")))
+        defer { pong = nil }
+        let deadline = Task { [weak self] in
+            do { try await Task.sleep(for: liveness.pongDeadline) } catch { return }
+            await self?.failPong(BridgeError("connection_failed", "The relay did not answer a liveness ping.", status: 504))
+        }
+        defer { deadline.cancel() }
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (waiter: CheckedContinuation<Void, any Error>) in
+                pong = waiter
+            }
+        } onCancel: { Task { [weak self] in await self?.failPong(CancellationError()) } }
+    }
+    private func answerPong() { let waiter = pong; pong = nil; waiter?.resume() }
+    private func failPong(_ error: any Error) { let waiter = pong; pong = nil; waiter?.resume(throwing: error) }
     private func accept(_ envelope: RelayEnvelope) async throws {
         if envelope.kind == "ready" { return }
+        if envelope.kind == "pong" { answerPong(); return }
         guard let channel = envelope.channelID, UUID(uuidString: channel) != nil else { throw BridgeError("invalid_response", "Invalid relay channel.") }
         switch envelope.kind {
         case "open":
@@ -152,6 +175,7 @@ public actor CloudRelayService {
     /// Closes without sending first: a send on a dead path never returns, and the relay withdraws a host's
     /// directory entry itself when its Bridge socket closes.
     private func disconnect() async {
+        failPong(BridgeError("connection_failed", "The relay link ended.", status: 504))
         heartbeat?.cancel(); heartbeat = nil
         publisher?.cancel(); publisher = nil
         registry?.cancel(); registry = nil
