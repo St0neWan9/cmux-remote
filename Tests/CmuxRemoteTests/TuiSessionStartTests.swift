@@ -48,7 +48,7 @@ private actor RecordingDesktop: CmuxControlling {
         let launcher = SessionLauncher(cmux: router, home: home, mutations: MutationLedger(), sessions: { [] })
         let roots = try await launcher.directories(workspaceID: workspaceID, access: access())
         #expect(roots.map(\.path) == ["~/projects/app"])
-        let request = StartSessionRequest(rootID: roots[0].id, path: "src", agent: .codex)
+        let request = StartSessionRequest(rootID: roots[0].id, path: "src", agent: .codex, prompt: "review src")
         let receipt = try await launcher.start(workspaceID: workspaceID, request: request, access: access())
         let started = TuiResourceIdentity().uuid(machine: TuiResourceFixture.machine, session: TuiResourceFixture.session, resource: TuiResourceFixture.startedTerminal)
         #expect(receipt.surfaceID == started)
@@ -56,8 +56,10 @@ private actor RecordingDesktop: CmuxControlling {
         let run = try #require(await source.effects.first { $0.0 == "workspace.run" })
         #expect(run.1["workspace"]?.string == TuiResourceFixture.workspace && run.1["machine"]?.string == TuiResourceFixture.machine)
         #expect(run.1["cwd"]?.string == folder.appendingPathComponent("src").path)
-        #expect(run.1["shell"]?.string == "exec \"${SHELL:-/bin/zsh}\" -ic 'codex; exec \"${SHELL:-/bin/zsh}\" -l'")
-        #expect(run.1["argv"] == nil && run.1["name"]?.string == "codex")
+        // The owner's interactive shell runs the agent with its message as one quoted argument, then stays open.
+        let shell = TuiControlAdapter.loginShell()
+        #expect(run.1["argv"]?.array?.compactMap(\.string) == [shell, "-ic", "codex --no-daemon 'review src'; exec '" + shell + "' -l"])
+        #expect(run.1["shell"] == nil && run.1["name"]?.string == "codex")
         // The daemon's own idempotency key comes from the operation, so a resent write is deduplicated there too.
         #expect(run.2 != nil && run.1["correlation_key"]?.string == run.2)
     }
@@ -83,7 +85,8 @@ private actor RecordingDesktop: CmuxControlling {
         var arbitrary = valid; arbitrary["launch_agent"] = .string("rm -rf ~")
         var relative = valid; relative["working_directory"] = .string("project")
         var missingKey = valid; missingKey.removeValue(forKey: "operation_key")
-        for params in [arbitrary, relative, missingKey] {
+        var oversized = valid; oversized["launch_prompt"] = .string(String(repeating: "x", count: 5000))
+        for params in [arbitrary, relative, missingKey, oversized] {
             await #expect(throws: BridgeError.self) { _ = try await daemon.request("surface.create", params: params) }
         }
         var unknown = valid; unknown["workspace_id"] = .string("12345678-1234-1234-1234-123456789012")

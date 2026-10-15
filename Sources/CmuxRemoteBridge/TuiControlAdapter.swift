@@ -103,13 +103,16 @@ public actor TuiControlAdapter: CmuxControlling {
                   let cwd = params["working_directory"]?.string, cwd.hasPrefix("/"),
                   let agent = params["launch_agent"]?.string.flatMap(LaunchAgent.init(rawValue:)),
                   let key = params["operation_key"]?.string, !key.isEmpty, key.utf8.count <= 128 else { throw BridgeError("invalid_input", "Invalid daemon terminal request.") }
+            let commandLine = AgentCommandLine()
+            let prompt = try commandLine.validatedPrompt(params["launch_prompt"]?.string)
             let current = try await snapshot()
             guard let workspace = current.rawWorkspaces[workspaceID] else { throw stale() }
             var request = current.selectors()
             request["workspace"] = .string(workspace); request["cwd"] = .string(cwd); request["name"] = .string(agent.rawValue)
-            // The daemon runs `<shell> -lc`, which skips interactive startup files where agents are often put on PATH;
-            // an interactive shell finds them as a typed command would, and stays open after the agent exits.
-            request["shell"] = .string("exec \"${SHELL:-/bin/zsh}\" -ic '" + agent.command + "; exec \"${SHELL:-/bin/zsh}\" -l'")
+            // The daemon's `-lc` skips the interactive startup files where agents are often put on PATH. The owner's
+            // interactive shell runs the agent as a typed command would, then stays open as a login shell.
+            let shell = Self.loginShell()
+            request["argv"] = .array([.string(shell), .string("-ic"), .string(commandLine.line(agent, prompt: prompt) + "; exec " + commandLine.quoted(shell) + " -l")])
             request["correlation_key"] = .string(key)
             let created = try await client.resource("workspace.run", params: request, idempotencyKey: key)
             guard let terminal = created["value"]["terminal_id"].string, (try? TuiResourceIdentity().validate(terminal, prefix: "term")) != nil else {
@@ -256,6 +259,14 @@ public actor TuiControlAdapter: CmuxControlling {
         knownWorkspaces.formUnion(current.rawWorkspaces.keys)
         guard knownSurfaces.count <= 16_384, knownConversations.count <= 16_384, knownWorkspaces.count <= 16_384 else { throw BridgeError("too_large", "The daemon resource routing table is full.", status: 413) }
         return current
+    }
+    /// The owner's login shell from the account database, falling back to zsh; the daemon never expands `$SHELL`.
+    static func loginShell() -> String {
+        if let entry = getpwuid(getuid()), let raw = entry.pointee.pw_shell {
+            let shell = String(cString: raw)
+            if shell.hasPrefix("/"), FileManager.default.isExecutableFile(atPath: shell) { return shell }
+        }
+        return "/bin/zsh"
     }
     private func terminalState(_ current: TuiSessionSnapshot, binding: TuiSessionSnapshot.Binding) async throws -> TuiTerminalState {
         try TuiTerminalState(await client.resource("terminal.state.read", params: current.selectors(binding), idempotencyKey: nil))

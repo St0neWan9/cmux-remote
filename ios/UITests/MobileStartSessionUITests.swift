@@ -33,6 +33,12 @@ final class MobileStartSessionUITests: XCTestCase {
         folder.tap()
         XCTAssertTrue(app.staticTexts["没有子目录。"].waitForExistence(timeout: 5))
         app.buttons["Codex"].tap()
+        // Codex needs a first message before it can start.
+        XCTAssertFalse(app.buttons["start.here"].isEnabled)
+        let prompt = app.textFields["start.prompt"].exists ? app.textFields["start.prompt"] : app.textViews["start.prompt"]
+        prompt.tap()
+        prompt.typeText("检查构建")
+        XCTAssertTrue(app.buttons["start.here"].isEnabled)
         capture(app, "subfolder")
         app.buttons["start.here"].tap()
         // The list waits for the new conversation and opens it.
