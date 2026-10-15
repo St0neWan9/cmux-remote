@@ -89,7 +89,12 @@ export class RelayRoom extends DurableObject<Env> {
       const pair = new WebSocketPair(), [client, server] = Object.values(pair);
       this.ctx.acceptWebSocket(server, metadata.role === "bridge" ? ["bridge"] : ["client", "channel:" + metadata.channel]);
       server.serializeAttachment(metadata);
-      if (metadata.role === "client") this.bridge()?.send(JSON.stringify({ kind: "open", channel_id: metadata.channel, client_id: metadata.clientID }));
+      if (metadata.role === "bridge") {
+        console.log(`relay bridge-connected host=${hostID.slice(0, 8)}`);
+      } else if (metadata.role === "client") {
+        console.log(`relay client-connected host=${hostID.slice(0, 8)} pending=${metadata.pending}`);
+        this.bridge()?.send(JSON.stringify({ kind: "open", channel_id: metadata.channel, client_id: metadata.clientID }));
+      }
       return new Response(null, { status: 101, webSocket: client, headers: { "Sec-WebSocket-Protocol": "cmux-remote.v3" } });
     } catch (error) {
       const failure = error instanceof RelayFailure ? error : new RelayFailure("invalid_request", 400);
@@ -140,6 +145,8 @@ export class RelayRoom extends DurableObject<Env> {
   async webSocketClose(socket: WebSocket): Promise<void> {
     const state = socket.deserializeAttachment() as Connection | undefined;
     if (state?.role === "bridge") {
+      const hostID = await this.ctx.storage.get<string>("hostID");
+      console.log(`relay bridge-disconnected host=${hostID?.slice(0, 8) ?? "unknown"}`);
       const replacement = this.bridge();
       if (!replacement || (replacement.deserializeAttachment() as Connection).channel === state.channel) {
         for (const peer of this.ctx.getWebSockets("client")) if ((peer.deserializeAttachment() as Connection).bridge === state.channel) peer.close(1012, "bridge_offline");
@@ -147,7 +154,10 @@ export class RelayRoom extends DurableObject<Env> {
         const hostID = await this.ctx.storage.get<string>("hostID");
         if (hostID) await directory(this.env).fetch("https://directory/remove", { method: "POST", body: JSON.stringify({ hostID }) });
       }
-    } else if (state?.role === "client") this.bridge()?.send(JSON.stringify({ kind: "close", channel_id: state.channel }));
+    } else if (state?.role === "client") {
+      console.log(`relay client-disconnected channel=${state.channel.slice(0, 8)}`);
+      this.bridge()?.send(JSON.stringify({ kind: "close", channel_id: state.channel }));
+    }
   }
   webSocketError(socket: WebSocket): void { socket.close(1011, "connection_failed"); }
   /** Accepts only this host's own signed bootstrap with a current relay enrollment permit for this origin. */
@@ -179,7 +189,10 @@ export class RelayRoom extends DurableObject<Env> {
     const now = Math.floor(Date.now() / 1000);
     if (state.window !== now) { state.window = now; state.messages = 0; state.byteCount = 0; }
     state.messages++; state.byteCount += count;
-    if (count > 3_000_000 || state.messages > (state.role === "bridge" ? 1024 : 256) || state.byteCount > (state.role === "bridge" ? 16_777_216 : 4_194_304)) throw new RelayFailure("rate_limited", 429);
+    if (count > 3_000_000 || state.messages > (state.role === "bridge" ? 1024 : 256) || state.byteCount > (state.role === "bridge" ? 16_777_216 : 4_194_304)) {
+      console.warn(`relay rate-limited role=${state.role} messages=${state.messages} bytes=${state.byteCount}`);
+      throw new RelayFailure("rate_limited", 429);
+    }
     socket.serializeAttachment(state);
   }
 }

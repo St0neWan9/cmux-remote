@@ -1,5 +1,6 @@
 import Foundation
 import CryptoKit
+import os
 import CmuxRemoteCore
 
 /// One ordered encrypted session; authorization remains in the fixed resource router.
@@ -41,6 +42,7 @@ actor LinkServerSession {
                 clientID = try IdentityCryptography().identityID(publicKey: proposal.value.clientPublicKey)
                 guard expectedClientID == nil || expectedClientID == clientID else { throw BridgeError("unauthorized", "The relay channel belongs to another device.") }
                 try await writer.write(JSONEncoder().encode(acceptance)); handshakeDeadline?.cancel(); handshakeDeadline = nil
+                Logger.link.info("link session opened client=\(self.clientID?.prefix(8) ?? "?", privacy: .public)")
                 return
             }
             let frame = try cipher!.open(data)
@@ -61,6 +63,7 @@ actor LinkServerSession {
                 guard requests[frame.id] == nil, subscriptions[frame.id] == nil, requests.count < 8,
                       let method = frame.method, ["GET", "POST"].contains(method), let uri = frame.uri,
                       uri.hasPrefix("/v2/"), let clientID else { throw BridgeError("invalid_request", "Invalid resource request or full link.") }
+                Logger.link.debug("link request method=\(method, privacy: .public) uri=\(uri, privacy: .public)")
                 try router.verifyChannelIdentity(frame, clientID: clientID)
                 if frame.kind == "subscribe" {
                     guard subscriptions.count < 8 else { throw BridgeError("too_large", "The subscription limit was reached.") }
@@ -84,6 +87,7 @@ actor LinkServerSession {
     }
     func close() async {
         guard !closed else { return }; closed = true
+        Logger.link.info("link session closed client=\(self.clientID?.prefix(8) ?? "?", privacy: .public)")
         handshakeDeadline?.cancel(); handshakeDeadline = nil
         for task in requests.values { task.cancel() }; requests.removeAll()
         for task in subscriptions.values { task.cancel() }; subscriptions.removeAll()
