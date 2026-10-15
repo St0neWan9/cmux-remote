@@ -117,6 +117,8 @@ private struct LaunchFixture {
         #expect(params["working_directory"]?.string == fixture.root.appendingPathComponent("src/core").path)
         #expect(params["initial_input"]?.string == "codex\r")
         #expect(params["focus"]?.bool == false && params["type"]?.string == "terminal" && params["initial_command"] == nil)
+        // Daemon-only fields never reach the desktop.
+        #expect(params["launch_agent"] == nil && params["operation_key"] == nil)
     }
 
     @Test func aRepeatedOperationReplaysItsReceiptAndNeverOpensASecondTerminal() async throws {
@@ -159,10 +161,10 @@ private struct LaunchFixture {
         #expect(await fixture.cmux.creates.isEmpty)
     }
 
-    @Test func daemonWorkspacesCannotStartSessions() async throws {
+    @Test func aDaemonWorkspaceWithoutTerminalFoldersOffersNoRoot() async throws {
         let fixture = try LaunchFixture()
         let daemon = SessionAccess(clientID: "phone") { _, _ in }
-        #expect(await fixture.code { try await fixture.launcher.directories(workspaceID: LaunchCmux.daemonWorkspace, access: daemon) } == "launch_unsupported")
+        #expect(try await fixture.launcher.directories(workspaceID: LaunchCmux.daemonWorkspace, access: daemon).isEmpty)
     }
 
     @Test func requestsAndReceiptsUseStableWireNames() throws {
