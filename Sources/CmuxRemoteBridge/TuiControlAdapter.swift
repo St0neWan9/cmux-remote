@@ -52,6 +52,12 @@ public actor TuiControlAdapter: CmuxControlling {
                 var row = descriptor(binding)
                 if !liveIDs.contains(binding.id) { row["state"] = .string("ended"); row["status"] = .string("ended") }
                 else if let state = activity[binding.providerSession] { row["state"] = .string(state); row["status"] = .string(state) }
+                // An interrupted Claude turn sends no Stop hook, so its hooks still say working; Claude Code marks
+                // itself idle in the terminal title with `✳` (a turn in progress shows a spinner glyph instead).
+                if liveIDs.contains(binding.id), binding.provider == "claude", row["state"]?.string == "working",
+                   current.terminalTitles[binding.terminal]?.hasPrefix("✳") == true {
+                    row["state"] = .string("idle"); row["status"] = .string("idle")
+                }
                 if let path = paths[binding.id] {
                     row["file"] = .string(path)
                 }
