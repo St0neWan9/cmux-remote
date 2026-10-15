@@ -18,8 +18,15 @@ struct OwnerCommand {
             guard options.args.count >= 2 else { throw BridgeError("invalid_input", "Choose an exact pending request ID.") }
             let workspaces = options.values("workspace")
             let explicit = options.values("capability")
-            let capabilities: [ClientCapability]
-            if explicit.isEmpty { capabilities = options.contains("control") ? [.workspaceRead, .conversationRead, .projectRead, .feedRead, .conversationControl, .feedReply] : [.workspaceRead, .conversationRead, .projectRead, .feedRead] }
+            var capabilities: [ClientCapability]
+            if explicit.isEmpty {
+                capabilities = options.contains("control") ? [.workspaceRead, .conversationRead, .projectRead, .feedRead, .conversationControl, .feedReply] : [.workspaceRead, .conversationRead, .projectRead, .feedRead]
+                // Starting sessions comes with control only when the device asked for it; approval never expands a request.
+                if options.contains("control") {
+                    let pending = try JSONDecoder().decode([EnrollmentRequest].self, from: JSONEncoder().encode(await socket.request("enrollment.pending", params: [:])))
+                    if pending.first(where: { $0.requestID == options.args[1] })?.scope.capabilities.contains(.conversationStart) == true { capabilities.append(.conversationStart) }
+                }
+            }
             else {
                 guard explicit.allSatisfy({ ClientCapability(rawValue: $0) != nil }) else { throw BridgeError("invalid_scope", "Unknown capability.") }
                 capabilities = explicit.compactMap(ClientCapability.init(rawValue:))

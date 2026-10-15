@@ -18,6 +18,8 @@ final class AppModel {
     var workspaces: [WorkspaceSummary] = []
     /// Workspace ID to the Mac that owns it, for labels when several Macs are connected.
     var workspaceHosts: [String: String] = [:]
+    /// Approved desktop workspaces on Macs that let this device start sessions.
+    var startTargets: [StartTarget] = []
     var hostErrors: [String: String] = [:]
     /// Each Mac's link as the client reports it; a Mac never dialed yet has no entry.
     var linkStates: [String: LinkState] = [:]
@@ -44,7 +46,7 @@ final class AppModel {
     private let makeSpeechInput: @MainActor () -> any SpeechInputServing
     private let pendingSends: PendingSendStore
     private let identityKey: @MainActor () throws -> Data
-    private let makeEnrollment: @MainActor (SignedValue<EnrollmentBootstrap>, Data, BridgeEndpoint?) throws -> any DeviceEnrolling
+    private let makeEnrollment: @MainActor (SignedValue<EnrollmentBootstrap>, Data, BridgeEndpoint?, [ClientCapability]) throws -> any DeviceEnrolling
     private let enrollmentTicks: @MainActor () -> (stream: AsyncStream<Void>, stop: @MainActor () -> Void)
     private let fetchSessions: @Sendable (RemoteClient) async throws -> [SessionDescriptor]
     private let fetchWorkspaces: @Sendable (RemoteClient) async throws -> [WorkspaceSummary]
@@ -60,7 +62,7 @@ final class AppModel {
     init(discovery: BridgeDiscovery = BridgeDiscovery(), store: PairingStore = PairingStore(), pendingSends: PendingSendStore = PendingSendStore(),
          makeSpeechInput: @escaping @MainActor () -> any SpeechInputServing = { UnavailableSpeechInput() },
          identityKey: @escaping @MainActor () throws -> Data = { try DeviceIdentityStore().privateKey() },
-         makeEnrollment: @escaping @MainActor (SignedValue<EnrollmentBootstrap>, Data, BridgeEndpoint?) throws -> any DeviceEnrolling = { bootstrap, key, endpoint in try EnrollmentClient(bootstrap: bootstrap, privateKey: key, name: "cmux iPhone", kind: "iphone", endpoint: endpoint) },
+         makeEnrollment: @escaping @MainActor (SignedValue<EnrollmentBootstrap>, Data, BridgeEndpoint?, [ClientCapability]) throws -> any DeviceEnrolling = { bootstrap, key, endpoint, capabilities in try EnrollmentClient(bootstrap: bootstrap, privateKey: key, name: "cmux iPhone", kind: "iphone", capabilities: capabilities, endpoint: endpoint) },
          fetchSessions: @escaping @Sendable (RemoteClient) async throws -> [SessionDescriptor] = { try await $0.get("/v1/sessions", as: [SessionDescriptor].self) },
          fetchWorkspaces: @escaping @Sendable (RemoteClient) async throws -> [WorkspaceSummary] = { client in
              let value = try await client.get("/v1/workspaces", as: JSONValue.self)
@@ -180,9 +182,18 @@ final class AppModel {
         guard enrollmentGeneration == generation else { return }
         error = nil; loading = true
         do {
-            let enrollment = try makeEnrollment(bootstrap, identityKey(), endpoint)
+            var enrollment = try makeEnrollment(bootstrap, identityKey(), endpoint, EnrollmentClient.phoneCapabilities)
             pendingEnrollment = enrollment
-            let status = try await enrollment.submit()
+            let status: EnrollmentStatus
+            do { status = try await enrollment.submit() }
+            catch let failure as BridgeError where failure.code == "outcome_unknown" && enrollment.request.value.scope.capabilities.contains(.conversationStart) {
+                // An older Bridge closes the link on a capability it cannot decode; ask again without starting sessions.
+                guard enrollmentGeneration == generation, pendingEnrollment === enrollment else { enrollment.close(); return }
+                enrollment.close()
+                enrollment = try makeEnrollment(bootstrap, identityKey(), endpoint, EnrollmentClient.previousPhoneCapabilities)
+                pendingEnrollment = enrollment
+                status = try await enrollment.submit()
+            }
             guard enrollmentGeneration == generation, pendingEnrollment === enrollment else { enrollment.close(); return }
             enrollmentState = status.state; loading = false
             startEnrollmentMonitor()
@@ -305,6 +316,9 @@ final class AppModel {
         hostedSessions = current.flatMap { link in perHost[link.id]!.sessions.map { HostedSession(hostID: link.id, hostName: link.name, session: $0) } }
         workspaces = current.flatMap { perHost[$0.id]!.workspaces }
         workspaceHosts = Dictionary(current.flatMap { link in perHost[link.id]!.workspaces.map { ($0.id, link.name) } }, uniquingKeysWith: { first, _ in first })
+        startTargets = current.filter { $0.client.allows(.conversationStart) }.flatMap { link in
+            perHost[link.id]!.workspaces.filter(\.startsSessions).map { StartTarget(hostID: link.id, hostName: link.name, workspace: $0, client: link.client) }
+        }
         error = links.compactMap { link in hostErrors[link.id].map { links.count > 1 ? link.name + "：" + $0 : $0 } }.first
     }
     func link(for hostID: String) -> HostLink? { links.first { $0.id == hostID } }

@@ -85,6 +85,7 @@
 "mac.capability.reply" = "处理待办操作";
 "mac.capability.terminals" = "查看终端";
 "mac.capability.input" = "输入终端内容";
+"mac.capability.start" = "开新会话";
 "mac.selectHost" = "选择一台 Mac，查看它的 workspace。";
 "mac.devices.pending" = "待批准申请";
 "mac.pairing.scanHint" = "在新设备上扫描此二维码，然后在这里批准连接申请。";
@@ -134,6 +135,7 @@
 "mac.relay.error" = "请检查 HTTPS 中转地址和仅当前用户可读的注册密钥文件。";
 "mac.relay.originPlaceholder" = "https://your-relay.workers.dev";
 "mac.device.narrowHint" = "取消勾选这台设备不应看到的工作区。批准不会增加申请之外的工作区。";
+"mac.device.allowStart" = "允许在这些工作区里开新的 Claude 或 Codex 会话";
 "mac.logs.title" = "日志";
 "mac.logs.open" = "显示日志…";
 "mac.logs.hint" = "后台 Bridge 的连接事件。设备连不上时，可在这里查看或复制。";
