@@ -4,7 +4,6 @@ import CmuxRemoteClient
 
 struct SessionListView: View {
     @Bindable var model: AppModel
-    @State private var showSidebar = false
     @State private var showSearch = false
     @State private var showConnection = false
     @State private var showFeed = false
@@ -35,7 +34,7 @@ struct SessionListView: View {
         let error = model.error
         let multiple = links.count > 1
         let canRead = links.contains { $0.client.allows(.conversationRead) }
-        SideDrawer(isPresented: $showSidebar, allowsEdgeOpening: !showConversation && !showConnection && !showFeed) {
+        SideDrawer(isPresented: $model.sidebarOpen, allowsEdgeOpening: !showConversation && !showConnection && !showFeed) {
         AppNavigationStack {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: MobileDesign.sectionGap) {
@@ -124,7 +123,7 @@ struct SessionListView: View {
             // A pull reads again; only a Mac that is down is dialed again. The page menu keeps a full redial.
             .refreshable { await model.pullToRefresh() }
             .task { await model.refresh() }
-            .onDisappear { showSidebar = false }
+            .onDisappear { model.sidebarOpen = false }
             .overlay { if loading && hosted.isEmpty { ProgressView() } }
             .navigationDestination(isPresented: $showConversation) { if let selectedConversation { ConversationView(model: selectedConversation, hostName: selectedHostName) } }
             .navigationDestination(isPresented: $showConnection) {
@@ -135,15 +134,18 @@ struct SessionListView: View {
                 }
             }
             .navigationDestination(isPresented: $showFeed) { if let id = feedHostID, let link = model.link(for: id) { FeedView(client: link.client) } }
+            // Adding a Mac is a pushed page, so it slides in and out like every other one and keeps the drawer.
+            .navigationDestination(isPresented: $model.addingDevice) { PairingView(model: model) }
         }
         } drawer: {
             SessionSidebarView(sections: sections, hosts: links.map { SidebarHost(id: $0.id, name: $0.name, canReadFeed: $0.client.allows(.feedRead), failed: model.hostErrors[$0.id] != nil) },
                 query: $query,
                 recent: recent, sortMode: $sortMode,
-                select: { hosted in showSidebar = false; openConversation(hosted) },
-                showConnection: { id in showSidebar = false; connectionHostID = id; showConnection = true },
-                showFeed: { id in showSidebar = false; feedHostID = id; showFeed = true },
-                addDevice: { showSidebar = false; model.addingDevice = true },
+                // The drawer stays open behind a pushed page, so coming back lands on it as it was.
+                select: { hosted in model.sidebarOpen = false; openConversation(hosted) },
+                showConnection: { id in connectionHostID = id; showConnection = true },
+                showFeed: { id in model.sidebarOpen = false; feedHostID = id; showFeed = true },
+                addDevice: { model.addingDevice = true },
                 refresh: { Task { await model.reconnect() } })
         }.environment(\.colorScheme, .light)
     }
@@ -177,7 +179,7 @@ struct SessionListView: View {
     }
     private var header: some View {
         HStack(spacing: 12) {
-            Button { showSidebar = true } label: {
+            Button { model.sidebarOpen = true } label: {
                 Image(systemName: "line.3.horizontal")
             }.buttonStyle(FloatingIconStyle()).accessibilityLabel(String(localized: "sessions.sidebar")).accessibilityIdentifier("sessions.sidebar")
             Text(String(localized: "sessions.title")).font(.headline).frame(maxWidth: .infinity)
