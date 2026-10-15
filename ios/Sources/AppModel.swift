@@ -18,7 +18,7 @@ final class AppModel {
     var workspaces: [WorkspaceSummary] = []
     /// Workspace ID to the Mac that owns it, for labels when several Macs are connected.
     var workspaceHosts: [String: String] = [:]
-    /// Approved desktop workspaces on Macs that let this device start sessions.
+    /// Approved workspaces on Macs that let this device start sessions.
     var startTargets: [StartTarget] = []
     var hostErrors: [String: String] = [:]
     /// Each Mac's link as the client reports it; a Mac never dialed yet has no entry.
@@ -382,7 +382,7 @@ final class AppModel {
         workspaces = current.flatMap { perHost[$0.id]!.workspaces }
         workspaceHosts = Dictionary(current.flatMap { link in perHost[link.id]!.workspaces.map { ($0.id, link.name) } }, uniquingKeysWith: { first, _ in first })
         startTargets = current.filter { $0.client.allows(.conversationStart) }.flatMap { link in
-            perHost[link.id]!.workspaces.filter(\.startsSessions).map { StartTarget(hostID: link.id, hostName: link.name, workspace: $0, client: link.client) }
+            perHost[link.id]!.workspaces.map { StartTarget(hostID: link.id, hostName: link.name, workspace: $0, client: link.client) }
         }
         error = links.compactMap { link in hostErrors[link.id].map { links.count > 1 ? link.name + "：" + $0 : $0 } }.first
         syncRunning()

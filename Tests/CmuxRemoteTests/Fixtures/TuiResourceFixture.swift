@@ -8,6 +8,8 @@ actor TuiResourceFixture: TuiResourceRequesting {
     static let session = "session_" + String(repeating: "b", count: 32)
     static let workspace = "ws_" + String(repeating: "c", count: 32)
     static let terminal = "term_" + String(repeating: "d", count: 32)
+    /// The terminal a `workspace.run` opens.
+    static let startedTerminal = "term_" + String(repeating: "e", count: 32)
     static let providerID = "11111111-2222-3333-4444-555555555555"
     var raw: JSONValue
     var screen = ""
@@ -39,6 +41,11 @@ actor TuiResourceFixture: TuiResourceRequesting {
             if lost { throw BridgeError("outcome_unknown", "Fixture lost response", status: 504) }
             if malformedReceipt { return .null }
             return .object(["value": .object([:]), "generation": .string("fixture-generation"), "revision": .string("1"), "replayed": .bool(false)])
+        case "workspace.run":
+            effects.append((operation, params, idempotencyKey))
+            if lost { throw BridgeError("outcome_unknown", "Fixture lost response", status: 504) }
+            return .object(["value": .object(["kind": .string("terminal"), "workspace_id": params["workspace"] ?? .null, "terminal_id": .string(Self.startedTerminal)]),
+                            "generation": .string("fixture-generation"), "revision": .string("2"), "replayed": .bool(false)])
         default: throw BridgeError("unsupported", "Unexpected fixture resource")
         }
     }
@@ -77,6 +84,11 @@ actor TuiResourceFixture: TuiResourceRequesting {
         self.lost = lost; replaceDuringState = replaced; malformedReceipt = malformed
     }
     func restore(_ text: String?) { restoredOnInterrupt = text }
+    /// Moves the fixture terminal to another working directory.
+    func setTerminalCWD(_ cwd: String) {
+        guard case .object(var graph) = raw, case .array(var terminals) = graph["terminals"] ?? .null, case .object(var terminal) = terminals[0] else { return }
+        terminal["cwd"] = .string(cwd); terminals[0] = .object(terminal); graph["terminals"] = .array(terminals); raw = .object(graph)
+    }
     func dismissesOnEscape() { dismissOnEscape = true }
     func setAgentField(_ field: String, _ value: JSONValue) {
         var root = raw.object!, row = root["agents"]!.array![0].object!; row[field] = value; root["agents"] = .array([.object(row)]); raw = .object(root)
