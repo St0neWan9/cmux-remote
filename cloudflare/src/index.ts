@@ -142,8 +142,10 @@ export class RelayRoom extends DurableObject<Env> {
       }
     } catch (error) { socket.close(1008, error instanceof RelayFailure ? error.code : "invalid_packet"); }
   }
-  async webSocketClose(socket: WebSocket): Promise<void> {
+  async webSocketClose(socket: WebSocket, code: number, reason: string, wasClean: boolean): Promise<void> {
     const state = socket.deserializeAttachment() as Connection | undefined;
+    // Who closed the socket and how, so a bridge that drops without a close frame can be told from one the edge ended.
+    console.log(`relay ${state?.role ?? "unknown"}-closed channel=${(state?.channel ?? "?").slice(0, 8)} code=${code} clean=${wasClean} reason=${reason.slice(0, 40)}`);
     if (state?.role === "bridge") {
       const hostID = await this.ctx.storage.get<string>("hostID");
       console.log(`relay bridge-disconnected host=${hostID?.slice(0, 8) ?? "unknown"}`);
@@ -159,7 +161,11 @@ export class RelayRoom extends DurableObject<Env> {
       this.bridge()?.send(JSON.stringify({ kind: "close", channel_id: state.channel }));
     }
   }
-  webSocketError(socket: WebSocket): void { socket.close(1011, "connection_failed"); }
+  webSocketError(socket: WebSocket, error: unknown): void {
+    const state = socket.deserializeAttachment() as Connection | undefined;
+    console.log(`relay ${state?.role ?? "unknown"}-error channel=${(state?.channel ?? "?").slice(0, 8)} error=${String((error as Error)?.message ?? error).slice(0, 80)}`);
+    socket.close(1011, "connection_failed");
+  }
   /** Accepts only this host's own signed bootstrap with a current relay enrollment permit for this origin. */
   private async entry(hostID: string, data: string | undefined, state: Connection): Promise<DirectoryEntry> {
     const hostKey = await this.ctx.storage.get<string>("hostKey");
