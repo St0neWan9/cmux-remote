@@ -33,8 +33,14 @@ func diagLog(_ level: DiagnosticLog.Level = .info, category: String, _ message: 
 }
 
 /// The trace a `RemoteClient` reports into: one line per dial, path outcome, link loss and failed request,
-/// tagged with the Mac so several links stay apart. Lines that carry an error are warnings.
+/// tagged with the Mac so several links stay apart.
 func diagLinkTrace(host: String) -> @Sendable (String) -> Void {
     let tag = String(host.prefix(8))
-    return { line in diagLog(line.contains("error=") || line.contains("timeout") ? .warning : .info, category: "link", line + " host=" + tag) }
+    return { line in diagLog(diagLinkLevel(line), category: "link", line + " host=" + tag) }
+}
+
+/// Lines that carry an error or a timeout are warnings. A path that lost a dial race is reported as
+/// "cancelled ... connected first" without an error, so it stays informational.
+func diagLinkLevel(_ line: String) -> DiagnosticLog.Level {
+    line.contains("error=") || line.contains("timeout") ? .warning : .info
 }
