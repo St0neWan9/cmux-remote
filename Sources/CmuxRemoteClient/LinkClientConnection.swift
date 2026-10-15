@@ -1,4 +1,5 @@
 import Foundation
+import os
 import CmuxRemoteCore
 
 /// Multiplexes bounded requests and subscriptions over one ordered authenticated link.
@@ -80,6 +81,7 @@ actor LinkClientConnection {
         if socket != nil { return }
         if preparing == nil {
             report(.connecting)
+            Logger.clientLink.info("link connecting relayed=\(self.lastRelayed, privacy: .public)")
             let host = host, key = key, endpoint = endpoint, race = lastRelayed && endpoint.relay != nil
             preparing = Task {
                 if race, let relay = endpoint.relay { return try await self.race(host: host, key: key, endpoint: endpoint, relay: relay) }
@@ -93,10 +95,11 @@ actor LinkClientConnection {
         let current = preparing!
         do {
             let ready: Prepared
-            do { ready = try await current.value } catch { if !closed { report(.disconnected) }; throw error }
+            do { ready = try await current.value } catch { if !closed { report(.disconnected); Logger.clientLink.warning("link disconnected error=\(String(describing: error), privacy: .public)") }; throw error }
             guard !closed else { ready.socket.close(); throw CancellationError() }
             if socket == nil {
                 socket = ready.socket; cipher = ready.cipher; writer = WebSocketSendQueue(socket: ready.socket, cipher: ready.cipher); lastRelayed = ready.relayed
+                Logger.clientLink.info("link connected relayed=\(ready.relayed, privacy: .public)")
                 report(.connected)
                 heartbeat = Task { [weak self] in
                     do { while !Task.isCancelled { try await Task.sleep(for: .seconds(25)); try await Self.ping(ready.socket) } }
