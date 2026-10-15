@@ -86,6 +86,7 @@
 "sessions.projects" = "Projects";
 "sessions.other" = "Other conversations";
 "sessions.options" = "Connection options";
+"page.close" = "Close";
 "page.back" = "Back";
 "chat.copy" = "Copy reply";
 "chat.copied" = "Copied";
