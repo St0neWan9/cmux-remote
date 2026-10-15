@@ -126,16 +126,9 @@ struct SessionListView: View {
             .task { await model.refresh() }
             .overlay { if loading && hosted.isEmpty { ProgressView() } }
             .navigationDestination(isPresented: $showConversation) { if let selectedConversation { ConversationView(model: selectedConversation, hostName: selectedHostName) } }
-            .navigationDestination(isPresented: $showConnection) {
-                if let id = connectionHostID, let link = model.link(for: id) {
-                    ConnectionDetailView(client: link.client, host: link.name, identity: link.connection?.host.id, certificate: link.connection?.host.certificateSHA256, endpoint: link.endpoint) {
-                        showConnection = false; model.remove(hostID: id)
-                    }
-                }
-            }
+
             .navigationDestination(isPresented: $showFeed) { if let id = feedHostID, let link = model.link(for: id) { FeedView(client: link.client) } }
-            // Adding a Mac is a pushed page, so it slides in and out like every other one and keeps the drawer.
-            .navigationDestination(isPresented: $model.addingDevice) { PairingView(model: model) }
+
         }
         } drawer: {
             SessionSidebarView(sections: sections, hosts: links.map { SidebarHost(id: $0.id, name: $0.name, canReadFeed: $0.client.allows(.feedRead), failed: model.hostErrors[$0.id] != nil) },
@@ -148,6 +141,15 @@ struct SessionListView: View {
                 addDevice: { model.addingDevice = true },
                 refresh: { Task { await model.reconnect() } })
         }.environment(\.colorScheme, .light)
+            // Presented over the drawer, which stays open behind them rather than squeezing them into its panel.
+            .fullScreenCover(isPresented: $showConnection) {
+                if let id = connectionHostID, let link = model.link(for: id) {
+                    ConnectionDetailView(client: link.client, host: link.name, identity: link.connection?.host.id, certificate: link.connection?.host.certificateSHA256, endpoint: link.endpoint) {
+                        showConnection = false; model.remove(hostID: id)
+                    }
+                }
+            }
+            .fullScreenCover(isPresented: $model.addingDevice) { PairingView(model: model) }
     }
     private func openConversation(_ hosted: HostedSession) {
         guard let link = model.link(for: hosted.hostID) else { return }
