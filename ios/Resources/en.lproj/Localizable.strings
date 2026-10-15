@@ -90,6 +90,8 @@
 "page.back" = "Back";
 "chat.copy" = "Copy reply";
 "chat.copied" = "Copied";
+"chat.selection.add_to_chat" = "Add to chat";
+"chat.selection.select_all" = "Select all";
 "chat.share" = "Share reply";
 "chat.quote" = "Quote in follow-up";
 "chat.response_time" = "Reply time";
