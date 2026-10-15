@@ -15,6 +15,9 @@ final class StartSessionModel {
     private(set) var uncertain = false
     var error: String?
     var agent: LaunchAgent = .claude
+    /// The first message; Codex needs one to report its conversation.
+    var prompt = ""
+    var canStart: Bool { !starting && (!agent.requiresPrompt || !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) }
     private var pendingRequest: StartSessionRequest?
     private let client: RemoteClient
 
@@ -38,12 +41,13 @@ final class StartSessionModel {
     func start(root: LaunchDirectory, path: String, agent: LaunchAgent, fresh: Bool = false) async -> (accepted: Bool, surfaceID: String?) {
         guard !starting else { return (false, nil) }
         starting = true; defer { starting = false }
-        let same = pendingRequest.map { $0.rootID == root.id && $0.path == path && $0.agent == agent } ?? false
-        let request = same && !fresh ? pendingRequest! : StartSessionRequest(rootID: root.id, path: path, agent: agent)
+        let message = prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : prompt
+        let same = pendingRequest.map { $0.rootID == root.id && $0.path == path && $0.agent == agent && $0.prompt == message } ?? false
+        let request = same && !fresh ? pendingRequest! : StartSessionRequest(rootID: root.id, path: path, agent: agent, prompt: message)
         pendingRequest = request
         do {
             let receipt = try await client.post("/v1/workspaces/\(workspace.id)/sessions", body: request, as: StartSessionReceipt.self)
-            pendingRequest = nil; uncertain = false; error = nil
+            pendingRequest = nil; uncertain = false; error = nil; prompt = ""
             return (receipt.accepted, receipt.surfaceID)
         } catch {
             let code = (error as? BridgeError)?.code

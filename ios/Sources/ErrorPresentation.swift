@@ -51,6 +51,7 @@ struct ErrorPresentation {
         case "image_load_failed": return String(localized: "error.image_load")
         case "request_expired": return String(localized: "error.expired")
         case "launch_unsupported": return String(localized: "error.launch_unsupported")
+        case "prompt_required": return String(localized: "error.prompt_required")
         case "directory_forbidden", "directory_missing": return String(localized: "error.directory")
         default:
             // Keep the code visible in the banner until all unhandled codes are confirmed handled.

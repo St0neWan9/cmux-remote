@@ -55,7 +55,7 @@ private actor PhoneUIBackend: CmuxControlling {
         // A started session is only recorded here: no terminal opens and no agent runs.
         case "surface.create":
             guard params["type"]?.string == "terminal", let input = params["initial_input"]?.string, let cwd = params["working_directory"]?.string else { throw BridgeError("invalid_params", "fixture") }
-            started = (String(input.dropLast()), cwd)
+            started = (String(input.split(separator: " ").first ?? "claude").trimmingCharacters(in: .newlines), cwd)
             try Data((#"{"type":"user","uuid":"started","timestamp":"2026-10-12T02:00:00Z","message":{"content":"新会话已在 Mac 上启动"}}"# + "\n").utf8).write(to: root.appendingPathComponent("started.jsonl"))
             return .object(["surface_id": .string(startedSurface)])
         case "system.tree":
