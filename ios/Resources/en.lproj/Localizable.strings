@@ -308,3 +308,5 @@
 "sessions.close_search" = "Close search";
 "sessions.title_menu" = "Conversation options";
 "feed.title_count" = "Waiting for you (%lld)";
+"chat.select_text" = "Select Text";
+"chat.copy_text" = "Copy";

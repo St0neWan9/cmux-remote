@@ -18,6 +18,21 @@ import CmuxRemoteCore
         let recorded = history + [user("new", 2, "continue")]
         #expect(OutgoingPromptMatcher().pending([prompt], messages: recorded, generation: "g1").isEmpty)
     }
+    /// Claude records a pasted multi-line prompt inside a wrapper; the phone's own prompt still matches it.
+    @Test func aPromptRecordedAsAPasteReplacesThePendingBubble() {
+        let history = [agent("reply", 1, "Done")]
+        let sent = "题型数量要实时\n\n设备筛选横排可以"
+        let prompt = OutgoingPrompt(request: SendRequest(text: sent), after: history, generation: "g1")
+        let recorded = history + [user("new", 2, "\n\n<pasted_content id=\"919e\">\n" + sent + "\n</pasted_content id=\"919e\">\n")]
+        #expect(OutgoingPromptMatcher().pending([prompt], messages: recorded, generation: "g1").isEmpty)
+    }
+    @Test func thePasteWrapperIsNotShown() {
+        #expect(PromptText.displayed("\n\n<pasted_content id=\"919e\">\n第一行\n\n第二行\n</pasted_content id=\"919e\">\n") == "第一行\n\n第二行")
+        // A prompt without a wrapper is shown exactly as typed, spacing included.
+        #expect(PromptText.displayed("  indented\nlines ") == "  indented\nlines ")
+        // Text that only talks about the tag keeps it.
+        #expect(PromptText.displayed("what is <pasted_content>?") == "what is <pasted_content>?")
+    }
     @Test func onlyAMessageRecordedAfterTheSendCanReplaceIt() {
         let history = [agent("reply", 5, "Done")]
         let prompt = OutgoingPrompt(request: SendRequest(text: "fix it"), after: history, generation: "g1")
