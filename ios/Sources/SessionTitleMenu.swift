@@ -1,11 +1,9 @@
 import SwiftUI
 import CmuxRemoteCore
 
-/// The list's title opens the page's options: order, workspace, pending items, refresh and management.
+/// The list's title opens the page's options: order, pending items, refresh and management.
 struct SessionTitleMenu: View {
     @Binding var sortMode: SessionSortMode
-    @Binding var workspaceID: String?
-    let workspaces: [(id: String, title: String)]
     /// Macs whose pending items this device may read, with how many wait on each.
     let feeds: [(id: String, name: String, count: Int)]
     let canStart: Bool
@@ -18,13 +16,6 @@ struct SessionTitleMenu: View {
             Picker(String(localized: "sessions.sort"), selection: $sortMode) {
                 ForEach(SessionSortMode.allCases) { mode in Label(mode.title, systemImage: mode.symbol).tag(mode) }
             }.pickerStyle(.inline)
-            if workspaces.count > 1 {
-                Picker(selection: $workspaceID) {
-                    Text(String(localized: "sessions.all_workspaces")).tag(String?.none)
-                    ForEach(workspaces, id: \.id) { workspace in Text(workspace.title).tag(String?.some(workspace.id)) }
-                } label: { Label(String(localized: "sessions.workspace_filter"), systemImage: "macwindow") }
-                    .pickerStyle(.menu)
-            }
             Divider()
             if feeds.count == 1, let only = feeds.first {
                 Button { showFeed(only.id) } label: { Label(feedTitle(only.count), systemImage: "bell") }
