@@ -16,11 +16,8 @@ struct DiagnosticLogView: View {
         return "cmux-remote \(version) (\(number)) · iOS \(UIDevice.current.systemVersion)"
     }
 
-    /// How this page is left: presented on its own it closes, and pushed it slides back.
-    var dismissal: WhitePage<EmptyView>.Dismissal = .close
-
     var body: some View {
-        WhitePage(title: String(localized: "diagnostics.title"), dismissal: dismissal) {
+        WhitePage(title: String(localized: "diagnostics.title"), dismissal: .close) {
             VStack(spacing: 0) {
                 List {
                     Section {
