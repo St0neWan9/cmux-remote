@@ -117,6 +117,14 @@ public struct AgentChatProseScreenExtractor: Sendable {
     /// the timer line is strongly preferred; the interrupt hint is only a fallback
     /// for layouts/agents that render no timer line (e.g. Codex).
     static func statusLineIndex(in rows: [String]) -> Int? {
+        // Nothing below the persistent mode bar can be the working line: Claude lists its background
+        // agents there (`⏺ main`, `◯ general-purpose  Running … 9m 50s · ↓ 130k tokens`), and a roster
+        // row carries a timer and throughput, so anchoring on it read the `⏺ main` row as the answer.
+        // The cut applies only to that layout, where the bar sits just under the composer's `❯` row.
+        let footer = rows.lastIndex(where: isModeFooterLine).flatMap { bar in
+            rows[max(0, bar - 4)..<bar].contains { $0.trimmingCharacters(in: .whitespaces).hasPrefix("❯") } ? bar : nil
+        }
+        let rows = Array(rows.prefix(footer ?? rows.count))
         // Tier 1: the spinner line carrying an elapsed timer and throughput,
         // directly above the answer once tokens start (`✻ … (3s · ↓ 1 tokens)`).
         for index in stride(from: rows.count - 1, through: 0, by: -1) {

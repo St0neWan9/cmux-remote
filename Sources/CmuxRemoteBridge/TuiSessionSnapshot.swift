@@ -47,9 +47,10 @@ struct TuiSessionSnapshot: Sendable {
         }
         let workspaceRows = try indexed("workspaces", "ws"), screens = try indexed("screens", "screen"), panes = try indexed("panes", "pane"), terminals = try indexed("terminals", "term")
         _ = try indexed("tabs", "tab"); _ = try indexed("agents", "agent")
-        var memberships: [String: Set<String>] = [:]
+        var memberships: [String: Set<String>] = [:], tabNames: [String: String] = [:]
         for tab in arrays["tabs"]! {
             guard tab["content_kind"].string == "terminal", let terminal = tab["content_id"].string else { continue }
+            if let name = tab["name"].string?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty { tabNames[terminal] = name }
             guard terminals[terminal] != nil, let pane = tab["pane_id"].string.flatMap({ panes[$0] }),
                   let screen = pane["screen_id"].string.flatMap({ screens[$0] }), let workspace = screen["workspace_id"].string, workspaceRows[workspace] != nil else {
                 throw BridgeError("invalid_response", "The daemon terminal has an invalid ownership path.", status: 502)
@@ -75,7 +76,9 @@ struct TuiSessionSnapshot: Sendable {
             }
             bound.append(Binding(id: identity.conversation(machine: machine, session: session, terminal: terminal, provider: provider, providerSession: providerSession), provider: provider, providerSession: providerSession.lowercased(), terminal: terminal, workspace: workspace,
                                  surfaceID: identity.uuid(machine: machine, session: session, resource: terminal), workspaceID: identity.uuid(machine: machine, session: session, resource: workspace),
-                                 title: content["title"].string.flatMap { $0.isEmpty ? nil : $0 } ?? workspaceRows[workspace]?["name"].string ?? provider, cwd: content["cwd"].string, state: state))
+                                 // The name the owner gave the tab wins, as a workspace's own name does; the agent's
+                                 // terminal title is only a fallback, so renaming the tab renames the conversation.
+                                 title: tabNames[terminal] ?? content["title"].string.flatMap { $0.isEmpty ? nil : $0 } ?? workspaceRows[workspace]?["name"].string ?? provider, cwd: content["cwd"].string, state: state))
         }
         bindings = bound
     }

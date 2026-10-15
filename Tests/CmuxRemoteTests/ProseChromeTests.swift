@@ -18,6 +18,26 @@ import CmuxAgentChat
         let text = AgentChatProseScreenExtractor().extract(lines: screen, agentKind: .claude)
         #expect(text == "The table now fits the message width.")
     }
+    /// Claude lists its background agents below the mode bar; a roster row carries a timer and
+    /// throughput like the working line, but the answer is still the one above the input box.
+    @Test func theBackgroundAgentRosterNeverBecomesThePreview() {
+        let screen = [
+            "⏺ Two monitors are running and the Bridge is connected.",
+            "",
+            "✻ Swooping… (1m 47s · ↓ 3.1k tokens · thought for 2s)",
+            "                                          ✔ Update installed · Restart to update",
+            "─────────────────────────────────────────────────── Studio Cmux Remote ─",
+            "❯\u{00a0}",
+            "──────────────────────────────────────────────────────────────────────────",
+            "  ⏵⏵ bypass permissions on · 2 monitors · esc to interrupt · ← for agents · ↓ to manage",
+            "",
+            "  ⏺ main",
+            "  ◯ general-purpose  Running scripts/verify.sh full suite           9m 50s · ↓ 130.2k tokens",
+            "  ◯ general-purpose  Searching iOS sources for linkStates               55s · ↓ 74.6k tokens",
+        ]
+        let text = AgentChatProseScreenExtractor().extract(lines: screen, agentKind: .claude)
+        #expect(text == "Two monitors are running and the Bridge is connected.")
+    }
     /// The box is stepped over, so the answer above it still reads normally.
     @Test func aScreenAnchoredBelowTheComposerStillReadsTheAnswer() {
         let screen = [
