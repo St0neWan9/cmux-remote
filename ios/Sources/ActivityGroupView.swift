@@ -14,6 +14,8 @@ struct ActivityGroupView: View {
     var isLatest = false
     /// The reader's own choice, which wins until the group stops being the newest.
     @State private var expanded: Bool?
+    /// The row this group belongs to, so expanding it keeps its place in the timeline.
+    @Environment(\.keepRowVisible) private var keepRowVisible
     private var isExpanded: Bool { expanded ?? isLatest }
     var body: some View {
         if item.operationCount == 0 {
@@ -33,7 +35,11 @@ struct ActivityGroupView: View {
     }
     private var group: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Button { withAnimation(.easeInOut(duration: 0.18)) { expanded = !isExpanded } } label: {
+            Button {
+                // The group's height changes, so the timeline is told before it lays out again.
+                keepRowVisible(item.id)
+                withAnimation(.easeInOut(duration: 0.18)) { expanded = !isExpanded }
+            } label: {
                 HStack(spacing: 9) {
                     Image(systemName: "book.pages")
                     if item.operationCount == 1 { Text(String(localized: "chat.activity_one")) }
