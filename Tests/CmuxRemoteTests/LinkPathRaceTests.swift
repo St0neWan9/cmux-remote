@@ -49,6 +49,36 @@ import CmuxRemoteCore
             link.close(); await fixture.stop()
         } catch { transport?.close(); await fixture.stop(); throw error }
     }
+    /// A LAN that answers too slowly counts as unreachable: the dial must fall back to the relay, not fail with
+    /// the "cancelled" error that closing the late socket can surface first.
+    @Test(.timeLimit(.minutes(1)))
+    func aLANHandshakeThatMissesItsDeadlineFallsBackToTheRelay() async throws {
+        let fixture = try await LinkIntegrationFixture.create()
+        let dials = Counter()
+        var transport: WebSocketTransport?
+        do {
+            try await fixture.authority.configureRelay(origin: "https://relay.example.com")
+            let admission = try #require(try await fixture.authority.status(fixture.enrollmentRequest).value.relay)
+            let bridge = fixture.connection.endpoint
+            let pairing = try PairingConfiguration(host: bridge.host, port: bridge.port,
+                token: String(repeating: "0", count: 32), certificateSHA256: fixture.connection.host.certificateSHA256)
+            // The LAN address is the real Bridge, but a one-millisecond deadline cannot be met.
+            let link = WebSocketTransport(host: fixture.connection.host, key: fixture.connection.privateKey,
+                endpoint: BridgeEndpoint(host: bridge.host, port: bridge.port, relay: admission),
+                relayDial: { _, _ in
+                    dials.increment()
+                    var parts = URLComponents()
+                    parts.scheme = "wss"; parts.host = bridge.host; parts.port = bridge.port; parts.path = "/v3/link"
+                    return LinkSocket(url: parts.url!, delegate: PinnedSessionDelegate(pairing: pairing), timeout: 15)
+                }, lanDeadline: .milliseconds(1)); transport = link
+            for _ in 0..<5 {
+                let _: [SessionDescriptor] = try await request(link, connection: fixture.connection, path: "/v2/sessions")
+                await link.reconnect()
+            }
+            #expect(dials.value >= 5)
+            link.close(); await fixture.stop()
+        } catch { transport?.close(); await fixture.stop(); throw error }
+    }
     private func request<T: Decodable & Sendable>(_ link: WebSocketTransport, connection: AuthorizedConnection, path: String) async throws -> T {
         let crypto = IdentityCryptography()
         let announcement = try await link.request("/v2/identity", method: "GET", as: SignedValue<HostAnnouncement>.self)
