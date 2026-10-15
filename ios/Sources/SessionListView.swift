@@ -15,6 +15,8 @@ struct SessionListView: View {
     @State private var query = ""
     @State private var filter = SessionFilter.all
     @State private var workspaceID: String?
+    /// The Mac whose conversations are shown; nil shows every Mac.
+    @State private var hostFilter: String?
     @AppStorage(SessionSortMode.storageKey) private var sortMode = SessionSortMode.workspace
     /// The new-session sheet; a target is set when it was opened from one workspace's group.
     @State private var showStart = false
@@ -32,21 +34,28 @@ struct SessionListView: View {
     var body: some View {
         let links = model.links
         let workspaces = model.workspaces
-        let hosted = model.hostedSessions.filter { filter.matches($0.session, query: query, workspaceID: workspaceID) }
-        let sections = SessionHostSection.make(links: links, sessions: hosted, workspaces: workspaces)
+        let shownLinks = hostFilter.map { id in links.filter { $0.id == id } } ?? links
+        let hosted = model.hostedSessions.filter { (hostFilter == nil || $0.hostID == hostFilter) && filter.matches($0.session, query: query, workspaceID: workspaceID) }
+        let sections = SessionHostSection.make(links: shownLinks, sessions: hosted, workspaces: workspaces)
+        // The drawer lists every Mac's projects whichever Mac the list shows.
+        let drawerSections = SessionHostSection.make(links: links, sessions: model.hostedSessions.filter { filter.matches($0.session, query: query, workspaceID: workspaceID) }, workspaces: workspaces)
         // Time order and a single selected workspace need no workspace headings.
         let grouped = workspaceID == nil && sortMode == .workspace
         let recent = hosted.sorted { ($0.session.updatedAt ?? .distantPast) > ($1.session.updatedAt ?? .distantPast) }
         let loading = model.loading
         let error = model.error
-        let multiple = links.count > 1
+        let multiple = shownLinks.count > 1
         let canRead = links.contains { $0.client.allows(.conversationRead) }
         // The drawer stays as the user left it; a pushed page opens over it rather than closing it.
         SideDrawer(isPresented: $model.sidebarOpen, allowsEdgeOpening: !showConversation && !showConnection && !showFeed && !model.addingDevice) {
         AppNavigationStack {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: MobileDesign.sectionGap) {
-                    if showSearch || !query.isEmpty { SessionSearchField(query: $query) }
+                    HostFilterTabs(hosts: links.map { HostFilterTabs.Host(id: $0.id, name: $0.name, state: model.linkStates[$0.id], failed: model.hostErrors[$0.id] != nil) },
+                                   selection: $hostFilter)
+                    PendingReminder(feed: PendingFeed.combined(pendingHosts(shownLinks).map { PendingFeed(count: $0.count, firstTitle: model.pending[$0.id]?.firstTitle) }),
+                                    hosts: pendingHosts(shownLinks).filter { $0.count > 0 }) { id in feedHostID = id; showFeed = true }
+                    // The status filter sits on the list it filters, under the Macs and what they wait on.
                     ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 10) {
                         ForEach(SessionFilter.allCases, id: \.rawValue) { value in
@@ -61,17 +70,6 @@ struct SessionListView: View {
                         }
                     }
                     }
-                    Menu {
-                        Button(String(localized: "sessions.all_workspaces")) { workspaceID = nil }
-                        ForEach(workspaces) { workspace in Button(workspaceTitle(workspace, multiple: multiple)) { workspaceID = workspace.id } }
-                    } label: {
-                    Label(workspaces.first(where: { $0.id == workspaceID }).map { workspaceTitle($0, multiple: multiple) } ?? scopeTitle(links), systemImage: multiple ? "laptopcomputer.and.iphone" : "laptopcomputer")
-                        .font(.subheadline.weight(.medium)).lineLimit(1)
-                        .padding(.horizontal, 16).padding(.vertical, 11)
-                        .background(Color.white, in: Capsule())
-                        .overlay(Capsule().stroke(Color.black.opacity(0.04), lineWidth: 0.5))
-                        .shadow(color: .black.opacity(0.065), radius: 14, y: 4)
-                    }.tint(.primary).accessibilityIdentifier("sessions.workspaces")
                     if let startNotice {
                         Label(startNotice, systemImage: awaiting == nil ? "checkmark.circle" : "hourglass")
                             .font(.footnote).foregroundStyle(.secondary).accessibilityIdentifier("sessions.start_notice")
@@ -140,6 +138,7 @@ struct SessionListView: View {
                 }
             }
             .onChange(of: workspaces.map(\.id)) { _, ids in if let workspaceID, !ids.contains(workspaceID) { self.workspaceID = nil } }
+            .onChange(of: links.map(\.id)) { _, ids in if let hostFilter, !ids.contains(hostFilter) { self.hostFilter = nil } }
             // A pull reads again; only a Mac that is down is dialed again. The page menu keeps a full redial.
             .refreshable { await model.pullToRefresh() }
             .task { await model.refresh() }
@@ -150,15 +149,13 @@ struct SessionListView: View {
 
         }
         } drawer: {
-            SessionSidebarView(sections: sections, hosts: links.map { SidebarHost(id: $0.id, name: $0.name, canReadFeed: $0.client.allows(.feedRead), failed: model.hostErrors[$0.id] != nil) },
+            SessionSidebarView(sections: drawerSections, hosts: links.map { SidebarHost(id: $0.id, name: $0.name, failed: model.hostErrors[$0.id] != nil) },
                 query: $query,
                 recent: recent, sortMode: $sortMode,
                 // The drawer stays open behind a pushed page, so coming back lands on it as it was.
                 select: { hosted in model.sidebarOpen = false; openConversation(hosted) },
                 showConnection: { id in connectionHostID = id; showConnection = true },
-                showFeed: { id in model.sidebarOpen = false; feedHostID = id; showFeed = true },
-                addDevice: { model.addingDevice = true },
-                refresh: { Task { await model.reconnect() } })
+                addDevice: { model.addingDevice = true })
         }.environment(\.colorScheme, .light)
             // Presented over the drawer, which stays open behind them rather than squeezing them into its panel.
             .fullScreenCover(isPresented: $showConnection) {
@@ -218,26 +215,34 @@ struct SessionListView: View {
             else { Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary) }
         }.padding(.vertical, 10).contentShape(Rectangle())
     }
+    /// Macs whose pending items this device may read, among those shown.
+    private func pendingHosts(_ links: [HostLink]) -> [(id: String, name: String, count: Int)] {
+        links.filter { $0.client.allows(.feedRead) }.map { ($0.id, $0.name, model.pending[$0.id]?.count ?? 0) }
+    }
+    /// The drawer on the left, the page's options under its title and search on the right; searching takes the whole bar.
     private var header: some View {
         HStack(spacing: 12) {
-            Button { model.sidebarOpen = true } label: {
-                Image(systemName: "line.3.horizontal")
-            }.buttonStyle(FloatingIconStyle()).accessibilityLabel(String(localized: "sessions.sidebar")).accessibilityIdentifier("sessions.sidebar")
-            Text(String(localized: "sessions.title")).font(.headline).frame(maxWidth: .infinity)
-            Menu {
-                Picker(String(localized: "sessions.sort"), selection: $sortMode) {
-                    ForEach(SessionSortMode.allCases) { mode in Label(mode.title, systemImage: mode.symbol).tag(mode) }
-                }
-            } label: { Image(systemName: "arrow.up.arrow.down") }
-                .buttonStyle(FloatingIconStyle()).accessibilityLabel(String(localized: "sessions.sort")).accessibilityIdentifier("sessions.sort")
-            Button { if showSearch || !query.isEmpty { showSearch = false; query = "" } else { showSearch = true } } label: {
-                Image(systemName: "magnifyingglass")
-            }.buttonStyle(FloatingIconStyle()).accessibilityLabel(String(localized: "sessions.search")).accessibilityIdentifier("sessions.search")
-            if !model.startTargets.isEmpty {
-                Button { startFrom = nil; showStart = true } label: { Image(systemName: "plus") }
-                    .buttonStyle(FloatingIconStyle()).accessibilityLabel(String(localized: "start.title")).accessibilityIdentifier("sessions.start")
+            if showSearch || !query.isEmpty {
+                SessionSearchField(query: $query, focusOnAppear: true)
+                Button { showSearch = false; query = "" } label: { Image(systemName: "xmark") }
+                    .buttonStyle(FloatingIconStyle()).accessibilityLabel(String(localized: "sessions.close_search")).accessibilityIdentifier("sessions.search.close")
+            } else {
+                Button { model.sidebarOpen = true } label: {
+                    Image(systemName: "line.3.horizontal")
+                }.buttonStyle(FloatingIconStyle()).accessibilityLabel(String(localized: "sessions.sidebar")).accessibilityIdentifier("sessions.sidebar")
+                Spacer(minLength: 0)
+                SessionTitleMenu(sortMode: $sortMode, workspaceID: $workspaceID,
+                                 workspaces: model.workspaces.map { ($0.id, workspaceTitle($0, multiple: model.links.count > 1)) },
+                                 feeds: pendingHosts(model.links), canStart: !model.startTargets.isEmpty,
+                                 showFeed: { id in feedHostID = id; showFeed = true },
+                                 refresh: { Task { await model.reconnect() } },
+                                 start: { startFrom = nil; showStart = true },
+                                 addMac: { model.addingDevice = true })
+                Spacer(minLength: 0)
+                Button { showSearch = true } label: {
+                    Image(systemName: "magnifyingglass")
+                }.buttonStyle(FloatingIconStyle()).accessibilityLabel(String(localized: "sessions.search")).accessibilityIdentifier("sessions.search")
             }
-
         }.padding(.horizontal, MobileDesign.pageInset).padding(.vertical, 10)
     }
 }
