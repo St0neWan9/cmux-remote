@@ -174,6 +174,8 @@ private actor PhoneUIBackend: CmuxControlling {
                 ##"{"type":"user","uuid":"design-result","timestamp":"2026-10-12T01:00:03Z","message":{"content":[{"type":"tool_result","tool_use_id":"design-read","content":"# UI fixture project\n\nLeft aligned file contents.\n"}]}}"##,
                 imageText,
                 #"{"type":"assistant","uuid":"a","timestamp":"2026-10-12T01:00:05Z","message":{"content":[{"type":"text","text":"页面使用白色背景，按钮和输入框悬浮显示。这个测试环境不会启动智能体，也不会更改真实权限。"}]}}"#,
+                // A reply with a pipe table: its columns must keep their own rendering when the text is selected.
+                #"{"type":"assistant","uuid":"table","timestamp":"2026-10-12T01:00:07Z","message":{"content":[{"type":"text","text":"| 项目 | 结果 |\n| --- | --- |\n| 构建 | 通过 |\n| 测试 | 通过 |"}]}}"#,
                 #"{"type":"system","subtype":"turn_duration","durationMs":5000,"timestamp":"2026-10-12T01:00:06Z"}"#]
             try Data((rows.joined(separator: "\n") + "\n").utf8).write(to: transcript)
         }

@@ -1,36 +1,14 @@
 import SwiftUI
 
-/// Native Markdown prose with separate code blocks and paragraph rhythm.
+/// Native selectable Markdown prose with separate code blocks and paragraph rhythm.
 ///
-/// A reply given a `selectionID` is selected in place: a long press turns it into a text view with handles and a menu
-/// to add the selection to the chat, copy, share or select the whole turn. Other text uses the system selection.
+/// The system's own selection is used rather than a text view built for it: it starts instantly, draws every block
+/// exactly as it reads, and needs no second renderer to keep in step. `.textSelection` sits on the enclosing stack
+/// so a drag reaches across blocks — a paragraph, a code block and a list can be selected in one gesture.
 struct MarkdownMessageView: View {
     let text: String
-    var selectionID: String? = nil
-    @Environment(\.messageSelection) private var selection
-    @Environment(\.selectMessage) private var selectMessage
-    @Environment(\.quoteText) private var quoteText
     private var blocks: [MarkdownBlock] { MarkdownBlock.parse(text) }
     var body: some View {
-        if let selectionID, let selectMessage {
-            if let selection, selection.messageID == selectionID {
-                SelectableMessageTextView(text: text, start: selection.point, quote: quoteText) { selectMessage(nil) }
-            } else {
-                prose(selectable: false)
-                    .contentShape(Rectangle())
-                    // A shorter wait than the system's own selection, and it keeps the touch's location: the word
-                    // under the finger is the one that gets selected. The drag never has to travel; it only reports
-                    // where the press was.
-                    .gesture(LongPressGesture(minimumDuration: 0.28).sequenced(before: DragGesture(minimumDistance: 0)).onEnded { value in
-                        guard case .second(true, let drag?) = value else { return }
-                        selectMessage(MessageSelection(messageID: selectionID, point: drag.startLocation))
-                    })
-            }
-        } else {
-            prose(selectable: true)
-        }
-    }
-    @ViewBuilder private func prose(selectable: Bool) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             ForEach(blocks) { block in
                 if block.code {
@@ -55,14 +33,6 @@ struct MarkdownMessageView: View {
                     Text(.init(block.text)).font(.body).lineSpacing(5).frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
-        }.modifier(SystemTextSelection(enabled: selectable))
-    }
-}
-
-/// The system's own selection, for text that is not selected in place.
-private struct SystemTextSelection: ViewModifier {
-    let enabled: Bool
-    func body(content: Content) -> some View {
-        if enabled { content.textSelection(.enabled) } else { content }
+        }.textSelection(.enabled)
     }
 }

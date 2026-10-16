@@ -4,12 +4,7 @@ import SwiftUI
 struct HeaderContentEffect: ViewModifier {
     /// The visible bottom edge in the timeline's coordinates; content below it is under the composer.
     var bottom: CGFloat = .infinity
-    /// Off while a reply in the row is selected: the effect draws UIKit text views as a placeholder.
-    var enabled = true
-    @ViewBuilder func body(content: Content) -> some View {
-        if enabled { blurred(content) } else { content }
-    }
-    private func blurred(_ content: Content) -> some View {
+    func body(content: Content) -> some View {
         content.visualEffect { effect, geometry in
             let frame = geometry.frame(in: .named("chatTimeline"))
             let top = Float(frame.minY)
