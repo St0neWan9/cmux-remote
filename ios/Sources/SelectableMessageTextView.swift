@@ -42,85 +42,130 @@ struct SelectableMessageTextView: UIViewRepresentable {
         context.coordinator.ended = ended
     }
 
+    /// The height the SwiftUI renderer would have used, so a reply does not move when it becomes selectable.
+    ///
+    /// Two other measurements are close but wrong: `UITextView.sizeThatFits` measures its own text container and
+    /// rounds up to a whole extra line at some widths (76 where the text is 71 at 354 points), and
+    /// `boundingRect` with `.usesFontLeading` adds the leading again (76). Without that option the same call
+    /// agrees with a label's own layout (70.86 against 71), which is what SwiftUI's text comes out at.
     func sizeThatFits(_ proposal: ProposedViewSize, uiView tv: UITextView, context: Context) -> CGSize? {
-        let w = proposal.width ?? UIScreen.main.bounds.width
-        var s = tv.sizeThatFits(CGSize(width: w, height: .infinity))
-        s.width = w
-        return s
+        let width = proposal.width ?? UIScreen.main.bounds.width
+        guard let attributed = tv.attributedText, attributed.length > 0 else { return CGSize(width: width, height: 0) }
+        let height = attributed.boundingRect(with: CGSize(width: width, height: .greatestFiniteMagnitude),
+                                             options: [.usesLineFragmentOrigin], context: nil).height
+        return CGSize(width: width, height: ceil(height))
     }
 
     // MARK: – Attributed string
 
+    /// The same paragraph rhythm the SwiftUI renderer uses, so switching a reply into a text view does not move it.
+    ///
+    /// Block spacing is the gap between the text views in `MarkdownMessageView` (14), code is padded and rounded
+    /// there, and a list marker sits 10 points from its text.
     static func attributedString(for text: String, traitCollection: UITraitCollection) -> NSAttributedString {
-        let result = NSMutableAttributedString()
         let blocks = MarkdownBlock.parse(text)
-        for (i, block) in blocks.enumerated() {
-            if i > 0 { result.append(NSAttributedString(string: "\n\n")) }
+        let result = NSMutableAttributedString()
+        for (index, block) in blocks.enumerated() {
+            if index > 0 { result.append(Self.gap(Self.blockSpacing)) }
             result.append(block.toAttributed())
         }
         return result
     }
+
+    /// The line gap between blocks, as an empty paragraph of the block spacing. `lineSpacing` alone is
+    /// ignored on a blank line, so the height is carried by the font.
+    static func gap(_ points: CGFloat) -> NSAttributedString {
+        let para = NSMutableParagraphStyle()
+        para.minimumLineHeight = points
+        para.maximumLineHeight = points
+        return NSAttributedString(string: "\n", attributes: [
+            .font: UIFont.systemFont(ofSize: points), .paragraphStyle: para,
+        ])
+    }
+
+    /// The `VStack` spacing between blocks in `MarkdownMessageView`.
+    static let blockSpacing: CGFloat = 14
+    /// The padding inside a code block there.
+    static let codePadding: CGFloat = 14
 }
 
 // MARK: – MarkdownBlock attributed rendering
 
 private extension MarkdownBlock {
     func toAttributed() -> NSAttributedString {
-        let para = NSMutableParagraphStyle()
-        if code {
-            para.lineSpacing = 2
-            para.firstLineHeadIndent = 10; para.headIndent = 10; para.tailIndent = -10
-            return NSAttributedString(string: text, attributes: [
-                .font: UIFont.monospacedSystemFont(
-                    ofSize: UIFont.preferredFont(forTextStyle: .callout).pointSize, weight: .regular),
-                .backgroundColor: UIColor.secondarySystemBackground,
-                .foregroundColor: UIColor.label,
-                .paragraphStyle: para
-            ])
-        }
-        if table != nil {
-            return NSAttributedString(string: text, attributes: [
-                .font: UIFont.monospacedSystemFont(
-                    ofSize: UIFont.preferredFont(forTextStyle: .callout).pointSize, weight: .regular),
-                .foregroundColor: UIColor.label
-            ])
-        }
-        para.lineSpacing = headingLevel != nil ? 2 : 5
-        let baseFont: UIFont
-        if let level = headingLevel {
-            let style: UIFont.TextStyle = level == 1 ? .title2 : level == 2 ? .title3 : .headline
-            baseFont = UIFont.preferredFont(forTextStyle: style)
-        } else {
-            baseFont = UIFont.preferredFont(forTextStyle: .body)
-        }
-        let rawText = listMarker.map { $0 + " " + text } ?? text
-        return inlineMarkdown(rawText, baseFont: baseFont, para: para)
+        if code { return codeAttributed() }
+        if table != nil { return tableAttributed() }
+        if let level = headingLevel { return headingAttributed(level) }
+        return paragraphAttributed()
     }
 
-    private func inlineMarkdown(_ raw: String, baseFont: UIFont, para: NSMutableParagraphStyle) -> NSAttributedString {
-        // AttributedString.init(markdown:) is the correct iOS 15+ API; NSAttributedString has no markdown init.
-        guard var parsed = try? AttributedString(
-            markdown: raw,
-            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
-        ) else {
-            return NSAttributedString(string: raw, attributes: [
-                .font: baseFont, .foregroundColor: UIColor.label, .paragraphStyle: para
-            ])
+    /// Code is padded on every side and sits on its own rounded surface, as the SwiftUI block does.
+    private func codeAttributed() -> NSAttributedString {
+        let para = NSMutableParagraphStyle()
+        para.lineSpacing = 2
+        let inset = SelectableMessageTextView.codePadding
+        para.firstLineHeadIndent = inset; para.headIndent = inset; para.tailIndent = -inset
+        para.paragraphSpacingBefore = inset; para.paragraphSpacing = inset
+        // The block's own surface; the text view's background stays clear.
+        let block = NSMutableAttributedString(string: self.text, attributes: [
+            .font: UIFont.monospacedSystemFont(ofSize: UIFont.preferredFont(forTextStyle: .callout).pointSize, weight: .regular),
+            .foregroundColor: UIColor.label,
+            .paragraphStyle: para,
+        ])
+        block.addAttribute(.backgroundColor, value: UIColor.secondarySystemBackground, range: NSRange(location: 0, length: block.length))
+        return block
+    }
+
+    private func tableAttributed() -> NSAttributedString {
+        let para = NSMutableParagraphStyle(); para.lineSpacing = 2
+        return NSAttributedString(string: text, attributes: [
+            .font: UIFont.monospacedSystemFont(ofSize: UIFont.preferredFont(forTextStyle: .callout).pointSize, weight: .regular),
+            .foregroundColor: UIColor.label,
+            .paragraphStyle: para,
+        ])
+    }
+
+    private func headingAttributed(_ level: Int) -> NSAttributedString {
+        let style: UIFont.TextStyle = level == 1 ? .title2 : level == 2 ? .title3 : .headline
+        let base = UIFont.preferredFont(forTextStyle: style)
+        // SwiftUI's heading block is `.bold()`; the markdown parse alone would leave it regular.
+        let bold = base.fontDescriptor.withSymbolicTraits(.traitBold).map { UIFont(descriptor: $0, size: base.pointSize) } ?? base
+        let para = NSMutableParagraphStyle(); para.lineSpacing = 2
+        return body(rawText: text, font: bold, para: para, indentMarker: false)
+    }
+
+    private func paragraphAttributed() -> NSAttributedString {
+        let para = NSMutableParagraphStyle(); para.lineSpacing = 5
+        guard let marker = listMarker else { return body(rawText: text, font: UIFont.preferredFont(forTextStyle: .body), para: para, indentMarker: false) }
+        // A list row hangs its text under a marker 10 points away, as the SwiftUI HStack does.
+        para.firstLineHeadIndent = 0
+        para.headIndent = markerWidth(marker) + 10
+        let line = NSMutableAttributedString(string: marker + "\t", attributes: [
+            .font: UIFont.preferredFont(forTextStyle: .body), .foregroundColor: UIColor.label, .paragraphStyle: para,
+        ])
+        line.append(body(rawText: text, font: UIFont.preferredFont(forTextStyle: .body), para: para, indentMarker: true))
+        line.addAttribute(.paragraphStyle, value: para, range: NSRange(location: 0, length: line.length))
+        return line
+    }
+
+    private func markerWidth(_ marker: String) -> CGFloat {
+        (marker as NSString).size(withAttributes: [.font: UIFont.preferredFont(forTextStyle: .body)]).width
+    }
+
+    /// Inline markdown inside one block, at the block's own font size.
+    private func body(rawText raw: String, font baseFont: UIFont, para: NSMutableParagraphStyle, indentMarker: Bool) -> NSAttributedString {
+        guard var parsed = try? AttributedString(markdown: raw, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)) else {
+            return NSAttributedString(string: raw, attributes: [.font: baseFont, .foregroundColor: UIColor.label, .paragraphStyle: para])
         }
-        // Remap fonts so every run inherits baseFont's size and style while keeping bold/italic traits.
+        // Remap fonts so every run keeps the block's size while retaining bold and italic traits.
         for run in parsed.runs {
             let traits = run.uiKit.font?.fontDescriptor.symbolicTraits ?? []
-            let newFont: UIFont
-            if let desc = baseFont.fontDescriptor.withSymbolicTraits(traits) {
-                newFont = UIFont(descriptor: desc, size: baseFont.pointSize)
-            } else {
-                newFont = baseFont
-            }
+            let merged = traits.union(baseFont.fontDescriptor.symbolicTraits)
+            let newFont = baseFont.fontDescriptor.withSymbolicTraits(merged).map { UIFont(descriptor: $0, size: baseFont.pointSize) } ?? baseFont
             parsed[run.range].uiKit.font = newFont
         }
         let ns = NSMutableAttributedString(parsed)
-        ns.addAttributes([.foregroundColor: UIColor.label, .paragraphStyle: para],
-                         range: NSRange(location: 0, length: ns.length))
+        ns.addAttributes([.foregroundColor: UIColor.label, .paragraphStyle: para], range: NSRange(location: 0, length: ns.length))
         return ns
     }
 }
@@ -143,10 +188,19 @@ extension SelectableMessageTextView {
         var ended: () -> Void
         /// Set once the first word is selected; a collapsed selection before then is the text view starting up.
         private var began = false
+        /// The first selection is reported by `textViewDidChangeSelection` as well as by `begin`, so the press
+        /// itself takes the firmer tap and the callback that follows it stays quiet.
+        private var pressedFeedback = false
+        /// iOS's own text selection ticks as the handles move; the press itself gets a firmer tap, as it does in
+        /// the system's text views. Prepared on the press, which is the moment before the feedback is fired.
+        private let selectionFeedback = UISelectionFeedbackGenerator()
+        private let impactFeedback = UIImpactFeedbackGenerator(style: .light)
         init(quote: @escaping (String) -> Void, ended: @escaping () -> Void) { self.quote = quote; self.ended = ended }
 
         func begin(_ textView: UITextView, at point: CGPoint) {
             textView.layoutIfNeeded()
+            // Prepared before the change lands: the generators are ready by the time the finger stops.
+            selectionFeedback.prepare(); impactFeedback.prepare()
             guard let position = textView.closestPosition(to: point) else { ended(); return }
             let word = textView.tokenizer.rangeEnclosingPosition(position, with: .word, inDirection: .storage(.forward))
                 ?? textView.tokenizer.rangeEnclosingPosition(position, with: .word, inDirection: .storage(.backward))
@@ -155,6 +209,8 @@ extension SelectableMessageTextView {
             textView.selectedTextRange = word
             began = textView.selectedRange.length > 0
             guard began, let range = textView.selectedTextRange else { ended(); return }
+            pressedFeedback = true
+            impactFeedback.impactOccurred()
             showMenu(for: textView)
         }
 
@@ -180,7 +236,10 @@ extension SelectableMessageTextView {
         }
 
         func textViewDidChangeSelection(_ textView: UITextView) {
-            if began && textView.selectedRange.length == 0 { began = false; ended() }
+            if began && textView.selectedRange.length == 0 { began = false; ended(); return }
+            guard began else { return }
+            if pressedFeedback { pressedFeedback = false; return }
+            selectionFeedback.selectionChanged()
         }
 
         private func menu(_ textView: UITextView, range: NSRange) -> UIMenu? {

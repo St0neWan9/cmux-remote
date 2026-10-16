@@ -18,8 +18,10 @@ struct MarkdownMessageView: View {
             } else {
                 prose(selectable: false)
                     .contentShape(Rectangle())
-                    // Released after a long press: the word under the finger is selected where it was pressed.
-                    .gesture(LongPressGesture(minimumDuration: 0.4).sequenced(before: DragGesture(minimumDistance: 0)).onEnded { value in
+                    // A shorter wait than the system's own selection, and it keeps the touch's location: the word
+                    // under the finger is the one that gets selected. The drag never has to travel; it only reports
+                    // where the press was.
+                    .gesture(LongPressGesture(minimumDuration: 0.28).sequenced(before: DragGesture(minimumDistance: 0)).onEnded { value in
                         guard case .second(true, let drag?) = value else { return }
                         selectMessage(MessageSelection(messageID: selectionID, point: drag.startLocation))
                     })
