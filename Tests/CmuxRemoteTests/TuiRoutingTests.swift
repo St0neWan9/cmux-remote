@@ -32,7 +32,8 @@ private actor RoutingDesktopFixture: CmuxControlling {
         #expect(await desktop.sends == 0); #expect(await resource.effects.count == 1)
         _ = try await service.send(id: TuiResourceFixture.providerID, request: .init(text: "Desktop only"))
         #expect(await desktop.sends == 1); #expect(await resource.effects.count == 1)
-        await resource.clearAgents()
+        // A daemon conversation that is really over must not fall through to the desktop backend.
+        await resource.clearAgents(); await resource.stopTerminal()
         await #expect(throws: BridgeError.self) { _ = try await service.send(id: live.id, request: .init(text: "Never fall through")) }
         #expect(await desktop.sends == 1)
     }
