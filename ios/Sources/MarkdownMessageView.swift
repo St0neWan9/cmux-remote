@@ -12,6 +12,7 @@ struct MarkdownMessageView: View {
     var body: some View {
         StructuredText(markdown: text)
             .font(.body)
+            .textual.headingStyle(MarkdownHeadingStyle())
             .textual.overflowMode(.wrap)
             .textual.textSelection(.enabled)
             .frame(maxWidth: .infinity, alignment: .leading)
