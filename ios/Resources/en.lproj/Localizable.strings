@@ -261,6 +261,7 @@
 "error.relay_origin" = "Enter an address starting with https://, without a path.";
 "chat.loading" = "Loading conversation…";
 "sessions.workspaces_title" = "Workspaces";
+"sessions.group_toggle" = "Expand or collapse the workspace";
 "sessions.sort" = "Sort";
 "sessions.sort.workspace" = "By workspace";
 "sessions.sort.time" = "By time";

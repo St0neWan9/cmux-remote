@@ -90,22 +90,29 @@ struct SessionListView: View {
                                 let key = section.hostID + "/" + group.id
                                 VStack(alignment: .leading, spacing: 14) {
                                     if grouped {
-                                        HStack(spacing: 4) {
-                                        Button { withAnimation(.easeInOut(duration: 0.18)) { if collapsed.contains(key) { collapsed.remove(key) } else { collapsed.insert(key) } } } label: {
+                                        HStack(spacing: 0) {
+                                        Button { toggle(key) } label: {
                                             HStack(spacing: 10) {
                                                 Label(group.name ?? String(localized: "sessions.other"), systemImage: group.name == nil ? "clock.arrow.circlepath" : "macwindow")
                                                     .font(.body.weight(.semibold)).lineLimit(1)
                                                 Spacer(minLength: 8)
-                                                Image(systemName: collapsed.contains(key) ? "chevron.right" : "chevron.down").font(.caption).foregroundStyle(.secondary)
                                             }.frame(minHeight: 36).contentShape(Rectangle())
                                         }.buttonStyle(.plain).accessibilityAddTraits(.isHeader).accessibilityIdentifier("sessions.group." + key)
                                             .accessibilityValue(collapsed.contains(key) ? String(localized: "chat.collapsed") : String(localized: "chat.expanded"))
+                                        // Starting a conversation here sits before the chevron and in its style, so the row
+                                        // reads as one set of controls; the chevron keeps its own target and still collapses.
                                         if let target = model.startTargets.first(where: { $0.hostID == section.hostID && $0.workspace.id.lowercased() == group.id }) {
                                             Button { startFrom = target; showStart = true } label: {
-                                                Image(systemName: "plus").font(.body.weight(.medium)).frame(width: 36, height: 36).contentShape(Rectangle())
+                                                Image(systemName: "plus").font(.caption).foregroundStyle(.secondary)
+                                                    .frame(width: 36, height: 36).contentShape(Rectangle())
                                             }.buttonStyle(.plain).accessibilityLabel(String(format: String(localized: "start.in_workspace"), group.name ?? ""))
                                                 .accessibilityIdentifier("sessions.group." + key + ".start")
                                         }
+                                        Button { toggle(key) } label: {
+                                            Image(systemName: collapsed.contains(key) ? "chevron.right" : "chevron.down").font(.caption).foregroundStyle(.secondary)
+                                                .frame(width: 32, height: 36).contentShape(Rectangle())
+                                        }.buttonStyle(.plain).accessibilityLabel(String(localized: "sessions.group_toggle"))
+                                            .accessibilityIdentifier("sessions.group." + key + ".toggle")
                                         }
                                     }
                                     if !grouped || !collapsed.contains(key) {
@@ -199,6 +206,9 @@ struct SessionListView: View {
     }
     private func scopeTitle(_ links: [HostLink]) -> String {
         links.count > 1 ? String(format: String(localized: "sessions.all_macs"), links.count) : (links.first?.name ?? model.host)
+    }
+    private func toggle(_ key: String) {
+        withAnimation(.easeInOut(duration: 0.18)) { if collapsed.contains(key) { collapsed.remove(key) } else { collapsed.insert(key) } }
     }
     private func sessionRow(_ session: SessionDescriptor, host: String? = nil) -> some View {
         HStack(spacing: 12) {
