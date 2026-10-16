@@ -15,10 +15,11 @@ struct MessageRow: View {
             if message.role == .user, case .prose(let value) = message.kind {
                 HStack(alignment: .top) {
                     Spacer(minLength: 44)
-                    Text(PromptText.displayed(value.text)).font(.body).lineSpacing(4).textSelection(.enabled)
+                    Text(PromptText.displayed(value.text)).font(.body).lineSpacing(4)
                         .foregroundStyle(Color.accentColor)
                         .padding(.horizontal, 16).padding(.vertical, 13)
                         .background(Color.accentColor.opacity(0.085), in: RoundedRectangle(cornerRadius: 24))
+                        .modifier(SelectableTextMenu(text: PromptText.displayed(value.text)))
 
                 }.padding(.top, 10).padding(.bottom, 22)
             } else {
