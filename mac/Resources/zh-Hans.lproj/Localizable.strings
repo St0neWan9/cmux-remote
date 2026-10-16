@@ -96,6 +96,11 @@
 "mac.menu.file" = "文件";
 "mac.menu.closeWindow" = "关闭窗口";
 "mac.share.address" = "地址";
+"mac.share.folders" = "目录";
+"mac.share.folders.add" = "添加…";
+"mac.share.folders.remove" = "不再共享 %@";
+"mac.share.folders.full" = "最多 %d 个目录。";
+"mac.share.folders.hint" = "会出现在手机上每个工作区的新会话目录列表里，排在该工作区自己的目录之前。";
 "mac.share.certificate" = "证书指纹";
 "mac.label" = "%@：";
 "mac.status" = "状态";

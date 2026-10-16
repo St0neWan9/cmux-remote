@@ -14,6 +14,8 @@ import CmuxRemoteBridge
     public private(set) var busy = false
     public private(set) var errorCode: String?
     public var selectedWorkspaces: Set<String> = []
+    /// Shared project folders offered to every workspace's new-session list on the phone.
+    public private(set) var allowedDirectories: [String] = []
     public var port = 7740
     public var relayOrigin = ""
     public var relayKeyFile = ""
@@ -47,6 +49,9 @@ import CmuxRemoteBridge
             pending = try JSONDecoder().decode([EnrollmentRequest].self, from: JSONEncoder().encode(requests))
             clients = try await owner.request("clients.list", params: [:]).array?.filter { $0["revoked"].bool != true } ?? []
             workspaces = try await owner.request("bridge.workspaces", params: [:])["workspaces"].array ?? []
+            // A resident Bridge that predates shared folders answers `sharing_unsupported`; that leaves the
+            // list empty instead of failing the whole refresh.
+            if let shared = try? await owner.request("directories.allowed", params: [:])["directories"].array { allowedDirectories = shared.compactMap(\.string) }
             selectedWorkspaces.formIntersection(Set(workspaces.compactMap { $0["id"].string?.lowercased() }))
             if let expiresAt, expiresAt <= Int(Date().timeIntervalSince1970) { qrLink = nil; self.expiresAt = nil }
             errorCode = actionError ?? status["error_code"].string
@@ -94,6 +99,10 @@ import CmuxRemoteBridge
     }
     public func revoke(clientID: String) async {
         await action { _ = try await owner.request("clients.revoke", params: ["client_id": .string(clientID)]) }
+    }
+    /// Replaces the shared folder list; the display form the Bridge returns (`~` for home) is sent back as-is.
+    public func saveAllowedDirectories(_ folders: [String]) async {
+        await action { _ = try await owner.request("directories.set_allowed", params: ["directories": .array(folders.map(JSONValue.string))]) }
     }
     private func action(_ operation: () async throws -> Void) async {
         guard !busy else { return }; busy = true

@@ -7,6 +7,8 @@ struct OwnerControlRouter: Sendable {
     let service: SessionService
     var mac: (any LocalMacControlling)? = nil
     var sharing: ManagedSharingService? = nil
+    /// The owner's shared project folders, off unless the resident Bridge keeps them.
+    var allowedDirectories: AllowedDirectoryRepository? = nil
     func respond(_ request: JSONValue) async -> JSONValue {
         let id = request["id"]
         do {
@@ -23,6 +25,14 @@ struct OwnerControlRouter: Sendable {
             case "relay.configure":
                 guard let sharing else { throw BridgeError("sharing_unsupported", "Upgrade the Bridge to configure relay access.") }
                 value = try await sharing.configureRelay(origin: params["origin"].string, keyFile: params["key_file"].string)
+            case "directories.allowed":
+                guard let store = allowedDirectories else { throw BridgeError("sharing_unsupported", "Upgrade the resident Bridge to choose allowed folders.") }
+                value = .object(["directories": .array(store.load().map { .string(display($0)) })])
+            case "directories.set_allowed":
+                guard let store = allowedDirectories else { throw BridgeError("sharing_unsupported", "Upgrade the resident Bridge to choose allowed folders.") }
+                guard let chosen = params["directories"].array else { throw BridgeError("invalid_input", "Choose the folders to allow.", status: 422) }
+                try store.save(chosen.compactMap(\.string))
+                value = .object(["directories": .array(store.load().map { .string(display($0)) })])
             case "bridge.workspaces": value = try await service.workspaces()
             case "enrollment.open":
                 guard let host = params["host"].string, let port = params["port"].int else { throw BridgeError("invalid_input", "Choose the host endpoint.") }
@@ -65,4 +75,9 @@ struct OwnerControlRouter: Sendable {
         }
     }
     private func json<T: Encodable>(_ value: T) throws -> JSONValue { try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(value)) }
+    /// The home directory shows as `~` wherever a folder is named.
+    private func display(_ url: URL) -> String {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        return url.path.hasPrefix(home + "/") ? "~" + url.path.dropFirst(home.count) : url.path
+    }
 }
