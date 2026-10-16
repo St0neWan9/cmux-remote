@@ -90,9 +90,6 @@
 "page.back" = "返回";
 "chat.copy" = "复制回复";
 "chat.copied" = "已复制";
-"chat.selection.add_to_chat" = "添加到聊天";
-"chat.selection.select_all" = "全选";
-"chat.selection.share" = "分享";
 "chat.share" = "分享回复";
 "chat.quote" = "引用到跟进";
 "chat.response_time" = "回复时间";
