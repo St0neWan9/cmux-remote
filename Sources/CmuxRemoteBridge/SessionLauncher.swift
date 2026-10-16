@@ -10,12 +10,15 @@ public actor SessionLauncher {
     private let home: URL
     private let mutations: MutationLedger
     private let sessions: @Sendable () async throws -> [SessionDescriptor]
+    /// The owner's shared folders, read per request so a change needs no Bridge restart.
+    private let sharedRoots: @Sendable () -> [URL]
     static let rootLimit = 32
     static let listingLimit = 500
 
-    public init(cmux: any CmuxControlling, home: URL, mutations: MutationLedger, sessions: @escaping @Sendable () async throws -> [SessionDescriptor]) {
+    public init(cmux: any CmuxControlling, home: URL, mutations: MutationLedger, sessions: @escaping @Sendable () async throws -> [SessionDescriptor],
+                sharedRoots: @escaping @Sendable () -> [URL] = { [] }) {
         self.cmux = cmux; self.home = home.resolvingSymlinksInPath().standardizedFileURL
-        files = ProjectFilePolicy(home: home); self.mutations = mutations; self.sessions = sessions
+        files = ProjectFilePolicy(home: home); self.mutations = mutations; self.sessions = sessions; self.sharedRoots = sharedRoots
     }
 
     public func directories(workspaceID: String, access: SessionAccess) async throws -> [LaunchDirectory] {
@@ -106,8 +109,10 @@ public actor SessionLauncher {
         return try files.directory(root: root.url.path, relativePath: normalized(path))
     }
 
-    /// The workspace's own directory, then the folders of its conversations, most recent first, then its other
-    /// terminals' folders (a daemon workspace has no directory of its own).
+    /// The owner's shared folders first, then the workspace's own directory, then the folders of its
+    /// conversations, most recent first, then its other terminals' folders (a daemon workspace has no
+    /// directory of its own). Shared folders are offered up front because the owner chose them explicitly;
+    /// they are not exempt from the policy below, so a folder the owner cannot normally open stays out.
     func roots(workspaceID: String) async throws -> [(id: String, url: URL)] {
         let workspace = workspaceID.lowercased()
         let row = try await workspaceRow(workspace)
@@ -115,7 +120,7 @@ public actor SessionLauncher {
             .sorted { ($0.updatedAt ?? .distantPast) > ($1.updatedAt ?? .distantPast) }
         let terminals = (row["directories"].array ?? []).map(\.string)
         var found: [(id: String, url: URL)] = []
-        for candidate in [row["current_directory"].string] + conversations.map(\.cwd) + terminals {
+        for candidate in sharedRoots().map(\.path) + [row["current_directory"].string] + conversations.map(\.cwd) + terminals {
             guard let candidate, !candidate.isEmpty, let url = try? files.projectRoot(candidate),
                   !found.contains(where: { $0.url.path == url.path }) else { continue }
             var isDirectory: ObjCBool = false
