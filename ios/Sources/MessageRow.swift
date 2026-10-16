@@ -15,11 +15,11 @@ struct MessageRow: View {
             if message.role == .user, case .prose(let value) = message.kind {
                 HStack(alignment: .top) {
                     Spacer(minLength: 44)
-                    Text(PromptText.displayed(value.text)).font(.body).lineSpacing(4)
+                    Text(PromptText.displayed(value.text)).font(.body).lineSpacing(4).textSelection(.enabled)
                         .foregroundStyle(Color.accentColor)
                         .padding(.horizontal, 16).padding(.vertical, 13)
                         .background(Color.accentColor.opacity(0.085), in: RoundedRectangle(cornerRadius: 24))
-                        .modifier(SelectableTextMenu(text: PromptText.displayed(value.text)))
+
                 }.padding(.top, 10).padding(.bottom, 22)
             } else {
                 VStack(alignment: .leading, spacing: 12) {
@@ -55,7 +55,7 @@ struct MessageRow: View {
     }
     @ViewBuilder private var agentContent: some View {
         switch message.kind {
-        case .prose(let value): MarkdownMessageView(text: value.text)
+        case .prose(let value): MarkdownMessageView(text: value.text, selectionID: message.id)
         // Reasoning between operations is part of the reply: shown in full, without a title or disclosure.
         case .thought(let value): MarkdownMessageView(text: value.text)
         case .toolUse(let value):
