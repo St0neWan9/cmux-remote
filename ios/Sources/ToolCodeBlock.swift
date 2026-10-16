@@ -5,9 +5,8 @@ struct ToolCodeBlock: View {
     let text: String
     var body: some View {
         Text(text).font(.system(.callout, design: .monospaced)).lineSpacing(2)
-            .multilineTextAlignment(.leading)
+            .textSelection(.enabled).multilineTextAlignment(.leading)
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .modifier(SelectableTextMenu(text: text, monospaced: true))
     }
 }

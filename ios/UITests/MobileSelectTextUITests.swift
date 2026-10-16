@@ -1,9 +1,9 @@
 import XCTest
 
-/// Part of a reply or of the reader's own message can be selected with the system's handles.
+/// A reply's text is selected in place, and the selection offers adding it to the chat, copying, sharing and selecting all.
 @MainActor
 final class MobileSelectTextUITests: XCTestCase {
-    func testSelectingPartOfAReplyAndOfAPrompt() throws {
+    func testSelectingPartOfAReplyInPlace() throws {
         guard let pairingPath = ProcessInfo.processInfo.environment["CMUX_REMOTE_TEST_PAIRING_PATH"], !pairingPath.isEmpty else {
             throw XCTSkip("Supply an isolated fixture pairing file to open conversations without real sessions.")
         }
@@ -15,31 +15,40 @@ final class MobileSelectTextUITests: XCTestCase {
         XCTAssertTrue(session.waitForExistence(timeout: 10))
         session.tap()
         XCTAssertTrue(app.buttons["chat.back"].waitForExistence(timeout: 5))
+        // The footer no longer opens a separate page for selection.
+        XCTAssertFalse(app.buttons["response.select"].exists, "A reply still offers a separate selection page")
 
-        // A reply opens on its own page from its footer, where a double tap selects one word with handles.
-        let select = app.buttons.matching(identifier: "response.select").allElementsBoundByIndex.last { $0.isHittable }
-        XCTAssertNotNil(select, "No reply offers to select its text")
-        select?.tap()
-        let text = app.textViews["select.text"]
-        XCTAssertTrue(text.waitForExistence(timeout: 5), "The reply did not open for selection")
-        text.doubleTap()
-        let copy = app.menuItems.matching(NSPredicate(format: "label IN %@", ["拷贝", "复制", "Copy"])).firstMatch
-        XCTAssertTrue(copy.waitForExistence(timeout: 5), "Selecting part of the reply showed no edit menu")
+        capture(app, "opened")
+        let reply = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "页面使用白色背景")).firstMatch
+        XCTAssertTrue(reply.waitForExistence(timeout: 5), "No reply text is on screen")
+        reply.press(forDuration: 1.0)
+        capture(app, "after-press")
+        let add = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "添加到聊天")).firstMatch
+        XCTAssertTrue(add.waitForExistence(timeout: 5), "Selecting a reply showed no menu with 添加到聊天")
         capture(app, "reply-selected")
-        app.buttons["page.close"].tap()
+        XCTAssertTrue(app.textViews["message.text"].exists, "The reply was not selected in place")
+        for item in ["复制", "分享", "全选"] {
+            XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", item)).firstMatch.exists, "The menu has no \(item)")
+        }
+        add.tap()
+        let composer = app.descendants(matching: .any)["chat.composer"]
+        XCTAssertTrue(composer.waitForExistence(timeout: 5))
+        let quoted = NSPredicate(format: "value BEGINSWITH %@", "> ")
+        XCTAssertEqual(XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: quoted, object: composer)], timeout: 5), .completed,
+                       "The selection was not quoted into the draft: \(String(describing: composer.value))")
+        capture(app, "quoted")
+        // Adding it ends the selection, and the reply is plain text again.
+        XCTAssertTrue(reply.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.textViews["message.text"].exists, "The reply stayed a text view after its selection ended")
 
-        // The reader's own message offers the same from a long press.
-        let prompt = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "第 29 轮")).firstMatch
-        XCTAssertTrue(prompt.waitForExistence(timeout: 5))
-        prompt.press(forDuration: 1.0)
-        // The menu's entry, not the footers' buttons with the same label.
-        let open = app.buttons.matching(NSPredicate(format: "label == %@ AND identifier != %@", "选择文本", "response.select")).firstMatch
-        XCTAssertTrue(open.waitForExistence(timeout: 5), "The message's long press has no text selection")
-        capture(app, "prompt-menu")
-        open.tap()
-        XCTAssertTrue(app.textViews["select.text"].waitForExistence(timeout: 5))
-        XCTAssertEqual(app.textViews["select.text"].value as? String, "第 29 轮：检查一下构建和测试")
-        capture(app, "prompt-page")
+        // Select all takes the whole turn.
+        reply.press(forDuration: 1.0)
+        let all = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "全选")).firstMatch
+        XCTAssertTrue(all.waitForExistence(timeout: 5))
+        all.tap()
+        capture(app, "select-all")
+        let addAll = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "添加到聊天")).firstMatch
+        XCTAssertTrue(addAll.waitForExistence(timeout: 5), "Selecting all showed no menu")
     }
     private func capture(_ app: XCUIApplication, _ name: String) {
         let attachment = XCTAttachment(screenshot: app.screenshot())

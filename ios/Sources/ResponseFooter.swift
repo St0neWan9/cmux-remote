@@ -7,7 +7,6 @@ struct ResponseFooter: View {
     let text: String
     let quote: (String) -> Void
     @State private var copied = false
-    @Environment(\.selectText) private var selectText
     var body: some View {
         // Equal boxes still look uneven: copy's back square rides high and share's box sits low under its arrow.
         HStack(spacing: 0) {
@@ -20,8 +19,7 @@ struct ResponseFooter: View {
                 .accessibilityLabel(String(localized: "chat.share")).accessibilityIdentifier("response.share")
             Button { quote(text) } label: { Image(systemName: "text.quote").frame(width: 36, height: 44) }
                 .accessibilityLabel(String(localized: "chat.quote")).accessibilityIdentifier("response.quote")
-            Button { selectText(text, false) } label: { Image(systemName: "text.cursor").frame(width: 36, height: 44) }
-                .accessibilityLabel(String(localized: "chat.select_text")).accessibilityIdentifier("response.select")
+
             if let date = response.completedAt {
                 Text(date, format: Calendar.current.isDateInToday(date)
                      ? .dateTime.hour().minute()

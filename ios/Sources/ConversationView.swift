@@ -18,8 +18,8 @@ struct ConversationView: View {
     @State private var settleTask: Task<Void, Never>?
     /// The reader opened or closed a card: the page stays where it is until they scroll or ask for the latest.
     @State private var holdingPlace = false
-    /// A message opened on its own page to select part of it.
-    @State private var selecting: SelectTextPage.Request?
+    /// The reply whose text is being selected in place.
+    @State private var selection: MessageSelection?
     @State private var scrollTrace = ScrollTrace()
     @State private var showProject = false
     @State private var selectedFile = ""
@@ -64,11 +64,10 @@ struct ConversationView: View {
                 else if bottom.isFinite && !latestVisible { scrollTrace.note("scroll follower"); proxy.scrollTo("latest", anchor: .bottom) }
             }
             .modifier(TimelineScrollInteraction(userScrolling: $userScrolling, atLatest: $atLatest, latestVisible: latestVisible))
-            .onChange(of: userScrolling) { _, scrolling in scrollTrace.note("userScrolling=\(scrolling)"); if scrolling { holdingPlace = false } }
+            .onChange(of: userScrolling) { _, scrolling in scrollTrace.note("userScrolling=\(scrolling)"); if scrolling { holdingPlace = false; selection = nil } }
             .onChange(of: atLatest) { _, value in scrollTrace.note("atLatest=\(value) hold=\(holdingPlace)") }
             .modifier(ScrollJumpTrace(trace: scrollTrace))
             // A card opened at the newest message would otherwise be carried off by the next one to arrive.
-            .environment(\.selectText) { text, monospaced in selecting = SelectTextPage.Request(text: text, monospaced: monospaced) }
             .environment(\.holdPlace) { scrollTrace.toggled("atLatest=\(atLatest) latestVisible=\(latestVisible)"); atLatest = false; holdingPlace = true }
             .scrollDismissesKeyboard(.interactively)
             .refreshable { await pullToRefresh(proxy) }
@@ -179,7 +178,6 @@ struct ConversationView: View {
         .navigationDestination(isPresented: Binding(get: { selectedToolDetail != nil }, set: { if !$0 { selectedToolDetail = nil } })) {
             if let reference = selectedToolDetail { ToolDetailView(reference: reference, sessionID: model.session.id, client: model.client) }
         }
-        .sheet(item: $selecting) { request in SelectTextPage(request: request) }
         .navigationDestination(isPresented: $showTiming) {
                 WhitePage(title: String(localized: "chat.timing")) {
                     VStack(alignment: .leading, spacing: 18) {
@@ -199,6 +197,12 @@ struct ConversationView: View {
         .task(id: phase) {
             guard phase == .active else { model.suspendReads(); return }; model.resumeReads()
             await model.observeChanges()
+        }
+        .environment(\.messageSelection, selection)
+        .environment(\.selectMessage) { selection = $0 }
+        .environment(\.quoteText) { [model] text in
+            let quoted = text.split(separator: "\n", omittingEmptySubsequences: false).map { "> " + $0 }.joined(separator: "\n")
+            model.draft = quoted + "\n\n" + model.draft
         }
         .environment(\.colorScheme, .light)
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { pageHeight = $0 }
@@ -280,7 +284,7 @@ struct ConversationView: View {
                     model.draft = quoted + "\n\n" + model.draft
                 }
             }
-        }.modifier(HeaderContentEffect(bottom: bottom))
+        }.modifier(HeaderContentEffect(bottom: bottom, enabled: selection?.messageID != item.first.id))
     }
     private func openToolDetail(_ messageID: String, _ field: String) {
         guard let generation = model.historyGeneration else { return }
