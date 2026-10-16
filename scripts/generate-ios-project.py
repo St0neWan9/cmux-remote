@@ -11,7 +11,8 @@ project = ios / 'CmuxRemote.xcodeproj'
 project.mkdir(exist_ok=True)
 release = json.loads((ios / 'Release.json').read_text())
 for field, pattern in {'bundle_id': r'[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+',
-                       'team_id': r'[A-Z0-9]{10}', 'version': r'\d+\.\d+\.\d+'}.items():
+                       'team_id': r'[A-Z0-9]{10}', 'version': r'\d+\.\d+\.\d+',
+                       'profile_name': r'[^\x00-\x1f]+'}.items():
     if not re.fullmatch(pattern, release[field]):
         raise SystemExit(f'Invalid release setting: {field}')
 
@@ -77,6 +78,10 @@ project_configs, target_configs = [], []
 for config in ('Debug', 'Release'):
     debug_flags = 'SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)"; SWIFT_OPTIMIZATION_LEVEL = "-Onone"; ENABLE_TESTABILITY = YES;' if config == 'Debug' else 'SWIFT_OPTIMIZATION_LEVEL = "-O";'
     project_configs.append(add('project:' + config, f'isa = XCBuildConfiguration; name = {config}; buildSettings = {{ SDKROOT = iphoneos; IPHONEOS_DEPLOYMENT_TARGET = 18.0; SWIFT_VERSION = 6.0; CLANG_ENABLE_MODULES = YES; {debug_flags} }};'))
+    # Manual distribution signing belongs to the app target alone: package targets cannot
+    # carry a profile, so a global setting reaches them and fails the Release archive.
+    signing = (f'CODE_SIGN_STYLE = Manual; PROVISIONING_PROFILE_SPECIFIER = {json.dumps(release["profile_name"])}; '
+               f'CODE_SIGN_IDENTITY = "Apple Distribution";') if config == 'Release' else 'CODE_SIGN_STYLE = Automatic;'
     target_configs.append(add('target:' + config, f'''isa = XCBuildConfiguration; name = {config}; buildSettings = {{
         PRODUCT_NAME = "$(TARGET_NAME)"; PRODUCT_BUNDLE_IDENTIFIER = {release["bundle_id"]};
         GENERATE_INFOPLIST_FILE = YES; INFOPLIST_FILE = Info.plist; INFOPLIST_KEY_CFBundleDisplayName = {json.dumps(release["display_name"])};
@@ -88,7 +93,7 @@ for config in ('Debug', 'Release'):
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
         INFOPLIST_KEY_UILaunchScreen_Generation = YES;
         SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; TARGETED_DEVICE_FAMILY = "1,2";
-        CODE_SIGN_STYLE = Automatic; DEVELOPMENT_TEAM = {release["team_id"]}; ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon; MARKETING_VERSION = {release["version"]}; CURRENT_PROJECT_VERSION = 1;
+        {signing} DEVELOPMENT_TEAM = {release["team_id"]}; ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon; MARKETING_VERSION = {release["version"]}; CURRENT_PROJECT_VERSION = 1;
         CODE_SIGN_ENTITLEMENTS = CmuxRemote.entitlements;
         SWIFT_STRICT_CONCURRENCY = complete;
     }};'''))
