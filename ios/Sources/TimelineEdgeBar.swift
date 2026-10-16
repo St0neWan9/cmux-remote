@@ -1,19 +1,23 @@
 import SwiftUI
 
-/// The conversation's header or composer: a bar in the safe area whose own paint is frosted and
-/// dissolves into the page past its inner edge.
+/// The conversation's header or composer: an opaque bar in the safe area that dissolves into the page
+/// over its last few points.
 ///
 /// The treatment lives on the bar, never on a row. A per-row layer effect rasterizes the row, which
-/// stops the vendored text view from drawing its selection. The system's own soft edge effect is
-/// asked for as well, but nothing depends on it: it renders weakly on some OS builds, and
-/// Reduce Transparency drops it entirely.
+/// stops the vendored text view from drawing its selection.
+///
+/// The bar is page-white, not a material. Messages scroll under a bar on this OS, and no material is
+/// opaque enough to hide them: the text shows through the header title and behind the composer, and
+/// `Reduce Transparency` changes how much. Solid white hides them everywhere, and the short gradient
+/// past the bar's inner edge keeps the seam from being a hard line — the same soft white transition the
+/// Metal header shader drew before this.
 struct TimelineEdgeBar<Bar: View>: ViewModifier {
     let edge: VerticalEdge
     @ViewBuilder let bar: () -> Bar
 
-    /// How far past the bar the rows dissolve. The bar's own inset grows by the same amount, so the
-    /// dissolve happens over ground the bar already owns and no message is buried under it.
-    private static var fade: CGFloat { 16 }
+    /// How far past the bar the rows dissolve. It is drawn beyond the bar's own bounds and costs no
+    /// layout, so no message is buried under blank space and no transparent band sits inside the bar.
+    private static var fade: CGFloat { 12 }
 
     private var atTop: Bool { edge == .top }
 
@@ -26,20 +30,14 @@ struct TimelineEdgeBar<Bar: View>: ViewModifier {
     }
 
     private var paintedBar: some View {
-        bar()
-            .padding(.bottom, atTop ? Self.fade : 0)
-            .padding(.top, atTop ? 0 : Self.fade)
-            .background(alignment: atTop ? .bottom : .top) { paint }
+        bar().background(alignment: atTop ? .bottom : .top) { paint }
     }
 
-    /// Frosted where the system still gives a material, with a plain gradient underneath it, so the
-    /// dissolve survives Reduce Transparency and every OS version.
+    /// Page white across the whole bar, then a gradient bleed onto the rows just past its inner edge.
     private var paint: some View {
         ZStack(alignment: atTop ? .bottom : .top) {
-            Rectangle().fill(.ultraThinMaterial)
-                .mask(LinearGradient(colors: atTop ? [.white, .white, .clear] : [.clear, .white, .white],
-                                     startPoint: .top, endPoint: .bottom))
-            LinearGradient(colors: atTop ? [.white, .clear] : [.clear, .white],
+            Color.white
+            LinearGradient(colors: atTop ? [.white, .white.opacity(0)] : [.white.opacity(0), .white],
                            startPoint: .top, endPoint: .bottom)
                 .frame(height: Self.fade)
                 .offset(y: atTop ? Self.fade : -Self.fade)
