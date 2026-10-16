@@ -110,7 +110,9 @@ struct Main {
                 let companion = MacCompanionService(repository: connections, mirrors: mirrors, discovery: discovery, catalog: catalog)
                 mac = companion
             } else { mac = nil }
-            let launcher = SessionLauncher(cmux: cmux, home: home, mutations: mutations, sessions: { try await service.sessions() })
+            let allowedDirectories = AllowedDirectoryRepository(directory: state.directory)
+            let launcher = SessionLauncher(cmux: cmux, home: home, mutations: mutations, sessions: { try await service.sessions() },
+                                           sharedRoots: { allowedDirectories.load() })
             let router = BridgeRouter(service: service, authority: authority, legacyToken: options.contains("legacy") ? try state.token() : nil, mirrors: RemoteMirrorService(cmux: cmux, mutations: mutations), launcher: launcher)
             let relayRepository = RelayConfigurationRepository(directory: state.directory)
             if let origin = options.value("relay") {
@@ -133,7 +135,7 @@ struct Main {
                 remembersChoice: command == "resident")
             let ready = AsyncThrowingStream<Void, any Error>.makeStream()
             let owner = Task {
-                do { try await OwnerControlServer().run(path: state.directory.appendingPathComponent("owner.sock").path, authority: authority, service: service, mac: mac, sharing: sharing, onListening: { ready.continuation.yield(()); ready.continuation.finish() }) }
+                do { try await OwnerControlServer().run(path: state.directory.appendingPathComponent("owner.sock").path, authority: authority, service: service, mac: mac, sharing: sharing, allowedDirectories: allowedDirectories, onListening: { ready.continuation.yield(()); ready.continuation.finish() }) }
                 catch { ready.continuation.finish(throwing: error); throw error }
             }
             defer { owner.cancel() }

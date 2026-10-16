@@ -96,6 +96,11 @@
 "mac.menu.file" = "File";
 "mac.menu.closeWindow" = "Close Window";
 "mac.share.address" = "Address";
+"mac.share.folders" = "Folders";
+"mac.share.folders.add" = "Add…";
+"mac.share.folders.remove" = "Stop sharing %@";
+"mac.share.folders.full" = "At most %d folders.";
+"mac.share.folders.hint" = "Offered to every workspace's new-session list on the phone, above the folders that workspace already uses.";
 "mac.share.certificate" = "Certificate fingerprint";
 "mac.label" = "%@:";
 "mac.status" = "Status";
