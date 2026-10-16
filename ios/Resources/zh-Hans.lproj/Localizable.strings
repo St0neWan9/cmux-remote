@@ -261,6 +261,7 @@
 "error.relay_origin" = "请输入以 https:// 开头、不带路径的地址。";
 "chat.loading" = "正在加载对话…";
 "sessions.workspaces_title" = "工作区";
+"sessions.group_toggle" = "展开或折叠工作区";
 "sessions.sort" = "排序";
 "sessions.sort.workspace" = "按工作区";
 "sessions.sort.time" = "按时间";
