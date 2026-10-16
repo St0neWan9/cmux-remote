@@ -1,5 +1,4 @@
 import SwiftUI
-import Textual
 import PhotosUI
 import UniformTypeIdentifiers
 import CmuxRemoteCore
@@ -20,6 +19,8 @@ struct ConversationView: View {
     /// The reader opened or closed a card: the page stays where it is until they scroll or ask for the latest.
     @State private var holdingPlace = false
     @State private var scrollTrace = ScrollTrace()
+    /// A message opened on its own page to select part of it.
+    @State private var selecting: SelectTextPage.Request?
     @State private var showProject = false
     @State private var selectedFile = ""
     @State private var showFeed = false
@@ -96,6 +97,7 @@ struct ConversationView: View {
             }
             .onDisappear { settleTask?.cancel(); settleTask = nil; initialScroll?.cancel(); initialScroll = nil }
             .onChange(of: model.jumpToLatest) { _, _ in holdingPlace = false; atLatest = true; withAnimation { scrollTrace.note("scroll after-send"); proxy.scrollTo("latest", anchor: .bottom) } }
+            .environment(\.selectText) { text, monospaced in selecting = SelectTextPage.Request(text: text, monospaced: monospaced) }
         }
         }
         .background(Color.white.ignoresSafeArea())
@@ -193,6 +195,7 @@ struct ConversationView: View {
             Button(String(localized: "chat.hard_stop"), role: .destructive) { Task { await model.interrupt(hard: true) } }
             Button(String(localized: "pair.cancel"), role: .cancel) {}
         } message: { Text(String(localized: "chat.hard_stop_note")) }
+        .sheet(item: $selecting) { request in SelectTextPage(request: request) }
         .task(id: phase) {
             guard phase == .active else { model.suspendReads(); return }; model.resumeReads()
             await model.observeChanges()
@@ -258,11 +261,6 @@ struct ConversationView: View {
         }.padding(.horizontal, 18).padding(.top, 12).padding(.bottom, 18)
             // A tap on the conversation puts the keyboard away; rows keep their own taps.
             .simultaneousGesture(TapGesture().onEnded { composerFocused = false })
-            // One selection on the page at a time, and selected reply text can be quoted into the follow-up.
-            .textual.textSelectionCoordination()
-            .textual.textSelectionActions([
-                TextSelectionAction(id: "add-to-chat", title: String(localized: "chat.selection.add_to_chat"), systemImage: "text.quote") { quote($0) }
-            ], prominence: .prominent)
     }
     /// One timeline item: its duration label, content and footer. Separate so the page body stays type-checkable.
     @ViewBuilder private func timelineRow(_ item: ConversationTimelineItem, firstResponse: [String: ConversationResponse], lastResponse: [String: ConversationResponse],
@@ -345,7 +343,7 @@ struct ConversationView: View {
                     Button { Task { await model.interrupt() } } label: { Label(String(localized: "chat.stop"), systemImage: "stop.circle") }
                     Button(role: .destructive) { confirmHardStop = true } label: { Label(String(localized: "chat.hard_stop"), systemImage: "stop.circle.fill") }
                 }
-            } label: { Image(systemName: "ellipsis").font(.system(size: 22, weight: .medium)).frame(width: 48, height: 44).background(Color.white, in: Capsule()).shadow(color: .black.opacity(0.07), radius: 10, y: 3) }
+            } label: { Image(systemName: "ellipsis").font(.system(size: 22, weight: .medium)).frame(width: 44, height: 44).background(Color.white, in: Circle()).shadow(color: .black.opacity(0.07), radius: 10, y: 3) }
                 .tint(.primary).accessibilityLabel(String(localized: "chat.more")).accessibilityIdentifier("chat.more")
         }.padding(.horizontal, MobileDesign.pageInset).padding(.vertical, 8)
     }
