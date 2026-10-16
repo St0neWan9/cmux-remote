@@ -55,7 +55,7 @@ struct MessageRow: View {
     }
     @ViewBuilder private var agentContent: some View {
         switch message.kind {
-        case .prose(let value): MarkdownMessageView(text: value.text)
+        case .prose(let value): MarkdownMessageView(text: value.text, selectionID: message.id)
         // Reasoning between operations is part of the reply: shown in full, without a title or disclosure.
         case .thought(let value): MarkdownMessageView(text: value.text)
         case .toolUse(let value):

@@ -92,6 +92,7 @@
 "chat.copied" = "已复制";
 "chat.selection.add_to_chat" = "添加到聊天";
 "chat.selection.select_all" = "全选";
+"chat.selection.share" = "分享";
 "chat.share" = "分享回复";
 "chat.quote" = "引用到跟进";
 "chat.response_time" = "回复时间";
@@ -310,5 +311,4 @@
 "sessions.close_search" = "关闭搜索";
 "sessions.title_menu" = "会话选项";
 "feed.title_count" = "待处理事项（%lld）";
-"chat.select_text" = "选择文本";
 "chat.copy_text" = "复制";

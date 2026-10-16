@@ -3,17 +3,20 @@ import UIKit
 
 /// UITextView-backed Markdown renderer with inline selection handles and a custom edit menu.
 ///
-/// SwiftUI `.textSelection(.enabled)` on a VStack already provides selection handles but only the
-/// system menu. Replacing the content with UITextView lets UIEditMenuInteraction inject custom
-/// items — 添加到聊天, 分享, 全选 — alongside the system Copy action.
+/// SwiftUI's `.textSelection` offers only the system menu. A text view's delegate can replace that menu, so a long
+/// press selects with handles and the selection offers adding to the chat, copying, sharing and selecting the whole turn.
 struct SelectableMessageTextView: UIViewRepresentable {
     let text: String
+    /// Where the long press landed; the word there is selected first.
+    let start: CGPoint
     let quote: (String) -> Void
+    /// The selection was dismissed; the reply goes back to plain text.
+    let ended: () -> Void
 
-    func makeCoordinator() -> Coordinator { Coordinator(quote: quote) }
+    func makeCoordinator() -> Coordinator { Coordinator(quote: quote, ended: ended) }
 
     func makeUIView(context: Context) -> UITextView {
-        let tv = UITextView()
+        let tv = WindowTextView()
         tv.isEditable = false
         tv.isScrollEnabled = false
         tv.backgroundColor = .clear
@@ -22,10 +25,13 @@ struct SelectableMessageTextView: UIViewRepresentable {
         tv.dataDetectorTypes = []
         tv.isSelectable = true
         tv.delegate = context.coordinator
-        let interaction = UIEditMenuInteraction(delegate: context.coordinator)
-        tv.addInteraction(interaction)
-        context.coordinator.textView = tv
-        context.coordinator.editMenuInteraction = interaction
+        tv.accessibilityIdentifier = "message.text"
+        let start = start, coordinator = context.coordinator
+        // Selected once the text view is in the window, so its handles and menu have somewhere to appear.
+        tv.enteredWindow = { [weak coordinator] tv in
+            tv.enteredWindow = nil
+            DispatchQueue.main.async { [weak tv] in if let tv { coordinator?.begin(tv, at: start) } }
+        }
         return tv
     }
 
@@ -33,7 +39,7 @@ struct SelectableMessageTextView: UIViewRepresentable {
         let attr = Self.attributedString(for: text, traitCollection: tv.traitCollection)
         if tv.attributedText != attr { tv.attributedText = attr }
         context.coordinator.quote = quote
-        context.coordinator.fullText = text
+        context.coordinator.ended = ended
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, uiView tv: UITextView, context: Context) -> CGSize? {
@@ -121,63 +127,89 @@ private extension MarkdownBlock {
 
 // MARK: – Coordinator
 
-@MainActor
-final class SelectableMessageTextView_Coordinator: NSObject, UITextViewDelegate, UIEditMenuInteractionDelegate {
-    var quote: (String) -> Void
-    var fullText: String = ""
-    weak var textView: UITextView?
-    var editMenuInteraction: UIEditMenuInteraction?
-    private var debounce: DispatchWorkItem?
-
-    init(quote: @escaping (String) -> Void) { self.quote = quote }
-
-    // Present the custom menu after selection settles.
-    func textViewDidChangeSelection(_ textView: UITextView) {
-        debounce?.cancel()
-        guard textView.selectedRange.length > 0 else { return }
-        let work = DispatchWorkItem { [weak self, weak textView] in
-            guard let self, let tv = textView, tv.selectedRange.length > 0 else { return }
-            guard let range = tv.selectedTextRange else { return }
-            let rects = tv.selectionRects(for: range)
-            let mid = rects.first.map { CGPoint(x: $0.rect.midX, y: $0.rect.minY) } ?? .zero
-            let cfg = UIEditMenuConfiguration(identifier: nil, sourcePoint: mid)
-            self.editMenuInteraction?.presentEditMenu(with: cfg)
-        }
-        debounce = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: work)
-    }
-
-    nonisolated func editMenuInteraction(_ interaction: UIEditMenuInteraction,
-                              menuFor configuration: UIEditMenuConfiguration,
-                              suggestedActions: [UIMenuElement]) -> UIMenu? {
-        MainActor.assumeIsolated {
-            guard let tv = textView, tv.selectedRange.length > 0 else { return nil }
-            let sel = (tv.text as NSString).substring(with: tv.selectedRange)
-
-            let addToChat = UIAction(title: String(localized: "chat.selection.add_to_chat")) { [weak self] _ in
-                self?.quote(sel)
-            }
-            let copy = UIAction(title: String(localized: "chat.copy_text")) { _ in
-                UIPasteboard.general.string = sel
-            }
-            let share = UIAction(title: String(localized: "chat.share")) { [weak tv] _ in
-                let vc = UIActivityViewController(activityItems: [sel], applicationActivities: nil)
-                tv?.window?.rootViewController?.topMost.present(vc, animated: true)
-            }
-            let selectAll = UIAction(title: String(localized: "chat.selection.select_all")) { [weak tv] _ in
-                tv?.selectAll(nil)
-            }
-            return UIMenu(children: [addToChat, copy, share, selectAll])
-        }
+/// A text view that reports when it is first placed in a window.
+final class WindowTextView: UITextView {
+    var enteredWindow: ((WindowTextView) -> Void)?
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        if window != nil { enteredWindow?(self) }
     }
 }
 
 extension SelectableMessageTextView {
-    typealias Coordinator = SelectableMessageTextView_Coordinator
+    /// Replaces the text view's own edit menu, so a selection shows one menu with this page's actions.
+    @MainActor final class Coordinator: NSObject, UITextViewDelegate, UIEditMenuInteractionDelegate {
+        var quote: (String) -> Void
+        var ended: () -> Void
+        /// Set once the first word is selected; a collapsed selection before then is the text view starting up.
+        private var began = false
+        init(quote: @escaping (String) -> Void, ended: @escaping () -> Void) { self.quote = quote; self.ended = ended }
+
+        func begin(_ textView: UITextView, at point: CGPoint) {
+            textView.layoutIfNeeded()
+            guard let position = textView.closestPosition(to: point) else { ended(); return }
+            let word = textView.tokenizer.rangeEnclosingPosition(position, with: .word, inDirection: .storage(.forward))
+                ?? textView.tokenizer.rangeEnclosingPosition(position, with: .word, inDirection: .storage(.backward))
+                ?? textView.textRange(from: position, to: textView.position(from: position, offset: 1) ?? position)
+            textView.becomeFirstResponder()
+            textView.selectedTextRange = word
+            began = textView.selectedRange.length > 0
+            guard began, let range = textView.selectedTextRange else { ended(); return }
+            showMenu(for: textView)
+        }
+
+        /// The text view shows its own menu only when its selection is tapped; this one opens it straight away.
+        private func showMenu(for textView: UITextView) {
+            guard let range = textView.selectedTextRange else { return }
+            let rect = textView.firstRect(for: range)
+            let interaction = UIEditMenuInteraction(delegate: self)
+            textView.addInteraction(interaction)
+            interaction.presentEditMenu(with: UIEditMenuConfiguration(identifier: nil, sourcePoint: CGPoint(x: rect.midX, y: rect.minY)))
+        }
+
+        nonisolated func editMenuInteraction(_ interaction: UIEditMenuInteraction, menuFor configuration: UIEditMenuConfiguration,
+                                             suggestedActions: [UIMenuElement]) -> UIMenu? {
+            MainActor.assumeIsolated {
+                guard let textView = interaction.view as? UITextView else { return nil }
+                return menu(textView, range: textView.selectedRange)
+            }
+        }
+
+        func textView(_ textView: UITextView, editMenuForTextIn range: NSRange, suggestedActions: [UIMenuElement]) -> UIMenu? {
+            menu(textView, range: range)
+        }
+
+        func textViewDidChangeSelection(_ textView: UITextView) {
+            if began && textView.selectedRange.length == 0 { began = false; ended() }
+        }
+
+        private func menu(_ textView: UITextView, range: NSRange) -> UIMenu? {
+            guard range.length > 0 else { return nil }
+            let selected = (textView.text as NSString).substring(with: range)
+            let quote = quote
+            return UIMenu(options: .displayInline, children: [
+                UIAction(title: String(localized: "chat.selection.add_to_chat"), image: UIImage(systemName: "text.quote")) { _ in
+                    quote(selected); textView.selectedRange = NSRange(location: range.location, length: 0)
+                },
+                UIAction(title: String(localized: "chat.copy_text"), image: UIImage(systemName: "doc.on.doc")) { _ in
+                    UIPasteboard.general.string = selected
+                },
+                UIAction(title: String(localized: "chat.selection.share"), image: UIImage(systemName: "square.and.arrow.up")) { [weak textView] _ in
+                    guard let textView, let presenter = textView.window?.rootViewController?.topMost else { return }
+                    let sheet = UIActivityViewController(activityItems: [selected], applicationActivities: nil)
+                    sheet.popoverPresentationController?.sourceView = textView
+                    presenter.present(sheet, animated: true)
+                },
+                UIAction(title: String(localized: "chat.selection.select_all"), image: UIImage(systemName: "selection.pin.in.out")) { [weak self, weak textView] _ in
+                    textView?.selectAll(nil)
+                    // A select all dismisses the menu; it comes back over the whole selection.
+                    DispatchQueue.main.async { if let textView { self?.showMenu(for: textView) } }
+                },
+            ])
+        }
+    }
 }
 
 private extension UIViewController {
-    var topMost: UIViewController {
-        presentedViewController?.topMost ?? self
-    }
+    var topMost: UIViewController { presentedViewController?.topMost ?? self }
 }
