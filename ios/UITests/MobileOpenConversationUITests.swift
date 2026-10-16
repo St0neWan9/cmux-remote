@@ -13,7 +13,7 @@ final class MobileOpenConversationUITests: XCTestCase {
         app.launch()
         let session = app.buttons.matching(NSPredicate(format: "identifier ENDSWITH %@", "fixture-session")).firstMatch
         XCTAssertTrue(session.waitForExistence(timeout: 10))
-        let latest = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "第 30 轮完成")).firstMatch
+        let latest = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "页面使用白色背景")).firstMatch
         for pass in ["first", "stored"] {
             session.tap()
             XCTAssertTrue(app.buttons["chat.back"].waitForExistence(timeout: 5))

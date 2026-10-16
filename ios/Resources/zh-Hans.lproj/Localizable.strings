@@ -88,11 +88,11 @@
 "sessions.options" = "连接选项";
 "page.close" = "关闭";
 "page.back" = "返回";
+"chat.select_text" = "选择文本";
 "chat.copy" = "复制回复";
 "chat.copied" = "已复制";
 "chat.share" = "分享回复";
 "chat.quote" = "引用到跟进";
-"chat.selection.add_to_chat" = "添加到聊天";
 "chat.response_time" = "回复时间";
 "chat.compacting" = "正在压缩上下文 %@";
 "chat.background.count" = "%ld 个后台任务正在运行";

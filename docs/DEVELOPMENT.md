@@ -180,20 +180,22 @@ clears on an observed state change, a new user message, or a phone send.
 
 ## Conversation overlap rendering
 
-The header and composer are scroll-edge bars over a white page. On iOS 26 the
-timeline uses the system's soft scroll edge effect beneath them; earlier
-systems show the page unsoftened. Rows carry no layer effect of their own: a
-layer effect rasterizes the row, and the text selection interaction over a
-reply is a UIKit view that a rasterized row draws as a placeholder.
+The header and composer float over a white page with no fill of their own. Each
+timeline row carries a layer effect (`HeaderContentEffect`) whose Metal stitchable
+shaders (`ConversationHeader.metal`) blur the ink entering the top and bottom
+bands and fade it toward the page, so the page stays white and only the ink under
+the bars is softened.
 
 ## Reply text selection
 
-Replies render with the vendored Textual package (`Vendor/Textual`), which
-draws SwiftUI text and lays a UIKit text interaction over it, so a long press
-shows selection handles that reach across paragraphs, lists, code and tables.
-Wide code and tables wrap instead of scrolling, since a nested scroll view is
-also UIKit. The timeline adds an "Add to chat" action that quotes the selection
-into the follow-up draft.
+Prose is SwiftUI text, so a reply copies with the pages' own controls rather than
+in-place selection. A reply's footer offers Copy, Share, Quote and Select Text;
+Select Text opens the text on its own page (`SelectTextPage`) in a `UITextView`,
+where the system's handles, magnifier and edit menu can take any part of it. The
+reader's own message and a tool's text offer the same Copy / Select Text pair
+from a long press. In-place selection is deliberately not used: the per-row layer
+effect rasterizes the row, and a rasterized row draws the selection interaction as
+a placeholder.
 
 ## Mac B LAN verification — 2026-10-12
 
