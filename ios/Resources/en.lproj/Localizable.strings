@@ -92,6 +92,7 @@
 "chat.copied" = "Copied";
 "chat.share" = "Share reply";
 "chat.quote" = "Quote in follow-up";
+"chat.selection.add_to_chat" = "Add to chat";
 "chat.response_time" = "Reply time";
 "chat.compacting" = "Compacting context %@";
 "chat.background.count" = "%ld background tasks running";

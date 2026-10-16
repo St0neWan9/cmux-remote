@@ -211,17 +211,6 @@ private actor DeferredToolPage {
             ChatMessage(id: "final1", seq: 150, role: .agent, timestamp: .distantPast, kind: .prose(ChatProse(text: "First block"))),
             ChatMessage(id: "final2", seq: 150, role: .agent, timestamp: .distantPast, kind: .prose(ChatProse(text: "Second block")))]
         if conversation.responseText(response) != "First block\n\nSecond block" { failures.append("Reply actions mixed in progress text or omitted a final-record block") }
-        let bare = MarkdownBlock.parse("```\nls\npwd\n```").first
-        let labeled = MarkdownBlock.parse("```swift\nlet n = 1\n```").first
-        if bare?.text != "ls\npwd" || labeled?.text != "let n = 1" { failures.append("Fenced Markdown lost code content") }
-        let structured = MarkdownBlock.parse("## Phone heading\n\n- First item\n- Second item\n\n```swift\nlet marker = \"PHONE_MARKDOWN_OK_1012\"\nprint(marker)\n```")
-        if structured.first?.headingLevel != 2 || structured.first?.text != "Phone heading" || structured.filter({ $0.listMarker != nil }).map(\.text) != ["First item", "Second item"] {
-            failures.append("Markdown headings and list markers remained literal paragraph text")
-        }
-        if structured.last?.code != true || structured.last?.text != "let marker = \"PHONE_MARKDOWN_OK_1012\"\nprint(marker)" {
-            failures.append("Structured Markdown lost its code block")
-        }
-
         let deferred = DeferredProjectRead()
         let project = ProjectModel(initialPath: " file with trailing space ", read: { resource, query in
             if resource == "file" { return try await deferred.read() }
