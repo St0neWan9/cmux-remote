@@ -22,11 +22,12 @@ class ReleaseConfig
     raise "Invalid profile name" if @profile_name.empty? || @profile_name.match?(/[\x00-\x1f]/)
     raise "Invalid App Store app ID" unless @app_store_app_id.empty? || @app_store_app_id.match?(/\A[1-9]\d*\z/)
   end
+  # Identity only. The profile and the distribution identity are per-target settings on the
+  # app target (scripts/generate-ios-project.py), because a global one is also applied to
+  # package targets, which cannot carry either and fail the Release archive.
   def xcargs
     args = ["DEVELOPMENT_TEAM=#{team_id}", "PRODUCT_BUNDLE_IDENTIFIER=#{bundle_id}",
-     "MARKETING_VERSION=#{version}", "CURRENT_PROJECT_VERSION=#{build_number}",
-     "CODE_SIGN_STYLE=Manual", "CODE_SIGN_IDENTITY=Apple Distribution",
-     "PROVISIONING_PROFILE_SPECIFIER=#{profile_name}"]
+     "MARKETING_VERSION=#{version}", "CURRENT_PROJECT_VERSION=#{build_number}"]
     args << "OTHER_CODE_SIGN_FLAGS=#{['--keychain', @keychain].shelljoin}" unless @keychain.to_s.empty?
     args.shelljoin
   end
