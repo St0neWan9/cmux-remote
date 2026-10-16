@@ -180,11 +180,20 @@ clears on an observed state change, a new user message, or a phone send.
 
 ## Conversation overlap rendering
 
-The header keeps a white page background. A bounded SwiftUI layer shader blurs
-and fades message pixels beneath the floating controls; it does not add a tinted
-backdrop. The iOS target compiles `ConversationHeader.metal` into its default
-shader library. `scripts/build-ios.sh` checks the Metal compiler and downloads
-Apple's official Metal Toolchain component if the active Xcode lacks it.
+The header and composer are scroll-edge bars over a white page. On iOS 26 the
+timeline uses the system's soft scroll edge effect beneath them; earlier
+systems show the page unsoftened. Rows carry no layer effect of their own: a
+layer effect rasterizes the row, and the text selection interaction over a
+reply is a UIKit view that a rasterized row draws as a placeholder.
+
+## Reply text selection
+
+Replies render with the vendored Textual package (`Vendor/Textual`), which
+draws SwiftUI text and lays a UIKit text interaction over it, so a long press
+shows selection handles that reach across paragraphs, lists, code and tables.
+Wide code and tables wrap instead of scrolling, since a nested scroll view is
+also UIKit. The timeline adds an "Add to chat" action that quotes the selection
+into the follow-up draft.
 
 ## Mac B LAN verification — 2026-10-12
 

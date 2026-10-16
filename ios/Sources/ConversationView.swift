@@ -1,4 +1,5 @@
 import SwiftUI
+import Textual
 import PhotosUI
 import UniformTypeIdentifiers
 import CmuxRemoteCore
@@ -46,9 +47,10 @@ struct ConversationView: View {
         GeometryReader { viewport in
         ScrollViewReader { proxy in
             ScrollView {
-                timeline(bottom: viewport.size.height) { Task { await loadOlder(proxy) } }
+                timeline { Task { await loadOlder(proxy) } }
             }
             .scrollClipDisabled()
+            .modifier(SoftScrollEdges())
             .modifier(InitialBottomAnchor())
             .coordinateSpace(name: "chatTimeline")
             .onPreferenceChange(TimelineBottomPreferenceKey.self) { bottom in
@@ -100,14 +102,14 @@ struct ConversationView: View {
         .background(Color.white.ignoresSafeArea())
         .background(InteractivePopInstaller())
         .toolbar(.hidden, for: .navigationBar)
-        .safeAreaInset(edge: .top, spacing: 0) {
+        .modifier(TimelineEdgeBar(edge: .top) {
             VStack(spacing: 6) {
                 header
                 ConnectionStatusBar(state: linkState) { Task { await reconnect() } }
             }
-        }
+        })
         .task { for await state in model.client.linkStates() { linkState = state } }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
+        .modifier(TimelineEdgeBar(edge: .bottom) {
             VStack(spacing: 12) {
                 SpeechDraftStrip(model: model.speech, useText: model.useSpeechDraft)
                 if model.imageDraft.loading { ProgressView(String(localized: "image.preparing")) }
@@ -140,7 +142,7 @@ struct ConversationView: View {
                              }, dictating: model.speech.state == .recording, startVoice: { Task { await model.speech.start() } }, finishVoice: { model.speech.finish() }, showImageFiles: { showingImageFiles = true },
                              maxLines: max(3, Int((pageHeight * 0.5 - 120) / 22)))
             }.padding(.horizontal, 14).padding(.top, 14).padding(.bottom, 10)
-        }
+        })
         .photosPicker(isPresented: $showingPhotos, selection: $photoItems, maxSelectionCount: max(1, 4 - model.imageDraft.images.count), selectionBehavior: .ordered, matching: .images)
         .fileImporter(isPresented: $showingImageFiles, allowedContentTypes: [.image], allowsMultipleSelection: true) { result in
             switch result {
@@ -201,7 +203,7 @@ struct ConversationView: View {
         .accessibilityAction(.escape) { dismiss() }
     }
     /// The message list. Separate from `body` so the page stays type-checkable.
-    @ViewBuilder private func timeline(bottom: CGFloat, reachedTop: @escaping () -> Void) -> some View {
+    @ViewBuilder private func timeline(reachedTop: @escaping () -> Void) -> some View {
         // Lookups are built once per update instead of searched again by every row.
         let firstResponse = Dictionary(model.responses.map { ($0.firstMessageID, $0) }, uniquingKeysWith: { _, latest in latest })
         let lastResponse = Dictionary(model.responses.map { ($0.lastMessageID, $0) }, uniquingKeysWith: { _, latest in latest })
@@ -229,23 +231,23 @@ struct ConversationView: View {
                 else { ContentUnavailableView(String(localized: "chat.empty"), systemImage: "bubble.left.and.bubble.right") }
             }
             ForEach(model.timelineItems) { item in
-                timelineRow(item, firstResponse: firstResponse, lastResponse: lastResponse, imagesByMessage: imagesByMessage, activeAnchor: activeAnchor, runningSince: runningSince, bottom: bottom)
+                timelineRow(item, firstResponse: firstResponse, lastResponse: lastResponse, imagesByMessage: imagesByMessage, activeAnchor: activeAnchor, runningSince: runningSince)
                     .id(item.id)
             }
             if activeAnchor == nil, let runningSince {
-                LiveRunLabel(since: runningSince, compacting: model.compacting, showsDivider: true, font: .subheadline).modifier(HeaderContentEffect(bottom: bottom))
+                LiveRunLabel(since: runningSince, compacting: model.compacting, showsDivider: true, font: .subheadline)
             }
             if let preview = model.preview {
                 VStack(alignment: .leading, spacing: 10) {
                     Label(String(localized: "chat.preview"), systemImage: "ellipsis.bubble").font(.caption).foregroundStyle(.secondary)
                     MarkdownMessageView(text: preview)
-                }.modifier(HeaderContentEffect(bottom: bottom))
+                }
             }
-            ForEach(model.outgoing) { prompt in OutgoingPromptRow(prompt: prompt).modifier(HeaderContentEffect(bottom: bottom)) }
+            ForEach(model.outgoing) { prompt in OutgoingPromptRow(prompt: prompt) }
             if let error = model.error {
                 Label(error, systemImage: "exclamationmark.circle").font(.footnote).foregroundStyle(.red).padding(12)
                     .frame(maxWidth: .infinity, alignment: .leading).background(Color.red.opacity(0.055), in: RoundedRectangle(cornerRadius: 14))
-                    .modifier(HeaderContentEffect(bottom: bottom))
+
             }
             Color.clear.frame(height: 1).id("latest")
                 .background {
@@ -257,10 +259,15 @@ struct ConversationView: View {
         }.padding(.horizontal, 18).padding(.top, 12).padding(.bottom, 18)
             // A tap on the conversation puts the keyboard away; rows keep their own taps.
             .simultaneousGesture(TapGesture().onEnded { composerFocused = false })
+            // One selection on the page at a time, and selected reply text can be quoted into the follow-up.
+            .textual.textSelectionCoordination()
+            .textual.textSelectionActions([
+                TextSelectionAction(id: "add-to-chat", title: String(localized: "chat.selection.add_to_chat"), systemImage: "text.quote") { quote($0) }
+            ], prominence: .prominent)
     }
     /// One timeline item: its duration label, content and footer. Separate so the page body stays type-checkable.
     @ViewBuilder private func timelineRow(_ item: ConversationTimelineItem, firstResponse: [String: ConversationResponse], lastResponse: [String: ConversationResponse],
-                                          imagesByMessage: [String: [ConversationImageReference]], activeAnchor: String?, runningSince: Date?, bottom: CGFloat) -> some View {
+                                          imagesByMessage: [String: [ConversationImageReference]], activeAnchor: String?, runningSince: Date?) -> some View {
         let images = item.messages.flatMap { imagesByMessage[$0.id] ?? [] }
         VStack(alignment: .leading, spacing: 12) {
             if item.id == activeAnchor, let runningSince {
@@ -271,12 +278,14 @@ struct ConversationView: View {
             if item.isActivity { ActivityGroupView(item: item, projectRoot: model.session.cwd, openFile: model.client.allows(.projectRead) ? { selectedFile = $0; showProject = true } : nil, images: images, openImage: { selectedImage = $0 }, openDetail: openToolDetail, isLatest: item.id == model.timelineItems.last?.id) }
             else { MessageRow(message: item.first, projectRoot: model.session.cwd, openFile: model.client.allows(.projectRead) ? { selectedFile = $0; showProject = true } : nil, images: images, openImage: { selectedImage = $0 }, openDetail: openToolDetail) }
             if let response = lastResponse[item.id], response.completed, case .prose = item.first.kind {
-                ResponseFooter(response: response, text: model.responseText(response)) { text in
-                    let quoted = text.split(separator: "\n", omittingEmptySubsequences: false).map { "> " + $0 }.joined(separator: "\n")
-                    model.draft = quoted + "\n\n" + model.draft
-                }
+                ResponseFooter(response: response, text: model.responseText(response), quote: quote)
             }
-        }.modifier(HeaderContentEffect(bottom: bottom))
+        }
+    }
+    /// Puts text into the follow-up draft as a Markdown quote, ahead of what is already typed.
+    private func quote(_ text: String) {
+        let quoted = text.split(separator: "\n", omittingEmptySubsequences: false).map { "> " + $0 }.joined(separator: "\n")
+        model.draft = quoted + "\n\n" + model.draft
     }
     private func openToolDetail(_ messageID: String, _ field: String) {
         guard let generation = model.historyGeneration else { return }

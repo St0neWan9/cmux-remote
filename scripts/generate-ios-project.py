@@ -25,9 +25,8 @@ def add(name, value):
     return ident
 
 source_refs, source_builds = [], []
-for path in sorted([*(ios / 'Sources').glob('*.swift'), *(ios / 'Sources').glob('*.metal')]):
-    source_type = 'sourcecode.metal' if path.suffix == '.metal' else 'sourcecode.swift'
-    ref = add(str(path.relative_to(ios)), f'isa = PBXFileReference; lastKnownFileType = {source_type}; path = "Sources/{path.name}"; sourceTree = "<group>";')
+for path in sorted((ios / 'Sources').glob('*.swift')):
+    ref = add(str(path.relative_to(ios)), f'isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Sources/{path.name}"; sourceTree = "<group>";')
     source_refs.append(ref)
     source_builds.append(add('build:' + str(path.relative_to(ios)), f'isa = PBXBuildFile; fileRef = {ref};'))
 
@@ -62,18 +61,22 @@ products = add('products', f'isa = PBXGroup; children = ({product}, {test_produc
 main = add('main', f'isa = PBXGroup; children = ({", ".join(source_refs + test_refs + ui_refs + [variant, info_variant, asset_ref, privacy_ref, products])}); sourceTree = "<group>";')
 package = add('package', 'isa = XCLocalSwiftPackageReference; relativePath = "..";')
 vendor_package = add('vendor-package', 'isa = XCLocalSwiftPackageReference; relativePath = "../Vendor/CmuxAgentChat";')
+textual_package = add('textual-package', 'isa = XCLocalSwiftPackageReference; relativePath = "../Vendor/Textual";')
 deps, frameworks = [], []
 for name in ('CmuxRemoteCore', 'CmuxRemoteClient', 'CmuxAgentChat'):
     dep = add('dep:' + name, f'isa = XCSwiftPackageProductDependency; productName = {name};')
     deps.append(dep)
     frameworks.append(add('framework:' + name, f'isa = PBXBuildFile; productRef = {dep};'))
+textual_dep = add('dep:Textual', 'isa = XCSwiftPackageProductDependency; productName = Textual;')
+deps.append(textual_dep)
+frameworks.append(add('framework:Textual', f'isa = PBXBuildFile; productRef = {textual_dep};'))
 sources = add('sources', f'isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = ({", ".join(source_builds)}); runOnlyForDeploymentPostprocessing = 0;')
 resources = add('resources', f'isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = ({strings_build}, {info_build}, {asset_build}, {privacy_build}); runOnlyForDeploymentPostprocessing = 0;')
 frameworks_phase = add('frameworks', f'isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = ({", ".join(frameworks)}); runOnlyForDeploymentPostprocessing = 0;')
 project_configs, target_configs = [], []
 for config in ('Debug', 'Release'):
     debug_flags = 'SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)"; SWIFT_OPTIMIZATION_LEVEL = "-Onone"; ENABLE_TESTABILITY = YES;' if config == 'Debug' else 'SWIFT_OPTIMIZATION_LEVEL = "-O";'
-    project_configs.append(add('project:' + config, f'isa = XCBuildConfiguration; name = {config}; buildSettings = {{ SDKROOT = iphoneos; IPHONEOS_DEPLOYMENT_TARGET = 17.0; SWIFT_VERSION = 6.0; CLANG_ENABLE_MODULES = YES; {debug_flags} }};'))
+    project_configs.append(add('project:' + config, f'isa = XCBuildConfiguration; name = {config}; buildSettings = {{ SDKROOT = iphoneos; IPHONEOS_DEPLOYMENT_TARGET = 18.0; SWIFT_VERSION = 6.0; CLANG_ENABLE_MODULES = YES; {debug_flags} }};'))
     target_configs.append(add('target:' + config, f'''isa = XCBuildConfiguration; name = {config}; buildSettings = {{
         PRODUCT_NAME = "$(TARGET_NAME)"; PRODUCT_BUNDLE_IDENTIFIER = {release["bundle_id"]};
         GENERATE_INFOPLIST_FILE = YES; INFOPLIST_FILE = Info.plist; INFOPLIST_KEY_CFBundleDisplayName = {json.dumps(release["display_name"])};
@@ -106,7 +109,7 @@ for config in ('Debug', 'Release'):
 ui_list = add('ui-list', f'isa = XCConfigurationList; buildConfigurations = ({", ".join(ui_configs)}); defaultConfigurationName = Debug; defaultConfigurationIsVisible = 0;')
 ui_sources = add('ui-sources', f'isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = ({", ".join(ui_builds)}); runOnlyForDeploymentPostprocessing = 0;')
 ui_target = add('ui-target', f'isa = PBXNativeTarget; name = CmuxRemoteUITests; productName = CmuxRemoteUITests; productType = "com.apple.product-type.bundle.ui-testing"; productReference = {ui_product}; buildConfigurationList = {ui_list}; buildPhases = ({ui_sources}); buildRules = (); dependencies = ({test_dependency});')
-project_id = add('project', f'isa = PBXProject; attributes = {{ LastUpgradeCheck = 2660; }}; buildConfigurationList = {project_list}; compatibilityVersion = "Xcode 14.0"; developmentRegion = en; knownRegions = (en, "zh-Hans", Base); mainGroup = {main}; productRefGroup = {products}; projectDirPath = ""; projectRoot = ""; packageReferences = ({package}, {vendor_package}); targets = ({target}, {test_target}, {ui_target});')
+project_id = add('project', f'isa = PBXProject; attributes = {{ LastUpgradeCheck = 2660; }}; buildConfigurationList = {project_list}; compatibilityVersion = "Xcode 14.0"; developmentRegion = en; knownRegions = (en, "zh-Hans", Base); mainGroup = {main}; productRefGroup = {products}; projectDirPath = ""; projectRoot = ""; packageReferences = ({package}, {vendor_package}, {textual_package}); targets = ({target}, {test_target}, {ui_target});')
 body = '\n'.join(f'{ident} = {{ {value} }};' for ident, value in objects.items())
 (project / 'project.pbxproj').write_text(f'// !$*UTF8*$!\n{{ archiveVersion = 1; classes = {{}}; objectVersion = 56; objects = {{\n{body}\n}}; rootObject = {project_id}; }}\n')
 schemes = project / 'xcshareddata/xcschemes'

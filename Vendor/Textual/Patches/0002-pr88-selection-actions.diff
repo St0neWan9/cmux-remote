@@ -1,0 +1,767 @@
+diff --git a/Package.resolved b/Package.resolved
+index 52c609c7..5274b439 100644
+--- a/Package.resolved
++++ b/Package.resolved
+@@ -1,5 +1,5 @@
+ {
+-  "originHash" : "6830735cf1642029fd8d0de11c899e009d69df72c78d3306a3f5a4e839b891b9",
++  "originHash" : "407abbc37ba2640490cb162b13978f6b846bd67d181857ada0d671650636f65c",
+   "pins" : [
+     {
+       "identity" : "swift-concurrency-extras",
+@@ -37,6 +37,15 @@
+         "version" : "600.0.1"
+       }
+     },
++    {
++      "identity" : "swiftui-math",
++      "kind" : "remoteSourceControl",
++      "location" : "https://github.com/gonzalezreal/swiftui-math",
++      "state" : {
++        "revision" : "0b5c2cfaaec8d6193db206f675048eeb5ce95f71",
++        "version" : "0.1.0"
++      }
++    },
+     {
+       "identity" : "xctest-dynamic-overlay",
+       "kind" : "remoteSourceControl",
+diff --git a/Sources/Textual/Internal/TextInteraction/AppKit/AppKitTextInteractionOverlay.swift b/Sources/Textual/Internal/TextInteraction/AppKit/AppKitTextInteractionOverlay.swift
+index d6e8e39d..552b193a 100644
+--- a/Sources/Textual/Internal/TextInteraction/AppKit/AppKitTextInteractionOverlay.swift
++++ b/Sources/Textual/Internal/TextInteraction/AppKit/AppKitTextInteractionOverlay.swift
+@@ -23,7 +23,8 @@
+       NSTextInteractionView(
+         model: model,
+         exclusionRects: overflowFrames,
+-        openURL: context.environment.openURL
++        openURL: context.environment.openURL,
++        selectionActions: context.environment.textSelectionActions
+       )
+     }
+ 
+@@ -31,6 +32,7 @@
+       nsView.model = model
+       nsView.exclusionRects = overflowFrames
+       nsView.openURL = context.environment.openURL
++      nsView.selectionActions = context.environment.textSelectionActions
+     }
+   }
+ #endif
+diff --git a/Sources/Textual/Internal/TextInteraction/AppKit/NSTextInteractionView.swift b/Sources/Textual/Internal/TextInteraction/AppKit/NSTextInteractionView.swift
+index f1b06f7a..e103001f 100644
+--- a/Sources/Textual/Internal/TextInteraction/AppKit/NSTextInteractionView.swift
++++ b/Sources/Textual/Internal/TextInteraction/AppKit/NSTextInteractionView.swift
+@@ -14,6 +14,8 @@
+     var model: TextSelectionModel
+     var exclusionRects: [CGRect]
+     var openURL: OpenURLAction
++    /// Actions the app adds to the selection menu, after the platform's own.
++    var selectionActions: [TextSelectionAction]
+ 
+     override var acceptsFirstResponder: Bool { true }
+     override var isFlipped: Bool { true }
+@@ -21,12 +23,15 @@
+ 
+     private var dragStart: TextPosition?
+     private var selectionAnchor: TextPosition?
++    private var outsideClickMonitor: Any?
+ 
+     init(
+       model: TextSelectionModel,
+       exclusionRects: [CGRect],
+-      openURL: OpenURLAction
++      openURL: OpenURLAction,
++      selectionActions: [TextSelectionAction] = []
+     ) {
++      self.selectionActions = selectionActions
+       self.model = model
+       self.exclusionRects = exclusionRects
+       self.openURL = openURL
+@@ -218,6 +223,18 @@
+           keyEquivalent: ""
+         )
+       )
++      if !selectionActions.isEmpty {
++        contextMenu.addItem(.separator())
++        for action in selectionActions {
++          let item = NSMenuItem(title: action.title, action: #selector(performSelectionAction(_:)), keyEquivalent: "")
++          item.target = self
++          item.representedObject = action
++          if let systemImage = action.systemImage {
++            item.image = NSImage(systemSymbolName: systemImage, accessibilityDescription: nil)
++          }
++          contextMenu.addItem(item)
++        }
++      }
+ 
+       return contextMenu
+     }
+@@ -257,6 +274,40 @@
+       selectionAnchor = nil
+     }
+ 
++    /// A selection lives as long as its view is first responder, as it does in a text view.
++    override func resignFirstResponder() -> Bool {
++      let resigned = super.resignFirstResponder()
++      if resigned {
++        resetSelection()
++      }
++      return resigned
++    }
++
++    override func viewDidMoveToWindow() {
++      super.viewDidMoveToWindow()
++      if let outsideClickMonitor {
++        NSEvent.removeMonitor(outsideClickMonitor)
++        self.outsideClickMonitor = nil
++      }
++      guard window != nil else {
++        return
++      }
++      outsideClickMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] event in
++        self?.dismissSelection(forClickIn: event)
++        return event
++      }
++    }
++
++    /// Ends the selection for a click anywhere in the window but on this view; clicks on the view are its own business.
++    func dismissSelection(forClickIn event: NSEvent) {
++      guard model.selectedRange != nil, event.window === window,
++        !bounds.contains(convert(event.locationInWindow, from: nil))
++      else {
++        return
++      }
++      resetSelection()
++    }
++
+     @objc private func share(_ sender: Any?) {
+       guard let selectedRange = model.selectedRange else {
+         return
+@@ -274,6 +325,16 @@
+       sharingPicker.show(relativeTo: rect, of: self, preferredEdge: .maxY)
+     }
+ 
++    @objc private func performSelectionAction(_ sender: NSMenuItem) {
++      guard let selectedRange = model.selectedRange, !selectedRange.isCollapsed,
++        let action = sender.representedObject as? TextSelectionAction
++      else {
++        return
++      }
++      action.handler(Formatter(model.attributedText(in: selectedRange)).plainText())
++    }
++
++
+     @objc private func copy(_ sender: Any?) {
+       guard let selectedRange = model.selectedRange else {
+         return
+diff --git a/Sources/Textual/Internal/TextInteraction/Shared/TextLayout/LiveTextLayoutCollection.swift b/Sources/Textual/Internal/TextInteraction/Shared/TextLayout/LiveTextLayoutCollection.swift
+index 30988f32..a05e9980 100644
+--- a/Sources/Textual/Internal/TextInteraction/Shared/TextLayout/LiveTextLayoutCollection.swift
++++ b/Sources/Textual/Internal/TextInteraction/Shared/TextLayout/LiveTextLayoutCollection.swift
+@@ -13,7 +13,12 @@
+     }
+ 
+     func isEqual(to other: any TextLayoutCollection) -> Bool {
+-      base == (other as? LiveTextLayoutCollection)?.base
++      guard let other = other as? LiveTextLayoutCollection else {
++        return false
++      }
++      // Lazy containers measure their content in passes that have no width yet; the layouts published from such a
++      // pass have no lines, and only the size tells them apart from the ones of the pass that follows.
++      return base == other.base && geometry.size == other.geometry.size
+     }
+ 
+     func needsPositionReconciliation(with other: any TextLayoutCollection) -> Bool {
+diff --git a/Sources/Textual/Internal/TextInteraction/Shared/TextLayout/TextLayoutCollection+Positioning.swift b/Sources/Textual/Internal/TextInteraction/Shared/TextLayout/TextLayoutCollection+Positioning.swift
+index 1a7090d3..ebcc8ad1 100644
+--- a/Sources/Textual/Internal/TextInteraction/Shared/TextLayout/TextLayoutCollection+Positioning.swift
++++ b/Sources/Textual/Internal/TextInteraction/Shared/TextLayout/TextLayoutCollection+Positioning.swift
+@@ -3,29 +3,32 @@
+ 
+   extension TextLayoutCollection {
+     var startPosition: TextPosition {
+-      TextPosition(
+-        indexPath: .init(runSlice: 0, run: 0, line: 0, layout: 0),
+-        affinity: layouts.count > 0 ? .downstream : .upstream
+-      )
++      // The first layout can be empty (a blank paragraph, say); the document starts at the first slice there is.
++      for (layoutIndex, layout) in layouts.enumerated() {
++        for (lineIndex, line) in layout.lines.enumerated() {
++          for (runIndex, run) in line.runs.enumerated() where !run.slices.isEmpty {
++            return TextPosition(
++              indexPath: .init(runSlice: 0, run: runIndex, line: lineIndex, layout: layoutIndex),
++              affinity: .downstream
++            )
++          }
++        }
++      }
++      return TextPosition(indexPath: .init(runSlice: 0, run: 0, line: 0, layout: 0), affinity: .upstream)
+     }
+ 
+     var endPosition: TextPosition {
+-      guard
+-        let layout = layouts.last,
+-        let line = layout.lines.last,
+-        let run = line.runs.last
+-      else {
+-        return startPosition
++      for (layoutIndex, layout) in layouts.enumerated().reversed() {
++        for (lineIndex, line) in layout.lines.enumerated().reversed() {
++          for (runIndex, run) in line.runs.enumerated().reversed() where !run.slices.isEmpty {
++            return TextPosition(
++              indexPath: .init(runSlice: run.slices.endIndex - 1, run: runIndex, line: lineIndex, layout: layoutIndex),
++              affinity: .upstream
++            )
++          }
++        }
+       }
+-      return TextPosition(
+-        indexPath: .init(
+-          runSlice: run.slices.endIndex - 1,
+-          run: line.runs.endIndex - 1,
+-          line: layout.lines.endIndex - 1,
+-          layout: layouts.endIndex - 1
+-        ),
+-        affinity: .upstream
+-      )
++      return startPosition
+     }
+ 
+     func position(from position: TextPosition, offset: Int) -> TextPosition? {
+@@ -75,15 +78,25 @@
+     }
+ 
+     func localCharacterRange(at indexPath: IndexPath) -> Range<Int> {
+-      let line = layouts[indexPath.layout].lines[indexPath.line]
+-      return line.runs[indexPath.run]
+-        .slices[indexPath.runSlice]
+-        .characterRange
++      // A layout without lines (an empty paragraph) has no slice to name; the position is its start.
++      guard let slice = runSlice(at: indexPath) else {
++        return 0..<0
++      }
++      return slice.characterRange
+     }
+ 
+     func layoutDirection(at indexPath: IndexPath) -> LayoutDirection {
+-      let line = layouts[indexPath.layout].lines[indexPath.line]
+-      return line.runs[indexPath.run].layoutDirection
++      guard let line = layouts[safe: indexPath.layout]?.lines[safe: indexPath.line],
++        let run = line.runs[safe: indexPath.run]
++      else {
++        return .leftToRight
++      }
++      return run.layoutDirection
++    }
++
++    private func runSlice(at indexPath: IndexPath) -> (any TextRunSlice)? {
++      layouts[safe: indexPath.layout]?.lines[safe: indexPath.line]?.runs[safe: indexPath.run]?
++        .slices[safe: indexPath.runSlice]
+     }
+ 
+     func position(at layoutIndex: Int, localCharacterIndex: Int) -> TextPosition? {
+@@ -307,4 +320,9 @@
+       )
+     }
+   }
++  extension Array {
++    fileprivate subscript(safe index: Int) -> Element? {
++      indices.contains(index) ? self[index] : nil
++    }
++  }
+ #endif
+diff --git a/Sources/Textual/Internal/TextInteraction/Shared/TextLayout/View+TextLayoutCollection.swift b/Sources/Textual/Internal/TextInteraction/Shared/TextLayout/View+TextLayoutCollection.swift
+index a1a8d067..71b61d71 100644
+--- a/Sources/Textual/Internal/TextInteraction/Shared/TextLayout/View+TextLayoutCollection.swift
++++ b/Sources/Textual/Internal/TextInteraction/Shared/TextLayout/View+TextLayoutCollection.swift
+@@ -11,12 +11,19 @@
+   // testing, position mapping, and selection rectangle computation.
+ 
+   extension View {
++    /// Overlays the text layouts published below this view, rebuilt whenever `size` changes.
++    ///
++    /// The preference alone is not enough to follow the text: while a message streams into a lazy container the
++    /// layouts are first published from a pass without width, and later passes that only change the size do not
++    /// re-evaluate the overlay. Reading the size here makes them.
+     func overlayTextLayoutCollection(
++      size: CGSize,
+       @ViewBuilder content: @escaping (any TextLayoutCollection) -> some View
+     ) -> some View {
+       overlayPreferenceValue(Text.LayoutKey.self) { value in
+         GeometryReader { geometry in
+           content(LiveTextLayoutCollection(base: value, geometry: geometry))
++            .id(size)
+         }
+       }
+     }
+diff --git a/Sources/Textual/Internal/TextInteraction/Shared/TextSelectionCoordinator.swift b/Sources/Textual/Internal/TextInteraction/Shared/TextSelectionCoordinator.swift
+index 49304374..9d85dbed 100644
+--- a/Sources/Textual/Internal/TextInteraction/Shared/TextSelectionCoordinator.swift
++++ b/Sources/Textual/Internal/TextInteraction/Shared/TextSelectionCoordinator.swift
+@@ -40,12 +40,15 @@ import SwiftUI
+ 
+ struct TextSelectionCoordination: ViewModifier {
+   #if TEXTUAL_ENABLE_TEXT_SELECTION
++    @Environment(TextSelectionCoordinator.self) private var inherited: TextSelectionCoordinator?
+     @State private var coordinator = TextSelectionCoordinator()
+   #endif
+ 
+   func body(content: Content) -> some View {
+     #if TEXTUAL_ENABLE_TEXT_SELECTION
+-      content.environment(coordinator)
++      // A coordinator set up further out keeps the whole subtree to one selection; only without one does the
++      // view coordinate its own paragraphs.
++      content.environment(inherited ?? coordinator)
+     #else
+       content
+     #endif
+diff --git a/Sources/Textual/Internal/TextInteraction/Shared/TextSelectionInteraction.swift b/Sources/Textual/Internal/TextInteraction/Shared/TextSelectionInteraction.swift
+index 6fe2eb27..0356de06 100644
+--- a/Sources/Textual/Internal/TextInteraction/Shared/TextSelectionInteraction.swift
++++ b/Sources/Textual/Internal/TextInteraction/Shared/TextSelectionInteraction.swift
+@@ -17,13 +17,15 @@ struct TextSelectionInteraction: ViewModifier {
+     @Environment(TextSelectionCoordinator.self) private var coordinator: TextSelectionCoordinator?
+ 
+     @State private var model = TextSelectionModel()
++    @State private var contentSize = CGSize.zero
+   #endif
+ 
+   func body(content: Content) -> some View {
+     #if TEXTUAL_ENABLE_TEXT_SELECTION
+       if textSelection.allowsSelection {
+         content
+-          .overlayTextLayoutCollection { layoutCollection in
++          .onGeometryChange(for: CGSize.self, of: \.size) { contentSize = $0 }
++          .overlayTextLayoutCollection(size: contentSize) { layoutCollection in
+             Color.clear
+               .onChange(of: AnyTextLayoutCollection(layoutCollection), initial: true) {
+                 model.setCoordinator(coordinator)
+diff --git a/Sources/Textual/Internal/TextInteraction/UIKit/UIKitTextInteractionOverlay.swift b/Sources/Textual/Internal/TextInteraction/UIKit/UIKitTextInteractionOverlay.swift
+index e1f19123..c85e2e4d 100644
+--- a/Sources/Textual/Internal/TextInteraction/UIKit/UIKitTextInteractionOverlay.swift
++++ b/Sources/Textual/Internal/TextInteraction/UIKit/UIKitTextInteractionOverlay.swift
+@@ -23,7 +23,9 @@
+       UITextInteractionView(
+         model: model,
+         exclusionRects: overflowFrames,
+-        openURL: context.environment.openURL
++        openURL: context.environment.openURL,
++        selectionActions: context.environment.textSelectionActions,
++        selectionActionProminence: context.environment.textSelectionActionProminence
+       )
+     }
+ 
+@@ -31,6 +33,8 @@
+       uiView.model = model
+       uiView.exclusionRects = overflowFrames
+       uiView.openURL = context.environment.openURL
++      uiView.selectionActions = context.environment.textSelectionActions
++      uiView.selectionActionProminence = context.environment.textSelectionActionProminence
+     }
+   }
+ #endif
+diff --git a/Sources/Textual/Internal/TextInteraction/UIKit/UITextInteractionView.swift b/Sources/Textual/Internal/TextInteraction/UIKit/UITextInteractionView.swift
+index 8bf49609..1fc0c19a 100644
+--- a/Sources/Textual/Internal/TextInteraction/UIKit/UITextInteractionView.swift
++++ b/Sources/Textual/Internal/TextInteraction/UIKit/UITextInteractionView.swift
+@@ -20,6 +20,9 @@
+     var model: TextSelectionModel
+     var exclusionRects: [CGRect]
+     var openURL: OpenURLAction
++    /// Actions the app adds to the selection menu, after the platform's own.
++    var selectionActions: [TextSelectionAction]
++    var selectionActionProminence: TextSelectionActionProminence
+ 
+     weak var inputDelegate: (any UITextInputDelegate)?
+ 
+@@ -27,12 +30,17 @@
+ 
+     private(set) lazy var _tokenizer = UITextInputStringTokenizer(textInput: self)
+     private let selectionInteraction: UITextInteraction
++    private(set) var outsideTapRecognizer: UITapGestureRecognizer?
+ 
+     init(
+       model: TextSelectionModel,
+       exclusionRects: [CGRect],
+-      openURL: OpenURLAction
++      openURL: OpenURLAction,
++      selectionActions: [TextSelectionAction] = [],
++      selectionActionProminence: TextSelectionActionProminence = .standard
+     ) {
++      self.selectionActions = selectionActions
++      self.selectionActionProminence = selectionActionProminence
+       self.model = model
+       self.exclusionRects = exclusionRects
+       self.openURL = openURL
+@@ -58,11 +66,46 @@
+     }
+ 
+     override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
++      let hasSelection = !(model.selectedRange?.isCollapsed ?? true)
+       switch action {
+       case #selector(copy(_:)), #selector(share(_:)):
+-        return !(model.selectedRange?.isCollapsed ?? true)
++        return hasSelection
+       default:
+-        return false
++        // Look up, translate, search and the rest are the platform's to offer for selected text; refusing
++        // every unknown selector was what kept them off the menu.
++        return hasSelection && super.canPerformAction(action, withSender: sender)
++      }
++    }
++
++    // The edit menu for a text interaction is assembled through the context menu system, so this is where
++    // the app's own actions join the platform's without replacing how the selection itself works.
++    override func buildMenu(with builder: any UIMenuBuilder) {
++      super.buildMenu(with: builder)
++      guard builder.system == .context, !selectionActions.isEmpty, model.selectedRange?.isCollapsed == false else {
++        return
++      }
++      // The text is only formatted once an action is chosen, and from the selection as it is then.
++      let actions = selectionActions.map { action in
++        UIAction(
++          title: action.title,
++          image: action.systemImage.map { UIImage(systemName: $0) } ?? nil
++        ) { [weak self] _ in
++          guard let self, let selectedRange = self.model.selectedRange, !selectedRange.isCollapsed else {
++            return
++          }
++          action.handler(Formatter(self.model.attributedText(in: selectedRange)).plainText())
++        }
++      }
++      builder.insertChild(
++        UIMenu(options: .displayInline, children: actions),
++        atEndOfMenu: .standardEdit
++      )
++      guard selectionActionProminence == .prominent else {
++        return
++      }
++      // The assistant entry is a responder command, so it is found by what it does, not by a private identifier.
++      builder.replaceChildren(ofMenu: .root) { children in
++        children.movingAssistantEntryLast()
+       }
+     }
+ 
+@@ -84,6 +127,57 @@
+       )
+     }
+ 
++    /// A selection lives as long as its view is first responder, as it does in a text view: focusing a text field,
++    /// presenting a sheet or leaving the screen ends it.
++    override func resignFirstResponder() -> Bool {
++      let resigned = super.resignFirstResponder()
++      if resigned {
++        model.selectedRange = nil
++      }
++      return resigned
++    }
++
++    override func didMoveToWindow() {
++      super.didMoveToWindow()
++      updateOutsideTapRecognizer()
++    }
++
++    /// Ends the selection for a tap anywhere in the window but on this view; taps on the view are its own business.
++    func dismissSelection(forTapAt point: CGPoint, in window: UIWindow) {
++      guard model.selectedRange != nil, !bounds.contains(convert(point, from: window)) else {
++        return
++      }
++      model.selectedRange = nil
++    }
++
++    // The recognizer sits on the window only while there is a selection, and lets every other touch through.
++    private func updateOutsideTapRecognizer() {
++      let recognizer = outsideTapRecognizer ?? makeOutsideTapRecognizer()
++      let wantsRecognizer = model.selectedRange?.isCollapsed == false && window != nil
++      if wantsRecognizer, recognizer.view !== window {
++        recognizer.view?.removeGestureRecognizer(recognizer)
++        window?.addGestureRecognizer(recognizer)
++      } else if !wantsRecognizer, let view = recognizer.view {
++        view.removeGestureRecognizer(recognizer)
++      }
++    }
++
++    private func makeOutsideTapRecognizer() -> UITapGestureRecognizer {
++      let recognizer = UITapGestureRecognizer(target: self, action: #selector(handleOutsideTap(_:)))
++      recognizer.cancelsTouchesInView = false
++      recognizer.delaysTouchesEnded = false
++      recognizer.delegate = self
++      outsideTapRecognizer = recognizer
++      return recognizer
++    }
++
++    @objc private func handleOutsideTap(_ gesture: UITapGestureRecognizer) {
++      guard let window else {
++        return
++      }
++      dismissSelection(forTapAt: gesture.location(in: window), in: window)
++    }
++
+     private func setUp() {
+       model.selectionWillChange = { [weak self] in
+         guard let self else { return }
+@@ -92,6 +186,7 @@
+       model.selectionDidChange = { [weak self] in
+         guard let self else { return }
+         self.inputDelegate?.selectionDidChange(self)
++        self.updateOutsideTapRecognizer()
+       }
+ 
+       let tapGesture = UITapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
+@@ -164,4 +259,35 @@
+   extension Logger.Textual.Category {
+     fileprivate static let textInteraction = Self(rawValue: "textInteraction")
+   }
++
++  extension UITextInteractionView: UIGestureRecognizerDelegate {
++    func gestureRecognizer(
++      _ gestureRecognizer: UIGestureRecognizer,
++      shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
++    ) -> Bool {
++      gestureRecognizer === outsideTapRecognizer
++    }
++  }
++  extension UIMenuElement {
++    /// Whether this element opens the system's writing assistant.
++    fileprivate var isAssistantEntry: Bool {
++      guard #available(iOS 18.2, *), let command = self as? UICommand else {
++        return false
++      }
++      return command.action == #selector(UIResponder.showWritingTools(_:))
++    }
++  }
++
++  extension [UIMenuElement] {
++    /// The same elements with the assistant entry last, at this level and inside every menu, so that Copy and the
++    /// app's own items keep their places wherever the system happens to file the entry.
++    fileprivate func movingAssistantEntryLast() -> [UIMenuElement] {
++      let reordered = map { element in
++        (element as? UIMenu).map { menu in
++          menu.replacingChildren(menu.children.movingAssistantEntryLast())
++        } ?? element
++      }
++      return reordered.filter { !$0.isAssistantEntry } + reordered.filter { $0.isAssistantEntry }
++    }
++  }
+ #endif
+diff --git a/Sources/Textual/TextSelectionAction.swift b/Sources/Textual/TextSelectionAction.swift
+new file mode 100644
+index 00000000..772e5b7e
+--- /dev/null
++++ b/Sources/Textual/TextSelectionAction.swift
+@@ -0,0 +1,45 @@
++import SwiftUI
++
++/// An action offered on the menu for a text selection, alongside the platform's own.
++///
++/// The system already provides copying, sharing, look-up and translation for selected text; a selection
++/// action adds what the app can do with that text (quote it, search it, save it) without replacing the
++/// platform's selection handling.
++public struct TextSelectionAction: Identifiable, Sendable {
++  public let id: String
++  /// The menu item's title.
++  public let title: String
++  /// The name of an SF Symbol shown with the title, where the platform's menu shows images.
++  public let systemImage: String?
++  /// Runs with the plain text of the selection when the item is chosen.
++  public let handler: @MainActor @Sendable (String) -> Void
++
++  public init(
++    id: String? = nil,
++    title: String,
++    systemImage: String? = nil,
++    handler: @escaping @MainActor @Sendable (String) -> Void
++  ) {
++    self.id = id ?? title
++    self.title = title
++    self.systemImage = systemImage
++    self.handler = handler
++  }
++}
++
++/// Where an app's actions sit on the selection menu relative to the system's.
++public enum TextSelectionActionProminence: Sendable, Hashable {
++  /// After the platform's edit actions, wherever the system puts them.
++  case standard
++  /// Right after Copy, ahead of the system's assistant entry, which moves to the end of the menu.
++  ///
++  /// On iOS 27 the assistant entry takes a slot on the menu's first page, which is short enough that
++  /// an app's own item can end up behind the overflow chevron. Prominent actions come first instead.
++  /// The macOS menu has no such entry, so there the two cases read the same.
++  case prominent
++}
++
++extension EnvironmentValues {
++  @Entry var textSelectionActions: [TextSelectionAction] = []
++  @Entry var textSelectionActionProminence: TextSelectionActionProminence = .standard
++}
+diff --git a/Sources/Textual/View+Textual.swift b/Sources/Textual/View+Textual.swift
+index a74eada1..84e66d02 100644
+--- a/Sources/Textual/View+Textual.swift
++++ b/Sources/Textual/View+Textual.swift
+@@ -159,6 +159,36 @@ extension TextualNamespace where Base: View {
+     #endif
+   }
+ 
++  /// Adds actions to the menu shown for a text selection in ``InlineText`` and ``StructuredText``.
++  ///
++  /// The platform's own selection menu (copy, share, look up, translate) stays as it is; these
++  /// actions are appended to it and receive the selected text when chosen. They only take effect
++  /// where selection is enabled with ``textSelection(_:)``.
++  ///
++  /// - Parameters:
++  ///   - actions: The actions to add, in the order they appear.
++  ///   - prominence: Where they sit relative to the system's; see ``TextSelectionActionProminence``.
++  @available(tvOS, unavailable)
++  @available(watchOS, unavailable)
++  public func textSelectionActions(
++    _ actions: [TextSelectionAction],
++    prominence: TextSelectionActionProminence = .standard
++  ) -> some View {
++    base
++      .environment(\.textSelectionActions, actions)
++      .environment(\.textSelectionActionProminence, prominence)
++  }
++
++  /// Keeps to one text selection across all the selectable text below this view.
++  ///
++  /// Each ``StructuredText`` and ``InlineText`` already coordinates its own paragraphs; a list of them, such as a
++  /// conversation, wants a selection in one to end the selection in another, which this provides.
++  @available(tvOS, unavailable)
++  @available(watchOS, unavailable)
++  public func textSelectionCoordination() -> some View {
++    base.modifier(TextSelectionCoordination())
++  }
++
+   /// Sets the spacing used between table cells in ``StructuredText``.
+   public func tableCellSpacing(
+     horizontal: CGFloat? = nil,
+diff --git a/Tests/TextualTests/Helpers/Snapshotting+TextLayoutCollection.swift b/Tests/TextualTests/Helpers/Snapshotting+TextLayoutCollection.swift
+index d841aed7..2254c8c2 100644
+--- a/Tests/TextualTests/Helpers/Snapshotting+TextLayoutCollection.swift
++++ b/Tests/TextualTests/Helpers/Snapshotting+TextLayoutCollection.swift
+@@ -7,11 +7,12 @@
+   extension Snapshotting where Value: SwiftUI.View, Format == String {
+     @MainActor
+     static func textLayoutCollection(config: ViewImageConfig = .iPhoneSe) -> Snapshotting {
+-      return Snapshotting<CodableTextLayoutCollection, String>.json
+-        .asyncPullback { (view: Value) -> Async<CodableTextLayoutCollection> in
++      // Named first: chained directly, the compiler picks the `json(_:)` overload and finds no `asyncPullback`.
++      let json: Snapshotting<CodableTextLayoutCollection, String> = .json
++      return json.asyncPullback { (view: Value) -> Async<CodableTextLayoutCollection> in
+           // Capture layout from view
+           var capturedLayoutCollection: (any TextLayoutCollection)?
+-          let viewWithCapture = view.overlayTextLayoutCollection { layoutCollection in
++          let viewWithCapture = view.overlayTextLayoutCollection(size: config.size ?? .zero) { layoutCollection in
+             capturedLayoutCollection = layoutCollection
+             return Color.clear
+           }
+diff --git a/Tests/TextualTests/Internal/TextInteraction/NSTextInteractionViewTests+macOS.swift b/Tests/TextualTests/Internal/TextInteraction/NSTextInteractionViewTests+macOS.swift
+new file mode 100644
+index 00000000..dd225a62
+--- /dev/null
++++ b/Tests/TextualTests/Internal/TextInteraction/NSTextInteractionViewTests+macOS.swift
+@@ -0,0 +1,47 @@
++#if TEXTUAL_ENABLE_TEXT_SELECTION && os(macOS)
++  import AppKit
++  import SwiftUI
++  import Testing
++
++  @testable import Textual
++
++  @MainActor
++  struct NSTextInteractionViewTests {
++    private func makeSelectedView() throws -> (window: NSWindow, view: NSTextInteractionView, model: TextSelectionModel) {
++      let model = try TextSelectionModel(fixtureName: "two-paragraphs-bidi")
++      let view = NSTextInteractionView(model: model, exclusionRects: [], openURL: OpenURLAction { _ in .handled })
++      view.frame = CGRect(x: 0, y: 0, width: 320, height: 120)
++      let window = NSWindow(
++        contentRect: CGRect(x: 0, y: 0, width: 320, height: 480), styleMask: .borderless, backing: .buffered, defer: false
++      )
++      window.contentView?.addSubview(view)
++      model.selectedRange = TextRange(start: model.startPosition, end: model.endPosition)
++      return (window, view, model)
++    }
++
++    private func click(at point: CGPoint, in window: NSWindow) -> NSEvent {
++      try! #require(
++        NSEvent.mouseEvent(
++          with: .leftMouseDown, location: point, modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber,
++          context: nil, eventNumber: 0, clickCount: 1, pressure: 1
++        )
++      )
++    }
++
++    @Test func resigningFirstResponderEndsTheSelection() throws {
++      let (window, view, model) = try makeSelectedView()
++      #expect(window.makeFirstResponder(view))
++      #expect(model.selectedRange != nil)
++      #expect(window.makeFirstResponder(nil))
++      #expect(model.selectedRange == nil)
++    }
++
++    @Test func clicksOutsideTheViewEndTheSelection() throws {
++      let (window, view, model) = try makeSelectedView()
++      view.dismissSelection(forClickIn: click(at: CGPoint(x: 10, y: 60), in: window))
++      #expect(model.selectedRange != nil, "A click on the view is handled by the view itself")
++      view.dismissSelection(forClickIn: click(at: CGPoint(x: 10, y: 400), in: window))
++      #expect(model.selectedRange == nil)
++    }
++  }
++#endif
+diff --git a/Tests/TextualTests/Internal/TextInteraction/UITextInteractionViewTests.swift b/Tests/TextualTests/Internal/TextInteraction/UITextInteractionViewTests.swift
+new file mode 100644
+index 00000000..92401e47
+--- /dev/null
++++ b/Tests/TextualTests/Internal/TextInteraction/UITextInteractionViewTests.swift
+@@ -0,0 +1,50 @@
++#if TEXTUAL_ENABLE_TEXT_SELECTION && os(iOS) && !targetEnvironment(macCatalyst)
++  import SwiftUI
++  import Testing
++  import UIKit
++
++  @testable import Textual
++
++  @MainActor
++  struct UITextInteractionViewTests {
++    private func makeSelectedView() throws -> (window: UIWindow, view: UITextInteractionView, model: TextSelectionModel) {
++      let model = try TextSelectionModel(fixtureName: "two-paragraphs-bidi")
++      let view = UITextInteractionView(model: model, exclusionRects: [], openURL: OpenURLAction { _ in .handled })
++      view.frame = CGRect(x: 0, y: 0, width: 320, height: 120)
++      let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 480))
++      window.addSubview(view)
++      window.makeKeyAndVisible()
++      model.selectedRange = TextRange(start: model.startPosition, end: model.endPosition)
++      return (window, view, model)
++    }
++
++    @Test func copyKeepsTheSelection() throws {
++      let (_, view, model) = try makeSelectedView()
++      view.copy(nil)
++      #expect(model.selectedRange != nil)
++    }
++
++    @Test func resigningFirstResponderEndsTheSelection() throws {
++      let (_, view, model) = try makeSelectedView()
++      #expect(view.becomeFirstResponder())
++      #expect(model.selectedRange != nil)
++      #expect(view.resignFirstResponder())
++      #expect(model.selectedRange == nil)
++    }
++
++    @Test func tapsOutsideTheViewEndTheSelection() throws {
++      let (window, view, model) = try makeSelectedView()
++      view.dismissSelection(forTapAt: CGPoint(x: 10, y: 60), in: window)
++      #expect(model.selectedRange != nil, "A tap on the view is handled by the view itself")
++      view.dismissSelection(forTapAt: CGPoint(x: 10, y: 300), in: window)
++      #expect(model.selectedRange == nil)
++    }
++
++    @Test func theOutsideTapRecognizerFollowsTheSelection() throws {
++      let (window, view, model) = try makeSelectedView()
++      #expect(view.outsideTapRecognizer?.view === window)
++      model.selectedRange = nil
++      #expect(view.outsideTapRecognizer?.view == nil)
++    }
++  }
++#endif

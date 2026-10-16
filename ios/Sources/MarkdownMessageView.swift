@@ -1,38 +1,19 @@
 import SwiftUI
+import Textual
 
-/// Native selectable Markdown prose with separate code blocks and paragraph rhythm.
+/// Selectable Markdown prose: paragraphs, lists, code blocks and tables in one text selection.
 ///
-/// The system's own selection is used rather than a text view built for it: it starts instantly, draws every block
-/// exactly as it reads, and needs no second renderer to keep in step. `.textSelection` sits on the enclosing stack
-/// so a drag reaches across blocks — a paragraph, a code block and a list can be selected in one gesture.
+/// SwiftUI's own `.textSelection` only offers a menu for a whole `Text` before iOS 27; Textual draws the same
+/// SwiftUI text and lays a selection interaction over it, so a long press shows handles that reach across blocks.
+/// Wide code and tables wrap rather than scroll: a nested scroll view is UIKit, which the timeline's layer effect
+/// draws as an empty box. Menu actions and selection coordination come from the timeline's environment.
 struct MarkdownMessageView: View {
     let text: String
-    private var blocks: [MarkdownBlock] { MarkdownBlock.parse(text) }
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            ForEach(blocks) { block in
-                if block.code {
-                    // Nested code scrolling was blank in the live timeline.
-                    // Wrapping keeps the selectable content in the parent layer.
-                    Text(block.text).font(.system(.callout, design: .monospaced)).padding(14)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
-                        .accessibilityIdentifier("markdown.code.\(block.id)")
-                } else if let table = block.table {
-                    MarkdownTableView(table: table).accessibilityIdentifier("markdown.table.\(block.id)")
-                } else if let level = block.headingLevel {
-                    Text(.init(block.text)).font(level == 1 ? .title2 : level == 2 ? .title3 : .headline).bold()
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .accessibilityAddTraits(.isHeader)
-                } else if let marker = block.listMarker {
-                    HStack(alignment: .top, spacing: 10) {
-                        Text(marker)
-                        Text(.init(block.text)).frame(maxWidth: .infinity, alignment: .leading)
-                    }.font(.body).lineSpacing(5)
-                } else {
-                    Text(.init(block.text)).font(.body).lineSpacing(5).frame(maxWidth: .infinity, alignment: .leading)
-                }
-            }
-        }.textSelection(.enabled)
+        StructuredText(markdown: text)
+            .font(.body)
+            .textual.overflowMode(.wrap)
+            .textual.textSelection(.enabled)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
