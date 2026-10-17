@@ -420,14 +420,15 @@ public actor SessionService {
         let state = try await cmux.request("surface.input_state", params: ["workspace_id": .string(workspace), "surface_id": .string(surface)])
         // Cross-validate the binding, not the agent badge: the badge is a sidebar-fold derivative
         // that can stay false while the hook record that authorizes a send is alive (observed after
-        // a journal fold outage). A session whose hook record is gone fails inside cmux's own send
-        // with its terminal-binding error instead of a paste into a bare shell.
+        // a journal fold outage). cmux's own send still checks its hook record and refuses a terminal
+        // whose record is gone, so a broken badge must not turn a live conversation read-only.
         guard state["workspace_id"].string?.lowercased() == workspace.lowercased(), state["surface_id"].string?.lowercased() == surface.lowercased() else { throw BridgeError("stale_binding", "The agent's terminal binding changed. Refresh the task.", status: 409) }
-        // The screen is the second check: a live agent's terminal always renders its prompt box
-        // (`empty`, `draft` or `dialog`) even when the sidebar fold is broken, while a terminal whose
-        // agent exited shows a shell the screen detector cannot read (`unknown`). A retained binding
-        // whose process died without a SessionEnd hook must not accept a paste.
-        if state["agent"].bool != true, state["state"].string == "unknown" {
+        // The screen is the second check. A live agent's terminal renders its prompt box (`empty`,
+        // `draft` or `dialog`), so one of those proves the agent is on screen even when the sidebar
+        // fold is broken. Anything else — `unknown`, or a response that omits the screen state — could
+        // be the bare shell left by an agent that died without a SessionEnd hook, so it fails closed.
+        let promptOnScreen = ["empty", "draft", "dialog"].contains(state["state"].string)
+        if state["terminal"].bool == false || (state["agent"].bool != true && !promptOnScreen) {
             throw BridgeError("stale_binding", "The agent has exited this terminal. Reopen the conversation.", status: 409)
         }
         // Interrupt does not paste over a draft and must remain available during a dialog.
