@@ -23,6 +23,9 @@ public struct TuiBindingRepository: Sendable {
         // older Bridge is re-keyed on load; rows that collapse onto one Agent keep the newest and take its identity.
         let migrated = migrate(archive.rows, identity: identity)
         guard Set(migrated.map(\.id)).count == migrated.count else { throw invalid() }
+        // Write the re-keyed rows back once, so a restart reads the current rule and the file matches what callers see.
+        // A failed rewrite is not fatal: the in-memory result is already correct and the next save retries.
+        if Set(migrated.map(\.id)) != Set(archive.rows.map(\.id)) { try? save(identity: identity, rows: migrated) }
         return migrated
     }
     /// Re-derives each row's conversation id from the daemon identity and the Agent session it names.

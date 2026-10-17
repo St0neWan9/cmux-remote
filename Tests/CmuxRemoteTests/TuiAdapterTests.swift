@@ -56,8 +56,12 @@ import CmuxRemoteCore
         let stale = TuiSessionSnapshot.Binding(id: "tui:" + UUID().uuidString.lowercased(), provider: "claude", providerSession: TuiResourceFixture.providerID.lowercased(),
                                               terminal: TuiResourceFixture.terminal, workspace: TuiResourceFixture.workspace, surfaceID: "surface", workspaceID: "workspace", title: "Old", cwd: "/tmp", state: "idle")
         try TuiBindingRepository(directory: root).save(identity: "\(TuiResourceFixture.machine):\(TuiResourceFixture.session)", rows: [stale])
-        let loaded = try TuiBindingRepository(directory: root).load(identity: "\(TuiResourceFixture.machine):\(TuiResourceFixture.session)")
+        let repository = TuiBindingRepository(directory: root)
+        let daemonIdentity = "\(TuiResourceFixture.machine):\(TuiResourceFixture.session)"
+        let loaded = try repository.load(identity: daemonIdentity)
         #expect(loaded.first?.id == first)
+        // The re-keyed archive is written back, so a restart reads the current rule rather than migrating again.
+        #expect(try repository.load(identity: daemonIdentity).first?.id == first)
     }
     @Test func aConversationWhoseSurfaceIsGoneCanBeReopenedFromItsOwnTranscript() async throws {
         let root = try temporary(); defer { try? FileManager.default.removeItem(at: root) }
