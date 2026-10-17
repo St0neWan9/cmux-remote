@@ -233,7 +233,8 @@ private actor PhoneUIBackend: CmuxControlling {
         // shows that shape instead of the one written first.
         let shape = selfFlag("short-conversation") ? "chat-short.jsonl"
             : selfFlag("tall-reply") ? "chat-tall.jsonl"
-            : selfFlag("awaiting-question") ? "chat-question.jsonl" : "chat.jsonl"
+            : selfFlag("awaiting-question") ? "chat-question.jsonl"
+            : selfFlag("long-conversation") ? "chat-long.jsonl" : "chat.jsonl"
         let transcript = root.appendingPathComponent(shape)
         if !FileManager.default.fileExists(atPath: transcript.path) {
             let icon = URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent("ios/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon-v3.png")
@@ -266,6 +267,15 @@ private actor PhoneUIBackend: CmuxControlling {
                 let rows = [
                     #"{"type":"user","uuid":"ask-user","timestamp":"2026-10-12T01:00:00Z","message":{"content":"帮我选个方案"}}"#,
                     askText]
+                try Data((rows.joined(separator: "\n") + "\n").utf8).write(to: transcript)
+            } else if selfFlag("long-conversation") {
+                // The newest turn ends in a short reply, so it carries the transcript's own action row: the
+                // page's end is then that row plus the page's foot, which is what a reader scrolling to the
+                // bottom must be able to see whole.
+                let rows = earlier + [
+                    #"{"type":"user","uuid":"long-user","timestamp":"2026-10-12T01:00:00Z","message":{"content":"最后确认一下"}}"#,
+                    #"{"type":"assistant","uuid":"long-reply","timestamp":"2026-10-12T01:00:02Z","message":{"content":[{"type":"text","text":"好的，改完了，最后一行的按钮必须完整露在输入框上方。"}]}}"#,
+                    #"{"type":"system","subtype":"turn_duration","durationMs":6000,"timestamp":"2026-10-12T01:00:03Z"}"#]
                 try Data((rows.joined(separator: "\n") + "\n").utf8).write(to: transcript)
             } else if selfFlag("tall-reply") {
                 // A JSON string cannot hold a raw newline: the transcript is one row per line.

@@ -267,6 +267,9 @@ struct ConversationView: View {
                     .frame(maxWidth: .infinity, alignment: .leading).background(Color.red.opacity(0.055), in: RoundedRectangle(cornerRadius: 14))
                     .modifier(HeaderContentEffect(bottom: bottom))
             }
+            // The page's foot is the last thing in the stack, so the marker below it is the true end of the
+            // content: anchoring that to the bottom lands exactly where a drag to the end does.
+            Color.clear.frame(height: 18)
             Color.clear.frame(height: 1).id("latest")
                 .background {
                     GeometryReader { anchor in
@@ -274,7 +277,7 @@ struct ConversationView: View {
                             value: anchor.frame(in: .named("chatTimeline")).maxY)
                     }
                 }
-        }.padding(.horizontal, 18).padding(.top, 12).padding(.bottom, 18)
+        }.padding(.horizontal, 18).padding(.top, 12)
             // A conversation shorter than the page rests against the composer, the way a chat log reads,
             // instead of floating at the top with the page's empty below it.
             .frame(minHeight: bottom, alignment: .bottom)
@@ -351,18 +354,23 @@ struct ConversationView: View {
     }
     /// Scrolls to the newest message.
     ///
-    /// The page's end is one empty marker, so anchoring it to the bottom always puts the newest row's *last*
-    /// line above the composer. That is right for a reply that fits, and wrong for one taller than the page:
-    /// its first line is then pushed off the top and the reader opens on the middle of it with the rest blank,
-    /// having to pull back to find where it began. A tall newest row therefore starts at the top instead.
+    /// Anchoring the newest row itself puts its last line just above the composer, but leaves the page's own
+    /// 18pt foot and the marker after it below the fold, so the page stops short of its real end: the reader
+    /// still has to pull up once more to see the very bottom. The marker therefore takes the bottom anchor,
+    /// which lands the page where a drag to the end would. That is right for a reply that fits, and wrong for
+    /// one taller than the page: its first line would then be pushed off the top and the reader would open on
+    /// the middle of it. A tall newest row starts at the top instead.
     ///
-    /// The target is the newest row rather than the page's end marker: a lazy stack estimates the height of a
-    /// row it has not built, and one very tall reply above makes that estimate wrong by thousands of points,
-    /// so the marker resolves into the middle of an earlier reply. Asking for the row itself builds it.
+    /// Either way the newest row is the target rather than the page's end alone: a lazy stack estimates the
+    /// height of a row it has not built, and one very tall reply above makes that estimate wrong by thousands
+    /// of points, so asking for the marker first resolves into the middle of an earlier reply. Asking for the
+    /// row builds it; the marker is then in place for the last attempt.
     private func scrollToNewest(_ proxy: ScrollViewProxy) {
         // A tall row is taller than the page only once it has laid out; until then the page's end is the target.
         guard let newest = model.timelineItems.last?.id else { proxy.scrollTo("latest", anchor: .bottom); return }
-        proxy.scrollTo(newest, anchor: lastRowHeight > viewportHeight ? .top : .bottom)
+        guard lastRowHeight <= viewportHeight else { proxy.scrollTo(newest, anchor: .top); return }
+        proxy.scrollTo(newest, anchor: .bottom)
+        proxy.scrollTo("latest", anchor: .bottom)
     }
     /// The menu's refresh redials a link that may be dead before reading, and shows the dial while it happens.
     private func reconnect() async {
