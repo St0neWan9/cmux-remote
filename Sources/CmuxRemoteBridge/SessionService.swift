@@ -99,7 +99,10 @@ public actor SessionService {
         // never establishes which conversations belong in this companion.
         let registeredIDs = Set((dump?["sessions"].array ?? []).filter { hasCmuxBinding($0) }.compactMap { $0["session_id"].string })
         let hookedIDs = Set(liveBindings.filter { hasCmuxBinding($0.value) }.keys)
-        let cmuxIDs = registeredIDs.union(hookedIDs)
+        // A conversation whose Agent has exited is absent from the live registry, but the daemon still vouches for the
+        // binding it kept, and the row is what lets the phone reopen it. Its provenance is that retained binding.
+        let resumableIDs = Set((vault["sessions"].array ?? []).filter { hasCmuxBinding($0) && $0["resumable"].bool == true }.compactMap { $0["session_id"].string })
+        let cmuxIDs = registeredIDs.union(hookedIDs).union(resumableIDs)
         var discovered: [String: Record] = [:]
         for item in vault["sessions"].array ?? [] {
             guard let id = item["session_id"].string, cmuxIDs.contains(id), let agent = item["agent"].string,
