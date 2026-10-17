@@ -10,6 +10,14 @@ struct MessageRow: View {
     var images: [ConversationImageReference] = []
     var openImage: ((ConversationImageReference) -> Void)?
     var openDetail: ((String, String) -> Void)?
+    /// The Feed request that may answer this question, when the agent is still waiting on it.
+    var pendingQuestion: JSONValue?
+    /// Whether an answer is on its way, so the card does not accept a second tap.
+    var answering = false
+    /// Sends the chosen labels for this question, in the question's own order.
+    var answerQuestion: (([String]) -> Void)?
+    /// What this reader chose here, when the transcript has not recorded it yet.
+    var chosenAnswer: String?
     var body: some View {
         Group {
             if message.role == .user, case .prose(let value) = message.kind {
@@ -96,8 +104,26 @@ struct MessageRow: View {
                 }
             }
         case .question(let value):
-            VStack(alignment: .leading, spacing: 8) { Label(String(localized: "feed.title"), systemImage: "questionmark.bubble").font(.caption).foregroundStyle(.secondary); Text(value.prompt); ForEach(value.options) { Text($0.label) } }
-                .modifier(FloatingSurface())
+            // The same card answers on the phone and stays a record once the request is gone: only a currently
+            // pending request for this exact prompt is offered, and it is answered through the Feed.
+            VStack(alignment: .leading, spacing: 12) {
+                Label(String(localized: "feed.title"), systemImage: "questionmark.bubble").font(.caption).foregroundStyle(.secondary)
+                if let answerQuestion, let question = pendingQuestion?["question"] {
+                    // The form keeps its own identifiers: a container identifier would replace each control's.
+                    FeedQuestionView(questions: [question], busy: answering) { answers in answerQuestion(answers) }
+                } else {
+                    Text(value.prompt)
+                    // An answered question is a record of the choice, not a dead form: naming the answer is what
+                    // the reader came back for, and only a still-unanswered card says it cannot be answered here.
+                    if let selected = value.selectedOptionLabel ?? chosenAnswer {
+                        Text(value.options.isEmpty ? selected : String.localizedStringWithFormat(String(localized: "chat.question.answered"), selected))
+                            .font(.footnote).foregroundStyle(.secondary)
+                    } else {
+                        ForEach(value.options) { Text($0.label) }
+                        Text(String(localized: "feed.question.unavailable")).font(.footnote).foregroundStyle(.secondary)
+                    }
+                }
+            }.modifier(FloatingSurface())
         case .permissionRequest(let value):
             VStack(alignment: .leading, spacing: 8) { Label(value.title, systemImage: "hand.raised"); Text(value.subject).font(.system(.callout, design: .monospaced)) }
                 .modifier(FloatingSurface())

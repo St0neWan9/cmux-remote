@@ -91,21 +91,23 @@ public actor TuiControlAdapter: CmuxControlling {
             pending = next
             return .object(["items": .array(next.values.sorted { $0.id < $1.id }.map(\.payload))])
         case "feed.permission.reply":
-            guard let id = params["request_id"]?.string, let original = pending[id], let mode = params["mode"]?.string, ["once", "deny"].contains(mode),
-                  let operation = UUID(uuidString: String(id.dropFirst("tui-decision:".count))) else { throw BridgeError("request_expired", "This daemon permission request is no longer available.", status: 409) }
-            let current = try await snapshot()
-            guard current.generation == original.generation, let binding = current.bindings.first(where: { $0.id == original.binding.id }), binding == original.binding else { throw stale() }
-            let screen = try await client.resource("terminal.screen.read", params: current.selectors(binding), idempotencyKey: nil)
-            guard let fresh = TuiDecisionParser().permission(snapshot: current, binding: binding, screen: screen), fresh.id == original.id else { throw BridgeError("request_expired", "The permission screen changed before the decision.", status: 409) }
-            let fingerprint = try MutationLedger.fingerprint(action: "tui-permission", resource: id, payload: .string(mode))
-            if let prior = try await decisions.begin(clientID: "tui_decision", operationID: operation, fingerprint: fingerprint, workspaceID: binding.workspaceID, capability: .feedReply) {
-                guard prior.receipt != nil else { throw BridgeError("outcome_unknown", "The previous decision is not confirmed; inspect the Agent.", status: 409) }
-                return .object(["delivered": .bool(true)])
+            guard let id = params["request_id"]?.string, let original = pending[id], let mode = params["mode"]?.string, ["once", "deny"].contains(mode) else {
+                throw BridgeError("request_expired", "This daemon permission request is no longer available.", status: 409)
             }
-            var fields = current.selectors(binding); fields["keys"] = .array((mode == "once" ? fresh.allowKeys : ["escape"]).map(JSONValue.string)); fields["expected_revision"] = .string(current.revision)
-            try await effect("terminal.input.keys", fields: fields, key: "cmux-remote:decision:" + operation.uuidString.lowercased(), generation: current.generation)
-            _ = try await decisions.complete(clientID: "tui_decision", operationID: operation); pending[id] = nil
-            return .object(["delivered": .bool(true)])
+            let keys = mode == "once" ? original.allowKeys : ["escape"]
+            return try await answer(id, original, keys: keys, action: "tui-permission", payload: .string(mode))
+        case "feed.question.reply":
+            // A notice that only waits for Enter or Escape. The phone sends the label it chose; the key comes from
+            // the decision the Bridge parsed, so no screen text can become input.
+            guard let id = params["request_id"]?.string, let original = pending[id], original.kind == .question,
+                  let selections = params["selections"]?.array, selections.count == 1, let chosen = selections[0].string else {
+                throw BridgeError("request_expired", "This daemon prompt is no longer available.", status: 409)
+            }
+            let label = original.choices.first { $0.key == chosen }?.label ?? chosen
+            guard let choice = original.choices.first(where: { $0.label == label }) else {
+                throw BridgeError("invalid_input", "Choose one of the prompt's own options.")
+            }
+            return try await answer(id, original, keys: [choice.key], action: "tui-question", payload: .string(choice.key))
         case "conversation.image.read":
             guard let id = params["session_id"]?.string, knownConversations.contains(id), let path = params["path"]?.string else { throw stale() }
             let data = try attachments?.image(conversation: id, path: path)
@@ -279,6 +281,30 @@ public actor TuiControlAdapter: CmuxControlling {
             try? await effect("terminal.input.write", fields: request, key: "cmux-remote:interrupt-clear:" + operationKey.lowercased(), generation: current.generation)
             return
         }
+    }
+    /// Re-checks the blocked Agent, the exact screen and the journal, then sends the decision's own keys.
+    ///
+    /// Permission and prompt choices share this: both are one non-retried key write bound to the screen revision
+    /// that produced the request, with a durable intent so no second device, new operation id or restart repeats it.
+    private func answer(_ id: String, _ original: TuiPendingDecision, keys: [String], action: String, payload: JSONValue) async throws -> JSONValue {
+        guard let operation = UUID(uuidString: String(id.dropFirst("tui-decision:".count))) else {
+            throw BridgeError("request_expired", "This daemon request is no longer available.", status: 409)
+        }
+        let current = try await snapshot()
+        guard current.generation == original.generation, let binding = current.bindings.first(where: { $0.id == original.binding.id }), binding == original.binding else { throw stale() }
+        let screen = try await client.resource("terminal.screen.read", params: current.selectors(binding), idempotencyKey: nil)
+        guard let fresh = TuiDecisionParser().permission(snapshot: current, binding: binding, screen: screen), fresh.id == original.id else {
+            throw BridgeError("request_expired", "The screen changed before the decision.", status: 409)
+        }
+        let fingerprint = try MutationLedger.fingerprint(action: action, resource: id, payload: payload)
+        if let prior = try await decisions.begin(clientID: "tui_decision", operationID: operation, fingerprint: fingerprint, workspaceID: binding.workspaceID, capability: .feedReply) {
+            guard prior.receipt != nil else { throw BridgeError("outcome_unknown", "The previous decision is not confirmed; inspect the Agent.", status: 409) }
+            return .object(["delivered": .bool(true)])
+        }
+        var fields = current.selectors(binding); fields["keys"] = .array(keys.map(JSONValue.string)); fields["expected_revision"] = .string(current.revision)
+        try await effect("terminal.input.keys", fields: fields, key: "cmux-remote:decision:" + operation.uuidString.lowercased(), generation: current.generation)
+        _ = try await decisions.complete(clientID: "tui_decision", operationID: operation); pending[id] = nil
+        return .object(["delivered": .bool(true)])
     }
     private func effect(_ operation: String, fields: [String: JSONValue], key: String, generation: String) async throws {
         let result = try await client.resource(operation, params: fields, idempotencyKey: key)

@@ -175,6 +175,8 @@
 "feed.resolved" = "Processed";
 "feed.expired" = "Expired";
 "feed.unsupported" = "This event has no supported reply action.";
+"feed.question.unavailable" = "This question can no longer be answered here.";
+"chat.question.answered" = "Answered: %@";
 "feed.recorded" = "Recorded";
 "error.input_value" = "Check the input and its size.";
 "error.project" = "This session has no shareable project directory.";

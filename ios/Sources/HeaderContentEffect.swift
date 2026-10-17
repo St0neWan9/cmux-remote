@@ -23,3 +23,16 @@ struct HeaderContentEffect: ViewModifier {
         }
     }
 }
+
+/// Applies the blur to a row, or leaves it alone where the row holds a control that must stay interactive.
+///
+/// There is no way to turn the effect off from inside it: a `visualEffect` rasterizes the subtree it wraps
+/// whether or not its layer effects are enabled, and a rasterized `TextField` becomes a placeholder. The
+/// modifier must therefore not be attached at all.
+struct BlurUnless: ViewModifier {
+    let disabled: Bool
+    let bottom: CGFloat
+    func body(content: Content) -> some View {
+        if disabled { content } else { content.modifier(HeaderContentEffect(bottom: bottom)) }
+    }
+}
