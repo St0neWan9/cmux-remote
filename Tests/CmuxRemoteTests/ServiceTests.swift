@@ -14,16 +14,18 @@ private actor FakeCmux: CmuxControlling {
     var ended = false
     func markEnded() { ended = true }
     let validBinding: Bool
+    let echoesBinding: Bool
+    let screenState: String
     let failSend: Bool
     let blocksTyping: Bool
-    init(validBinding: Bool = true, failSend: Bool = false, blocksTyping: Bool = false) {
-        self.validBinding = validBinding; self.failSend = failSend; self.blocksTyping = blocksTyping
+    init(validBinding: Bool = true, echoesBinding: Bool = true, screenState: String = "empty", failSend: Bool = false, blocksTyping: Bool = false) {
+        self.validBinding = validBinding; self.echoesBinding = echoesBinding; self.screenState = screenState; self.failSend = failSend; self.blocksTyping = blocksTyping
     }
     func request(_ method: String, params: [String: JSONValue]) async throws -> JSONValue {
         switch method {
         case "vault.sessions": return .object(["sessions": .array([.object(["session_id": .string("session"), "agent": .string("claude"), "title": .string("Task")])])])
         case "chat.sessions.dump": return .object(["sessions": .array([.object(["session_id": .string("session"), "agent": .string("claude"), "workspace_id": .string("workspace"), "surface_id": .string("surface"), "state": .string(ended ? "ended" : "idle")])])])
-        case "surface.input_state": return .object(["agent": .bool(validBinding), "workspace_id": .string("workspace"), "surface_id": .string("surface"), "blocks_typing": .bool(blocksTyping)])
+        case "surface.input_state": return .object(["agent": .bool(validBinding), "workspace_id": .string(echoesBinding ? "workspace" : "moved-workspace"), "surface_id": .string(echoesBinding ? "surface" : "moved-surface"), "state": .string(screenState), "blocks_typing": .bool(blocksTyping)])
         case "mobile.chat.interrupt": interruptCount += 1; hardInterrupt = params["hard"]?.bool; return .object(["interrupted": .bool(true)])
         case "mobile.chat.send":
             sendCount += 1
@@ -53,7 +55,7 @@ private actor FakeCmux: CmuxControlling {
         #expect(await cmux.interruptCount == 1)
     }
     @Test func staleBindingNeverInterruptsAnotherAgent() async {
-        let cmux = FakeCmux(validBinding: false, blocksTyping: true)
+        let cmux = FakeCmux(echoesBinding: false, blocksTyping: true)
         let service = SessionService(cmux: cmux, home: URL(fileURLWithPath: "/example/home"), transcriptRoots: [])
         do { _ = try await service.interrupt(id: "session", request: InterruptRequest()); Issue.record("Expected stale binding rejection") }
         catch { #expect((error as? BridgeError)?.code == "stale_binding") }
@@ -68,8 +70,23 @@ private actor FakeCmux: CmuxControlling {
         #expect(await cmux.sendCount == 1)
     }
     @Test func staleBindingNeverTypesIntoAnotherAgent() async {
-        let cmux = FakeCmux(validBinding: false); let service = SessionService(cmux: cmux, home: URL(fileURLWithPath: "/example/home"), transcriptRoots: [])
+        let cmux = FakeCmux(echoesBinding: false); let service = SessionService(cmux: cmux, home: URL(fileURLWithPath: "/example/home"), transcriptRoots: [])
         do { _ = try await service.send(id: "session", request: SendRequest(text: "Test")); Issue.record("Expected stale binding rejection") }
+        catch { #expect((error as? BridgeError)?.code == "stale_binding") }
+        #expect(await cmux.sendCount == 0)
+    }
+    @Test func aFalseAgentBadgeDoesNotBlockSendWhileTheBindingEchoes() async throws {
+        // cmux's sidebar fold can report no agent while the hook record that authorizes a send is
+        // alive; the badge is advisory and the send proceeds so cmux's own record check decides.
+        let cmux = FakeCmux(validBinding: false, screenState: "empty"); let service = SessionService(cmux: cmux, home: URL(fileURLWithPath: "/example/home"), transcriptRoots: [])
+        _ = try await service.send(id: "session", request: SendRequest(text: "Test"))
+        #expect(await cmux.sendCount == 1)
+    }
+    @Test func aTerminalWithoutAnAgentPromptNeverAcceptsASend() async throws {
+        // A retained binding whose process died without a SessionEnd hook leaves the list looking
+        // live; the screen check is what keeps the send out of the bare shell that remains.
+        let cmux = FakeCmux(validBinding: false, screenState: "unknown"); let service = SessionService(cmux: cmux, home: URL(fileURLWithPath: "/example/home"), transcriptRoots: [])
+        do { _ = try await service.send(id: "session", request: SendRequest(text: "Test")); Issue.record("Expected dead-terminal rejection") }
         catch { #expect((error as? BridgeError)?.code == "stale_binding") }
         #expect(await cmux.sendCount == 0)
     }
