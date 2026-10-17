@@ -4,14 +4,13 @@ import XCTest
 @MainActor
 final class MobileInlineQuestionUITests: XCTestCase {
     func testTappingContinueAnswersTheDialogsOwnChoice() throws {
-        let shape = ProcessInfo.processInfo.environment["CMUX_REMOTE_FIXTURE_FLAGS"] ?? ""
-        try XCTSkipUnless(shape == "awaiting-question", "This run's fixture holds the \(shape) transcript.")
+        let shape = FixtureShape.current()
+        try XCTSkipUnless(shape == "awaiting-question", "This run's fixture holds the \(shape ?? "default") transcript.")
         guard let pairingPath = ProcessInfo.processInfo.environment["CMUX_REMOTE_TEST_PAIRING_PATH"], !pairingPath.isEmpty else {
             throw XCTSkip("Supply an isolated fixture pairing file to open conversations without real sessions.")
         }
         let app = XCUIApplication(bundleIdentifier: "com.st0newan9.cmux-remote")
         app.launchEnvironment["CMUX_REMOTE_TEST_PAIRING_PATH"] = pairingPath
-        app.launchEnvironment["CMUX_REMOTE_FIXTURE_FLAGS"] = shape
         app.launchArguments = ["-AppleLanguages", "(zh-Hans)"]
         app.launch()
         let session = app.buttons.matching(NSPredicate(format: "identifier ENDSWITH %@", "fixture-session")).firstMatch
