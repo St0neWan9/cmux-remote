@@ -7,7 +7,7 @@ import XCTest
 @MainActor
 final class MobileScrollAnchorUITests: XCTestCase {
     func testAShortConversationRestsAgainstTheComposer() throws {
-        try XCTSkipUnless(isShort, "This run's fixture holds the \(selectedShape) transcript.")
+        try XCTSkipUnless(isShort, "This run's fixture holds the \(selectedShape ?? "default") transcript.")
         let app = try openConversation()
         let reply = try row(app, "message.short-reply")
         let composer = app.textFields.firstMatch.frame
@@ -17,7 +17,7 @@ final class MobileScrollAnchorUITests: XCTestCase {
         XCTAssertGreaterThan(reply.minY, 110, "The short conversation started under the header.")
     }
     func testATallReplyOpensAtItsFirstLine() throws {
-        try XCTSkipUnless(isTall, "This run's fixture holds the \(selectedShape) transcript.")
+        try XCTSkipUnless(isTall, "This run's fixture holds the \(selectedShape ?? "default") transcript.")
         let app = try openConversation()
         let reply = try row(app, "message.tall-reply")
         XCTAssertGreaterThan(reply.height, 600, "The fixture's newest reply was not taller than the page.")
@@ -32,7 +32,7 @@ final class MobileScrollAnchorUITests: XCTestCase {
     /// the content. Both the opening scroll and the "latest" button share this path, so this measures the button
     /// after the reader has scrolled away and asks to come back.
     func testTheLatestButtonReachesTheEndOfALongConversation() throws {
-        try XCTSkipUnless(isLong, "This run's fixture holds the \(selectedShape) transcript.")
+        try XCTSkipUnless(isLong, "This run's fixture holds the \(selectedShape ?? "default") transcript.")
         let app = try openConversation()
         let timeline = app.scrollViews.firstMatch
         // The newest reply ends in a short line, so its own action row is the page's last content.
@@ -57,7 +57,7 @@ final class MobileScrollAnchorUITests: XCTestCase {
         XCTAssertLessThan(abs(after.minY - before.minY), 3, "The page was still \(Int(after.minY - before.minY))pt above its end.")
     }
     /// The transcript the fixture was started with; it decides which shape this run can measure.
-    private var selectedShape: String { ProcessInfo.processInfo.environment["CMUX_REMOTE_FIXTURE_FLAGS"] ?? "" }
+    private var selectedShape: String? { FixtureShape.current() }
     /// The fixture writes one transcript per state directory; only the shape it wrote can be measured.
     private var isShort: Bool { selectedShape == "short-conversation" }
     private var isTall: Bool { selectedShape == "tall-reply" }
@@ -68,7 +68,6 @@ final class MobileScrollAnchorUITests: XCTestCase {
         }
         let app = XCUIApplication(bundleIdentifier: "com.st0newan9.cmux-remote")
         app.launchEnvironment["CMUX_REMOTE_TEST_PAIRING_PATH"] = pairingPath
-        app.launchEnvironment["CMUX_REMOTE_FIXTURE_FLAGS"] = selectedShape
         app.launchArguments = ["-AppleLanguages", "(zh-Hans)"]
         app.launch()
         let session = app.buttons.matching(NSPredicate(format: "identifier ENDSWITH %@", "fixture-session")).firstMatch
