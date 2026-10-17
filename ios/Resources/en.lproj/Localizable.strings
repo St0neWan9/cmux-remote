@@ -177,6 +177,7 @@
 "feed.unsupported" = "This event has no supported reply action.";
 "feed.question.unavailable" = "This question can no longer be answered here.";
 "chat.question.answered" = "Answered: %@";
+"chat.question.answering_above" = "Answered together on the first card of this request.";
 "feed.recorded" = "Recorded";
 "error.input_value" = "Check the input and its size.";
 "error.project" = "This session has no shareable project directory.";

@@ -100,7 +100,16 @@ struct ConversationView: View {
                 }
             }
             .onDisappear { settleTask?.cancel(); settleTask = nil; initialScroll?.cancel(); initialScroll = nil }
-            .onChange(of: model.jumpToLatest) { _, _ in holdingPlace = false; atLatest = true; withAnimation { scrollTrace.note("scroll after-send"); scrollToNewest(proxy) } }
+            // A prompt this phone sent lands with the page's newest row at the top and the reply taking the
+            // room below it, which is where the reader looks next. Following resumes when they scroll down.
+            .onChange(of: model.jumpToLatest) { _, _ in
+                holdingPlace = false
+                withAnimation {
+                    if let sent = model.outgoing.last?.id {
+                        proxy.scrollTo(sent, anchor: .top); scrollTrace.note("scroll sent-prompt"); atLatest = false
+                    } else { scrollTrace.note("scroll after-send"); atLatest = true; scrollToNewest(proxy) }
+                }
+            }
             .environment(\.selectText) { text, monospaced in selecting = SelectTextPage.Request(text: text, monospaced: monospaced) }
         }
         }
@@ -261,7 +270,9 @@ struct ConversationView: View {
                     MarkdownMessageView(text: preview)
                 }.modifier(HeaderContentEffect(bottom: bottom))
             }
-            ForEach(model.outgoing) { prompt in OutgoingPromptRow(prompt: prompt).modifier(HeaderContentEffect(bottom: bottom)) }
+            ForEach(model.outgoing) { prompt in
+                OutgoingPromptRow(prompt: prompt).modifier(HeaderContentEffect(bottom: bottom)).id(prompt.id)
+            }
             if let error = model.error {
                 Label(error, systemImage: "exclamationmark.circle").font(.footnote).foregroundStyle(.red).padding(12)
                     .frame(maxWidth: .infinity, alignment: .leading).background(Color.red.opacity(0.055), in: RoundedRectangle(cornerRadius: 14))

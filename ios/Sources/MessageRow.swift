@@ -11,7 +11,7 @@ struct MessageRow: View {
     var openImage: ((ConversationImageReference) -> Void)?
     var openDetail: ((String, String) -> Void)?
     /// The Feed request that may answer this question, when the agent is still waiting on it.
-    var pendingQuestion: JSONValue?
+    var pendingQuestion: ConversationQuestions.Match?
     /// Whether an answer is on its way, so the card does not accept a second tap.
     var answering = false
     /// Sends the chosen labels for this question, in the question's own order.
@@ -108,9 +108,16 @@ struct MessageRow: View {
             // pending request for this exact prompt is offered, and it is answered through the Feed.
             VStack(alignment: .leading, spacing: 12) {
                 Label(String(localized: "feed.title"), systemImage: "questionmark.bubble").font(.caption).foregroundStyle(.secondary)
-                if let answerQuestion, let question = pendingQuestion?["question"] {
+                if let pendingQuestion, pendingQuestion.isFirst, let answerQuestion {
+                    // The whole request is rendered on its first card, exactly as the Feed lists it: one reply
+                    // carries one label per question, so a card cannot answer only its own.
                     // The form keeps its own identifiers: a container identifier would replace each control's.
-                    FeedQuestionView(questions: [question], busy: answering) { answers in answerQuestion(answers) }
+                    FeedQuestionView(questions: pendingQuestion.questions, busy: answering) { answers in answerQuestion(answers) }
+                } else if let pendingQuestion, !pendingQuestion.isFirst {
+                    // The later cards are the same request seen from another question; the first card answers it.
+                    Text(value.prompt)
+                    ForEach(value.options) { Text($0.label) }
+                    Text(String(localized: "chat.question.answering_above")).font(.footnote).foregroundStyle(.secondary)
                 } else {
                     Text(value.prompt)
                     // An answered question is a record of the choice, not a dead form: naming the answer is what
