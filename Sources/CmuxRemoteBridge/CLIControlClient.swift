@@ -10,7 +10,7 @@ public struct CLIControlClient: CmuxControlling {
     public func request(_ method: String, params: [String: JSONValue]) async throws -> JSONValue {
         // A cmux stall under system load makes the official CLI fail fast. One bounded retry absorbs
         // that transient for reads; it only runs after a quick failure so the whole request, at worst
-        // six plus half a plus twelve seconds, stays inside the link's twenty-second no-progress window.
+        // six plus half a second plus twelve seconds, stays inside the link's twenty-second no-progress window.
         let started = ContinuousClock.now
         do { return try await attempt(method, params: params) }
         catch let error as BridgeError where error.code == "socket_unavailable" && started.duration(to: .now) < .seconds(6) {

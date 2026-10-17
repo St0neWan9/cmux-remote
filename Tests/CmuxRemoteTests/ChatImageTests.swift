@@ -14,7 +14,7 @@ private actor ImageCmux: CmuxControlling {
         switch method {
         case "vault.sessions": return .object(["sessions": .array([.object(["session_id": .string("session"), "agent": .string("claude")])])])
         case "chat.sessions.dump": return .object(["sessions": .array([.object(["session_id": .string("session"), "agent": .string("claude"), "workspace_id": .string("workspace"), "surface_id": .string("surface"), "state": .string("idle")])])])
-        case "surface.input_state": return .object(["agent": .bool(echoes), "workspace_id": .string(echoes ? "workspace" : "moved-workspace"), "surface_id": .string(echoes ? "surface" : "moved-surface"), "blocks_typing": .bool(blocksTyping)])
+        case "surface.input_state": return .object(["agent": .bool(echoes), "workspace_id": .string(echoes ? "workspace" : "moved-workspace"), "surface_id": .string(echoes ? "surface" : "moved-surface"), "state": .string("empty"), "terminal": .bool(true), "blocks_typing": .bool(blocksTyping)])
         case "mobile.chat.send": deliveries.append(params); if fail { throw BridgeError("outcome_unknown", "Lost response", status: 504) }; if rejectSubmission { return .object(["submitted": .bool(false)]) }
         default: break
         }
@@ -67,7 +67,7 @@ private actor ImageCmux: CmuxControlling {
         #expect(await cmux.deliveries.isEmpty)
     }
     @Test(arguments: [(false, false, "stale_binding"), (true, true, "input_busy")])
-    func imageDeliveryRetainsExistingBindingAndDesktopDraftProtection(_ echoes: Bool, _ busy: Bool, _ code: String) async {
+    func imageDeliveryRejectsAMismatchedBindingAndProtectsADesktopDraft(_ echoes: Bool, _ busy: Bool, _ code: String) async {
         let cmux = ImageCmux(echoes: echoes, blocksTyping: busy)
         do { _ = try await service(cmux).send(id: "session", request: SendRequest(text: "Test", attachments: [image()])); Issue.record("Expected protected target") }
         catch { #expect((error as? BridgeError)?.code == code) }

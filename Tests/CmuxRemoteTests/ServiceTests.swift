@@ -15,17 +15,22 @@ private actor FakeCmux: CmuxControlling {
     func markEnded() { ended = true }
     let validBinding: Bool
     let echoesBinding: Bool
-    let screenState: String
+    /// The screen state cmux reports; nil models a response that omits the field entirely.
+    let screenState: String?
+    let terminal: Bool
     let failSend: Bool
     let blocksTyping: Bool
-    init(validBinding: Bool = true, echoesBinding: Bool = true, screenState: String = "empty", failSend: Bool = false, blocksTyping: Bool = false) {
-        self.validBinding = validBinding; self.echoesBinding = echoesBinding; self.screenState = screenState; self.failSend = failSend; self.blocksTyping = blocksTyping
+    init(validBinding: Bool = true, echoesBinding: Bool = true, screenState: String? = "empty", terminal: Bool = true, failSend: Bool = false, blocksTyping: Bool = false) {
+        self.validBinding = validBinding; self.echoesBinding = echoesBinding; self.screenState = screenState; self.terminal = terminal; self.failSend = failSend; self.blocksTyping = blocksTyping
     }
     func request(_ method: String, params: [String: JSONValue]) async throws -> JSONValue {
         switch method {
         case "vault.sessions": return .object(["sessions": .array([.object(["session_id": .string("session"), "agent": .string("claude"), "title": .string("Task")])])])
         case "chat.sessions.dump": return .object(["sessions": .array([.object(["session_id": .string("session"), "agent": .string("claude"), "workspace_id": .string("workspace"), "surface_id": .string("surface"), "state": .string(ended ? "ended" : "idle")])])])
-        case "surface.input_state": return .object(["agent": .bool(validBinding), "workspace_id": .string(echoesBinding ? "workspace" : "moved-workspace"), "surface_id": .string(echoesBinding ? "surface" : "moved-surface"), "state": .string(screenState), "blocks_typing": .bool(blocksTyping)])
+        case "surface.input_state":
+            var reply: [String: JSONValue] = ["agent": .bool(validBinding), "workspace_id": .string(echoesBinding ? "workspace" : "moved-workspace"), "surface_id": .string(echoesBinding ? "surface" : "moved-surface"), "terminal": .bool(terminal), "blocks_typing": .bool(blocksTyping)]
+            if let screenState { reply["state"] = .string(screenState) }
+            return .object(reply)
         case "mobile.chat.interrupt": interruptCount += 1; hardInterrupt = params["hard"]?.bool; return .object(["interrupted": .bool(true)])
         case "mobile.chat.send":
             sendCount += 1
@@ -82,6 +87,14 @@ private actor FakeCmux: CmuxControlling {
         _ = try await service.send(id: "session", request: SendRequest(text: "Test"))
         #expect(await cmux.sendCount == 1)
     }
+    @Test func aDialogOrDraftAlsoProvesTheAgentIsOnScreen() async throws {
+        for state in ["draft", "dialog"] {
+            let cmux = FakeCmux(validBinding: false, screenState: state); let service = SessionService(cmux: cmux, home: URL(fileURLWithPath: "/example/home"), transcriptRoots: [])
+            // Interrupt stays available during a dialog and never pastes over a draft.
+            _ = try await service.interrupt(id: "session", request: InterruptRequest())
+            #expect(await cmux.interruptCount == 1)
+        }
+    }
     @Test func aTerminalWithoutAnAgentPromptNeverAcceptsASend() async throws {
         // A retained binding whose process died without a SessionEnd hook leaves the list looking
         // live; the screen check is what keeps the send out of the bare shell that remains.
@@ -89,6 +102,27 @@ private actor FakeCmux: CmuxControlling {
         do { _ = try await service.send(id: "session", request: SendRequest(text: "Test")); Issue.record("Expected dead-terminal rejection") }
         catch { #expect((error as? BridgeError)?.code == "stale_binding") }
         #expect(await cmux.sendCount == 0)
+    }
+    @Test func aScreenStateTheDetectionCannotReadFailsClosed() async throws {
+        // A reply that omits `state` proves nothing about the screen, so a missing badge plus a
+        // missing screen state is rejected exactly like the `unknown` reading.
+        let cmux = FakeCmux(validBinding: false, screenState: nil); let service = SessionService(cmux: cmux, home: URL(fileURLWithPath: "/example/home"), transcriptRoots: [])
+        do { _ = try await service.interrupt(id: "session", request: InterruptRequest()); Issue.record("Expected an unreadable terminal rejection") }
+        catch { #expect((error as? BridgeError)?.code == "stale_binding") }
+        #expect(await cmux.interruptCount == 0)
+    }
+    @Test func aNonTerminalSurfaceNeverAcceptsAnAgentWrite() async throws {
+        let cmux = FakeCmux(screenState: "empty", terminal: false); let service = SessionService(cmux: cmux, home: URL(fileURLWithPath: "/example/home"), transcriptRoots: [])
+        do { _ = try await service.send(id: "session", request: SendRequest(text: "Test")); Issue.record("Expected non-terminal rejection") }
+        catch { #expect((error as? BridgeError)?.code == "stale_binding") }
+        #expect(await cmux.sendCount == 0)
+    }
+    @Test func aLiveAgentBadgeStillAllowsASendWhenTheScreenIsUnreadable() async throws {
+        // cmux's lifecycle record is authoritative when it says an agent is there; the screen reading
+        // only has to break the tie when the badge is missing.
+        let cmux = FakeCmux(validBinding: true, screenState: "unknown"); let service = SessionService(cmux: cmux, home: URL(fileURLWithPath: "/example/home"), transcriptRoots: [])
+        _ = try await service.send(id: "session", request: SendRequest(text: "Test"))
+        #expect(await cmux.sendCount == 1)
     }
     @Test func uncertainWriteIsNotRetried() async {
         let cmux = FakeCmux(failSend: true); let service = SessionService(cmux: cmux, home: URL(fileURLWithPath: "/example/home"), transcriptRoots: [])
