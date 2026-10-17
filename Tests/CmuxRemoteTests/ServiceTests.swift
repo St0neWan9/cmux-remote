@@ -11,8 +11,10 @@ private actor FakeCmux: CmuxControlling {
     /// The rendered screen the fake terminal serves; the working line and the CLI chrome both live here.
     var screen = "Other agent output"
     func setScreen(_ value: String) { screen = value }
+    static let surfaceID = "11111111-1111-1111-1111-111111111111"
     var ended = false
     func markEnded() { ended = true }
+    func setResumedTo(_ id: String) { resumedTo = id }
     let validBinding: Bool
     let echoesBinding: Bool
     /// The screen state cmux reports; nil models a response that omits the field entirely.
@@ -20,20 +22,32 @@ private actor FakeCmux: CmuxControlling {
     let terminal: Bool
     let failSend: Bool
     let blocksTyping: Bool
-    init(validBinding: Bool = true, echoesBinding: Bool = true, screenState: String? = "empty", terminal: Bool = true, failSend: Bool = false, blocksTyping: Bool = false) {
-        self.validBinding = validBinding; self.echoesBinding = echoesBinding; self.screenState = screenState; self.terminal = terminal; self.failSend = failSend; self.blocksTyping = blocksTyping
+    let vaultFile: String?
+    var resumedTo: String?
+    var creates = 0
+    var sentSessionIDs: [String] = []
+    init(validBinding: Bool = true, echoesBinding: Bool = true, screenState: String? = "empty", terminal: Bool = true, failSend: Bool = false, blocksTyping: Bool = false, vaultFile: String? = nil, ended: Bool = false) {
+        self.validBinding = validBinding; self.echoesBinding = echoesBinding; self.screenState = screenState; self.terminal = terminal; self.failSend = failSend; self.blocksTyping = blocksTyping; self.vaultFile = vaultFile; self.ended = ended
     }
     func request(_ method: String, params: [String: JSONValue]) async throws -> JSONValue {
         switch method {
-        case "vault.sessions": return .object(["sessions": .array([.object(["session_id": .string("session"), "agent": .string("claude"), "title": .string("Task")])])])
-        case "chat.sessions.dump": return .object(["sessions": .array([.object(["session_id": .string("session"), "agent": .string("claude"), "workspace_id": .string("workspace"), "surface_id": .string("surface"), "state": .string(ended ? "ended" : "idle")])])])
+        case "vault.sessions":
+            var item: [String: JSONValue] = ["session_id": .string("session"), "agent": .string("claude"), "title": .string("Task")]
+            if let vaultFile { item["file"] = .string(vaultFile); item["cwd"] = .string("project") }
+            return .object(["sessions": .array([.object(item)])])
+        case "chat.sessions.dump":
+            var rows: [JSONValue] = [.object(["session_id": .string("session"), "agent": .string("claude"), "workspace_id": .string("workspace"), "surface_id": .string(Self.surfaceID), "state": .string(ended ? "ended" : "idle"), "resumable": .bool(ended)])]
+            if let resumedTo { rows.append(.object(["session_id": .string(resumedTo), "agent": .string("claude"), "workspace_id": .string("workspace"), "surface_id": .string(Self.surfaceID), "state": .string("idle")])) }
+            return .object(["sessions": .array(rows)])
+        case "surface.create": creates += 1; return .object(["surface_id": .string(Self.surfaceID)])
         case "surface.input_state":
-            var reply: [String: JSONValue] = ["agent": .bool(validBinding), "workspace_id": .string(echoesBinding ? "workspace" : "moved-workspace"), "surface_id": .string(echoesBinding ? "surface" : "moved-surface"), "terminal": .bool(terminal), "blocks_typing": .bool(blocksTyping)]
+            var reply: [String: JSONValue] = ["agent": .bool(validBinding), "workspace_id": .string(echoesBinding ? "workspace" : "moved-workspace"), "surface_id": .string(echoesBinding ? Self.surfaceID : "moved-surface"), "terminal": .bool(terminal), "blocks_typing": .bool(blocksTyping)]
             if let screenState { reply["state"] = .string(screenState) }
             return .object(reply)
         case "mobile.chat.interrupt": interruptCount += 1; hardInterrupt = params["hard"]?.bool; return .object(["interrupted": .bool(true)])
         case "mobile.chat.send":
             sendCount += 1
+            if let id = params["session_id"]?.string { sentSessionIDs.append(id) }
             if failSend { throw BridgeError("outcome_unknown", "Response lost", status: 504) }
             return .object(["submitted": .bool(true)])
         case "surface.read_text": screenReadCount += 1; return .object(["text": .string(screen)])
@@ -94,6 +108,30 @@ private actor FakeCmux: CmuxControlling {
             _ = try await service.interrupt(id: "session", request: InterruptRequest())
             #expect(await cmux.interruptCount == 1)
         }
+    }
+    @Test func aResumedSessionTakesOverTheConversationIdentity() async throws {
+        // A desktop resume starts `claude --resume`, which forks a new Agent session id on the opened
+        // surface. The conversation keeps its identity, adopts the live session's transcript and
+        // state, and sends address the live session cmux knows.
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).resolvingSymlinksInPath()
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let project = dir.appendingPathComponent("project")
+        try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
+        let transcript = dir.appendingPathComponent("session.jsonl")
+        try Data("{\"type\":\"user\",\"cwd\":\"\(project.path)\"}\n".utf8).write(to: transcript)
+        let aliases = SessionAliasStore(directory: dir.appendingPathComponent("state"))
+        let cmux = FakeCmux(vaultFile: transcript.path, ended: true)
+        let service = SessionService(cmux: cmux, home: dir, transcriptRoots: [dir], aliases: aliases)
+        _ = try await service.resume(id: "session", request: ResumeRequest())
+        #expect(await cmux.creates == 1)
+        await cmux.setResumedTo("resumed-session")
+        let list = try await service.sessions()
+        #expect(list.map(\.id) == ["session"])
+        #expect(list.first?.state == "idle")
+        #expect(list.first?.resumable == false)
+        _ = try await service.send(id: "session", request: SendRequest(text: "Test"))
+        #expect(await cmux.sentSessionIDs == ["resumed-session"])
     }
     @Test func aTerminalWithoutAnAgentPromptNeverAcceptsASend() async throws {
         // A retained binding whose process died without a SessionEnd hook leaves the list looking
