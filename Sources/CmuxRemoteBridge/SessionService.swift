@@ -23,12 +23,18 @@ public actor SessionService {
     private var liveBindings: [String: JSONValue] = [:]
     private var eventBoot: String?
     private var eventSequence: Int?
+    private let aliases: SessionAliasStore?
 
-    public init(cmux: any CmuxControlling, home: URL, transcriptRoots: [URL], mutations: MutationLedger? = nil, journal: MutationJournal? = nil) {
+    public init(cmux: any CmuxControlling, home: URL, transcriptRoots: [URL], mutations: MutationLedger? = nil, journal: MutationJournal? = nil, aliases: SessionAliasStore? = nil) {
         self.cmux = cmux; self.transcriptRoots = transcriptRoots.map { $0.resolvingSymlinksInPath().standardizedFileURL }
-        self.files = ProjectFilePolicy(home: home); self.mutations = mutations ?? MutationLedger(); self.journal = journal
+        self.files = ProjectFilePolicy(home: home); self.mutations = mutations ?? MutationLedger(); self.journal = journal; self.aliases = aliases
     }
 
+    /// The Agent session a conversation currently answers for: a desktop resume forks the Agent's
+    /// session id, and cmux addresses the live one, while the phone keeps the conversation's id.
+    private func liveSessionID(_ id: String) async -> String {
+        await aliases?.liveSessionID(conversationID: id) ?? id
+    }
     public func status() async throws -> JSONValue {
         _ = try await cmux.request("system.ping", params: [:])
         let caps = try await cmux.request("system.capabilities", params: [:])
@@ -133,6 +139,7 @@ public actor SessionService {
             discovered[id]?.descriptor = SessionDescriptor(id: old.id, agent: old.agent, title: named, cwd: facts.cwd ?? old.cwd, workspaceID: old.workspaceID,
                                                            surfaceID: old.surfaceID, state: old.state, updatedAt: facts.updatedAt, resumable: old.resumable)
         }
+        await reconcileResumedSessions(&discovered)
         records = discovered
         for (id, record) in records {
             guard let old = record.descriptor.surfaceID.map({ tabTitles[$0.lowercased()] }), let title = old else { continue }
@@ -291,7 +298,7 @@ public actor SessionService {
         if let receipt = try await begin(request.operationID, signature: signature, workspace: session.workspaceID, capability: .conversationControl, legacySignature: legacySignature, access: access) { return receipt }
         try await validateMutationBinding(session, access: access)
         do {
-            var params: [String: JSONValue] = ["session_id": .string(session.id), "text": .string(request.text), "operation_id": .string(request.operationID.uuidString), "backend_operation_key": .string(IdentityCryptography().digest(Data(((access?.clientID ?? "owner") + ":" + request.operationID.uuidString).utf8))), "workspace_id": .string(session.workspaceID!), "surface_id": .string(session.surfaceID!)]
+            var params: [String: JSONValue] = ["session_id": .string(await liveSessionID(session.id)), "text": .string(request.text), "operation_id": .string(request.operationID.uuidString), "backend_operation_key": .string(IdentityCryptography().digest(Data(((access?.clientID ?? "owner") + ":" + request.operationID.uuidString).utf8))), "workspace_id": .string(session.workspaceID!), "surface_id": .string(session.surfaceID!)]
             if !attachments.isEmpty { params["attachments"] = .array(attachments) }
             let result = try await cmux.request("mobile.chat.send", params: params)
             guard result["submitted"].bool != false else { throw BridgeError("outcome_unknown", "cmux did not confirm prompt submission; inspect its draft before retrying.", status: 409) }
@@ -357,6 +364,32 @@ public actor SessionService {
         guard let surface = result["surface_id"].string, UUID(uuidString: surface) != nil else {
             throw BridgeError("outcome_unknown", "cmux did not confirm the reopened terminal.", status: 409)
         }
+        // The resumed Agent forks a new session id on that surface; the conversation follows it once
+        // the inventory sees it there.
+        await aliases?.setTarget(surface, conversationID: value.id)
+    }
+    /// Folds a desktop resume back into one conversation: the Agent session the resume produced on the
+    /// recorded surface takes over the conversation's identity, transcript and live state, and its own
+    /// row disappears from the list.
+    private func reconcileResumedSessions(_ discovered: inout [String: Record]) async {
+        guard let aliases else { return }
+        for id in await aliases.trackedConversationIDs() {
+            guard await aliases.liveSessionID(conversationID: id) == nil,
+                  let surface = await aliases.target(conversationID: id),
+                  let fresh = discovered.values.first(where: {
+                      $0.descriptor.surfaceID?.lowercased() == surface.lowercased() && $0.descriptor.id != id
+                          && $0.descriptor.state != "ended"
+                  }) else { continue }
+            await aliases.setAlias(conversationID: id, sessionID: fresh.descriptor.id)
+        }
+        for (old, new) in await aliases.aliasPairs() {
+            guard let fresh = discovered[new] else { continue }
+            let descriptor = SessionDescriptor(id: old, agent: fresh.descriptor.agent, title: fresh.descriptor.title, cwd: fresh.descriptor.cwd,
+                                               workspaceID: fresh.descriptor.workspaceID, surfaceID: fresh.descriptor.surfaceID,
+                                               state: fresh.descriptor.state, updatedAt: fresh.descriptor.updatedAt, resumable: false)
+            discovered[old] = Record(descriptor: descriptor, transcript: fresh.transcript)
+            discovered[new] = nil
+        }
     }
 
     public func interrupt(id: String, request: InterruptRequest, access: SessionAccess? = nil) async throws -> MutationReceipt {
@@ -367,7 +400,7 @@ public actor SessionService {
         if let receipt = try await begin(request.operationID, signature: signature, workspace: session.workspaceID, capability: .conversationControl, legacySignature: legacySignature, access: access) { return receipt }
         try await validateMutationBinding(session, access: access)
         do {
-            let result = try await cmux.request("mobile.chat.interrupt", params: ["session_id": .string(session.id), "hard": .bool(request.hard), "operation_id": .string(request.operationID.uuidString), "backend_operation_key": .string(IdentityCryptography().digest(Data(((access?.clientID ?? "owner") + ":" + request.operationID.uuidString).utf8))), "workspace_id": .string(session.workspaceID!), "surface_id": .string(session.surfaceID!)])
+            let result = try await cmux.request("mobile.chat.interrupt", params: ["session_id": .string(await liveSessionID(session.id)), "hard": .bool(request.hard), "operation_id": .string(request.operationID.uuidString), "backend_operation_key": .string(IdentityCryptography().digest(Data(((access?.clientID ?? "owner") + ":" + request.operationID.uuidString).utf8))), "workspace_id": .string(session.workspaceID!), "surface_id": .string(session.surfaceID!)])
             guard result["interrupted"].bool != false else { throw BridgeError("outcome_unknown", "cmux did not confirm interruption.", status: 409) }
             return try await complete(request.operationID, access: access)
         } catch { journal?.uncertain(id: request.operationID); throw mutationError(error) }
