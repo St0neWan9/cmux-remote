@@ -23,9 +23,11 @@ import CmuxRemoteBridge
     public var isSharing: Bool { status["state"].string == "running" }
     public var address: String? { status["address"].string }
     private let owner: any CmuxControlling
+    /// Prefilled key-file path offered when no relay registration is configured yet.
+    private let defaultKeyFile: String
     private var observation: Task<Void, Never>?
     private var actionError: String?
-    public init(owner: any CmuxControlling) { self.owner = owner }
+    public init(owner: any CmuxControlling, defaultKeyFile: String = "") { self.owner = owner; self.defaultKeyFile = defaultKeyFile }
     public func start() {
         guard observation == nil else { return }
         observation = Task { [weak self] in
@@ -42,7 +44,8 @@ import CmuxRemoteBridge
         do {
             status = try await owner.request("bridge.status", params: [:])
             if !relayDraftLoaded {
-                relayOrigin = status["relay"]["origin"].string ?? ""; relayKeyFile = status["relay"]["key_file"].string ?? ""; relayDraftLoaded = true
+                relayOrigin = status["relay"]["origin"].string ?? ""
+                relayKeyFile = status["relay"]["key_file"].string ?? defaultKeyFile; relayDraftLoaded = true
             }
             if let bound = status["port"].int, isSharing { port = bound }
             let requests = try await owner.request("enrollment.pending", params: [:])

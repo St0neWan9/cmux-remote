@@ -6,6 +6,7 @@ import AppKit
     private let model: MacAppModel
     /// Section identifier, label key and symbol, in toolbar order.
     private let sections: [(id: String, label: String, symbol: String)] = [
+        ("general", "mac.general.title", "gearshape"),
         ("share", "mac.share.title", "square.and.arrow.up"),
         ("pairing", "mac.pairing.title", "qrcode"),
         ("devices", "mac.devices.title", "laptopcomputer.and.iphone"),

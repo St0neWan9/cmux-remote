@@ -160,3 +160,17 @@
 "mac.logs.missing" = "还没有 Bridge 日志。";
 "mac.logs.missing.hint" = "后台 Bridge 未运行，或者是不写日志文件的旧版本。";
 "mac.logs.unreadable" = "无法读取 Bridge 日志。请检查“高级”中的数据目录。";
+"mac.general.title" = "通用";
+"mac.general.launchAtLogin" = "自动启动";
+"mac.general.launchAtLogin.hint" = "登录系统时自动启动桌面端和 Bridge。";
+"mac.general.silentLaunch" = "静默启动";
+"mac.general.silentLaunch.hint" = "打开应用时只显示菜单栏图标，不显示窗口。";
+"mac.general.enabled" = "启用";
+"mac.error.launchService" = "系统未能更改自动启动，请在“系统设置 > 通用 > 登录项”中重试。";
+"mac.menu.edit" = "编辑";
+"mac.menu.undo" = "撤销";
+"mac.menu.redo" = "重做";
+"mac.menu.cut" = "剪切";
+"mac.menu.copy" = "拷贝";
+"mac.menu.paste" = "粘贴";
+"mac.menu.selectAll" = "全选";

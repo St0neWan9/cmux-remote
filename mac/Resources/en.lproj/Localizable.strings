@@ -160,3 +160,17 @@
 "mac.logs.missing" = "No Bridge log yet.";
 "mac.logs.missing.hint" = "The background Bridge is not running, or it is an older version that does not write a log file.";
 "mac.logs.unreadable" = "The Bridge log cannot be read. Check the data directory under Advanced.";
+"mac.general.title" = "General";
+"mac.general.launchAtLogin" = "Launch at login";
+"mac.general.launchAtLogin.hint" = "Start CmuxRemote and its Bridge automatically when you log in.";
+"mac.general.silentLaunch" = "Silent launch";
+"mac.general.silentLaunch.hint" = "Opening the app shows only the menu bar icon, without a window.";
+"mac.general.enabled" = "Enabled";
+"mac.error.launchService" = "The system could not change automatic startup. Try again under System Settings, General, Login Items.";
+"mac.menu.edit" = "Edit";
+"mac.menu.undo" = "Undo";
+"mac.menu.redo" = "Redo";
+"mac.menu.cut" = "Cut";
+"mac.menu.copy" = "Copy";
+"mac.menu.paste" = "Paste";
+"mac.menu.selectAll" = "Select All";
