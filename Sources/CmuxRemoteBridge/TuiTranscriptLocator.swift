@@ -29,6 +29,21 @@ public struct TuiTranscriptLocator: Sendable {
         }
         return paths
     }
+    /// The working directory a session was recorded in, read from its own transcript.
+    /// The daemon's terminal cwd drifts with `cd` and is absent once the terminal is gone, so a resume must use the
+    /// directory the Agent itself wrote; a wrong directory would reopen the session in the wrong project.
+    public func recordedCwd(provider: String, sessionID: String) throws -> String? {
+        guard let path = (try? locate(provider: provider, sessionID: sessionID, cwd: nil)).flatMap({ $0 }), path.hasPrefix("/") else { return nil }
+        let handle = try FileHandle(forReadingFrom: URL(fileURLWithPath: path)); defer { try? handle.close() }
+        // The session header is the first line; read only a bounded prefix so a long transcript cannot stall it.
+        let head = try handle.read(upToCount: 262_144) ?? Data()
+        for line in head.split(separator: UInt8(ascii: "\n")) {
+            guard let object = try? JSONDecoder().decode(JSONValue.self, from: Data(line)) else { continue }
+            if let cwd = object["cwd"].string, cwd.hasPrefix("/") { return cwd }
+            if let cwd = object["payload"]["cwd"].string, cwd.hasPrefix("/") { return cwd }
+        }
+        return nil
+    }
     private func search(_ wanted: [String: Set<String>]) throws -> (paths: [String: String], ambiguous: Set<String>) {
         let roots: [(String, URL)] = [("claude", claudeRoot.appendingPathComponent("projects")), ("codex", codexRoot.appendingPathComponent("sessions")), ("codex", codexRoot.appendingPathComponent("archived_sessions"))]
         let keys: Set<URLResourceKey> = [.isSymbolicLinkKey, .isDirectoryKey, .isRegularFileKey]

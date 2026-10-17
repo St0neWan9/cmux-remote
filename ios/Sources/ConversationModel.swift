@@ -9,6 +9,8 @@ final class ConversationModel {
     var session: SessionDescriptor
     let client: RemoteClient
     var canSend: Bool { session.writable && client.canControlConversations }
+    /// Reopening starts a process in the workspace, so it needs the start grant as well as control.
+    var canResume: Bool { session.resumable && client.allows(.conversationStart) }
     var messages: [ChatMessage] = []
     var images: [ConversationImageReference] = []
     var timelineItems: [ConversationTimelineItem] = []
@@ -290,6 +292,16 @@ final class ConversationModel {
         if let reanchor, readsEnabled, olderReads.isCurrent(reanchor), generation == sourceGeneration { await refresh() }
     }
     func useSpeechDraft() { if let text = speech.takeText() { draft += (draft.isEmpty ? "" : "\n") + text } }
+    /// Reopens the Agent session in a new terminal and follows the conversation once it reports back.
+    func resume() async {
+        guard canResume, !busy else { return }
+        busy = true; defer { busy = false }
+        do {
+            _ = try await client.post("/v1/sessions/\(session.id)/resume", body: ResumeRequest(), as: MutationReceipt.self)
+            // The Bridge opens a terminal; the conversation keeps its identity and reports as live once the Agent starts.
+            await refresh()
+        } catch { self.error = ErrorPresentation().message(error) }
+    }
     func send() async {
         guard canSend, !busy, !speech.active, !imageDraft.loading, pendingSend == nil,
               !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !imageDraft.images.isEmpty else { return }

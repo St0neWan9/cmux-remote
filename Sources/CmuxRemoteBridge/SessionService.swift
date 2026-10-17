@@ -115,6 +115,8 @@ public actor SessionService {
             record.descriptor.workspaceID = item["workspace_id"].string
             record.descriptor.surfaceID = item["surface_id"].string
             record.descriptor.state = item["state"].string ?? "unknown"
+            // The backend says whether it verified an Agent session that can still be reopened.
+            record.descriptor.resumable = item["resumable"].bool == true
             discovered[id] = record
         }
         for (id, record) in discovered {
@@ -123,7 +125,7 @@ public actor SessionService {
             // An unnamed session falls back to the summary the agent writes into its own transcript.
             let named = old.title == old.id ? facts.title ?? old.title : old.title
             discovered[id]?.descriptor = SessionDescriptor(id: old.id, agent: old.agent, title: named, cwd: facts.cwd ?? old.cwd, workspaceID: old.workspaceID,
-                                                           surfaceID: old.surfaceID, state: old.state, updatedAt: facts.updatedAt)
+                                                           surfaceID: old.surfaceID, state: old.state, updatedAt: facts.updatedAt, resumable: old.resumable)
         }
         records = discovered
         for (id, record) in records {
@@ -132,7 +134,7 @@ public actor SessionService {
             guard !looksLikeADirectory(title, cwd: record.descriptor.cwd) else { continue }
             let current = record.descriptor
             records[id]?.descriptor = SessionDescriptor(id: current.id, agent: current.agent, title: title, cwd: current.cwd, workspaceID: current.workspaceID,
-                                                        surfaceID: current.surfaceID, state: current.state, updatedAt: current.updatedAt)
+                                                        surfaceID: current.surfaceID, state: current.state, updatedAt: current.updatedAt, resumable: current.resumable)
         }
         for (id, event) in liveBindings {
             guard records[id] != nil else { continue }
@@ -275,6 +277,28 @@ public actor SessionService {
             guard result["submitted"].bool != false else { throw BridgeError("outcome_unknown", "cmux did not confirm prompt submission; inspect its draft before retrying.", status: 409) }
             return try await complete(request.operationID, access: access)
         } catch { journal?.uncertain(id: request.operationID); throw mutationError(error) }
+    }
+
+    /// Reopens one Agent session in a new terminal, continuing the same conversation.
+    /// The caller names only the conversation; the Agent session id and the directory come from the Bridge's own
+    /// binding and the Agent's transcript, so a device can never choose what command runs where.
+    public func resume(id: String, request: ResumeRequest, access: SessionAccess? = nil) async throws -> MutationReceipt {
+        let operationID = request.operationID
+        let signature = try MutationLedger.fingerprint(action: "resume", resource: id, payload: .string(id))
+        if let receipt = try await existing(operationID, signature: signature, access: access) { return receipt }
+        _ = try await sessions()
+        let value = try await record(id).descriptor
+        guard value.resumable, let workspace = value.workspaceID else { throw BridgeError("read_only", "This conversation has no Agent session left to reopen.", status: 409) }
+        // Reopening starts a process in the workspace, so it needs the same grant as starting one.
+        try await access?.require(.conversationStart, workspace: workspace)
+        if let receipt = try await begin(operationID, signature: signature, workspace: workspace, capability: .conversationStart, access: access) { return receipt }
+        do {
+            let result = try await cmux.request("mobile.chat.resume", params: [
+                "session_id": .string(value.id),
+                "operation_key": .string(IdentityCryptography().digest(Data(((access?.clientID ?? "owner") + ":" + operationID.uuidString).utf8)))])
+            guard result["surface_id"].string != nil else { throw BridgeError("outcome_unknown", "cmux did not confirm the reopened terminal.", status: 409) }
+            return try await complete(operationID, access: access)
+        } catch { journal?.uncertain(id: operationID); throw mutationError(error) }
     }
 
     public func interrupt(id: String, request: InterruptRequest, access: SessionAccess? = nil) async throws -> MutationReceipt {

@@ -97,7 +97,7 @@ struct TuiSessionSnapshot: Sendable {
             case "blocked": state = "needs_input"
             default: continue
             }
-            bound.append(Binding(id: identity.conversation(machine: machine, session: session, terminal: terminal, provider: provider, providerSession: providerSession), provider: provider, providerSession: providerSession.lowercased(), terminal: terminal, workspace: workspace,
+            bound.append(Binding(id: identity.conversation(machine: machine, session: session, provider: provider, providerSession: providerSession), provider: provider, providerSession: providerSession.lowercased(), terminal: terminal, workspace: workspace,
                                  surfaceID: identity.uuid(machine: machine, session: session, resource: terminal), workspaceID: identity.uuid(machine: machine, session: session, resource: workspace),
                                  // The name the owner gave the tab wins, as a workspace's own name does; the agent's
                                  // terminal title is only a fallback, so renaming the tab renames the conversation.

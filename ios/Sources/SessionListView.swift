@@ -218,7 +218,9 @@ struct SessionListView: View {
                     Text(session.agent.capitalized)
                     if let host { Text(host).lineLimit(1) }
                     if let updated = session.updatedAt { Text(updated, format: .relative(presentation: .named)).lineLimit(1) }
-                    if !session.writable { Label(String(localized: "sessions.read_only"), systemImage: "lock") }
+                    // A conversation that can be reopened says so, rather than reading as plain history.
+                    if session.resumable { Label(String(localized: "sessions.resume"), systemImage: "arrow.clockwise.circle") }
+                    else if !session.writable { Label(String(localized: "sessions.read_only"), systemImage: "lock") }
                 }.font(.caption).foregroundStyle(.secondary)
             }.frame(maxWidth: .infinity, alignment: .leading)
             if session.state.hasPrefix("working") { WorkingIndicator() }

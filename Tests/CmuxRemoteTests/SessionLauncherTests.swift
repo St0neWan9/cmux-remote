@@ -109,7 +109,8 @@ import CmuxRemoteBridge
         #expect(await fixture.cmux.creates.isEmpty)
         let request = StartSessionRequest(rootID: root.id, agent: .claude, prompt: "secret plan for the release")
         _ = try await fixture.launcher.start(workspaceID: LaunchCmux.workspace, request: request, access: fixture.access())
-        #expect(await fixture.cmux.creates.first?["initial_input"]?.string == "claude 'secret plan for the release'\r")
+        // The program's fixed flags precede the message, which stays one quoted literal argument.
+        #expect(await fixture.cmux.creates.first?["initial_input"]?.string == LaunchAgent.claude.command + " 'secret plan for the release'\r")
         let ledger = try String(contentsOf: fixture.home.appendingPathComponent("state/mutation-receipts.ndjson"), encoding: .utf8)
         #expect(!ledger.contains("secret plan"))
         // The same identity with a different message is a different operation.
