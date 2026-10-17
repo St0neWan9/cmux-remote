@@ -208,6 +208,11 @@ private actor PhoneUIBackend: CmuxControlling {
         let port = CommandLine.arguments.count == 3 ? (Int(CommandLine.arguments[2]) ?? 0) : 7745
         guard (1...65535).contains(port) else { throw BridgeError("invalid_input", "Pass a valid fixture port") }
         let state = BridgeState(directory: URL(fileURLWithPath: CommandLine.arguments[1]))
+        // The Bridge's journal refuses a state directory anyone else can reach, and a directory made by `mkdir`
+        // under `/tmp` is world-readable: every reply would fail with `journal_unavailable`. The fixture owns the
+        // directory it was given, so it closes it rather than making each caller remember to.
+        try FileManager.default.createDirectory(at: state.directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: state.directory.path)
         if !FileManager.default.fileExists(atPath: state.certificate) { try state.initialize() }
         let root = state.directory.appendingPathComponent("project")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
