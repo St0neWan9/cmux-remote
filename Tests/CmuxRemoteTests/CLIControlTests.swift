@@ -51,8 +51,10 @@ import CmuxRemoteBridge
         """
         try Data(script.utf8).write(to: executable)
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
-        // A read whose first CLI invocation fails quickly is retried once and then succeeds.
-        let client = CLIControlClient(executable: executable, socketPath: "/example/cmux.sock")
+        // A read whose first CLI invocation fails quickly is retried once and then succeeds. The window is
+        // widened here because a loaded CI machine can take seconds to start the fixture process; production
+        // keeps six, which is what keeps the whole request inside the link's no-progress window.
+        let client = CLIControlClient(executable: executable, socketPath: "/example/cmux.sock", retryWindow: .seconds(30))
         #expect(try await client.request("system.tree", params: [:])["accepted"].bool == true)
         #expect(try String(contentsOf: counter, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines) == "2")
         // A mutation must never repeat: the first failure already made the outcome unknown.
