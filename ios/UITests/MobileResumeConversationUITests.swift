@@ -5,12 +5,14 @@ import XCTest
 @MainActor
 final class MobileResumeConversationUITests: XCTestCase {
     func testAResumableConversationIsMarkedAndOffersToReopen() throws {
+        // The fixture lists a resumable conversation only when its state directory asks for one; the shape
+        // decides whether this run can test it at all.
+        try XCTSkipUnless(FixtureShape.current() == "resumable-session", "This run's fixture holds the \(FixtureShape.current() ?? "default") transcript.")
         guard let pairingPath = ProcessInfo.processInfo.environment["CMUX_REMOTE_TEST_PAIRING_PATH"], !pairingPath.isEmpty else {
             throw XCTSkip("Supply an isolated fixture pairing file to open conversations without real sessions.")
         }
         let app = XCUIApplication(bundleIdentifier: "com.st0newan9.cmux-remote")
         app.launchEnvironment["CMUX_REMOTE_TEST_PAIRING_PATH"] = pairingPath
-        app.launchEnvironment["CMUX_REMOTE_FIXTURE_FLAGS"] = "resumable-session"
         app.launchArguments = ["-AppleLanguages", "(zh-Hans)"]
         app.launch()
 
