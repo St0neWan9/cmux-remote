@@ -30,7 +30,8 @@ public actor ManagedSharingService {
                  "address": LANAddressResolver().address().map(JSONValue.string) ?? .null,
                  "host_id": .string(authority.host.id), "name": .string(authority.host.name),
                  "certificate": .string(authority.host.certificateSHA256),
-                 "relay": relayState, "error_code": failure.map(JSONValue.string) ?? .null])
+                 "relay": relayState, "error_code": failure.map(JSONValue.string) ?? .null,
+                 "owner_revision": .number(Double(OwnerRevision.current))])
     }
     /// Owner-only configuration; changing it never starts sharing or expands client grants.
     public func configureRelay(origin: String?, keyFile: String?) async throws -> JSONValue {
