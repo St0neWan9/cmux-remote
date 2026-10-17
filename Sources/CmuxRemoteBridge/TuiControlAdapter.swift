@@ -50,8 +50,12 @@ public actor TuiControlAdapter: CmuxControlling {
             var rows: [JSONValue] = []
             for binding in bindings {
                 var row = descriptor(binding)
-                if !liveIDs.contains(binding.id) { row["state"] = .string("ended"); row["status"] = .string("ended") }
+                // An Agent the daemon has not re-registered after a resume, on a terminal that is still running, is a
+                // live conversation rather than a finished one; only a terminal that is gone makes it historical.
+                let revived = !liveIDs.contains(binding.id) && current.runningTerminals.contains(binding.surfaceID)
+                if !liveIDs.contains(binding.id), !revived { row["state"] = .string("ended"); row["status"] = .string("ended") }
                 else if let state = activity[binding.providerSession] { row["state"] = .string(state); row["status"] = .string(state) }
+                else if revived { row["state"] = .string("idle"); row["status"] = .string("idle") }
                 // An interrupted Claude turn sends no Stop hook, so its hooks still say working; Claude Code marks
                 // itself idle in the terminal title with `✳` (a turn in progress shows a spinner glyph instead).
                 if liveIDs.contains(binding.id), binding.provider == "claude", row["state"]?.string == "working",
@@ -96,7 +100,7 @@ public actor TuiControlAdapter: CmuxControlling {
             return .object(["data_b64": data.map { .string($0.base64EncodedString()) } ?? .null])
         case "surface.read_text", "surface.input_state":
             let current = try await snapshot()
-            guard let id = params["surface_id"]?.string?.lowercased(), let binding = current.bindings.first(where: { $0.surfaceID == id }),
+            guard let id = params["surface_id"]?.string?.lowercased(), let binding = activeBinding(surfaceID: id, in: current),
                   params["workspace_id"]?.string.map({ $0.lowercased() == binding.workspaceID }) != false else { throw stale() }
             let screen = try await client.resource("terminal.screen.read", params: current.selectors(binding), idempotencyKey: nil)
             guard let text = screen["text"].string, text.utf8.count <= 1_048_576 else { throw BridgeError("invalid_response", "The daemon screen is invalid.", status: 502) }
@@ -132,7 +136,7 @@ public actor TuiControlAdapter: CmuxControlling {
                 throw BridgeError("invalid_input", "A stable conversation operation identity is required.")
             }
             let current = try await snapshot()
-            guard let binding = current.bindings.first(where: { $0.id == id }),
+            guard let binding = activeBinding(id: id, in: current),
                   params["workspace_id"]?.string?.lowercased() == binding.workspaceID,
                   params["surface_id"]?.string?.lowercased() == binding.surfaceID else { throw stale() }
             if method == "mobile.chat.interrupt" {
@@ -157,7 +161,7 @@ public actor TuiControlAdapter: CmuxControlling {
             // Recheck binding/revision after screen/state reads; never retarget an old session.
             let final = try await snapshot()
             guard final.generation == cleared.generation, final.revision == cleared.revision,
-                  final.bindings.first(where: { $0.id == id }) == binding else { throw stale() }
+                  stillBound(binding, in: final) else { throw stale() }
             var request = final.selectors(binding)
             request["text"] = .string((paste ? "\u{1b}[200~" + content + "\u{1b}[201~" : content) + "\r")
             request["expected_revision"] = .string(final.revision)
@@ -217,7 +221,7 @@ public actor TuiControlAdapter: CmuxControlling {
             }
             try await Task.sleep(for: restoreInterval)
             current = try await snapshot()
-            guard current.generation == start.generation, current.bindings.first(where: { $0.id == binding.id }) == binding else { throw stale() }
+            guard current.generation == start.generation, stillBound(binding, in: current) else { throw stale() }
             state = try await terminalState(current, binding: binding)
         }
         if prompt.isEmpty(state, provider: binding.provider) { return (current, state) }
@@ -229,7 +233,7 @@ public actor TuiControlAdapter: CmuxControlling {
         let expected = sent.filter { !$0.isWhitespace }
         for check in 0..<restoreChecks {
             if check > 0 { try? await Task.sleep(for: restoreInterval) }
-            guard !Task.isCancelled, let current = try? await snapshot(), current.bindings.first(where: { $0.id == binding.id }) == binding,
+            guard !Task.isCancelled, let current = try? await snapshot(), stillBound(binding, in: current),
                   let state = try? await terminalState(current, binding: binding), let typed = prompt.typedText(state, provider: binding.provider) else { return }
             if typed.isEmpty { continue }
             guard typed.filter({ !$0.isWhitespace }) == expected else { return }
@@ -280,6 +284,28 @@ public actor TuiControlAdapter: CmuxControlling {
     private func descriptor(_ binding: TuiSessionSnapshot.Binding) -> [String: JSONValue] {
         ["session_id": .string(binding.id), "agent": .string(binding.provider), "title": .string(binding.title), "cwd": binding.cwd.map(JSONValue.string) ?? .null,
          "workspace_id": .string(binding.workspaceID), "surface_id": .string(binding.surfaceID), "state": .string(binding.state), "status": .string(binding.state)]
+    }
+    /// The live hook binding, or the archived one whose terminal is still running: an Agent that resumed without the
+    /// daemon re-registering it keeps its terminal, so it stays reachable instead of reading as historical.
+    /// A terminal that a live binding already claims is not revived, so a replacement session is never mistaken for
+    /// the conversation that used to run there.
+    private func activeBinding(id: String?, in current: TuiSessionSnapshot) -> TuiSessionSnapshot.Binding? {
+        guard let id else { return nil }
+        let key = id.lowercased()
+        if let live = current.bindings.first(where: { $0.id.lowercased() == key }) { return live }
+        guard let archived = catalog.values.first(where: { $0.id.lowercased() == key }), current.runningTerminals.contains(archived.surfaceID) else { return nil }
+        return current.bindings.contains { $0.surfaceID == archived.surfaceID } ? nil : archived
+    }
+    /// The same rule keyed by the phone's surface id, for reads that name a surface rather than a conversation.
+    private func activeBinding(surfaceID: String?, in current: TuiSessionSnapshot) -> TuiSessionSnapshot.Binding? {
+        guard let id = surfaceID?.lowercased() else { return nil }
+        if let live = current.bindings.first(where: { $0.surfaceID == id }) { return live }
+        guard !current.bindings.contains(where: { $0.surfaceID == id }) else { return nil }
+        return catalog.values.first { $0.surfaceID == id && current.runningTerminals.contains($0.surfaceID) }
+    }
+    /// Whether the conversation is still the same live one across a re-read; a revived binding must pass this too.
+    private func stillBound(_ binding: TuiSessionSnapshot.Binding, in current: TuiSessionSnapshot) -> Bool {
+        activeBinding(id: binding.id, in: current) == binding
     }
     private func stale() -> BridgeError { BridgeError("stale_binding", "This daemon Agent no longer has its verified terminal/workspace binding.", status: 409) }
     private func unsupported() -> BridgeError { BridgeError("unsupported", "This operation is not supported by the daemon backend.", status: 422) }

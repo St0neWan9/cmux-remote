@@ -26,6 +26,9 @@ struct TuiSessionSnapshot: Sendable {
     let surfaces: Set<String>
     /// Each terminal's own title, which an agent may use for its activity (Claude Code marks idle with `✳`).
     let terminalTitles: [String: String]
+    /// Terminals the daemon still reports as running. A conversation whose Agent stopped reporting keeps its
+    /// terminal, so this is what separates a resumed Agent the daemon has forgotten from a historical one.
+    let runningTerminals: Set<String>
     init(_ raw: JSONValue) throws {
         let identity = TuiResourceIdentity()
         machine = try identity.validate(raw["machine"]["id"].string, prefix: "machine")
@@ -77,6 +80,9 @@ struct TuiSessionSnapshot: Sendable {
         rawWorkspaces = Dictionary(uniqueKeysWithValues: workspaceRows.keys.map { (identity.uuid(machine: machineID, session: sessionID, resource: $0), $0) })
         surfaces = Set(terminals.keys.map { identity.uuid(machine: machineID, session: sessionID, resource: $0) })
         terminalTitles = terminals.compactMapValues { $0["title"].string }
+        runningTerminals = Set(terminals.compactMap { id, row in
+            row["running"].bool == true && row["lifecycle"].string == "running" ? identity.uuid(machine: machineID, session: sessionID, resource: id) : nil
+        })
         var bound: [Binding] = [], claimed = Set<String>()
         for agent in arrays["agents"]! {
             guard agent["source"].string == "hook", let provider = agent["extra"]["agent"].string, ["claude", "codex"].contains(provider),

@@ -24,9 +24,25 @@ import CmuxRemoteCore
         #expect(UUID(uuidString: first) != nil)
         #expect(try await bridge.request("workspace.list", params: [:])["workspaces"].array![0]["id"].string == first)
         let records = try await service(bridge).sessions(); #expect(records.count == 1); let record = try #require(records.first); #expect(record.id.hasPrefix("tui:"))
-        await source.setAgentField("source", .string("socket"))
+        // A daemon record that is not hook provenance does not bind, and with its terminal gone it is historical.
+        await source.setAgentField("source", .string("socket")); await source.stopTerminal()
         let after = try await service(bridge).sessions(); #expect(after.count == 1 && after[0].state == "ended")
         #expect(try await service(adapter(source)).sessions().isEmpty)
+    }
+    @Test func anAgentTheDaemonForgotOnARunningTerminalStaysWritable() async throws {
+        let root = try temporary(); defer { try? FileManager.default.removeItem(at: root) }
+        let source = TuiResourceFixture(), bridge = adapter(source, root: root), session = service(bridge, root: root)
+        let id = try #require(try await session.sessions().first?.id)
+        #expect(try await session.sessions().first?.writable == true)
+        // The Agent resumed into the same terminal and the daemon dropped its hook row; the conversation reads as
+        // idle rather than ended, and a send still reaches that terminal.
+        await source.clearAgents()
+        let resumed = service(adapter(source, root: root), root: root)
+        let revived = try #require(try await resumed.sessions().first)
+        #expect(revived.id == id); #expect(revived.state == "idle"); #expect(revived.writable)
+        _ = try await resumed.send(id: id, request: .init(text: "after the resume"))
+        #expect(await source.effects.count == 1)
+        #expect(await source.effects.first?.1["terminal"]?.string == TuiResourceFixture.terminal)
     }
     @Test func ambiguousWorkspaceAndReplacedDaemonCannotBecomeWritable() async throws {
         let source = TuiResourceFixture(); await source.makeAmbiguous()
@@ -146,7 +162,7 @@ import CmuxRemoteCore
         let source = TuiResourceFixture(), bridge = adapter(source, root: root), session = service(bridge, root: root)
         let id = try #require(try await session.sessions().first?.id)
         #expect(try await session.history(id: id, beforeSeq: nil, limit: 20).messages.count == 1)
-        await source.clearAgents()
+        await source.clearAgents(); await source.stopTerminal()
         let restarted = service(adapter(source, root: root), root: root)
         let historical = try #require(try await restarted.sessions().first)
         #expect(historical.id == id && !historical.writable)
