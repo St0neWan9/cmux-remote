@@ -11,6 +11,7 @@ public actor SessionService {
     private let cmux: any CmuxControlling
     private let transcriptRoots: [URL]
     private let files: ProjectFilePolicy
+    private let commandLine = AgentCommandLine()
     private let reader = TranscriptReader()
     private var records: [String: Record] = [:]
     private var transcriptTails: [String: (size: Int, cwd: String?, lastMessage: Date?, title: String?)] = [:]
@@ -118,8 +119,10 @@ public actor SessionService {
             record.descriptor.workspaceID = item["workspace_id"].string
             record.descriptor.surfaceID = item["surface_id"].string
             record.descriptor.state = item["state"].string ?? "unknown"
-            // The backend says whether it verified an Agent session that can still be reopened.
-            record.descriptor.resumable = item["resumable"].bool == true
+            // cmux verifies its own daemon sessions; for a desktop session it only keeps the row, so this
+            // side applies the same rule it documents: an ended Agent whose transcript still records the
+            // working directory can be reopened, and nothing else may claim it can.
+            record.descriptor.resumable = item["resumable"].bool == true || desktopResumable(item, record: record)
             discovered[id] = record
         }
         for (id, record) in discovered {
@@ -151,6 +154,20 @@ public actor SessionService {
             records[id]?.descriptor.state = event["state"].string ?? "unknown"
         }
         return records.values.map(\.descriptor).sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+    }
+    /// Whether a desktop row the daemon keeps after an exit can still be reopened.
+    ///
+    /// cmux reports `resumable` for its own daemon sessions only; a desktop row carries the retained
+    /// workspace/surface and a transcript path instead. The rule matches what `resume` needs: the Agent
+    /// is gone (`ended`), the workspace is still known, and the transcript is both readable under a
+    /// configured root and records the directory the Agent ran in.
+    private func desktopResumable(_ item: JSONValue, record: Record) -> Bool {
+        guard item["state"].string == "ended",
+              record.descriptor.workspaceID != nil,
+              let path = record.transcript,
+              let attributes = try? FileManager.default.attributesOfItem(atPath: path),
+              let size = (attributes[.size] as? NSNumber)?.intValue, size > 0 else { return false }
+        return TranscriptWorkingDirectory().read(path: path, size: size) != nil
     }
     public func acceptEvent(_ frame: JSONValue) {
         if let boot = frame["boot_id"].string, eventBoot != nil && eventBoot != boot { liveBindings.removeAll(); records.removeAll() }
@@ -296,12 +313,50 @@ public actor SessionService {
         try await access?.require(.conversationStart, workspace: workspace)
         if let receipt = try await begin(operationID, signature: signature, workspace: workspace, capability: .conversationStart, access: access) { return receipt }
         do {
-            let result = try await cmux.request("mobile.chat.resume", params: [
-                "session_id": .string(value.id),
-                "operation_key": .string(IdentityCryptography().digest(Data(((access?.clientID ?? "owner") + ":" + operationID.uuidString).utf8)))])
-            guard result["surface_id"].string != nil else { throw BridgeError("outcome_unknown", "cmux did not confirm the reopened terminal.", status: 409) }
+            if id.hasPrefix("tui:") {
+                // The daemon owns the reopen: it runs the recorded launcher itself and deduplicates by key.
+                let result = try await cmux.request("mobile.chat.resume", params: [
+                    "session_id": .string(value.id),
+                    "operation_key": .string(IdentityCryptography().digest(Data(((access?.clientID ?? "owner") + ":" + operationID.uuidString).utf8)))])
+                guard result["surface_id"].string != nil else { throw BridgeError("outcome_unknown", "cmux did not confirm the reopened terminal.", status: 409) }
+            } else {
+                try await desktopResume(value, workspace: workspace, access: access)
+            }
             return try await complete(operationID, access: access)
         } catch { journal?.uncertain(id: operationID); throw mutationError(error) }
+    }
+
+    /// Desktop cmux has no resume RPC, so reopening is the same fixed terminal start a new session uses:
+    /// the command, the Agent session and the directory all come from the Bridge's own record.
+    private func desktopResume(_ value: SessionDescriptor, workspace: String, access: SessionAccess?) async throws {
+        guard let path = records[value.id]?.transcript,
+              let attributes = try? FileManager.default.attributesOfItem(atPath: path),
+              let size = (attributes[.size] as? NSNumber)?.intValue, size > 0,
+              let recorded = TranscriptWorkingDirectory().read(path: path, size: size),
+              let directory = try? files.projectRoot(recorded),
+              let agent = LaunchAgent(rawValue: value.agent) else { throw BridgeError("read_only", "This conversation's directory is no longer available.", status: 409) }
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: directory.path, isDirectory: &isDirectory), isDirectory.boolValue else {
+            throw BridgeError("read_only", "This conversation's directory is no longer available.", status: 409)
+        }
+        try await access?.require(.conversationStart, workspace: workspace)
+        // The shell that owns the terminal is the one the Agent ran under, so a resumed command sees the same PATH.
+        let shell = ProcessInfo.processInfo.environment["SHELL"].flatMap { $0.hasPrefix("/") ? $0 : nil } ?? "/bin/zsh"
+        let command = agent.resumeCommand(sessionID: value.id)
+        let line = "\(commandLine.quoted(shell)) -ic \(commandLine.quoted(command))"
+        let result: JSONValue
+        do {
+            result = try await cmux.request("surface.create", params: [
+                "workspace_id": .string(workspace), "type": .string("terminal"), "working_directory": .string(directory.path),
+                "initial_input": .string(line + "\r"), "focus": .bool(false)])
+        } catch let error as BridgeError where error.code == "outcome_unknown" {
+            throw error
+        } catch {
+            throw BridgeError("outcome_unknown", "The reopened terminal may or may not exist; check the workspace before trying again.", status: 409)
+        }
+        guard let surface = result["surface_id"].string, UUID(uuidString: surface) != nil else {
+            throw BridgeError("outcome_unknown", "cmux did not confirm the reopened terminal.", status: 409)
+        }
     }
 
     public func interrupt(id: String, request: InterruptRequest, access: SessionAccess? = nil) async throws -> MutationReceipt {

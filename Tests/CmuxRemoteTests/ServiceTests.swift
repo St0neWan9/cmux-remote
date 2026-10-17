@@ -180,3 +180,89 @@ private actor FakeCmux: CmuxControlling {
         #expect(await cmux.screenReadCount == 0)
     }
 }
+
+/// A desktop backend that keeps a transcript-backed row and records the terminal it is asked to open.
+private actor DesktopCmux: CmuxControlling {
+    let transcript: String?
+    let ended: Bool
+    var created: [[String: JSONValue]] = []
+    init(transcript: String?, ended: Bool = true) { self.transcript = transcript; self.ended = ended }
+    func request(_ method: String, params: [String: JSONValue]) async throws -> JSONValue {
+        let id = "515f4a08-349b-4fef-9edb-c42c0881383b"
+        switch method {
+        case "vault.sessions":
+            guard let transcript else { return .object(["sessions": .array([])]) }
+            return .object(["sessions": .array([.object(["session_id": .string(id), "agent": .string("claude"), "title": .string("Task"), "cwd": .string("/tmp/project"), "file": .string(transcript), "status": .string(ended ? "exited" : "live")])])])
+        case "chat.sessions.dump":
+            guard let transcript else { return .object(["sessions": .array([])]) }
+            return .object(["sessions": .array([.object(["session_id": .string(id), "agent": .string("claude"), "workspace_id": .string("workspace"), "surface_id": .string("surface"), "state": .string(ended ? "ended" : "idle"), "transcript_path": .string(transcript)])])])
+        case "surface.create":
+            created.append(params)
+            return .object(["surface_id": .string("11111111-1111-1111-1111-111111111111")])
+        default: return .object([:])
+        }
+    }
+}
+
+@Suite struct DesktopResumeTests {
+    /// A transcript whose first line records the directory the Agent ran in.
+    private func transcript(in root: URL, cwd: String?) throws -> String {
+        let file = root.appendingPathComponent("515f4a08-349b-4fef-9edb-c42c0881383b.jsonl")
+        var fields: [String: JSONValue] = ["type": .string("user"), "uuid": .string("first")]
+        if let cwd { fields["cwd"] = .string(cwd) }
+        try Data((String(decoding: try JSONEncoder().encode(JSONValue.object(fields)), as: UTF8.self) + "\n").utf8).write(to: file)
+        return file.path
+    }
+    /// A project inside a home the policy accepts; `ProjectFilePolicy` refuses the home and its parents.
+    private func project(_ root: URL) throws -> (home: URL, directory: URL) {
+        let home = root.appendingPathComponent("home", isDirectory: true)
+        let project = home.appendingPathComponent("project", isDirectory: true)
+        try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
+        return (home, project)
+    }
+    @Test func anEndedDesktopRowWhoseTranscriptRecordsItsDirectoryIsResumable() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("cmux-resume-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let (home, project) = try project(root)
+        let path = try transcript(in: root, cwd: project.path)
+        let service = SessionService(cmux: DesktopCmux(transcript: path), home: home, transcriptRoots: [root])
+        let row = try await service.sessions().first
+        // cmux's desktop dump carries no `resumable`, so the Bridge applies the documented rule itself.
+        #expect(row?.resumable == true)
+        #expect(row?.writable == false)
+    }
+    @Test func aTranscriptWithoutItsOwnDirectoryIsNotResumable() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("cmux-resume-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let path = try transcript(in: root, cwd: nil)
+        let service = SessionService(cmux: DesktopCmux(transcript: path), home: try project(root).home, transcriptRoots: [root])
+        #expect(try await service.sessions().first?.resumable == false)
+    }
+    @Test func aLiveDesktopRowIsNotResumable() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("cmux-resume-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let (home, project) = try project(root)
+        let path = try transcript(in: root, cwd: project.path)
+        let service = SessionService(cmux: DesktopCmux(transcript: path, ended: false), home: home, transcriptRoots: [root])
+        // A live conversation is never offered as a reopen target.
+        #expect(try await service.sessions().first?.resumable == false)
+    }
+    @Test func resumeStartsTheRecordedAgentInTheTranscriptsDirectory() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("cmux-resume-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let (home, project) = try project(root)
+        let path = try transcript(in: root, cwd: project.path)
+        let cmux = DesktopCmux(transcript: path)
+        let service = SessionService(cmux: cmux, home: home, transcriptRoots: [root])
+        _ = try await service.resume(id: "515f4a08-349b-4fef-9edb-c42c0881383b", request: ResumeRequest())
+        let created = await cmux.created
+        // Desktop cmux has no resume RPC: the reopen is a fixed terminal start with the recorded command.
+        #expect(created.count == 1)
+        #expect(created.first?["working_directory"]?.string == project.path)
+        #expect(created.first?["initial_input"]?.string?.contains("--resume 515f4a08-349b-4fef-9edb-c42c0881383b") == true)
+    }
+}
