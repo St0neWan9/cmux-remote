@@ -24,7 +24,9 @@ extension AppModel {
     ///
     /// Returning from a long background redials every Mac, since its links are likely half-open. Automatic retries,
     /// the bar's Retry and a pull touch only Macs already known to be down: redialing a working link drops its live updates.
+    /// A person's retry starts a fresh automatic-retry budget, so a Mac given up on can be tried again.
     func reconnect(onlyLost: Bool = false) async {
+        reconnectSchedule.rearm()
         await redial(onlyLost ? links.filter { linkStates[$0.id] != .connected } : links)
     }
 
@@ -52,7 +54,7 @@ extension AppModel {
             await reconnect()
         }
         let observed = links.map { ($0.id, $0.client) }
-        let schedule = ReconnectSchedule()
+        let schedule = reconnectSchedule
         await withTaskGroup(of: Void.self) { group in
             for (id, client) in observed {
                 group.addTask { [weak self] in
@@ -95,13 +97,23 @@ extension AppModel {
         var states: [String: LinkState] = [:]
         for link in links { if let state = linkStates[link.id] { states[link.id] = state } }
         switch schedule.step(states: states, waited: full) {
-        case .idle: return
+        case .idle:
+            // Say it once instead of dialing forever; the bar keeps its Retry for a path that comes back.
+            if schedule.exhausted, !reportedExhaustion {
+                reportedExhaustion = true
+                diagLog(.info, category: "link", "auto retry stopped after \(schedule.attempt) attempts; a Mac is still down")
+            }
+            if !schedule.exhausted { reportedExhaustion = false }
+            return
         case .redialDropped(let hosts):
+            reportedExhaustion = false
             diagLog(.info, category: "link", "auto retry #1 at once: link dropped host=\(hosts.map { String($0.prefix(8)) }.joined(separator: ","))")
             await redial(links.filter { hosts.contains($0.id) })
         case .retryLost(let attempt, let waited):
+            reportedExhaustion = false
             diagLog(.info, category: "link", "auto retry #\(attempt) after waiting \(waited.components.seconds)s")
-            await reconnect(onlyLost: true)
+            // The automatic path must not rearm the budget it just spent.
+            await redial(links.filter { linkStates[$0.id] != .connected })
         }
     }
 }
