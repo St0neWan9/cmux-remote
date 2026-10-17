@@ -176,8 +176,21 @@ final class ConversationModel {
         // On screen the conversation follows its own changes; an off-screen follower would subscribe to them again.
         observing = true; unfollow(); defer { observing = false }
         let paths = ["/v1/sessions/\(session.id)/history", "/v1/sessions/\(session.id)/preview", "/v1/sessions"]
-        for await _ in client.changes(paths: paths) {
-            guard !Task.isCancelled, readsEnabled else { return }; await refresh(); await refreshQuestions()
+        var failures = 0
+        while !Task.isCancelled, readsEnabled {
+            var delivered = false
+            for await _ in client.changes(paths: paths) {
+                guard !Task.isCancelled, readsEnabled else { return }
+                delivered = true
+                await refresh(); await refreshQuestions()
+            }
+            // The watch ended while the page is still on screen: the link bounced past its
+            // subscription or a refusal took it down. Re-arm instead of freezing the page; the
+            // pause bounds the retries when a refusal is permanent.
+            guard !Task.isCancelled, readsEnabled else { return }
+            failures = delivered ? 0 : min(failures + 1, 5)
+            try? await Task.sleep(for: .seconds(1 << failures))
+            await refresh()
         }
     }
     /// Whether an off-screen follower is running for this conversation.
@@ -196,10 +209,21 @@ final class ConversationModel {
     /// screen, the session list and the feed already use some; the live tail is read with the history anyway.
     private func followHidden(every interval: Duration) async {
         await syncHidden()
-        for await _ in client.changes(paths: ["/v1/sessions/\(session.id)/history"]) {
+        var failures = 0
+        while !Task.isCancelled {
+            var delivered = false
+            for await _ in client.changes(paths: ["/v1/sessions/\(session.id)/history"]) {
+                guard !Task.isCancelled else { return }
+                delivered = true
+                try? await Task.sleep(for: interval)
+                guard !Task.isCancelled else { return }
+                await syncHidden()
+            }
+            // The watch ended while the conversation still runs off screen: re-arm so switching
+            // back to it shows its latest messages instead of the snapshot from before the drop.
             guard !Task.isCancelled else { return }
-            try? await Task.sleep(for: interval)
-            guard !Task.isCancelled else { return }
+            failures = delivered ? 0 : min(failures + 1, 5)
+            try? await Task.sleep(for: .seconds(1 << failures))
             await syncHidden()
         }
     }
