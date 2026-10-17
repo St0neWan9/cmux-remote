@@ -27,6 +27,8 @@ struct FeedView: View {
                             Text(item["title"].string ?? item["tool_name"].string ?? String(localized: "feed.event")).font(.headline)
                             if let plan = item["plan"].string { MarkdownMessageView(text: plan) }
                             if let prompt = item["question_prompt"].string { Text(prompt) }
+                            // A prompt's own words: the terminal dialog it was read from, shown above its choices.
+                            if let body = item["body"].string, !body.isEmpty { Text(body).font(.callout).textSelection(.enabled) }
                             if let detail = item["tool_input"].string { Text(detail).font(.caption.monospaced()).textSelection(.enabled) }
                             if let text = item["text"].string ?? item["reason"].string { MarkdownMessageView(text: text) }
                             if let result = item["tool_result"].string {

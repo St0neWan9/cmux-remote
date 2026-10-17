@@ -35,11 +35,15 @@ struct FeedQuestionView: View {
                         }.buttonStyle(.plain).disabled(busy).accessibilityIdentifier("feed.question.option." + String(index) + "." + option.id)
                             .accessibilityAddTraits(drafts[index]?.selected.contains(option.id) == true ? .isSelected : [])
                     }
-                    TextField(String(localized: "feed.custom"), text: Binding(get: { drafts[index]?.customText ?? "" }, set: { text in
-                        var draft = drafts[index] ?? FeedQuestionDraft(); draft.typeCustom(text); drafts[index] = draft
-                    }), axis: .vertical).lineLimit(1...4)
-                        .modifier(FloatingInput())
-                        .disabled(busy).accessibilityIdentifier("feed.question.custom." + String(index))
+                    // A prompt that names every answer it accepts withholds the extra ways to reply: typing a
+                    // third option or sending nothing would be answers the Agent cannot act on.
+                    if question["allow_custom"].bool != false {
+                        TextField(String(localized: "feed.custom"), text: Binding(get: { drafts[index]?.customText ?? "" }, set: { text in
+                            var draft = drafts[index] ?? FeedQuestionDraft(); draft.typeCustom(text); drafts[index] = draft
+                        }), axis: .vertical).lineLimit(1...4)
+                            .modifier(FloatingInput())
+                            .disabled(busy).accessibilityIdentifier("feed.question.custom." + String(index))
+                    }
                 }
             }
             ActionRow {
@@ -47,8 +51,10 @@ struct FeedQuestionView: View {
                 .buttonStyle(FloatingButtonStyle(prominent: true))
                 .disabled(busy || (answers.isEmpty && !(!questions.isEmpty && questions.allSatisfy { ($0["options"].array ?? []).isEmpty })))
                 .accessibilityIdentifier("feed.question.submit")
-            Button(String(localized: "feed.skip_questions")) { submit([]) }.buttonStyle(FloatingButtonStyle()).disabled(busy || questions.isEmpty)
-                .accessibilityIdentifier("feed.question.skip")
+            if questions.contains(where: { $0["allow_skip"].bool != false }) {
+                Button(String(localized: "feed.skip_questions")) { submit([]) }.buttonStyle(FloatingButtonStyle()).disabled(busy || questions.isEmpty)
+                    .accessibilityIdentifier("feed.question.skip")
+            }
             }
         }
     }

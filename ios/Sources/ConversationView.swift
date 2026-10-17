@@ -40,6 +40,10 @@ struct ConversationView: View {
     @State private var linkState: LinkState?
     /// Whether the marker above the first loaded message is within reach of the top of the page.
     @State private var topNear = false
+    /// The rendered height of the newest timeline row. A page opens at its start when that row is taller than the page.
+    @State private var lastRowHeight: CGFloat = 0
+    /// The height of the conversation area, measured on the same geometry the timeline uses.
+    @State private var viewportHeight: CGFloat = 0
     private let hostName: String
     init(model: ConversationModel, hostName: String = "") {
         _model = State(initialValue: model); self.hostName = hostName
@@ -51,7 +55,7 @@ struct ConversationView: View {
                 timeline(bottom: viewport.size.height) { Task { await loadOlder(proxy) } }
             }
             .scrollClipDisabled()
-            .modifier(InitialBottomAnchor())
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { viewportHeight = $0 }
             .coordinateSpace(name: "chatTimeline")
             .onPreferenceChange(TimelineBottomPreferenceKey.self) { bottom in
                 // Scrolling reports every frame; only a real change may invalidate the timeline.
@@ -61,7 +65,7 @@ struct ConversationView: View {
                     // While the page holds its place, the newest row coming into view does not resume following.
                     if !holdingPlace, atLatest != visible { atLatest = visible }
                 }
-                else if bottom.isFinite && !latestVisible { scrollTrace.note("scroll follower"); proxy.scrollTo("latest", anchor: .bottom) }
+                else if bottom.isFinite && !latestVisible { scrollTrace.note("scroll follower"); scrollToNewest(proxy) }
             }
             .modifier(TimelineScrollInteraction(userScrolling: $userScrolling, atLatest: $atLatest, latestVisible: latestVisible))
             .onChange(of: userScrolling) { _, scrolling in scrollTrace.note("userScrolling=\(scrolling)"); if scrolling { holdingPlace = false } }
@@ -73,7 +77,7 @@ struct ConversationView: View {
             .refreshable { await pullToRefresh(proxy) }
             .overlay(alignment: .bottom) {
                 if !atLatest {
-                    Button { holdingPlace = false; atLatest = true; withAnimation { scrollTrace.note("scroll latest-button"); proxy.scrollTo("latest", anchor: .bottom) } } label: {
+                    Button { holdingPlace = false; atLatest = true; withAnimation { scrollTrace.note("scroll latest-button"); scrollToNewest(proxy) } } label: {
                         Image(systemName: "arrow.down").font(.system(size: 20, weight: .medium)).frame(width: 42, height: 42)
                             .background(Color.white, in: Circle()).shadow(color: .black.opacity(0.1), radius: 10, y: 4)
                     }.buttonStyle(.plain).accessibilityLabel(String(localized: "chat.latest")).accessibilityIdentifier("chat.latest").padding(.bottom, 10)
@@ -81,10 +85,10 @@ struct ConversationView: View {
             }
             .onChange(of: model.timelineItems.last?.id) { _, _ in
                 if !initiallyScrolled && !model.messages.isEmpty { settleAtBottom(proxy); initiallyScrolled = true }
-                else if atLatest { scrollTrace.note("scroll new-item"); proxy.scrollTo("latest", anchor: .bottom) }
+                else if atLatest { scrollTrace.note("scroll new-item"); scrollToNewest(proxy) }
             }
-            .onChange(of: model.latestMessageText) { _, _ in if atLatest { scrollTrace.note("scroll new-text"); proxy.scrollTo("latest", anchor: .bottom) } }
-            .onChange(of: model.preview) { _, _ in if atLatest { scrollTrace.note("scroll preview"); proxy.scrollTo("latest", anchor: .bottom) } }
+            .onChange(of: model.latestMessageText) { _, _ in if atLatest { scrollTrace.note("scroll new-text"); scrollToNewest(proxy) } }
+            .onChange(of: model.preview) { _, _ in if atLatest { scrollTrace.note("scroll preview"); scrollToNewest(proxy) } }
             // Opening a cached conversation re-enters with its follow state; start from the last message.
             .onAppear {
                 userScrolling = false; atLatest = true; holdingPlace = false
@@ -96,7 +100,7 @@ struct ConversationView: View {
                 }
             }
             .onDisappear { settleTask?.cancel(); settleTask = nil; initialScroll?.cancel(); initialScroll = nil }
-            .onChange(of: model.jumpToLatest) { _, _ in holdingPlace = false; atLatest = true; withAnimation { scrollTrace.note("scroll after-send"); proxy.scrollTo("latest", anchor: .bottom) } }
+            .onChange(of: model.jumpToLatest) { _, _ in holdingPlace = false; atLatest = true; withAnimation { scrollTrace.note("scroll after-send"); scrollToNewest(proxy) } }
             .environment(\.selectText) { text, monospaced in selecting = SelectTextPage.Request(text: text, monospaced: monospaced) }
         }
         }
@@ -244,6 +248,10 @@ struct ConversationView: View {
             ForEach(model.timelineItems) { item in
                 timelineRow(item, firstResponse: firstResponse, lastResponse: lastResponse, imagesByMessage: imagesByMessage, activeAnchor: activeAnchor, runningSince: runningSince, bottom: bottom)
                     .id(item.id)
+                    // Its height decides the opening anchor: a reply taller than the page opens at its first line.
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+                        if item.id == model.timelineItems.last?.id { lastRowHeight = height }
+                    }
             }
             if activeAnchor == nil, let runningSince {
                 LiveRunLabel(since: runningSince, compacting: model.compacting, showsDivider: true, font: .subheadline).modifier(HeaderContentEffect(bottom: bottom))
@@ -268,6 +276,9 @@ struct ConversationView: View {
                     }
                 }
         }.padding(.horizontal, 18).padding(.top, 12).padding(.bottom, 18)
+            // A conversation shorter than the page rests against the composer, the way a chat log reads,
+            // instead of floating at the top with the page's empty below it.
+            .frame(minHeight: bottom, alignment: .bottom)
             // A tap on the conversation puts the keyboard away; rows keep their own taps.
             .simultaneousGesture(TapGesture().onEnded { composerFocused = false })
     }
@@ -282,11 +293,21 @@ struct ConversationView: View {
                 ResponseRunLabel(seconds: seconds, recorded: response.recordedDuration)
             }
             if item.isActivity { ActivityGroupView(item: item, projectRoot: model.session.cwd, openFile: model.client.allows(.projectRead) ? { selectedFile = $0; showProject = true } : nil, images: images, openImage: { selectedImage = $0 }, openDetail: openToolDetail, isLatest: item.id == model.timelineItems.last?.id) }
-            else { MessageRow(message: item.first, projectRoot: model.session.cwd, openFile: model.client.allows(.projectRead) ? { selectedFile = $0; showProject = true } : nil, images: images, openImage: { selectedImage = $0 }, openDetail: openToolDetail) }
+            else {
+                let prompt = item.first.kind.questionPrompt
+                MessageRow(message: item.first, projectRoot: model.session.cwd, openFile: model.client.allows(.projectRead) ? { selectedFile = $0; showProject = true } : nil, images: images, openImage: { selectedImage = $0 }, openDetail: openToolDetail,
+                           pendingQuestion: prompt.flatMap { model.pendingQuestions[$0] }, answering: model.answeringQuestion,
+                           answerQuestion: model.client.canReplyFeed ? { answers in Task { await model.answer(prompt: prompt ?? "", selections: answers) } } : nil,
+                           chosenAnswer: prompt.flatMap { model.answeredQuestions[$0] })
+            }
             if let response = lastResponse[item.id], response.completed, case .prose = item.first.kind {
                 ResponseFooter(response: response, text: model.responseText(response), quote: quote)
             }
-        }.modifier(HeaderContentEffect(bottom: bottom))
+        }
+        // An answerable question carries its own text field. A `visualEffect` rasterizes the subtree even with
+        // every layer effect disabled, and a rasterized `TextField` draws as the system's placeholder, so this
+        // row opts out of the modifier entirely rather than making it a no-op.
+        .modifier(BlurUnless(disabled: item.first.kind.questionPrompt.map { model.pendingQuestions[$0] != nil } ?? false, bottom: bottom))
     }
     /// Puts text into the follow-up draft as a Markdown quote, ahead of what is already typed.
     private func quote(_ text: String) {
@@ -325,9 +346,24 @@ struct ConversationView: View {
                 guard !Task.isCancelled else { return }
                 if attempt > 0 { try? await Task.sleep(for: .milliseconds(60)) }
                 guard !Task.isCancelled, atLatest else { return }
-                scrollTrace.note("scroll settle"); proxy.scrollTo("latest", anchor: .bottom)
+                scrollTrace.note("scroll settle"); scrollToNewest(proxy)
             }
         }
+    }
+    /// Scrolls to the newest message.
+    ///
+    /// The page's end is one empty marker, so anchoring it to the bottom always puts the newest row's *last*
+    /// line above the composer. That is right for a reply that fits, and wrong for one taller than the page:
+    /// its first line is then pushed off the top and the reader opens on the middle of it with the rest blank,
+    /// having to pull back to find where it began. A tall newest row therefore starts at the top instead.
+    ///
+    /// The target is the newest row rather than the page's end marker: a lazy stack estimates the height of a
+    /// row it has not built, and one very tall reply above makes that estimate wrong by thousands of points,
+    /// so the marker resolves into the middle of an earlier reply. Asking for the row itself builds it.
+    private func scrollToNewest(_ proxy: ScrollViewProxy) {
+        // A tall row is taller than the page only once it has laid out; until then the page's end is the target.
+        guard let newest = model.timelineItems.last?.id else { proxy.scrollTo("latest", anchor: .bottom); return }
+        proxy.scrollTo(newest, anchor: lastRowHeight > viewportHeight ? .top : .bottom)
     }
     /// The menu's refresh redials a link that may be dead before reading, and shows the dial while it happens.
     private func reconnect() async {

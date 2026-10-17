@@ -38,6 +38,18 @@ final class ConversationModel {
     var compacting = false
     /// Tasks the agent detached and has not finished. They outlive the turn that started them.
     private(set) var backgroundTasks: [BackgroundAgentTask] = []
+    /// Questions the agent is blocked on and the phone may answer, keyed by the prompt the card shows.
+    ///
+    /// The transcript holds the question the agent asked; the Feed holds the request that may be answered.
+    /// A card is answered only where both exist and name the same conversation and prompt.
+    private(set) var pendingQuestions: [String: JSONValue] = [:]
+    /// Whether answering is in flight, so a card does not accept a second tap.
+    var answeringQuestion = false
+    /// Answers given from this phone during the session, keyed by the prompt's own words.
+    ///
+    /// The transcript records the question but not the choice, so until the next history read carries it the
+    /// card would show no answer; this keeps the reader's own choice visible where they made it.
+    private(set) var answeredQuestions: [String: String] = [:]
     var error: String?
     var draft = ""
     let imageDraft = ImageDraftModel()
@@ -66,6 +78,10 @@ final class ConversationModel {
     private let fullReadInterval: TimeInterval = 60
     /// The last read of this conversation, shown on open while the fresh one is on its way.
     private let cache: ConversationCache?
+    /// Reads the requests waiting for the agent, of which this conversation's questions are the ones it owns.
+    private let readFeed: @Sendable () async throws -> [JSONValue]
+    /// Answers one of those requests.
+    private let replyFeed: @Sendable (String, JSONValue) async throws -> MutationReceipt
     private let refreshReads = ReadRequestOwner()
     private let olderReads = ReadRequestOwner()
     private var readsEnabled = true
@@ -89,6 +105,8 @@ final class ConversationModel {
          readHistory: (@Sendable (Int?) async throws -> ConversationSnapshot)? = nil,
          readPreview: (@Sendable () async throws -> PreviewSnapshot)? = nil,
          readTail: (@Sendable (Int) async throws -> ConversationSnapshot)? = nil,
+         readFeed: (@Sendable () async throws -> [JSONValue])? = nil,
+         replyFeed: (@Sendable (String, JSONValue) async throws -> MutationReceipt)? = nil,
          cache: ConversationCache? = nil) {
         self.session = session; self.client = client; speech = SpeechDraftModel(input: speechInput ?? UnavailableSpeechInput())
         let id = session.id
@@ -105,6 +123,9 @@ final class ConversationModel {
         else if readHistory == nil {
             self.readTail = { limit in try await client.get("/v1/sessions/\(id)/history", query: ["limit": String(limit)], as: ConversationSnapshot.self) }
         } else { self.readTail = nil }
+        // Questions live in the Feed, beside the transcript: the card the agent asked and the request that answers it.
+        self.readFeed = readFeed ?? { try await client.get("/v1/feed", as: JSONValue.self)["items"].array ?? [] }
+        self.replyFeed = replyFeed ?? { requestID, body in try await client.post("/v1/feed/\(requestID)/reply", body: body, as: MutationReceipt.self) }
         self.cache = cache
     }
     /// Shows what was read last, so opening a conversation never starts blank.
@@ -156,7 +177,7 @@ final class ConversationModel {
         observing = true; unfollow(); defer { observing = false }
         let paths = ["/v1/sessions/\(session.id)/history", "/v1/sessions/\(session.id)/preview", "/v1/sessions"]
         for await _ in client.changes(paths: paths) {
-            guard !Task.isCancelled, readsEnabled else { return }; await refresh()
+            guard !Task.isCancelled, readsEnabled else { return }; await refresh(); await refreshQuestions()
         }
     }
     /// Whether an off-screen follower is running for this conversation.
@@ -192,6 +213,7 @@ final class ConversationModel {
     func refresh() async {
         guard readsEnabled, !Task.isCancelled else { return }
         await refreshReads.run { [self] request in await readLatest(request) }
+        await refreshQuestions()
     }
     private func readLatest(_ request: UUID) async {
         do {
@@ -392,5 +414,25 @@ final class ConversationModel {
     private func logFailure(_ operation: String, _ error: any Error, shown: Bool) {
         diagLog(shown ? .error : .warning, category: "conversation",
                 "op=\(operation) error=\(TraceFormat().describe(error)) session=\(session.id.prefix(8)) shown=\(shown)")
+    }
+    /// Reads the questions this conversation's agent is waiting on.
+    ///
+    /// Only a pending `question` for this exact agent and session is offered, matched to the card by its prompt:
+    /// the transcript has no request identity, so the prompt the agent asked is what joins the two. A failure
+    /// leaves no answerable card rather than a stale one.
+    func refreshQuestions() async {
+        guard readsEnabled, !Task.isCancelled, client.canReplyFeed else { return }
+        guard let items = try? await readFeed() else { pendingQuestions = [:]; return }
+        let next = ConversationQuestions().pending(items, agent: session.agent, sessionID: session.id)
+        if next != pendingQuestions { pendingQuestions = next }
+    }
+    /// Answers the agent's question with the labels the reader chose, in the order the questions were asked.
+    func answer(prompt: String, selections: [String]) async {
+        guard let pending = pendingQuestions[prompt], let requestID = pending["request_id"].string, !answeringQuestion else { return }
+        answeringQuestion = true; defer { answeringQuestion = false }
+        do {
+            _ = try await replyFeed(requestID, ConversationQuestions().reply(requestID: requestID, selections: selections))
+            pendingQuestions[prompt] = nil; answeredQuestions[prompt] = selections.joined(separator: ", "); await refresh()
+        } catch { logFailure("question.reply", error, shown: true); self.error = ErrorPresentation().message(error) }
     }
 }

@@ -27,6 +27,17 @@ public enum ChatMessageKind: Sendable, Equatable {
     case unsupported(ChatUnsupportedPayload)
 }
 
+extension ChatMessageKind {
+    /// The prompt a question asked, when this is one.
+    ///
+    /// A question carries no request identity: the Feed request that answers it is joined to the card by the
+    /// prompt the agent asked, so a renderer needs the text without switching over the payload.
+    public var questionPrompt: String? {
+        if case .question(let value) = self { return value.prompt }
+        return nil
+    }
+}
+
 extension ChatMessageKind: Codable {
     private enum CodingKeys: String, CodingKey {
         case type
