@@ -51,6 +51,7 @@ struct SessionSidebarView: View {
                                         if multiple { Text(hosted.hostName).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
                                     }.frame(maxWidth: .infinity, alignment: .leading)
                                     if hosted.session.state.hasPrefix("working") { WorkingIndicator(size: 13) }
+                                    else if hosted.session.resumable { Image(systemName: "arrow.clockwise.circle").font(.caption).foregroundStyle(.secondary) }
                                     else if !hosted.session.writable { Image(systemName: "lock").font(.caption).foregroundStyle(.secondary) }
                                 }.frame(minHeight: 44).contentShape(Rectangle())
                             }.buttonStyle(.plain).accessibilityIdentifier("sidebar.session." + hosted.hostID + "." + hosted.session.id)
@@ -108,6 +109,7 @@ struct SessionSidebarView: View {
                         HStack {
                             Text(session.title).lineLimit(2).frame(maxWidth: .infinity, alignment: .leading)
                             if session.state.hasPrefix("working") { WorkingIndicator(size: 13) }
+                            else if session.resumable { Image(systemName: "arrow.clockwise.circle").font(.caption).foregroundStyle(.secondary) }
                             else if !session.writable { Image(systemName: "lock").font(.caption).foregroundStyle(.secondary) }
                         }.frame(minHeight: 44).contentShape(Rectangle())
                     }.buttonStyle(.plain).padding(.leading, 34).accessibilityIdentifier("sidebar.session." + section.hostID + "." + session.id)

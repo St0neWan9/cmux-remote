@@ -54,6 +54,18 @@ private actor PhoneUIBackend: CmuxControlling {
             return .object(["workspaces": .array(listed)])
         case "vault.sessions":
             var rows: [JSONValue] = [.object(["session_id": .string("fixture-session"), "agent": .string("claude"), "title": .string(vaultTitle), "cwd": .string(root.path), "file": .string(transcript.path)])]
+            // An Agent that exited while its terminal stayed open: the phone should offer to reopen it.
+            if flag("resumable-session") {
+                // A resumable conversation is one whose transcript still exists; the fixture writes a short one once.
+                let resumed = root.appendingPathComponent("resumable.jsonl")
+                if !FileManager.default.fileExists(atPath: resumed.path) {
+                    try Data([
+                        #"{"type":"user","uuid":"r1","timestamp":"2026-10-12T01:00:00Z","message":{"content":"重启前的问题"}}"#,
+                        #"{"type":"assistant","uuid":"r2","timestamp":"2026-10-12T01:00:05Z","message":{"content":"重启前的回答"}}"#,
+                    ].joined(separator: "\n").appending("\n").utf8).write(to: resumed)
+                }
+                rows.append(.object(["session_id": .string("fixture-resumable"), "agent": .string("claude"), "title": .string("UI 测试：可恢复会话"), "cwd": .string(root.path), "file": .string(resumed.path), "resumable": .bool(true)]))
+            }
             if let started { rows.append(.object(["session_id": .string("fixture-started"), "agent": .string(started.agent), "title": .string("UI 测试：新会话"), "cwd": .string(started.cwd), "file": .string(root.appendingPathComponent("started.jsonl").path)])) }
             return .object(["sessions": .array(rows)])
         // A started session is only recorded here: no terminal opens and no agent runs.
@@ -74,6 +86,9 @@ private actor PhoneUIBackend: CmuxControlling {
         case "chat.sessions.dump":
             var rows: [JSONValue] = [.object(["session_id": .string("fixture-session"), "agent": .string("claude"), "workspace_id": .string(workspace), "surface_id": .string(surface), "state": .string(flag("report-working") ? "working" : "idle"), "cwd": .string(root.path)])]
             if let started { rows.append(.object(["session_id": .string("fixture-started"), "agent": .string(started.agent), "workspace_id": .string(workspace), "surface_id": .string(startedSurface), "state": .string("idle"), "cwd": .string(started.cwd)])) }
+            if flag("resumable-session") {
+                rows.append(.object(["session_id": .string("fixture-resumable"), "agent": .string("claude"), "workspace_id": .string(workspace), "surface_id": .string("88888888-8888-8888-8888-888888888888"), "state": .string("ended"), "cwd": .string(root.path), "resumable": .bool(true)]))
+            }
             return .object(["sessions": .array(rows)])
         case "surface.input_state": return .object(["agent": .bool(true), "workspace_id": .string(workspace), "surface_id": .string(surface), "blocks_typing": .bool(false)])
         // The agent's working line lives only on the rendered screen, and the screen also carries the
@@ -99,6 +114,10 @@ private actor PhoneUIBackend: CmuxControlling {
             }
             return .object(["delivered": .bool(true)])
         case "mobile.chat.interrupt": return .object(["interrupted": .bool(true)])
+        // Reopening is recorded only; the fixture starts no agent and opens no terminal.
+        case "mobile.chat.resume":
+            guard params["session_id"]?.string != nil else { throw BridgeError("invalid_params", "fixture") }
+            return .object(["surface_id": .string("99999999-9999-9999-9999-999999999999")])
         case "mobile.chat.send":
             let stamp = ISO8601DateFormatter().string(from: Date())
             let images = params["attachments"]?.array ?? []

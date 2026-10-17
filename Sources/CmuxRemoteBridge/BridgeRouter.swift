@@ -187,6 +187,10 @@ public struct BridgeRouter: Sendable {
                     data = try encode(await service.file(id: id, path: relative, access: access))
                 case ("POST", "send"): data = try encode(await service.send(id: id, request: JSONDecoder().decode(SendRequest.self, from: body), access: access))
                 case ("POST", "interrupt"): data = try encode(await service.interrupt(id: id, request: JSONDecoder().decode(InterruptRequest.self, from: body), access: access))
+                // Reopening a conversation starts an Agent in its workspace, so it is a start-class action, not control.
+                case ("POST", "resume"):
+                    try await require(client, .conversationStart)
+                    data = try encode(await service.resume(id: id, request: JSONDecoder().decode(ResumeRequest.self, from: body), access: access))
                 default: throw BridgeError("not_found", "This resource is not available.", status: 404)
                 }
             } else if method == "POST", path.count == 4, path[0...1] == ["v1", "feed"], path[3] == "reply" {

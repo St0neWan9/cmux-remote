@@ -47,6 +47,29 @@ In a cmux-tui daemon workspace the roots also include the working directories of
 
 An older Bridge cannot decode `conversationStart` and closes the link during enrollment; the phone then asks again without it.
 
+## Resuming a conversation
+
+A conversation keeps its identity when its Agent session moves to a new terminal, because the id is derived from the
+provider and its session id rather than from a terminal. `GET /v1/sessions` reports `resumable: true` only when the
+Bridge has verified all of: the Agent session has a transcript under a configured root, that transcript itself records
+the working directory the Agent ran in, the conversation's workspace still exists, and — for a terminal that is still
+running — that its rendered screen no longer shows the Agent's prompt. A live conversation is never reported resumable,
+and a terminal whose screen cannot be read is neither writable nor resumable.
+
+| Route | Body | Result |
+| --- | --- | --- |
+| POST /v1/sessions/:id/resume | `{operation_id?}` | `{operation_id, accepted}` |
+
+This requires `conversationControl` and `conversationStart` for the conversation's workspace. The caller names only
+the conversation: the Agent, its session id and the working directory all come from the Bridge's own binding and the
+Agent's transcript, never from the request, so a device cannot choose what command runs or where. The directory is the
+one the Agent recorded itself, not the daemon's terminal `cwd`, which tracks `cd` and is absent once the terminal is
+gone. The Bridge starts `<agent> --resume <session-id>` (Claude, with the owner's fixed flags) or
+`codex resume <session-id>` in a new terminal of that workspace through the same `surface.create`/`workspace.run`
+path as a new conversation, and the phrase is deduplicated by the operation identity, so a retry cannot open a second
+terminal. A conversation that is not resumable is `read_only`; an unconfirmed start is `outcome_unknown` and is never
+retried under the same identity.
+
 ## Terminal mirror resources
 
 These routes require signed v2 requests. Legacy shared-token clients cannot use
