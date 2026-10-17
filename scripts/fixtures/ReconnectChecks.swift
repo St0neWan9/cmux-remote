@@ -51,6 +51,27 @@ enum ReconnectChecks {
         let busyFull = await busy.wait()
         check(!busyFull && busy.step(states: ["studio": .disconnected], waited: busyFull) == .redialDropped(["studio"]), "A drop seen during a dial waited a full pause")
 
+        // A Mac that stays down is retried a bounded number of times, then left alone until something re-arms it.
+        let bounded = ReconnectSchedule(pauses: [.milliseconds(40)], maxAttempts: 2)
+        bounded.observe(host: "studio", from: nil, to: .disconnected)
+        _ = await bounded.wait()
+        check(bounded.step(states: ["studio": .disconnected], waited: true) == .retryLost(attempt: 1, waited: .milliseconds(40)),
+              "A Mac whose dial failed was not retried inside its budget")
+        _ = await bounded.wait()
+        check(bounded.step(states: ["studio": .disconnected], waited: true) == .retryLost(attempt: 2, waited: .milliseconds(40)),
+              "The last automatic retry was skipped")
+        _ = await bounded.wait()
+        check(bounded.exhausted && bounded.step(states: ["studio": .disconnected], waited: true) == .idle,
+              "A dead path was dialed past its retry budget")
+        // Another pause changes nothing: the schedule stays idle instead of resuming the loop.
+        _ = await bounded.wait()
+        check(bounded.step(states: ["studio": .disconnected, "laptop": .connected], waited: true) == .idle,
+              "An exhausted schedule resumed retrying a dead Mac")
+        // A person's retry (or a network change) starts a fresh budget.
+        bounded.rearm()
+        check(!bounded.exhausted && bounded.step(states: ["studio": .disconnected], waited: true) == .retryLost(attempt: 1, waited: .milliseconds(40)),
+              "Re-arming did not let a lost Mac be dialed again")
+
         // The race loser's line is informational; real failures stay warnings.
         check(diagLinkLevel("dial lan cancelled after 2706ms: relay connected first") == .info, "A path that lost the dial race was logged as a warning")
         check(diagLinkLevel("dial relay cancelled after 41ms: lan connected first") == .info, "A relay that lost the dial race was logged as a warning")

@@ -27,6 +27,10 @@ final class AppModel {
     var linkStates: [String: LinkState] = [:]
     /// When the app last left the foreground, so a short switch does not force every link to dial again.
     @ObservationIgnored var backgroundedAt: Date?
+    /// Paces automatic redials of lost Macs; it outlives one supervision pass so a person's retry can reset it.
+    @ObservationIgnored let reconnectSchedule = ReconnectSchedule()
+    /// Whether the "automatic retries stopped" line was already written for the current exhausted budget.
+    @ObservationIgnored var reportedExhaustion = false
     var error: String?
     var loading = false
     var host = ""
