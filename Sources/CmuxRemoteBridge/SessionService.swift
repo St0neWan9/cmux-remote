@@ -418,7 +418,18 @@ public actor SessionService {
         let value = try await record(id).descriptor
         guard value.writable, let surface = value.surfaceID, let workspace = value.workspaceID else { throw BridgeError("read_only", "This historical conversation has no verified running terminal.", status: 409) }
         let state = try await cmux.request("surface.input_state", params: ["workspace_id": .string(workspace), "surface_id": .string(surface)])
-        guard state["agent"].bool == true, state["workspace_id"].string?.lowercased() == workspace.lowercased(), state["surface_id"].string?.lowercased() == surface.lowercased() else { throw BridgeError("stale_binding", "The agent's terminal binding changed. Refresh the task.", status: 409) }
+        // Cross-validate the binding, not the agent badge: the badge is a sidebar-fold derivative
+        // that can stay false while the hook record that authorizes a send is alive (observed after
+        // a journal fold outage). A session whose hook record is gone fails inside cmux's own send
+        // with its terminal-binding error instead of a paste into a bare shell.
+        guard state["workspace_id"].string?.lowercased() == workspace.lowercased(), state["surface_id"].string?.lowercased() == surface.lowercased() else { throw BridgeError("stale_binding", "The agent's terminal binding changed. Refresh the task.", status: 409) }
+        // The screen is the second check: a live agent's terminal always renders its prompt box
+        // (`empty`, `draft` or `dialog`) even when the sidebar fold is broken, while a terminal whose
+        // agent exited shows a shell the screen detector cannot read (`unknown`). A retained binding
+        // whose process died without a SessionEnd hook must not accept a paste.
+        if state["agent"].bool != true, state["state"].string == "unknown" {
+            throw BridgeError("stale_binding", "The agent has exited this terminal. Reopen the conversation.", status: 409)
+        }
         // Interrupt does not paste over a draft and must remain available during a dialog.
         if requiresEmptyPrompt, state["blocks_typing"].bool == true { throw BridgeError("input_busy", "The desktop has a draft or an open question. Resolve it first.", status: 409) }
         try await access?.require(.conversationControl, workspace: workspace)
