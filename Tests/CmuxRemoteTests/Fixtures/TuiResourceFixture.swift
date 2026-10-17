@@ -94,6 +94,12 @@ actor TuiResourceFixture: TuiResourceRequesting {
     func setAgentField(_ field: String, _ value: JSONValue) {
         var root = raw.object!, row = root["agents"]!.array![0].object!; row[field] = value; root["agents"] = .array([.object(row)]); raw = .object(root)
     }
+    /// The terminal is gone: the daemon reports it neither running nor alive, as a closed tab does.
+    func stopTerminal() {
+        var root = raw.object!, terminals = root["terminals"]!.array!, row = terminals[0].object!
+        row["running"] = .bool(false); row["lifecycle"] = .string("exited")
+        terminals[0] = .object(row); root["terminals"] = .array(terminals); raw = .object(root)
+    }
     func clearAgents() { var root = raw.object!; root["agents"] = .array([]); raw = .object(root) }
     func replaceIdentity() { var root = raw.object!; root["machine"] = .object(["id": .string("machine_" + String(repeating: "e", count: 32))]); raw = .object(root) }
     func makeAmbiguous() {
