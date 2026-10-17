@@ -9,7 +9,7 @@ import Foundation
 /// them: one file per shape, next to `phone.json`.
 enum FixtureShape {
     /// The names a fixture state directory may carry; a run picks exactly one.
-    static let names = ["short-conversation", "tall-reply", "long-conversation", "awaiting-question", "resumable-session"]
+    static let names = ["short-conversation", "tall-reply", "long-conversation", "awaiting-question", "awaiting-multi-question", "resumable-session"]
     /// The shape this run's fixture holds, read from the directory of the pairing file the runner passed.
     static func current(environment variables: [String: String] = ProcessInfo.processInfo.environment) -> String? {
         guard let pairing = variables["CMUX_REMOTE_TEST_PAIRING_PATH"], !pairing.isEmpty else { return nil }
