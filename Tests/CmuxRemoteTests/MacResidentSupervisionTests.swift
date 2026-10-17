@@ -9,9 +9,13 @@ private actor ControllableOwner: CmuxControlling {
     private var available = false
     /// The resident answers only while its own child is alive, as a real owner socket does.
     var living: @Sendable () -> Bool = { true }
+    /// The owner-protocol revision the fake resident reports through `bridge.status`.
+    private var revision = OwnerRevision.current
     func open(_ living: @escaping @Sendable () -> Bool) { available = true; self.living = living }
+    func setRevision(_ newRevision: Int) { revision = newRevision }
     func request(_ method: String, params: [String: JSONValue]) async throws -> JSONValue {
         guard available, living() else { throw BridgeError("unavailable", "No resident is listening", status: 503) }
+        if method == "bridge.status" { return .object(["owner_revision": .number(Double(revision))]) }
         return .object(["pong": .bool(true)])
     }
 }
@@ -22,6 +26,7 @@ private final class FakeProcess: RunningProcess, @unchecked Sendable {
     private var exitWaiters: [CheckedContinuation<Void, Never>] = []
     private var running = true
     var isRunning: Bool { lock.withLock { running } }
+    func terminate() { exit() }
     func exit() {
         lock.lock(); running = false; let waiters = exitWaiters; exitWaiters = []; lock.unlock()
         for waiter in waiters { waiter.resume() }
@@ -37,7 +42,7 @@ private final class FakeProcess: RunningProcess, @unchecked Sendable {
 }
 
 @Suite struct MacResidentSupervisionTests {
-    private func fixture() throws -> (MacResidentLauncher, ControllableOwner, Children) {
+    private func fixture(stopStale: (@Sendable () async throws -> Void)? = nil) throws -> (MacResidentLauncher, ControllableOwner, Children) {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("resident-" + UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         // A completed, private setup is what tells the launcher that restarting is worth trying.
@@ -49,8 +54,15 @@ private final class FakeProcess: RunningProcess, @unchecked Sendable {
         try Data("#!/bin/sh\n".utf8).write(to: executable)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executable.path)
         let owner = ControllableOwner(); let children = Children()
-        let launcher = MacResidentLauncher(executable: executable, directory: directory, owner: owner,
+        let launcher: MacResidentLauncher
+        if let stopStale {
+            launcher = MacResidentLauncher(executable: executable, directory: directory, owner: owner,
+                                           spawn: { _, _ in let child = FakeProcess(); children.add(child); return child },
+                                           stopStale: stopStale)
+        } else {
+            launcher = MacResidentLauncher(executable: executable, directory: directory, owner: owner,
                                            spawn: { _, _ in let child = FakeProcess(); children.add(child); return child })
+        }
         return (launcher, owner, children)
     }
     @Test(.timeLimit(.minutes(1))) func aResidentThatExitsIsReplacedAndTheAppReattaches() async throws {
@@ -82,6 +94,30 @@ private final class FakeProcess: RunningProcess, @unchecked Sendable {
         await supervision.value
         #expect(children.count <= 6)
         #expect(!supervision.isCancelled)
+    }
+    @Test(.timeLimit(.minutes(1))) func aStaleOwnerIsStoppedAndReplacedByTheBundledResident() async throws {
+        let stops = Counter()
+        let (launcher, owner, children) = try fixture(stopStale: { stops.increment() })
+        // The adopted resident predates the bundled owner revision and answers regardless of any child.
+        await owner.setRevision(0)
+        await owner.open { true }
+        let supervision = Task { await launcher.supervise() }
+        while children.count < 1 || stops.value < 1 { try await Task.sleep(for: .milliseconds(5)) }
+        #expect(stops.value == 1)
+        // The replacement answers the current revision, so the launcher waits on it instead of replacing it again.
+        await owner.setRevision(OwnerRevision.current)
+        while !(await launcher.isWaitingForExitForTesting) { try await Task.sleep(for: .milliseconds(5)) }
+        #expect(children.count == 1)
+        #expect(stops.value == 1)
+        supervision.cancel()
+    }
+    @Test func aCurrentOwnerIsAdoptedWithoutStoppingOrSpawning() async throws {
+        let stops = Counter()
+        let (launcher, owner, children) = try fixture(stopStale: { stops.increment() })
+        await owner.open { true }
+        try await launcher.ensureStarted()
+        #expect(children.count == 0)
+        #expect(stops.value == 0)
     }
 }
 

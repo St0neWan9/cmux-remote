@@ -11,6 +11,7 @@ struct RemoteSettingsView: View {
                 MacPreferencePage { MacSetupRows(app: app) }
             } else {
                 switch app.section {
+                case "general": GeneralSettingsView(launch: app.launch)
                 case "pairing": PairingSettingsView(model: app.sharing)
                 case "devices": DevicesSettingsView(model: app.sharing)
                 case "connect": CompanionView(model: app.remote)

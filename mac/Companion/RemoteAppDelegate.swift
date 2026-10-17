@@ -25,7 +25,8 @@ import CmuxRemoteMac
         installMainMenu()
         Task {
             await model.start()
-            if model.serviceError != nil || acceptanceOpenSettings { showSettings() }
+            // A silent launch shows only the menu bar icon; the acceptance fixture still needs its window.
+            if !model.launch.silentLaunch || acceptanceOpenSettings { showSettings() }
         }
     }
     private func installMainMenu() {
@@ -37,7 +38,24 @@ import CmuxRemoteMac
         let fileMenu = NSMenu(title: fileItem.title)
         fileMenu.addItem(NSMenuItem(title: String(localized: "mac.menu.closeWindow", bundle: .interface), action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w"))
         fileItem.submenu = fileMenu; main.addItem(fileItem)
+        // Text fields copy, paste and undo only through a standard Edit menu in the responder chain.
+        main.addItem(editMenuItem())
         NSApplication.shared.mainMenu = main
+    }
+    private func editMenuItem() -> NSMenuItem {
+        let item = NSMenuItem(title: String(localized: "mac.menu.edit", bundle: .interface), action: nil, keyEquivalent: "")
+        let menu = NSMenu(title: item.title)
+        // NSStandardKeyBindingResponding actions live on NSText in Swift; undo and redo have no
+        // typed declaration, so their selectors stay literal.
+        menu.addItem(NSMenuItem(title: String(localized: "mac.menu.undo", bundle: .interface), action: Selector(("undo:")), keyEquivalent: "z"))
+        menu.addItem(NSMenuItem(title: String(localized: "mac.menu.redo", bundle: .interface), action: Selector(("redo:")), keyEquivalent: "Z"))
+        menu.addItem(.separator())
+        menu.addItem(NSMenuItem(title: String(localized: "mac.menu.cut", bundle: .interface), action: #selector(NSText.cut(_:)), keyEquivalent: "x"))
+        menu.addItem(NSMenuItem(title: String(localized: "mac.menu.copy", bundle: .interface), action: #selector(NSText.copy(_:)), keyEquivalent: "c"))
+        menu.addItem(NSMenuItem(title: String(localized: "mac.menu.paste", bundle: .interface), action: #selector(NSText.paste(_:)), keyEquivalent: "v"))
+        menu.addItem(NSMenuItem(title: String(localized: "mac.menu.selectAll", bundle: .interface), action: #selector(NSText.selectAll(_:)), keyEquivalent: "a"))
+        item.submenu = menu
+        return item
     }
     /// Menus, toolbar and window title switch immediately; SwiftUI pages rebuild from the model's language.
     private func applyLanguage() {
