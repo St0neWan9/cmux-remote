@@ -70,6 +70,14 @@ path as a new conversation, and the phrase is deduplicated by the operation iden
 terminal. A conversation that is not resumable is `read_only`; an unconfirmed start is `outcome_unknown` and is never
 retried under the same identity.
 
+A desktop cmux has no resume RPC, so the Bridge performs the start itself with `surface.create`; a cmux-tui
+daemon runs `mobile.chat.resume` and keeps its own deduplication key. One limitation remains on the desktop:
+cmux records the Agent's terminal only when its hook reports there, and a terminal the Bridge opened is not
+rewritten into that record by the resumed process. Until cmux updates the binding, its own `mobile.chat.send`
+answers `not_found` ("The agent's terminal moved") for both the old and the new surface, so a conversation
+reopened this way is readable but still not writable from the phone. Opening it once on the Mac, or waiting for
+the next Agent hook after a turn started in that terminal, does not change that record in cmux 0.65.2.
+
 ## Terminal mirror resources
 
 These routes require signed v2 requests. Legacy shared-token clients cannot use
