@@ -64,6 +64,20 @@ physical two-Mac acceptance run are not established by the package tests.
 
 Run `scripts/verify.sh` for package tests and build. The first implementation is a development baseline, not a promise of complete provider-version compatibility. Live screen extraction is a best-effort preview; transcript messages replace it when committed. Historical sessions without a verified live surface are read-only. Codex Feed actions only work when cmux exposes an actionable request.
 
+## Troubleshooting
+
+### Phone disconnects while the Mac display is off
+
+macOS App Nap freezes cmux when its windows are occluded and the display is
+asleep, so the bridge's local cmux RPC calls hang and the phone sees no data
+until the display wakes. Disable App Nap for cmux and restart it:
+
+```sh
+defaults write com.cmuxterm.app NSAppSleepDisabled -bool YES
+```
+
+Then quit and relaunch cmux. To revert: `defaults delete com.cmuxterm.app NSAppSleepDisabled`.
+
 ## License
 
 GPL-3.0-or-later. The pinned cmux parsing package retains its upstream copyright and license. SwiftNIO, SwiftNIO SSL and the backend-only SwiftTerm dependency retain their own licenses. This project is independent and is not an official cmux product.
