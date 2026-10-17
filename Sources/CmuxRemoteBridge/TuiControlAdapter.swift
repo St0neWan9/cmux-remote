@@ -154,14 +154,27 @@ public actor TuiControlAdapter: CmuxControlling {
             let current = try await snapshot()
             guard let found = await resumableBinding(id: id, in: current) else { throw stale() }
             let binding = found.binding
+            guard let agent = LaunchAgent(rawValue: binding.provider) else { throw stale() }
+            let line = agent.resumeCommand(sessionID: binding.providerSession)
+            // The conversation's own terminal is still open on a shell, so the resume belongs in it: opening a new tab
+            // would take the pane's focus away from the window the owner was using, and the new tab would become the
+            // one the conversation is attributed to. Only a terminal that is gone needs a new one.
+            if let surface = binding.surfaceID as String?, current.runningTerminals.contains(surface) {
+                var request = current.selectors(binding)
+                // A leading space keeps a resumed command out of the shell's history rewriting; the whole line and its
+                // Return arrive in one write so no prompt redraw can eat the first character.
+                request["text"] = .string(" " + line + "\r")
+                request["expected_revision"] = .string(current.revision)
+                try await effect("terminal.input.write", fields: request, key: "cmux-remote:resume:" + key, generation: current.generation)
+                return .object(["surface_id": .string(surface)])
+            }
             var request = current.selectors()
             request["workspace"] = .string(binding.workspace); request["cwd"] = .string(found.cwd)
-            request["name"] = .string(binding.provider)
+            // The tab takes the conversation's own title, so the phone keeps showing the conversation it resumed.
+            request["name"] = .string(binding.title)
             // The daemon's `-lc` skips the interactive startup files where agents are often put on PATH, so the owner's
             // interactive shell runs the resume as a typed command would, and a login shell stays open after it exits.
             let shell = Self.loginShell()
-            guard let agent = LaunchAgent(rawValue: binding.provider) else { throw stale() }
-            let line = agent.resumeCommand(sessionID: binding.providerSession)
             request["argv"] = .array([.string(shell), .string("-ic"), .string(line + "; exec " + AgentCommandLine().quoted(shell) + " -l")])
             request["correlation_key"] = .string(key)
             let created = try await client.resource("workspace.run", params: request, idempotencyKey: key)
