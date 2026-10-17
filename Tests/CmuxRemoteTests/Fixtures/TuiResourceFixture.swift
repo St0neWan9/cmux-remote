@@ -12,7 +12,8 @@ actor TuiResourceFixture: TuiResourceRequesting {
     static let startedTerminal = "term_" + String(repeating: "e", count: 32)
     static let providerID = "11111111-2222-3333-4444-555555555555"
     var raw: JSONValue
-    var screen = ""
+    /// The Agent at an empty prompt, which is what most fixtures assume a live terminal shows.
+    var screen = "\u{1b}[H❯\u{00a0}\u{1b}[2mTry a task\u{1b}[22m"
     var replay: String
     var effects: [(String, [String: JSONValue], String?)] = []
     var lost = false

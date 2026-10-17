@@ -88,6 +88,47 @@ import CmuxRemoteCore
         #expect(argv[2].hasPrefix(LaunchAgent.claude.command))
         #expect(effects[0].1["cwd"]?.string == "/project")
     }
+    @Test func anAgentThatExitedLeavesARunningTerminalResumableRatherThanWritable() async throws {
+        let root = try temporary(); defer { try? FileManager.default.removeItem(at: root) }
+        let folder = root.appendingPathComponent(".claude/projects/-project")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let session = TuiResourceFixture.providerID
+        try Data((#"{"type":"user","cwd":"/project"}"# + "\n").utf8).write(to: folder.appendingPathComponent(session + ".jsonl"))
+        let source = TuiResourceFixture(), live = service(adapter(source, root: root), root: root)
+        let id = try #require(try await live.sessions().first?.id)
+        // The Agent exited and the shell that replaced it is on screen; the terminal itself is still running.
+        await source.clearAgents()
+        // The shell that replaced the Agent, as the daemon renders it.
+        await source.configure(replay: "\u{1b}[?2004h\u{1b}[Hvaluz@Studio [10:09] [~/project]\r\n-> %")
+        let reopened = service(adapter(source, root: root), root: root)
+        let record = try #require(try await reopened.sessions().first)
+        #expect(record.id == id); #expect(record.resumable); #expect(!record.writable); #expect(record.state == "ended")
+        _ = try await reopened.resume(id: id, request: ResumeRequest())
+        let argv = (await source.effects.first?.1["argv"]?.array ?? []).compactMap { $0.string }
+        #expect(argv.count == 3 && argv[2].contains("--resume " + session.lowercased()))
+        #expect(argv[2].hasPrefix(LaunchAgent.claude.command))
+        #expect((await source.effects.first?.1["cwd"]?.string) == "/project")
+    }
+    @Test func aRunningTerminalStillShowingTheAgentPromptStaysWritable() async throws {
+        let root = try temporary(); defer { try? FileManager.default.removeItem(at: root) }
+        let source = TuiResourceFixture(), session = service(adapter(source, root: root), root: root)
+        let id = try #require(try await session.sessions().first?.id)
+        // The daemon lost the hook row, but the Agent is still sitting at its own prompt.
+        await source.clearAgents()
+        await source.configure(replay: "\u{1b}[?2004h\u{1b}[H❯\u{00a0}\u{1b}[2mTry a task\u{1b}[22m")
+        let after = try #require(try await service(adapter(source, root: root), root: root).sessions().first)
+        #expect(after.id == id); #expect(after.writable); #expect(!after.resumable)
+    }
+    @Test func anUnreadableScreenIsNeitherWritableNorResumable() async throws {
+        let root = try temporary(); defer { try? FileManager.default.removeItem(at: root) }
+        let source = TuiResourceFixture(), session = service(adapter(source, root: root), root: root)
+        _ = try #require(try await session.sessions().first?.id)
+        await source.clearAgents()
+        // An unreadable grid and no transcript: the Bridge cannot prove the terminal is a shell, so it offers nothing.
+        await source.configure(replay: "\u{1b}[Hunknown UI")
+        let after = try #require(try await service(adapter(source, root: root), root: root).sessions().first)
+        #expect(!after.writable); #expect(!after.resumable)
+    }
     @Test func aConversationWithoutAReservableSessionCannotBeReopened() async throws {
         let root = try temporary(); defer { try? FileManager.default.removeItem(at: root) }
         let source = TuiResourceFixture(), bridge = adapter(source, root: root), live = service(bridge, root: root)

@@ -52,8 +52,9 @@ An older Bridge cannot decode `conversationStart` and closes the link during enr
 A conversation keeps its identity when its Agent session moves to a new terminal, because the id is derived from the
 provider and its session id rather than from a terminal. `GET /v1/sessions` reports `resumable: true` only when the
 Bridge has verified all of: the Agent session has a transcript under a configured root, that transcript itself records
-the working directory the Agent ran in, and the conversation's workspace still exists. A live conversation is never
-reported resumable.
+the working directory the Agent ran in, the conversation's workspace still exists, and — for a terminal that is still
+running — that its rendered screen no longer shows the Agent's prompt. A live conversation is never reported resumable,
+and a terminal whose screen cannot be read is neither writable nor resumable.
 
 | Route | Body | Result |
 | --- | --- | --- |
