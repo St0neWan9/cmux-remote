@@ -8,6 +8,7 @@ import CmuxRemoteCore
 @MainActor @Observable final class MacAppModel {
     var remote: MacCompanionModel
     var sharing: MacSharingModel
+    let launch: MacLaunchPreferences
     let logs: MacLogModel
     var section = "share"
     /// Stored for the next launch; every string lookup reads it through `Bundle.interface`.
@@ -28,7 +29,8 @@ import CmuxRemoteCore
         let directory = URL(fileURLWithPath: path)
         let owner = UnixSocketClient(path: directory.appendingPathComponent("owner.sock").path)
         remote = MacCompanionModel(owner: owner, discovery: OwnerBridgeDiscovery(owner: owner))
-        sharing = MacSharingModel(owner: owner)
+        sharing = MacSharingModel(owner: owner, defaultKeyFile: directory.appendingPathComponent("relay-registration-key").path)
+        launch = MacLaunchPreferences(defaults: preferences)
         launcher = MacResidentLauncher(executable: executable, directory: directory, owner: owner)
         logs = MacLogModel(directory: directory, tail: BridgeLogTail(), interval: .seconds(2))
     }
@@ -69,7 +71,7 @@ import CmuxRemoteCore
         let directory = URL(fileURLWithPath: statePath)
         let owner = UnixSocketClient(path: directory.appendingPathComponent("owner.sock").path)
         remote = MacCompanionModel(owner: owner, discovery: OwnerBridgeDiscovery(owner: owner))
-        sharing = MacSharingModel(owner: owner)
+        sharing = MacSharingModel(owner: owner, defaultKeyFile: directory.appendingPathComponent("relay-registration-key").path)
         launcher = MacResidentLauncher(executable: executable, directory: directory, owner: owner)
         logs.directory = directory
         preferences.set(statePath, forKey: "bridgeStatePath")
