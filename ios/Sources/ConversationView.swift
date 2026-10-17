@@ -132,6 +132,14 @@ struct ConversationView: View {
                         else { Text(String(localized: "chat.working")).font(.footnote) }
                         Spacer(); Label(model.session.agent.capitalized, systemImage: "sparkles").font(.caption)
                     }.foregroundStyle(.secondary).padding(.horizontal, 12)
+                } else if model.canResume {
+                    // The Agent's terminal is gone but its session can be reopened, so the page offers that instead
+                    // of a composer that would have nowhere to type.
+                    Button { Task { await model.resume() } } label: {
+                        Label(String(localized: "sessions.resume"), systemImage: "arrow.clockwise.circle")
+                    }
+                    .buttonStyle(.borderedProminent).controlSize(.small).disabled(model.busy)
+                    .accessibilityIdentifier("sessions.resume")
                 } else if !model.canSend { Text(String(localized: "sessions.read_only")).font(.caption).foregroundStyle(.secondary) }
                 ChatComposer(draft: $model.draft, focused: $composerFocused, canSend: model.canSend, busy: model.busy, working: model.hasActiveResponse,
                              images: model.imageDraft.images, removeImage: model.imageDraft.remove,

@@ -100,6 +100,14 @@ actor TuiResourceFixture: TuiResourceRequesting {
         row["running"] = .bool(false); row["lifecycle"] = .string("exited")
         terminals[0] = .object(row); root["terminals"] = .array(terminals); raw = .object(root)
     }
+    /// The terminal and its tab are gone, as a closed surface leaves the graph; the workspace stays.
+    func removeTerminal() {
+        var root = raw.object!
+        root["terminals"] = .array([])
+        root["tabs"] = .array((root["tabs"]?.array ?? []).filter { $0["content_id"].string != Self.terminal })
+        root["agents"] = .array([])
+        raw = .object(root)
+    }
     func clearAgents() { var root = raw.object!; root["agents"] = .array([]); raw = .object(root) }
     func replaceIdentity() { var root = raw.object!; root["machine"] = .object(["id": .string("machine_" + String(repeating: "e", count: 32))]); raw = .object(root) }
     func makeAmbiguous() {

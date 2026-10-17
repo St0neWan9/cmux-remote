@@ -56,6 +56,8 @@ public actor TuiControlAdapter: CmuxControlling {
                 if !liveIDs.contains(binding.id), !revived { row["state"] = .string("ended"); row["status"] = .string("ended") }
                 else if let state = activity[binding.providerSession] { row["state"] = .string(state); row["status"] = .string(state) }
                 else if revived { row["state"] = .string("idle"); row["status"] = .string("idle") }
+                // A conversation that can be reopened says so, so the phone offers to resume instead of a lock.
+                if !liveIDs.contains(binding.id), resumableBinding(id: binding.id, in: current) != nil { row["resumable"] = .bool(true) }
                 // An interrupted Claude turn sends no Stop hook, so its hooks still say working; Claude Code marks
                 // itself idle in the terminal title with `✳` (a turn in progress shows a spinner glyph instead).
                 if liveIDs.contains(binding.id), binding.provider == "claude", row["state"]?.string == "working",
@@ -131,6 +133,31 @@ public actor TuiControlAdapter: CmuxControlling {
             let surface = TuiResourceIdentity().uuid(machine: current.machine, session: current.session, resource: terminal)
             knownSurfaces.insert(surface)
             return .object(["surface_id": .string(surface)])
+        case "mobile.chat.resume":
+            // Reopening one Agent session in a new terminal: the conversation, its provider session and the directory
+            // all come from this Bridge's own binding and the Agent's transcript, never from the caller.
+            guard let id = params["session_id"]?.string, let key = params["operation_key"]?.string, !key.isEmpty, key.utf8.count <= 128 else {
+                throw BridgeError("invalid_input", "A conversation and a stable operation identity are required.")
+            }
+            let current = try await snapshot()
+            guard let found = resumableBinding(id: id, in: current) else { throw stale() }
+            let binding = found.binding
+            var request = current.selectors()
+            request["workspace"] = .string(binding.workspace); request["cwd"] = .string(found.cwd)
+            request["name"] = .string(binding.provider)
+            // The daemon's `-lc` skips the interactive startup files where agents are often put on PATH, so the owner's
+            // interactive shell runs the resume as a typed command would, and a login shell stays open after it exits.
+            let shell = Self.loginShell()
+            guard let agent = LaunchAgent(rawValue: binding.provider) else { throw stale() }
+            let line = agent.resumeCommand(sessionID: binding.providerSession)
+            request["argv"] = .array([.string(shell), .string("-ic"), .string(line + "; exec " + AgentCommandLine().quoted(shell) + " -l")])
+            request["correlation_key"] = .string(key)
+            let created = try await client.resource("workspace.run", params: request, idempotencyKey: key)
+            guard let terminal = created["value"]["terminal_id"].string, (try? TuiResourceIdentity().validate(terminal, prefix: "term")) != nil else {
+                throw BridgeError("outcome_unknown", "The daemon did not confirm the reopened terminal.", status: 409)
+            }
+            knownSurfaces.insert(TuiResourceIdentity().uuid(machine: current.machine, session: current.session, resource: terminal))
+            return .object(["surface_id": .string(TuiResourceIdentity().uuid(machine: current.machine, session: current.session, resource: terminal))])
         case "mobile.chat.send", "mobile.chat.interrupt":
             guard let id = params["session_id"]?.string, let operation = params["operation_id"]?.string, let operationUUID = UUID(uuidString: operation), let operationKey = params["backend_operation_key"]?.string, operationKey.count == 64, operationKey.allSatisfy({ $0.isASCII && $0.isHexDigit }) else {
                 throw BridgeError("invalid_input", "A stable conversation operation identity is required.")
@@ -302,6 +329,17 @@ public actor TuiControlAdapter: CmuxControlling {
         if let live = current.bindings.first(where: { $0.surfaceID == id }) { return live }
         guard !current.bindings.contains(where: { $0.surfaceID == id }) else { return nil }
         return catalog.values.first { $0.surfaceID == id && current.runningTerminals.contains($0.surfaceID) }
+    }
+    /// A conversation whose terminal is gone but whose Agent session can still be reopened: its workspace outlived the
+    /// terminal and its own transcript names the directory to reopen it in. Nothing here is trusted from the phone.
+    private func resumableBinding(id: String?, in current: TuiSessionSnapshot) -> (binding: TuiSessionSnapshot.Binding, cwd: String)? {
+        guard let id, let binding = catalog.values.first(where: { $0.id.lowercased() == id.lowercased() }),
+              !current.bindings.contains(where: { $0.id == binding.id }),
+              !current.surfaces.contains(binding.surfaceID),
+              current.rawWorkspaces[binding.workspaceID] != nil else { return nil }
+        guard let recorded = try? transcripts.recordedCwd(provider: binding.provider, sessionID: binding.providerSession),
+              !recorded.isEmpty else { return nil }
+        return (binding, recorded)
     }
     /// Whether the conversation is still the same live one across a re-read; a revived binding must pass this too.
     private func stillBound(_ binding: TuiSessionSnapshot.Binding, in current: TuiSessionSnapshot) -> Bool {

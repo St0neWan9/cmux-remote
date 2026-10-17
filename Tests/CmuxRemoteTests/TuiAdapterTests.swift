@@ -44,6 +44,58 @@ import CmuxRemoteCore
         #expect(await source.effects.count == 1)
         #expect(await source.effects.first?.1["terminal"]?.string == TuiResourceFixture.terminal)
     }
+    @Test func aConversationIsIdentifiedByItsAgentNotItsTerminal() async throws {
+        let root = try temporary(); defer { try? FileManager.default.removeItem(at: root) }
+        let identity = TuiResourceIdentity()
+        let machine = TuiResourceFixture.machine, session = TuiResourceFixture.session
+        let first = identity.conversation(machine: machine, session: session, provider: "claude", providerSession: TuiResourceFixture.providerID)
+        let other = identity.conversation(machine: machine, session: session, provider: "claude", providerSession: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+        #expect(first == identity.conversation(machine: machine, session: session, provider: "claude", providerSession: TuiResourceFixture.providerID.uppercased()))
+        #expect(first != other)
+        // An archive written before this rule is re-keyed on load, so the same Agent keeps one identity.
+        let stale = TuiSessionSnapshot.Binding(id: "tui:" + UUID().uuidString.lowercased(), provider: "claude", providerSession: TuiResourceFixture.providerID.lowercased(),
+                                              terminal: TuiResourceFixture.terminal, workspace: TuiResourceFixture.workspace, surfaceID: "surface", workspaceID: "workspace", title: "Old", cwd: "/tmp", state: "idle")
+        try TuiBindingRepository(directory: root).save(identity: "\(TuiResourceFixture.machine):\(TuiResourceFixture.session)", rows: [stale])
+        let loaded = try TuiBindingRepository(directory: root).load(identity: "\(TuiResourceFixture.machine):\(TuiResourceFixture.session)")
+        #expect(loaded.first?.id == first)
+    }
+    @Test func aConversationWhoseSurfaceIsGoneCanBeReopenedFromItsOwnTranscript() async throws {
+        let root = try temporary(); defer { try? FileManager.default.removeItem(at: root) }
+        let folder = root.appendingPathComponent(".claude/projects/-project")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let session = TuiResourceFixture.providerID
+        try Data((#"{"type":"user","cwd":"/project"}"# + "\n").utf8).write(to: folder.appendingPathComponent(session + ".jsonl"))
+        let source = TuiResourceFixture(), bridge = adapter(source, root: root), live = service(bridge, root: root)
+        let id = try #require(try await live.sessions().first?.id)
+        // A live conversation is not offered for reopening; only one whose terminal is gone is.
+        #expect(try await live.sessions().first?.resumable == false)
+        // The Agent's terminal is closed; the workspace outlived it, so the conversation can be reopened.
+        await source.removeTerminal()
+        let reopened = service(adapter(source, root: root), root: root)
+        let record = try #require(try await reopened.sessions().first)
+        #expect(record.id == id); #expect(record.resumable); #expect(!record.writable)
+        _ = try await reopened.resume(id: id, request: ResumeRequest())
+        let effects = await source.effects
+        #expect(effects.count == 1); #expect(effects[0].0 == "workspace.run")
+        let argv = effects[0].1["argv"]?.array?.compactMap { $0.string } ?? []
+        #expect(argv.count == 3 && argv[1] == "-ic")
+        // The Agent's own session id and directory, never a caller's choice.
+        #expect(argv[2].contains("--resume " + session.lowercased()))
+        #expect(argv[2].hasPrefix(LaunchAgent.claude.command))
+        #expect(effects[0].1["cwd"]?.string == "/project")
+    }
+    @Test func aConversationWithoutAReservableSessionCannotBeReopened() async throws {
+        let root = try temporary(); defer { try? FileManager.default.removeItem(at: root) }
+        let source = TuiResourceFixture(), bridge = adapter(source, root: root), live = service(bridge, root: root)
+        let id = try #require(try await live.sessions().first?.id)
+        await source.removeTerminal()
+        // No transcript, so no directory the Agent itself recorded: reopening would guess.
+        let reopened = service(adapter(source, root: root), root: root)
+        let record = try #require(try await reopened.sessions().first)
+        #expect(!record.resumable)
+        await #expect(throws: BridgeError.self) { _ = try await reopened.resume(id: id, request: ResumeRequest()) }
+        #expect(await source.effects.isEmpty)
+    }
     @Test func ambiguousWorkspaceAndReplacedDaemonCannotBecomeWritable() async throws {
         let source = TuiResourceFixture(); await source.makeAmbiguous()
         #expect(try await service(adapter(source)).sessions().isEmpty)
