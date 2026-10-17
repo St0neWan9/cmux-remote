@@ -76,7 +76,7 @@ struct Main {
                 let sources = try await SourceBackends(options: options, environment: runtimeEnvironment, home: home, transcripts: transcripts, directory: state.directory, mutations: mutations)
                 cmux = sources.controller; localDesktop = sources.desktop; desktopSocket = sources.desktopSocket; transcriptRoots = roots
             }
-            let service = SessionService(cmux: cmux, home: home, transcriptRoots: transcriptRoots, mutations: mutations)
+            let service = SessionService(cmux: cmux, home: home, transcriptRoots: transcriptRoots, mutations: mutations, aliases: SessionAliasStore(directory: state.directory))
             let events: Task<Void, Never>?
             if let socket = desktopSocket {
                 let client = CmuxEventClient(path: socket, password: runtimeEnvironment["CMUX_REMOTE_SOCKET_PASSWORD"], capability: runtimeEnvironment["CMUX_SOCKET_CAPABILITY"])
