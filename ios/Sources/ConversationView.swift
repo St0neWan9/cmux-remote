@@ -137,8 +137,9 @@ struct ConversationView: View {
                     // of a composer that would have nowhere to type.
                     Button { Task { await model.resume() } } label: {
                         Label(String(localized: "sessions.resume"), systemImage: "arrow.clockwise.circle")
+                            .font(.body).padding(.horizontal, 8).frame(minHeight: 44)
                     }
-                    .buttonStyle(.borderedProminent).controlSize(.small).disabled(model.busy)
+                    .buttonStyle(.borderedProminent).disabled(model.busy)
                     .accessibilityIdentifier("sessions.resume")
                 } else if !model.canSend { Text(String(localized: "sessions.read_only")).font(.caption).foregroundStyle(.secondary) }
                 ChatComposer(draft: $model.draft, focused: $composerFocused, canSend: model.canSend, busy: model.busy, working: model.hasActiveResponse,
