@@ -22,6 +22,7 @@ public actor TuiControlAdapter: CmuxControlling {
     /// The journal position after the last folded hook; nil until the first read and after a failed one.
     private var journalCursor: JSONValue?
     private let restoreChecks: Int
+    private let claudeConfirmation: ClaudeModelConfirmation
     private let journalWindow: UInt64
     private let restoreInterval: Duration
     private let modelSwitch: CodexModelSwitch
@@ -32,6 +33,7 @@ public actor TuiControlAdapter: CmuxControlling {
         self.client = client; self.transcripts = transcripts; self.attachments = attachments; self.decisions = decisions; self.archive = archive
         self.restoreChecks = restoreChecks; self.restoreInterval = restoreInterval; self.journalWindow = journalWindow; self.keyPause = keyPause
         modelSwitch = CodexModelSwitch(interval: restoreInterval)
+        claudeConfirmation = ClaudeModelConfirmation(interval: restoreInterval)
     }
     public func identity() -> String? { pinnedIdentity }
     public func ownsDecision(_ id: String) -> Bool { pending[id] != nil }
@@ -239,18 +241,25 @@ public actor TuiControlAdapter: CmuxControlling {
             // Codex has no model argument, so its picker is walked here; a Claude switch is an ordinary send.
             guard let id = params["session_id"]?.string, let operationKey = params["backend_operation_key"]?.string, operationKey.count == 64,
                   operationKey.allSatisfy({ $0.isASCII && $0.isHexDigit }),
-                  let candidates = params["candidates"]?.array?.compactMap(\.string), (1...4).contains(candidates.count) else {
+                  (params["candidates"]?.array?.count ?? 0) <= 4 else {
                 throw BridgeError("invalid_input", "A stable model switch identity and a model are required.")
             }
+            let candidates = params["candidates"]?.array?.compactMap(\.string) ?? []
             let current = try await snapshot()
             guard let binding = activeBinding(id: id, in: current),
                   params["workspace_id"]?.string?.lowercased() == binding.workspaceID,
                   params["surface_id"]?.string?.lowercased() == binding.surfaceID else { throw stale() }
-            guard binding.provider == "codex" else { throw unsupported() }
-            _ = try await clearPromptForSend(current, binding: binding, operationKey: operationKey)
             let key = "cmux-remote:model:" + operationKey.lowercased() + ":"
             let console = AgentConsole(rows: { [self] in try await consoleRows(binding) },
                                        write: { [self] text, step in try await consoleWrite(binding, text: text, key: key + step) })
+            // The command itself went out as a send; only the question Claude Code may ask about it is answered here.
+            if binding.provider == "claude" {
+                try await claudeConfirmation.settle(on: console, confirm: params["confirm"]?.bool == true)
+                return .object(["switched": .bool(true)])
+            }
+            guard binding.provider == "codex" else { throw unsupported() }
+            _ = try await clearPromptForSend(current, binding: binding, operationKey: operationKey)
+            guard !candidates.isEmpty else { throw BridgeError("invalid_input", "A stable model switch identity and a model are required.") }
             try await modelSwitch.run(on: console, candidates: candidates, effort: params["effort"]?.string)
             return .object(["switched": .bool(true)])
         default: throw unsupported()
@@ -461,6 +470,8 @@ public actor TuiControlAdapter: CmuxControlling {
         // The rendered grid, not the raw screen text, which still carries the escape sequences that place the prompt.
         guard let state = try? await terminalState(current, binding: binding) else { return nil }
         let prefix = binding.provider == "claude" ? "❯\u{00a0}" : "› "
+        // A menu the Agent drew over its prompt leaves no prompt line, yet the Agent is still waiting there.
+        if AgentMenuScreen(rows: state.rows).isShown { return true }
         return state.rows.contains { line in
             var body = Substring(line.drop(while: { $0 == " " }))
             if body.hasPrefix("│") { body = body.dropFirst().drop(while: { $0 == " " }) }

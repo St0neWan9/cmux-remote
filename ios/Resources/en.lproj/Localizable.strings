@@ -323,3 +323,5 @@
 "error.model_unavailable" = "The agent does not offer this model.";
 "error.model_switch_failed" = "The model picker did not respond as expected. Nothing changed.";
 "error.agent_busy" = "Wait for the agent to finish its turn, then switch models.";
+"model.confirm_title" = "Switch to this model?";
+"model.confirm_note" = "This conversation is long. Switching to %@ makes Claude Code read all of it again under the new model, so the next reply is slower and uses more tokens.";
