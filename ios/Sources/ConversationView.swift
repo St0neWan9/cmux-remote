@@ -18,6 +18,8 @@ struct ConversationView: View {
     @State private var settleTask: Task<Void, Never>?
     /// The reader opened or closed a card: the page stays where it is until they scroll or ask for the latest.
     @State private var holdingPlace = false
+    /// A prompt this phone just sent, held at the top of the page until the reader scrolls or asks for the latest.
+    @State private var pinnedSent: UUID?
     @State private var scrollTrace = ScrollTrace()
     /// A message opened on its own page to select part of it.
     @State private var selecting: SelectTextPage.Request?
@@ -49,70 +51,7 @@ struct ConversationView: View {
         _model = State(initialValue: model); self.hostName = hostName
     }
     var body: some View {
-        GeometryReader { viewport in
-        ScrollViewReader { proxy in
-            ScrollView {
-                timeline(bottom: viewport.size.height) { Task { await loadOlder(proxy) } }
-            }
-            .scrollClipDisabled()
-            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { viewportHeight = $0 }
-            .coordinateSpace(name: "chatTimeline")
-            .onPreferenceChange(TimelineBottomPreferenceKey.self) { bottom in
-                // Scrolling reports every frame; only a real change may invalidate the timeline.
-                let visible = bottom > 0 && bottom <= viewport.size.height + 32
-                if latestVisible != visible { latestVisible = visible }
-                if userScrolling || !atLatest {
-                    // While the page holds its place, the newest row coming into view does not resume following.
-                    if !holdingPlace, atLatest != visible { atLatest = visible }
-                }
-                else if bottom.isFinite && !latestVisible { scrollTrace.note("scroll follower"); scrollToNewest(proxy) }
-            }
-            .modifier(TimelineScrollInteraction(userScrolling: $userScrolling, atLatest: $atLatest, latestVisible: latestVisible))
-            .onChange(of: userScrolling) { _, scrolling in scrollTrace.note("userScrolling=\(scrolling)"); if scrolling { holdingPlace = false } }
-            .onChange(of: atLatest) { _, value in scrollTrace.note("atLatest=\(value) hold=\(holdingPlace)") }
-            .modifier(ScrollJumpTrace(trace: scrollTrace))
-            // A card opened at the newest message would otherwise be carried off by the next one to arrive.
-            .environment(\.holdPlace) { scrollTrace.toggled("atLatest=\(atLatest) latestVisible=\(latestVisible)"); atLatest = false; holdingPlace = true }
-            .scrollDismissesKeyboard(.interactively)
-            .refreshable { await pullToRefresh(proxy) }
-            .overlay(alignment: .bottom) {
-                if !atLatest {
-                    Button { holdingPlace = false; atLatest = true; withAnimation { scrollTrace.note("scroll latest-button"); scrollToNewest(proxy) } } label: {
-                        Image(systemName: "arrow.down").font(.system(size: 20, weight: .medium)).frame(width: 42, height: 42)
-                            .background(Color.white, in: Circle()).shadow(color: .black.opacity(0.1), radius: 10, y: 4)
-                    }.buttonStyle(.plain).accessibilityLabel(String(localized: "chat.latest")).accessibilityIdentifier("chat.latest").padding(.bottom, 10)
-                }
-            }
-            .onChange(of: model.timelineItems.last?.id) { _, _ in
-                if !initiallyScrolled && !model.messages.isEmpty { settleAtBottom(proxy); initiallyScrolled = true }
-                else if atLatest { scrollTrace.note("scroll new-item"); scrollToNewest(proxy) }
-            }
-            .onChange(of: model.latestMessageText) { _, _ in if atLatest { scrollTrace.note("scroll new-text"); scrollToNewest(proxy) } }
-            .onChange(of: model.preview) { _, _ in if atLatest { scrollTrace.note("scroll preview"); scrollToNewest(proxy) } }
-            // Opening a cached conversation re-enters with its follow state; start from the last message.
-            .onAppear {
-                userScrolling = false; atLatest = true; holdingPlace = false
-                initialScroll = Task {
-                    // Show the conversation read last, then settle once the fresh read lands.
-                    await model.restoreStored()
-                    guard !Task.isCancelled, !model.messages.isEmpty else { return }
-                    initiallyScrolled = true; settleAtBottom(proxy, retries: 6)
-                }
-            }
-            .onDisappear { settleTask?.cancel(); settleTask = nil; initialScroll?.cancel(); initialScroll = nil }
-            // A prompt this phone sent lands with the page's newest row at the top and the reply taking the
-            // room below it, which is where the reader looks next. Following resumes when they scroll down.
-            .onChange(of: model.jumpToLatest) { _, _ in
-                holdingPlace = false
-                withAnimation {
-                    if let sent = model.outgoing.last?.id {
-                        proxy.scrollTo(sent, anchor: .top); scrollTrace.note("scroll sent-prompt"); atLatest = false
-                    } else { scrollTrace.note("scroll after-send"); atLatest = true; scrollToNewest(proxy) }
-                }
-            }
-            .environment(\.selectText) { text, monospaced in selecting = SelectTextPage.Request(text: text, monospaced: monospaced) }
-        }
-        }
+        GeometryReader { viewport in timelineScroller(viewport: viewport.size.height) }
         .background(Color.white.ignoresSafeArea())
         .background(InteractivePopInstaller())
         .toolbar(.hidden, for: .navigationBar)
@@ -154,15 +93,7 @@ struct ConversationView: View {
                     .buttonStyle(FloatingButtonStyle(prominent: true)).disabled(model.busy)
                     .accessibilityIdentifier("sessions.resume")
                 } else if !model.canSend { Text(String(localized: "sessions.read_only")).font(.caption).foregroundStyle(.secondary) }
-                ChatComposer(draft: $model.draft, focused: $composerFocused, canSend: model.canSend, busy: model.busy, working: model.hasActiveResponse,
-                             images: model.imageDraft.images, removeImage: model.imageDraft.remove,
-                             send: { Task { await model.send() } }, stop: { Task { await model.interrupt() } },
-                             canReadProject: model.client.allows(.projectRead), canReadFeed: model.client.allows(.feedRead), showProject: { selectedFile = ""; showProject = true }, showFeed: { showFeed = true },
-                             hasImages: !model.imageDraft.images.isEmpty, sendBlocked: model.recoveryBlocked || model.imageDraft.loading || model.speech.active, showPhotos: {
-                                 guard model.imageDraft.images.count < 4 else { model.imageDraft.error = String(localized: "error.image"); return }
-                                 photoItems = []; showingPhotos = true
-                             }, dictating: model.speech.state == .recording, startVoice: { Task { await model.speech.start() } }, finishVoice: { model.speech.finish() }, showImageFiles: { showingImageFiles = true },
-                             maxLines: max(3, Int((pageHeight * 0.5 - 120) / 22)))
+                composer
             }.padding(.horizontal, 14).padding(.top, 14).padding(.bottom, 10)
         }
         .photosPicker(isPresented: $showingPhotos, selection: $photoItems, maxSelectionCount: max(1, 4 - model.imageDraft.images.count), selectionBehavior: .ordered, matching: .images)
@@ -280,6 +211,10 @@ struct ConversationView: View {
             }
             // The page's foot is the last thing in the stack, so the marker below it is the true end of the
             // content: anchoring that to the bottom lands exactly where a drag to the end does.
+            // A prompt this phone just sent takes the page's top with a blank page under it, waiting for the
+            // reply. Without that tail the top anchor cannot reach: the scroll view clamps at the content's
+            // end and the bubble only creeps upward.
+            if pinnedSent != nil { Color.clear.frame(height: max(bottom, 1)) }
             Color.clear.frame(height: 18)
             Color.clear.frame(height: 1).id("latest")
                 .background {
@@ -382,6 +317,115 @@ struct ConversationView: View {
         guard lastRowHeight <= viewportHeight else { proxy.scrollTo(newest, anchor: .top); return }
         proxy.scrollTo(newest, anchor: .bottom)
         proxy.scrollTo("latest", anchor: .bottom)
+    }
+    /// The scrolling page: the timeline and everything that follows, moves or restores its position.
+    private func timelineScroller(viewport: CGFloat) -> some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                timeline(bottom: viewport) { Task { await loadOlder(proxy) } }
+            }
+            .scrollClipDisabled()
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { viewportHeight = $0 }
+            .coordinateSpace(name: "chatTimeline")
+            .onPreferenceChange(TimelineBottomPreferenceKey.self) { bottom in
+                followed(bottom: bottom, viewport: viewport, proxy: proxy)
+            }
+            .modifier(TimelineScrollInteraction(userScrolling: $userScrolling, atLatest: $atLatest, latestVisible: latestVisible))
+            .onChange(of: userScrolling) { _, scrolling in
+                scrollTrace.note("userScrolling=\(scrolling)")
+                if scrolling { holdingPlace = false; pinnedSent = nil }
+            }
+            .onChange(of: atLatest) { _, value in scrollTrace.note("atLatest=\(value) hold=\(holdingPlace)") }
+            .modifier(ScrollJumpTrace(trace: scrollTrace))
+            // A card opened at the newest message would otherwise be carried off by the next one to arrive.
+            .environment(\.holdPlace) { scrollTrace.toggled("atLatest=\(atLatest) latestVisible=\(latestVisible)"); atLatest = false; holdingPlace = true }
+            .scrollDismissesKeyboard(.interactively)
+            .refreshable { await pullToRefresh(proxy) }
+            .overlay(alignment: .bottom) {
+                if !atLatest {
+                    latestButton(proxy)
+                }
+            }
+            .onChange(of: model.timelineItems.last?.id) { _, _ in
+                if !initiallyScrolled && !model.messages.isEmpty { settleAtBottom(proxy); initiallyScrolled = true }
+                else if atLatest { scrollTrace.note("scroll new-item"); scrollToNewest(proxy) }
+            }
+            .onChange(of: model.latestMessageText) { _, _ in if atLatest { scrollTrace.note("scroll new-text"); scrollToNewest(proxy) } }
+            .onChange(of: model.preview) { _, _ in if atLatest { scrollTrace.note("scroll preview"); scrollToNewest(proxy) } }
+            // Opening a cached conversation re-enters with its follow state; start from the last message.
+            .onAppear {
+                userScrolling = false; atLatest = true; holdingPlace = false
+                initialScroll = Task {
+                    // Show the conversation read last, then settle once the fresh read lands.
+                    await model.restoreStored()
+                    guard !Task.isCancelled, !model.messages.isEmpty else { return }
+                    initiallyScrolled = true; settleAtBottom(proxy, retries: 6)
+                }
+            }
+            .onDisappear { settleTask?.cancel(); settleTask = nil; initialScroll?.cancel(); initialScroll = nil }
+            // A prompt this phone sent lands with the page's newest row at the top and the reply taking the
+            // room below it, which is where the reader looks next. Following resumes when they scroll down.
+            .onChange(of: model.jumpToLatest) { _, _ in pinSentPrompt(proxy) }
+            // Once the transcript owns the prompt, its bubble moves into the timeline and the page's blank
+            // tail goes with it; keeping it would leave a screen of empty page under the reply.
+            .onChange(of: model.outgoing) { _, prompts in
+                if let pinned = pinnedSent, !prompts.contains(where: { $0.id == pinned }) { pinnedSent = nil }
+            }
+            .environment(\.selectText) { text, monospaced in selecting = SelectTextPage.Request(text: text, monospaced: monospaced) }
+        }
+    }
+    /// The input bar and the actions beside it; its own view keeps the page's body type-checkable.
+    private var composer: some View {
+        ChatComposer(draft: $model.draft, focused: $composerFocused, canSend: model.canSend, busy: model.busy, working: model.hasActiveResponse,
+                     images: model.imageDraft.images, removeImage: model.imageDraft.remove,
+                     send: { Task { await model.send() } }, stop: { Task { await model.interrupt() } },
+                     canReadProject: model.client.allows(.projectRead), canReadFeed: model.client.allows(.feedRead),
+                     showProject: { selectedFile = ""; showProject = true }, showFeed: { showFeed = true },
+                     hasImages: !model.imageDraft.images.isEmpty,
+                     sendBlocked: model.recoveryBlocked || model.imageDraft.loading || model.speech.active,
+                     showPhotos: { showPhotos() },
+                     dictating: model.speech.state == .recording,
+                     startVoice: { Task { await model.speech.start() } }, finishVoice: { model.speech.finish() },
+                     showImageFiles: { showingImageFiles = true },
+                     maxLines: max(3, Int((pageHeight * 0.5 - 120) / 22)))
+    }
+    private func showPhotos() {
+        guard model.imageDraft.images.count < 4 else { model.imageDraft.error = String(localized: "error.image"); return }
+        photoItems = []; showingPhotos = true
+    }
+    /// The page's follow decision, taken from the marker's position each time it is re-measured.
+    private func followed(bottom: CGFloat, viewport: CGFloat, proxy: ScrollViewProxy) {
+        // Scrolling reports every frame; only a real change may invalidate the timeline.
+        let visible = bottom > 0 && bottom <= viewport + 32
+        if latestVisible != visible { latestVisible = visible }
+        if userScrolling || !atLatest {
+            // While the page holds its place, the newest row coming into view does not resume following.
+            if !holdingPlace, atLatest != visible { atLatest = visible }
+        } else if bottom.isFinite, !latestVisible {
+            scrollTrace.note("scroll follower"); scrollToNewest(proxy)
+        }
+    }
+    /// Holds the prompt this phone just sent at the top of the page, with a blank page left under it.
+    private func pinSentPrompt(_ proxy: ScrollViewProxy) {
+        holdingPlace = false
+        guard let sent = model.outgoing.last?.id else {
+            scrollTrace.note("scroll after-send"); atLatest = true; scrollToNewest(proxy); return
+        }
+        // The blank tail and the scroll land in the same update, so the top anchor is reachable.
+        pinnedSent = sent; atLatest = false
+        withAnimation { scrollTrace.note("scroll sent-prompt"); proxy.scrollTo(sent, anchor: .top) }
+    }
+    /// The way back to the page's end after a scroll away or a pinned prompt.
+    private func latestButton(_ proxy: ScrollViewProxy) -> some View {
+        Button {
+            holdingPlace = false; pinnedSent = nil; atLatest = true
+            withAnimation { scrollTrace.note("scroll latest-button"); scrollToNewest(proxy) }
+        } label: {
+            Image(systemName: "arrow.down").font(.system(size: 20, weight: .medium)).frame(width: 42, height: 42)
+                .background(Color.white, in: Circle()).shadow(color: .black.opacity(0.1), radius: 10, y: 4)
+        }
+        .buttonStyle(.plain).accessibilityLabel(String(localized: "chat.latest"))
+        .accessibilityIdentifier("chat.latest").padding(.bottom, 10)
     }
     /// The menu's refresh redials a link that may be dead before reading, and shows the dial while it happens.
     private func reconnect() async {
