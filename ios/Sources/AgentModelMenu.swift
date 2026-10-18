@@ -20,7 +20,7 @@ struct AgentModelMenu: View, Equatable {
             Menu {
                 // A long configured list would push this out of reach, so typing a name comes first.
                 if choices.acceptsCustom {
-                    Button { customName = ""; customShown = true } label: { Label(String(localized: "model.custom"), systemImage: "cpu") }
+                    Button { customName = ""; customShown = true } label: { Label(String(localized: "model.custom"), systemImage: "square.stack.3d.up") }
                         .accessibilityIdentifier("model.custom")
                 }
                 Section(note(choices)) {
