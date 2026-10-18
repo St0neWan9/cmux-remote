@@ -343,11 +343,14 @@ struct ConversationView: View {
             }
             .scrollClipDisabled()
             .coordinateSpace(name: "chatTimeline")
-            // Whether the page rests at its end, measured by the scroll view itself: the timeline's
-            // preference lives in a different coordinate space (it starts below the top inset), so comparing
-            // it with a height was off by that inset and the page believed it was at the end when it was not.
+            // Whether the newest content is in sight, measured by the scroll view itself. Its offset counts from
+            // under the header while its container height leaves the header and composer out, so adding the two
+            // stopped a header's height short of the end: a page dragged to its end by hand still read as away
+            // from it and kept the latest button. The visible rect reaches under the composer; what the reader
+            // sees ends where the composer begins. The page's foot and a pinned prompt's blank room are not content.
             .onScrollGeometryChange(for: Bool.self) { geometry in
-                geometry.contentOffset.y + geometry.containerSize.height >= geometry.contentSize.height - 32
+                let seen = geometry.visibleRect.maxY - geometry.contentInsets.bottom
+                return seen >= geometry.contentSize.height - pageTail - 8
             } action: { old, atEnd in
                 _ = old
                 bottomVisible(atEnd)
@@ -363,8 +366,11 @@ struct ConversationView: View {
             .environment(\.holdPlace) { scrollTrace.toggled("atLatest=\(atLatest) latestVisible=\(latestVisible)"); atLatest = false; holdingPlace = true }
             .scrollDismissesKeyboard(.interactively)
             .refreshable { await pullToRefresh(proxy) }
+            // Offered only while newest content is out of sight: a page that rests at its end, by hand or after a
+            // card closed, has nowhere to go back to. A pinned prompt follows its reply, so the button appears
+            // once that reply runs under the composer.
             .overlay(alignment: .bottom) {
-                if !atLatest {
+                if !latestVisible && (!atLatest || pinnedSent != nil) {
                     latestButton(proxy)
                 }
             }
@@ -418,6 +424,11 @@ struct ConversationView: View {
     private func isPinned(_ item: ConversationTimelineItem) -> Bool {
         guard let pinned = pinnedSent, pinned.outgoing == nil else { return false }
         return PinnedPromptText.matches(item.first, pinned.text)
+    }
+    /// The blank height after the newest content: the page's foot and end marker, and below a pinned prompt the
+    /// room it leaves for the reply. It has to match the filler and foot the timeline lays out.
+    private var pageTail: CGFloat {
+        19 + (pinnedSent == nil ? 0 : max(0, scrollHeight - PinnedPrompt.foot - pinnedRowHeight))
     }
     /// The page's follow decision, taken from the marker's position each time it is re-measured.
     private func bottomVisible(_ visible: Bool) {
