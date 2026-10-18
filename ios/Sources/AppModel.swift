@@ -29,8 +29,9 @@ final class AppModel {
     @ObservationIgnored var backgroundedAt: Date?
     /// Paces automatic redials of lost Macs; it outlives one supervision pass so a person's retry can reset it.
     @ObservationIgnored let reconnectSchedule = ReconnectSchedule()
-    /// Whether the "automatic retries stopped" line was already written for the current exhausted budget.
-    @ObservationIgnored var reportedExhaustion = false
+    /// Macs the schedule keeps retrying in the background: the pages stop showing their dial and their failure,
+    /// until one of them connects or a person asks for a retry.
+    var quietHosts: Set<String> = []
     var error: String?
     var loading = false
     var host = ""
@@ -301,6 +302,7 @@ final class AppModel {
                 perHost[link.id] = (ordered(sessions), workspaces ?? perHost[link.id]?.workspaces ?? []); hostErrors[link.id] = nil
                 // A read that just succeeded proves the link, including for a transport that reports no states.
                 if linkStates[link.id] != nil { linkStates[link.id] = .connected }
+                quietHosts.remove(link.id)
             case .failure(let failure):
                 // The Mac keeps its own error, so several Macs still say which one is down; the bar retries it.
                 hostErrors[link.id] = ErrorPresentation().message(failure)

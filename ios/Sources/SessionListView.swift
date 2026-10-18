@@ -130,8 +130,9 @@ struct SessionListView: View {
                     if hosted.isEmpty && !loading {
                         Text(String(localized: !canRead ? "sessions.no_read_grant" : (model.hostedSessions.isEmpty ? "sessions.empty" : "sessions.no_matches"))).foregroundStyle(.secondary).padding(.vertical, 12)
                     }
-                    // The bar already says the Mac is unreachable; the red line is for other failures.
-                    if let error, !multiple, model.connectionState != .disconnected { Text(error).font(.footnote).foregroundStyle(.red) }
+                    // The bar already says the Mac is unreachable, and a Mac retried in the background is not shown
+                    // as failing; the red line is for other failures.
+                    if let error, !multiple, model.connectionState != .disconnected, model.quietHosts.isEmpty { Text(error).font(.footnote).foregroundStyle(.red) }
                 }.frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, MobileDesign.pageInset).padding(.top, 20).padding(.bottom, 24)
             }

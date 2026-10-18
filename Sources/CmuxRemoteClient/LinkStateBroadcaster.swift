@@ -8,6 +8,14 @@ final class LinkStateBroadcaster: @unchecked Sendable {
     private var current: LinkState?
     private var observers: [UUID: AsyncStream<LinkState>.Continuation] = [:]
 
+    /// The last reported state; nil before the first dial.
+    var latest: LinkState? { lock.lock(); defer { lock.unlock() }; return current }
+
+    /// Returns once the link reports connected, or when the caller is cancelled.
+    func connected() async {
+        for await state in states() where state == .connected { return }
+    }
+
     func report(_ state: LinkState) {
         lock.lock()
         guard current != state else { lock.unlock(); return }
