@@ -4,15 +4,16 @@ import CmuxRemoteClient
 /// Keeps every approved Mac's link up and makes its state visible.
 extension AppModel {
     /// The state the pages show: dialing wins over a failure so a retry is visible as soon as it starts.
+    /// A Mac retried in the background is left out, so its dial does not keep turning the bar.
     var connectionState: LinkState? {
-        let states = links.compactMap { linkStates[$0.id] }
+        let states = links.filter { !quietHosts.contains($0.id) }.compactMap { linkStates[$0.id] }
         if states.contains(.connecting) { return .connecting }
         if states.contains(.disconnected) { return .disconnected }
         return states.isEmpty ? nil : .connected
     }
     /// The Mac to name in the bar when exactly one of several is unreachable.
     var offlineHostName: String? {
-        let offline = links.filter { linkStates[$0.id] == .disconnected }
+        let offline = links.filter { linkStates[$0.id] == .disconnected && !quietHosts.contains($0.id) }
         return links.count > 1 && offline.count == 1 ? offline.first?.name : nil
     }
     /// The state of one Mac's link, for a conversation that belongs to it.
@@ -24,9 +25,9 @@ extension AppModel {
     ///
     /// Returning from a long background redials every Mac, since its links are likely half-open. Automatic retries,
     /// the bar's Retry and a pull touch only Macs already known to be down: redialing a working link drops its live updates.
-    /// A person's retry starts a fresh automatic-retry budget, so a Mac given up on can be tried again.
+    /// A person's retry starts the backoff over and shows the Macs retried in the background again.
     func reconnect(onlyLost: Bool = false) async {
-        reconnectSchedule.rearm()
+        reconnectSchedule.rearm(); quietHosts.removeAll()
         await redial(onlyLost ? links.filter { linkStates[$0.id] != .connected } : links)
     }
 
@@ -66,6 +67,7 @@ extension AppModel {
                                 "state=\(state) host=\(id.prefix(8))")
                         await MainActor.run {
                             self.linkStates[id] = state
+                            if state == .connected { self.quietHosts.remove(id) }
                             schedule.observe(host: id, from: previous, to: state)
                         }
                         previous = state
@@ -98,19 +100,18 @@ extension AppModel {
         for link in links { if let state = linkStates[link.id] { states[link.id] = state } }
         switch schedule.step(states: states, waited: full) {
         case .idle:
-            // Say it once instead of dialing forever; the bar keeps its Retry for a path that comes back.
-            if schedule.exhausted, !reportedExhaustion {
-                reportedExhaustion = true
-                diagLog(.info, category: "link", "auto retry stopped after \(schedule.attempt) attempts; a Mac is still down")
-            }
-            if !schedule.exhausted { reportedExhaustion = false }
             return
         case .redialDropped(let hosts):
-            reportedExhaustion = false
+            // A link that just worked and dropped is news: show its redial again.
+            quietHosts.subtract(hosts)
             diagLog(.info, category: "link", "auto retry #1 at once: link dropped host=\(hosts.map { String($0.prefix(8)) }.joined(separator: ","))")
             await redial(links.filter { hosts.contains($0.id) })
         case .retryLost(let attempt, let waited):
-            reportedExhaustion = false
+            let lost = links.filter { linkStates[$0.id] != .connected }.map(\.id)
+            if schedule.quiet, !lost.allSatisfy(quietHosts.contains) {
+                quietHosts.formUnion(lost)
+                diagLog(.info, category: "link", "auto retry continues in the background; next every \(schedule.pause.components.seconds)s at most 256s")
+            }
             diagLog(.info, category: "link", "auto retry #\(attempt) after waiting \(waited.components.seconds)s")
             // The automatic path must not rearm the budget it just spent.
             await redial(links.filter { linkStates[$0.id] != .connected })

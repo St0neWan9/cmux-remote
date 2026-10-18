@@ -34,30 +34,13 @@ public final class RemoteClient: Sendable {
         canReplyFeed = connection.grant.value.scope.capabilities.contains(.feedReply)
         hub = Self.hub(runtime: runtime, trace: trace)
     }
-    /// Keeps one path subscribed across link loss: each event or failure invalidates its watchers, and a failure
-    /// is retried with backoff unless the device lost its grant.
+    /// Keeps one path subscribed across link loss without dialing a link that is down; see `PathResubscription`.
     private static func hub(runtime: RemoteClientRuntime, trace: @escaping @Sendable (String) -> Void) -> PathWatchHub {
-        PathWatchHub { path, changed in
-            var attempt = 0
-            while !Task.isCancelled {
-                do {
-                    let subscription = try await runtime.subscribe(path)
-                    for try await _ in subscription { guard !Task.isCancelled else { return }; attempt = 0; await changed() }
-                } catch {
-                    guard !Task.isCancelled else { return }
-                    await changed()
-                    let final = (error as? BridgeError).map { ["unauthorized", "scope_denied", "invalid_identity", "invalid_signature", "host_changed"].contains($0.code) } ?? false
-                    let next = final ? "stopped" : "retry in \(1 << min(attempt + 1, 5))s"
-                    trace("subscription ended \(path) error=\(TraceFormat().describe(error)) \(next)")
-                    if final { return }
-                    // The next subscribe must fetch the restarted Bridge's epoch, not sign with the old one again.
-                    if (error as? BridgeError)?.code == "invalid_proof" { await runtime.discardEpoch() }
-                }
-                attempt = min(attempt + 1, 5)
-                // Reconnection backoff is an intended, cancellable delay.
-                do { try await Task.sleep(for: .seconds(1 << attempt)) } catch { return }
-            }
-        }
+        let states = runtime.linkStates
+        let loop = PathResubscription(subscribe: { try await runtime.subscribe($0) },
+                                      linkDown: { states.latest == .disconnected }, linkUp: { await states.connected() },
+                                      discardEpoch: { await runtime.discardEpoch() }, trace: trace)
+        return PathWatchHub { path, changed in await loop.run(path, changed: changed) }
     }
     public func get<T: Decodable & Sendable>(_ path: String, query: [String: String] = [:], as type: T.Type) async throws -> T { try await runtime.request(path, method: "GET", query: query, body: nil, as: type) }
     public func post<B: Encodable & Sendable, T: Decodable & Sendable>(_ path: String, body: B, as type: T.Type) async throws -> T { try await runtime.request(path, method: "POST", query: [:], body: JSONEncoder().encode(body), as: type) }
