@@ -44,6 +44,19 @@ enum ReconnectChecks {
         check(failing.step(states: ["studio": .disconnected, "laptop": .disconnected], waited: failedFull) == .retryLost(attempt: 1, waited: .milliseconds(40)),
               "A Mac whose dial failed was not retried after the pause")
         check(failing.step(states: ["studio": .disconnected, "laptop": .connecting], waited: true) == .idle, "A retry started while another Mac was still dialing")
+        // A dial in flight must not wipe the budget: otherwise the schedule can never stop.
+        check(failing.attempt == 1, "A Mac still dialing reset the retry budget")
+        let busyBudget = ReconnectSchedule(pauses: [.milliseconds(20)], maxAttempts: 2)
+        busyBudget.observe(host: "studio", from: nil, to: .disconnected)
+        for expected in [1, 2] {
+            _ = await busyBudget.wait()
+            check(busyBudget.step(states: ["studio": .disconnected], waited: true) == .retryLost(attempt: expected, waited: .milliseconds(20)), "Retry \(expected) inside the budget was skipped")
+            _ = await busyBudget.wait()
+            _ = busyBudget.step(states: ["studio": .disconnected, "laptop": .connecting], waited: true)
+        }
+        _ = await busyBudget.wait()
+        check(busyBudget.step(states: ["studio": .disconnected], waited: true) == .idle && busyBudget.exhausted,
+              "A Mac stuck dialing kept a dead path retrying forever")
 
         // A drop seen while the loop was busy dialing is handled without another pause.
         let busy = ReconnectSchedule(pauses: [.seconds(30)])
