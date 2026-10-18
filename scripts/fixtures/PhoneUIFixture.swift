@@ -41,16 +41,20 @@ private actor PhoneUIBackend: CmuxControlling {
             ]),
         ])
     }
-    /// A request that asked two questions: the first card carries both, the second stays a record.
+    /// A request that asked two questions: the first card carries both and the second is not repeated.
+    ///
+    /// Shaped as a cmux-tui terminal menu offers it: only its own options answer, nothing can be typed or skipped.
     private var multiQuestion: JSONValue = .object([
         "id": .string("multi-question"), "request_id": .string("multi-question"),
         "workstream_id": .string("cmux-feed-v1:" + Data("claude".utf8).base64EncodedString() + ":" + Data("fixture-session".utf8).base64EncodedString()),
         "source": .string("claude"), "kind": .string("question"), "status": .string("pending"), "title": .string("Agent 提问"),
         "questions": .array([
             .object(["id": .string("plan"), "prompt": .string("用哪个方案?"), "multi_select": .bool(false),
+                     "allow_custom": .bool(false), "allow_skip": .bool(false),
                      "options": .array([.object(["id": .string("fast"), "label": .string("快速方案")]),
                                         .object(["id": .string("safe"), "label": .string("稳妥方案")])])]),
             .object(["id": .string("scope"), "prompt": .string("改动范围?"), "multi_select": .bool(false),
+                     "allow_custom": .bool(false), "allow_skip": .bool(false),
                      "options": .array([.object(["id": .string("front"), "label": .string("只改前端")]),
                                         .object(["id": .string("both"), "label": .string("前后端都改")])])]),
         ]),
@@ -312,7 +316,8 @@ private actor PhoneUIBackend: CmuxControlling {
                                                                     ["question": "用哪个方案?", "options": [["label": "快速方案"], ["label": "稳妥方案"]]],
                                                                     ["question": "改动范围?", "options": [["label": "只改前端"], ["label": "前后端都改"]]]]]]]]]
                 let askText = String(decoding: try JSONSerialization.data(withJSONObject: ask), as: UTF8.self)
-                let rows = [
+                // Earlier turns make the page taller than the screen, so the form can pass under the header and composer.
+                let rows = earlier.suffix(30) + [
                     #"{"type":"user","uuid":"ask-multi-user","timestamp":"2026-10-12T01:00:00Z","message":{"content":"帮我选个方案和范围"}}"#,
                     askText]
                 try Data((rows.joined(separator: "\n") + "\n").utf8).write(to: transcript)

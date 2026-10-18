@@ -177,7 +177,6 @@
 "feed.unsupported" = "此事项暂不支持在手机上回复。";
 "feed.question.unavailable" = "这个问题已无法在这里回答。";
 "chat.question.answered" = "已选择：%@";
-"chat.question.answering_above" = "在第一张卡片中一起回答";
 "feed.recorded" = "已记录";
 "error.input_value" = "请检查输入内容及大小。";
 "error.project" = "此会话没有可访问的项目目录。";
