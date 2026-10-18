@@ -20,7 +20,7 @@ struct AgentModelMenu: View, Equatable {
             Menu {
                 // A long configured list would push this out of reach, so typing a name comes first.
                 if choices.acceptsCustom {
-                    Button { customName = ""; customShown = true } label: { Label(String(localized: "model.custom"), systemImage: "ellipsis.circle") }
+                    Button { customName = ""; customShown = true } label: { Label(String(localized: "model.custom"), systemImage: "cpu") }
                         .accessibilityIdentifier("model.custom")
                 }
                 Section(note(choices)) {
@@ -34,7 +34,7 @@ struct AgentModelMenu: View, Equatable {
             } label: {
                 HStack(spacing: 3) {
                     Text(subtitle).lineLimit(1)
-                    Image(systemName: "chevron.up.chevron.down").font(.caption2.weight(.semibold))
+                    Image(systemName: "chevron.down").font(.caption2.weight(.semibold))
                 }.font(.caption).foregroundStyle(.secondary).contentShape(Rectangle())
             }
             .disabled(!enabled)
