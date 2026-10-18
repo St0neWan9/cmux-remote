@@ -370,7 +370,9 @@ final class ConversationModel {
         if modelChoices == nil, let shared = modelCache?.list(scope: scope, agent: agent) { modelChoices = shared }
         do {
             let list = try await readModels()
-            modelChoices = list; modelsRead = true
+            // An unchanged list is not assigned again: the menu may be open, and any change rebuilds it.
+            if modelChoices != list { modelChoices = list }
+            modelsRead = true
             modelCache?.store(list, scope: scope, agent: agent)
         } catch { logFailure("models", error, shown: false) }
     }
