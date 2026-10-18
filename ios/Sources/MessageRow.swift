@@ -103,6 +103,10 @@ struct MessageRow: View {
                     }.frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
+        case .question where pendingQuestion.map { !$0.isFirst } ?? false:
+            // A later question of a request still waiting: the first card already carries it in its form, so a
+            // second copy would only repeat it. It shows again as a record once the request is answered.
+            EmptyView()
         case .question(let value):
             // The same card answers on the phone and stays a record once the request is gone: only a currently
             // pending request for this exact prompt is offered, and it is answered through the Feed.
@@ -113,11 +117,6 @@ struct MessageRow: View {
                     // carries one label per question, so a card cannot answer only its own.
                     // The form keeps its own identifiers: a container identifier would replace each control's.
                     FeedQuestionView(questions: pendingQuestion.questions, busy: answering) { answers in answerQuestion(answers) }
-                } else if let pendingQuestion, !pendingQuestion.isFirst {
-                    // The later cards are the same request seen from another question; the first card answers it.
-                    Text(value.prompt)
-                    ForEach(value.options) { Text($0.label) }
-                    Text(String(localized: "chat.question.answering_above")).font(.footnote).foregroundStyle(.secondary)
                 } else {
                     Text(value.prompt)
                     // An answered question is a record of the choice, not a dead form: naming the answer is what
