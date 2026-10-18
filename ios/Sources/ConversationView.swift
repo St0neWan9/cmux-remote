@@ -154,7 +154,8 @@ struct ConversationView: View {
             Button(String(localized: "pair.cancel"), role: .cancel) {}
         } message: { Text(String(localized: "chat.hard_stop_note")) }
         .sheet(item: $selecting) { request in SelectTextPage(request: request) }
-        .task(id: model.canSend) { await model.loadModelChoices() }
+        // Read on every visit and every return to the foreground, so an edit on the Mac shows without a relaunch.
+        .task(id: model.canSend && phase == .active) { if phase == .active { await model.loadModelChoices() } }
         .task(id: phase) {
             guard phase == .active else { model.suspendReads(); return }; model.resumeReads()
             await model.observeChanges()
