@@ -41,7 +41,7 @@ enum ModelMenuChecks {
         await other.loadModelChoices()
         check(other.modelChoices == nil, "Another Mac's conversation showed this Mac's model list")
 
-        // A read that failed is made again the next time the page opens; one that succeeded is not repeated.
+        // A read that failed is made again the next time the page opens.
         let flaky = ReadSwitch(); await flaky.set(true)
         let retried = model("retried", on: laptop) { if await flaky.on { throw URLError(.networkConnectionLost) }; return claude }
         await retried.loadModelChoices()
@@ -49,10 +49,24 @@ enum ModelMenuChecks {
         await flaky.set(false)
         await retried.loadModelChoices()
         check(retried.canSwitchModel, "Reopening after a failed read did not read the models again")
-        let before = await reads.value
-        await retried.loadModelChoices()
-        let after = await reads.value
-        check(after == before, "A conversation that already read its models read them again on every visit")
+
+        // Every visit reads again: the owner edits the agent's configuration while the app keeps running.
+        let edited = ModelChoiceList(choices: [ModelChoice(id: "sonnet", label: "Sonnet")], acceptsCustom: true, persistsDefault: true)
+        let mac = ListSource(claude)
+        let visited = model("visited", on: studio) { await mac.list }
+        await visited.loadModelChoices()
+        check(visited.modelChoices == claude, "The first visit did not show the Mac's list")
+        await mac.set(edited)
+        await visited.loadModelChoices()
+        check(visited.modelChoices == edited, "A conversation opened again kept the list it read before the Mac's configuration changed")
+        // The new list is what every other conversation on that Mac shows first.
+        let next = model("next", on: studio) { throw URLError(.timedOut) }
+        await next.loadModelChoices()
+        check(next.modelChoices == edited, "Another conversation showed the Mac's old list after one had read the new one")
+        // A refresh that fails keeps the list already shown rather than taking the menu away.
+        let failing = model("visited", on: studio) { throw URLError(.timedOut) }
+        await failing.loadModelChoices()
+        check(failing.modelChoices == edited, "A failed refresh took the menu away")
 
         // A conversation that cannot send cannot switch, and reads nothing.
         let ended = ConversationModel(session: SessionDescriptor(id: "ended", agent: "claude", title: "ended", cwd: nil, workspaceID: "workspace", surfaceID: "surface", state: "ended"),
@@ -67,3 +81,4 @@ enum ModelMenuChecks {
 
 private actor Counter { var value = 0; func add() { value += 1 } }
 private actor ReadSwitch { var on = false; func set(_ value: Bool) { on = value } }
+private actor ListSource { var list: ModelChoiceList; init(_ list: ModelChoiceList) { self.list = list }; func set(_ value: ModelChoiceList) { list = value } }
