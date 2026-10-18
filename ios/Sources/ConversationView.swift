@@ -19,7 +19,12 @@ struct ConversationView: View {
     /// The reader opened or closed a card: the page stays where it is until they scroll or ask for the latest.
     @State private var holdingPlace = false
     /// A prompt this phone just sent, held at the top of the page until the reader scrolls or asks for the latest.
-    @State private var pinnedSent: UUID?
+    ///
+    /// It starts as the outgoing bubble, which the transcript then replaces with the recorded message; the pin
+    /// follows the text into that row so the page does not move when the swap happens.
+    @State private var pinnedSent: PinnedPrompt?
+    /// The content height before the page's blank tail, which decides how much tail still fits.
+    @State private var timelineContentHeight: CGFloat = 0
     @State private var scrollTrace = ScrollTrace()
     /// A message opened on its own page to select part of it.
     @State private var selecting: SelectTextPage.Request?
@@ -214,7 +219,18 @@ struct ConversationView: View {
             // A prompt this phone just sent takes the page's top with a blank page under it, waiting for the
             // reply. Without that tail the top anchor cannot reach: the scroll view clamps at the content's
             // end and the bubble only creeps upward.
-            if pinnedSent != nil { Color.clear.frame(height: max(bottom, 1)) }
+            // Measured before the tail: what this row reports never depends on the tail it sizes.
+            Color.clear.frame(height: 1)
+                .background {
+                    GeometryReader { content in
+                        Color.clear.preference(key: TimelineContentHeightPreferenceKey.self,
+                            value: content.frame(in: .named("chatTimeline")).maxY)
+                    }
+                }
+            // The tail keeps the sent prompt at the page's top while it still fits: it shrinks as the reply
+            // grows, so the prompt stays put and the bottom stays the end of the page. Once the reply is
+            // taller than the page there is no room left and following takes over.
+            if pinnedSent != nil { Color.clear.frame(height: max(0, bottom - timelineContentHeight)) }
             Color.clear.frame(height: 18)
             Color.clear.frame(height: 1).id("latest")
                 .background {
@@ -330,6 +346,9 @@ struct ConversationView: View {
             .onPreferenceChange(TimelineBottomPreferenceKey.self) { bottom in
                 followed(bottom: bottom, viewport: viewport, proxy: proxy)
             }
+            .onPreferenceChange(TimelineContentHeightPreferenceKey.self) { height in
+                if abs(height - timelineContentHeight) > 0.5 { timelineContentHeight = height }
+            }
             .modifier(TimelineScrollInteraction(userScrolling: $userScrolling, atLatest: $atLatest, latestVisible: latestVisible))
             .onChange(of: userScrolling) { _, scrolling in
                 scrollTrace.note("userScrolling=\(scrolling)")
@@ -366,11 +385,10 @@ struct ConversationView: View {
             // A prompt this phone sent lands with the page's newest row at the top and the reply taking the
             // room below it, which is where the reader looks next. Following resumes when they scroll down.
             .onChange(of: model.jumpToLatest) { _, _ in pinSentPrompt(proxy) }
-            // Once the transcript owns the prompt, its bubble moves into the timeline and the page's blank
-            // tail goes with it; keeping it would leave a screen of empty page under the reply.
-            .onChange(of: model.outgoing) { _, prompts in
-                if let pinned = pinnedSent, !prompts.contains(where: { $0.id == pinned }) { pinnedSent = nil }
-            }
+            // The transcript replaces the bubble with the recorded message: keep the pin on that row so the
+            // page does not move when the swap happens.
+            .onChange(of: model.outgoing) { _, _ in handOverPin(proxy) }
+            .onChange(of: model.timelineItems.count) { _, _ in handOverPin(proxy) }
             .environment(\.selectText) { text, monospaced in selecting = SelectTextPage.Request(text: text, monospaced: monospaced) }
         }
     }
@@ -408,12 +426,24 @@ struct ConversationView: View {
     /// Holds the prompt this phone just sent at the top of the page, with a blank page left under it.
     private func pinSentPrompt(_ proxy: ScrollViewProxy) {
         holdingPlace = false
-        guard let sent = model.outgoing.last?.id else {
+        guard let sent = model.outgoing.last else {
             scrollTrace.note("scroll after-send"); atLatest = true; scrollToNewest(proxy); return
         }
-        // The blank tail and the scroll land in the same update, so the top anchor is reachable.
-        pinnedSent = sent; atLatest = false
-        withAnimation { scrollTrace.note("scroll sent-prompt"); proxy.scrollTo(sent, anchor: .top) }
+        // The tail and the scroll land in the same update, so the top anchor is reachable before the reply
+        // starts growing. Following stays on: with the tail shrinking, the page's end and the prompt's top
+        // are the same place until the reply fills the page.
+        pinnedSent = PinnedPrompt(outgoing: sent.id, text: sent.text)
+        atLatest = true
+        withAnimation { scrollTrace.note("scroll sent-prompt"); proxy.scrollTo(sent.id, anchor: .top) }
+    }
+    /// Moves the pin from the outgoing bubble to the transcript row that recorded it.
+    private func handOverPin(_ proxy: ScrollViewProxy) {
+        guard let pinned = pinnedSent, let outgoing = pinned.outgoing, !model.outgoing.contains(where: { $0.id == outgoing }) else { return }
+        let target = model.timelineItems.last { item in
+            item.first.role == .user && PinnedPromptText.matches(item.first, pinned.text)
+        }
+        pinnedSent = PinnedPrompt(outgoing: nil, text: pinned.text)
+        if let target { proxy.scrollTo(target.id, anchor: .top); scrollTrace.note("scroll pin-handover") }
     }
     /// The way back to the page's end after a scroll away or a pinned prompt.
     private func latestButton(_ proxy: ScrollViewProxy) -> some View {
