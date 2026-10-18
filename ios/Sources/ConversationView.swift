@@ -500,6 +500,7 @@ struct ConversationView: View {
                                enabled: !model.busy && !model.working && model.pendingSend == nil) { name, label in
                     Task { await model.switchModel(to: name, label: label) }
                 }
+                .equatable()
             }.frame(maxWidth: .infinity, alignment: .leading)
             Menu {
                 Button { showTiming = true } label: { Label(String(localized: "chat.timing"), systemImage: "clock") }.accessibilityIdentifier("chat.timing")

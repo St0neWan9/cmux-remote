@@ -2,7 +2,12 @@ import SwiftUI
 import CmuxRemoteCore
 
 /// The agent and model under the conversation's title; tapped, it switches the model with the agent's own command.
-struct AgentModelMenu: View {
+///
+/// It is equal to itself while what it shows is unchanged: the conversation page renders again many times a
+/// second while a reply streams in, and every render of an open menu rebuilds it, which threw the reader back
+/// to its top while they were scrolling through the list. The action is left out of the comparison; it always
+/// switches this page's conversation.
+struct AgentModelMenu: View, Equatable {
     let subtitle: String
     let current: String?
     let choices: ModelChoiceList?
@@ -29,7 +34,7 @@ struct AgentModelMenu: View {
             } label: {
                 HStack(spacing: 3) {
                     Text(subtitle).lineLimit(1)
-                    Image(systemName: "chevron.down").font(.caption2.weight(.semibold))
+                    Image(systemName: "chevron.up.chevron.down").font(.caption2.weight(.semibold))
                 }.font(.caption).foregroundStyle(.secondary).contentShape(Rectangle())
             }
             .disabled(!enabled)
@@ -48,6 +53,9 @@ struct AgentModelMenu: View {
         } else {
             Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1)
         }
+    }
+    nonisolated static func == (lhs: AgentModelMenu, rhs: AgentModelMenu) -> Bool {
+        lhs.subtitle == rhs.subtitle && lhs.current == rhs.current && lhs.choices == rhs.choices && lhs.enabled == rhs.enabled
     }
     private func selected(_ choice: ModelChoice) -> Bool {
         guard let current = current?.lowercased() else { return false }
