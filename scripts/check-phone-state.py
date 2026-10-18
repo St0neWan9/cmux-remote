@@ -6,7 +6,7 @@ root = Path(__file__).resolve().parents[1]
 build = Path(subprocess.check_output(['swift', 'build', '--show-bin-path'], cwd=root, text=True).strip())
 modules = build / 'Modules' if (build / 'Modules').is_dir() else build
 args = ['swiftc', '-parse-as-library', '-swift-version', '6', '-I', str(modules)]
-for name in ['SpeechDraftModel', 'SpeechInputServing', 'SpeechInputResult', 'UnavailableSpeechInput', 'HistoricalImageModel', 'ReadRequestOwner', 'AppModel', 'HostLink', 'HostedSession', 'StartTarget', 'ConversationModel', 'ImageDraftModel', 'ImageSelection', 'ImageAttachmentEncoder', 'ImageFileLoader', 'PendingSendStore', 'ToolDetailModel', 'ToolDetailReference', 'PairingStore', 'DeviceIdentityStore', 'SecureDeviceStore', 'ErrorPresentation', 'DiagnosticLog', 'EdgeBackSwipe', 'ConversationCache', 'RunningSessionSync', 'BackgroundSync', 'PendingFeed', 'RefreshTicker', 'ReconnectSchedule', 'ProjectModel', 'FeedModel']:
+for name in ['SpeechDraftModel', 'SpeechInputServing', 'SpeechInputResult', 'UnavailableSpeechInput', 'HistoricalImageModel', 'ReadRequestOwner', 'AppModel', 'HostLink', 'HostedSession', 'StartTarget', 'ConversationModel', 'ImageDraftModel', 'ImageSelection', 'ImageAttachmentEncoder', 'ImageFileLoader', 'PendingSendStore', 'ToolDetailModel', 'ToolDetailReference', 'PairingStore', 'DeviceIdentityStore', 'SecureDeviceStore', 'ErrorPresentation', 'DiagnosticLog', 'EdgeBackSwipe', 'ConversationCache', 'RunningSessionSync', 'BackgroundSync', 'PendingFeed', 'RefreshTicker', 'ReconnectSchedule', 'ProjectModel', 'FeedModel', 'ModelChoiceCache']:
     args.append(str(root / 'ios' / 'Sources' / (name + '.swift')))
 args.append(str(root / 'scripts/fixtures/PhoneStateChecks.swift'))
 args.append(str(root / 'scripts/fixtures/ConversationReadChecks.swift'))
@@ -18,6 +18,7 @@ args.append(str(root / 'scripts/fixtures/SpeechStateChecks.swift'))
 args.append(str(root / 'scripts/fixtures/EdgeBackChecks.swift'))
 args.append(str(root / 'scripts/fixtures/MultiHostChecks.swift'))
 args.append(str(root / 'scripts/fixtures/ReconnectChecks.swift'))
+args.append(str(root / 'scripts/fixtures/ModelMenuChecks.swift'))
 for module in ['CmuxRemoteCore', 'CmuxRemoteClient', 'CmuxAgentChat']:
     mapping_file = build / (module + '.build/output-file-map.json')
     if mapping_file.is_file():

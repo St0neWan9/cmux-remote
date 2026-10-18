@@ -92,6 +92,10 @@ final class ConversationModel {
     /// Answers one of those requests.
     private let replyFeed: @Sendable (String, JSONValue) async throws -> MutationReceipt
     private let readModels: @Sendable () async throws -> ModelChoiceList
+    /// The Mac's model lists, shared with every other conversation on it.
+    private let modelCache: ModelChoiceCache?
+    /// Whether this conversation has read the list itself, rather than only showing the shared one.
+    private var modelsRead = false
     private let postModel: @Sendable (ModelSwitchRequest) async throws -> MutationReceipt
     private let refreshReads = ReadRequestOwner()
     private let olderReads = ReadRequestOwner()
@@ -120,8 +124,8 @@ final class ConversationModel {
          replyFeed: (@Sendable (String, JSONValue) async throws -> MutationReceipt)? = nil,
          readModels: (@Sendable () async throws -> ModelChoiceList)? = nil,
          postModel: (@Sendable (ModelSwitchRequest) async throws -> MutationReceipt)? = nil,
-         cache: ConversationCache? = nil) {
-        self.session = session; self.client = client; speech = SpeechDraftModel(input: speechInput ?? UnavailableSpeechInput())
+         cache: ConversationCache? = nil, modelCache: ModelChoiceCache? = nil) {
+        self.session = session; self.client = client; self.modelCache = modelCache; speech = SpeechDraftModel(input: speechInput ?? UnavailableSpeechInput())
         let id = session.id
         let recovery = PendingSendStore(); let scope = client.operationRecoveryScope
         self.loadRecovery = loadRecovery ?? { try await recovery.load(scope: scope, sessionID: id) }
@@ -357,10 +361,18 @@ final class ConversationModel {
         if let reanchor, readsEnabled, olderReads.isCurrent(reanchor), generation == sourceGeneration { await refresh() }
     }
     /// Reads the models the agent offers. A Bridge without model switching answers with an error and leaves none.
+    ///
+    /// The list belongs to the Mac and the agent, so a list another conversation read is shown at once while this
+    /// one reads its own; a read cancelled by leaving the page is made again the next time it opens.
     func loadModelChoices() async {
-        guard canSend, modelChoices == nil, ["claude", "codex"].contains(session.agent) else { return }
-        do { modelChoices = try await readModels() }
-        catch { logFailure("models", error, shown: false) }
+        guard canSend, !modelsRead, ["claude", "codex"].contains(session.agent) else { return }
+        let scope = client.operationRecoveryScope, agent = session.agent
+        if modelChoices == nil, let shared = modelCache?.list(scope: scope, agent: agent) { modelChoices = shared }
+        do {
+            let list = try await readModels()
+            modelChoices = list; modelsRead = true
+            modelCache?.store(list, scope: scope, agent: agent)
+        } catch { logFailure("models", error, shown: false) }
     }
     /// Switches the agent to another model with its own model command. A failure is shown and never retried.
     func switchModel(to name: String, label: String) async {

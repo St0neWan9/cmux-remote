@@ -15,7 +15,7 @@ struct AgentModelMenu: View {
             Menu {
                 // A long configured list would push this out of reach, so typing a name comes first.
                 if choices.acceptsCustom {
-                    Button { customName = ""; customShown = true } label: { Label(String(localized: "model.custom"), systemImage: "character.cursor.ibeam") }
+                    Button { customName = ""; customShown = true } label: { Label(String(localized: "model.custom"), systemImage: "ellipsis.circle") }
                         .accessibilityIdentifier("model.custom")
                 }
                 Section(note(choices)) {

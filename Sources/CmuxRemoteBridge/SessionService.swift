@@ -25,6 +25,8 @@ public actor SessionService {
     private var eventSequence: Int?
     private let aliases: SessionAliasStore?
     private let modelCatalog: ModelChoiceCatalog
+    /// The session read in progress, shared by callers that arrive while it runs.
+    private var sessionsRead: Task<[SessionDescriptor], any Error>?
     private let modelSwitch = CodexModelSwitch()
 
     public init(cmux: any CmuxControlling, home: URL, transcriptRoots: [URL], mutations: MutationLedger? = nil, journal: MutationJournal? = nil, aliases: SessionAliasStore? = nil) {
@@ -99,7 +101,21 @@ public actor SessionService {
         guard let cwd else { return false }
         return title == cwd || cwd.hasSuffix("/" + title)
     }
+    /// The conversations cmux knows, read afresh.
+    ///
+    /// Every phone request authorizes against a fresh read, and one page asks for its history, live preview,
+    /// models and the list at once. Each read walks every session the daemon holds and takes seconds, and the
+    /// daemon answers them one after another, so a page waited for several reads in a row. Callers that arrive
+    /// while a read is under way now share it rather than queue another behind it; that read started at most one
+    /// read's duration earlier, and each caller still re-checks the record's binding before acting on it.
     public func sessions() async throws -> [SessionDescriptor] {
+        if let sessionsRead { return try await sessionsRead.value }
+        let read = Task { try await self.readSessions() }
+        sessionsRead = read
+        defer { if sessionsRead == read { sessionsRead = nil } }
+        return try await read.value
+    }
+    private func readSessions() async throws -> [SessionDescriptor] {
         let vault = try await cmux.request("vault.sessions", params: ["limit": .number(200)])
         let dump = try? await cmux.request("chat.sessions.dump", params: [:])
         let tabTitles = await surfaceTitles()
@@ -233,8 +249,8 @@ public actor SessionService {
 
     /// Returns a bounded, revision-bound page from an authorized session's tool record.
     public func toolText(id: String, messageID: String, generation: String, field: String,
-                         offset: Int, contentID: String?, limit: Int, access: SessionAccess? = nil) async throws -> ToolTextPage {
-        let record = try await authorizedRecord(id, capability: .conversationRead, access: access)
+                         offset: Int, contentID: String?, limit: Int, discovered: Bool = false, access: SessionAccess? = nil) async throws -> ToolTextPage {
+        let record = try await authorizedRecord(id, capability: .conversationRead, discovered: discovered, access: access)
         guard let path = record.transcript else { throw BridgeError("history_unavailable", "No readable conversation record is available.", status: 404) }
         let result = try await reader.toolText(path: path, agent: record.descriptor.agent, messageID: messageID,
                                              generation: generation, field: field, offset: offset, contentID: contentID, limit: limit)
@@ -243,8 +259,8 @@ public actor SessionService {
     }
 
     /// Reads only a transcript-bound image; project bytes additionally require project-read authority.
-    public func image(id: String, referenceID: String, generation: String, access: SessionAccess? = nil) async throws -> Data {
-        let record = try await authorizedRecord(id, capability: .conversationRead, access: access)
+    public func image(id: String, referenceID: String, generation: String, discovered: Bool = false, access: SessionAccess? = nil) async throws -> Data {
+        let record = try await authorizedRecord(id, capability: .conversationRead, discovered: discovered, access: access)
         guard let path = record.transcript else { throw BridgeError("image_unavailable", "No recorded image is available.", status: 404) }
         let image = try await reader.image(path: path, agent: record.descriptor.agent, referenceID: referenceID, generation: generation)
         let bytes: Data
@@ -309,8 +325,8 @@ public actor SessionService {
     }
 
     /// The models this conversation's agent offers on this Mac.
-    public func models(id: String, access: SessionAccess? = nil) async throws -> ModelChoiceList {
-        let record = try await authorizedRecord(id, capability: .conversationRead, access: access)
+    public func models(id: String, discovered: Bool = false, access: SessionAccess? = nil) async throws -> ModelChoiceList {
+        let record = try await authorizedRecord(id, capability: .conversationRead, discovered: discovered, access: access)
         let list = modelCatalog.choices(agent: record.descriptor.agent)
         try await recheck(record, capability: .conversationRead, access: access)
         return list
@@ -516,8 +532,8 @@ public actor SessionService {
         catch { journal?.uncertain(id: operation); throw mutationError(error) }
     }
 
-    public func file(id: String, path: String, access: SessionAccess? = nil) async throws -> TextFileSnapshot {
-        let record = try await authorizedRecord(id, capability: .projectRead, access: access)
+    public func file(id: String, path: String, discovered: Bool = false, access: SessionAccess? = nil) async throws -> TextFileSnapshot {
+        let record = try await authorizedRecord(id, capability: .projectRead, discovered: discovered, access: access)
         guard let cwd = record.descriptor.cwd else { throw BridgeError("project_unavailable", "This conversation has no project directory.", status: 404) }
         let file = try files.resolve(root: cwd, relativePath: path)
         let data = try Data(contentsOf: file)
@@ -525,15 +541,15 @@ public actor SessionService {
         try await recheck(record, capability: .projectRead, access: access)
         return TextFileSnapshot(path: path, text: text, truncated: false)
     }
-    public func changes(id: String, access: SessionAccess? = nil) async throws -> JSONValue {
-        let record = try await authorizedRecord(id, capability: .projectRead, access: access)
+    public func changes(id: String, discovered: Bool = false, access: SessionAccess? = nil) async throws -> JSONValue {
+        let record = try await authorizedRecord(id, capability: .projectRead, discovered: discovered, access: access)
         let cwd = try projectRoot(record)
         let output = try await GitReader().run(directory: cwd, arguments: ["status", "--porcelain=v1", "-z", "--untracked-files=normal"])
         try await recheck(record, capability: .projectRead, access: access)
         return .object(["entries": .array(output.split(separator: "\0").map { .string(String($0)) })])
     }
-    public func diff(id: String, path: String?, access: SessionAccess? = nil) async throws -> TextFileSnapshot {
-        let record = try await authorizedRecord(id, capability: .projectRead, access: access)
+    public func diff(id: String, path: String?, discovered: Bool = false, access: SessionAccess? = nil) async throws -> TextFileSnapshot {
+        let record = try await authorizedRecord(id, capability: .projectRead, discovered: discovered, access: access)
         let cwd = try projectRoot(record)
         let listed = try await GitReader().run(directory: cwd, arguments: ["diff", "--no-ext-diff", "--no-textconv", "--name-only", "-z", "HEAD", "--"])
         let changed = listed.split(separator: "\0").map(String.init)
