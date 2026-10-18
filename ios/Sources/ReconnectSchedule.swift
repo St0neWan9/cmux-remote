@@ -66,7 +66,10 @@ final class ReconnectSchedule {
         if !lost.isEmpty { attempt = 1; return .redialDropped(lost) }
         guard full else { return .idle }
         let waited = pause
-        guard !states.values.contains(.connecting), states.values.contains(.disconnected) else { attempt = 0; return .idle }
+        // A dial already under way is not a recovery: resetting the budget whenever it happened would make
+        // the budget unreachable while a retry's own dial is in flight, and a dead path would be dialed forever.
+        guard !states.values.contains(.connecting) else { return .idle }
+        guard states.values.contains(.disconnected) else { attempt = 0; return .idle }
         // The budget is spent: stop dialing a path that keeps failing until something asks for it again.
         guard attempt < maxAttempts else { return .idle }
         attempt += 1

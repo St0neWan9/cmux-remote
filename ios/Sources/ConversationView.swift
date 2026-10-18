@@ -25,6 +25,11 @@ struct ConversationView: View {
     @State private var pinnedSent: PinnedPrompt?
     /// The content height before the page's blank tail, which decides how much tail still fits.
     @State private var timelineContentHeight: CGFloat = 0
+    /// The scrolling page's own height: the filler is laid out in the scroll view's coordinates, not the
+    /// screen's, so it must be the scroll view's height that fills it.
+    @State private var scrollHeight: CGFloat = 0
+    /// The pinned prompt's own height, which with the page's foot is all the room its tail leaves.
+    @State private var pinnedRowHeight: CGFloat = 0
     @State private var scrollTrace = ScrollTrace()
     /// A message opened on its own page to select part of it.
     @State private var selecting: SelectTextPage.Request?
@@ -47,16 +52,12 @@ struct ConversationView: View {
     @State private var linkState: LinkState?
     /// Whether the marker above the first loaded message is within reach of the top of the page.
     @State private var topNear = false
-    /// The rendered height of the newest timeline row. A page opens at its start when that row is taller than the page.
-    @State private var lastRowHeight: CGFloat = 0
-    /// The height of the conversation area, measured on the same geometry the timeline uses.
-    @State private var viewportHeight: CGFloat = 0
     private let hostName: String
     init(model: ConversationModel, hostName: String = "") {
         _model = State(initialValue: model); self.hostName = hostName
     }
     var body: some View {
-        GeometryReader { viewport in timelineScroller(viewport: viewport.size.height) }
+        timelineScroller()
         .background(Color.white.ignoresSafeArea())
         .background(InteractivePopInstaller())
         .toolbar(.hidden, for: .navigationBar)
@@ -162,7 +163,7 @@ struct ConversationView: View {
         .accessibilityAction(.escape) { dismiss() }
     }
     /// The message list. Separate from `body` so the page stays type-checkable.
-    @ViewBuilder private func timeline(bottom: CGFloat, reachedTop: @escaping () -> Void) -> some View {
+    @ViewBuilder private func timeline(bottom: CGFloat, tailFirst: Bool, reachedTop: @escaping () -> Void) -> some View {
         // Lookups are built once per update instead of searched again by every row.
         let firstResponse = Dictionary(model.responses.map { ($0.firstMessageID, $0) }, uniquingKeysWith: { _, latest in latest })
         let lastResponse = Dictionary(model.responses.map { ($0.lastMessageID, $0) }, uniquingKeysWith: { _, latest in latest })
@@ -170,6 +171,12 @@ struct ConversationView: View {
         let runningSince = model.runningSince
         // The live label belongs at the top of the reply in progress; before the first reply it has its own row.
         let activeAnchor: String? = runningSince == nil ? nil : model.responses.last.flatMap { $0.completed ? nil : $0.firstMessageID }
+        VStack(spacing: 0) {
+        // The blank tail goes above the rows while the page shows its end: a conversation shorter than the
+        // page then rests against the composer. A prompt this phone sent takes the tail below itself instead,
+        // so the reply grows into the room under it; the total is the same either way, so the page does not move.
+        if tailFirst { Color.clear.frame(height: max(0, bottom - timelineContentHeight)) }
+        // The rows' own height, measured where nothing else can stretch it.
         LazyVStack(alignment: .leading, spacing: 6) {
             if model.hasMore {
                 // Reaching the top while reading back pages in the earlier messages; the page opens at the latest.
@@ -192,10 +199,7 @@ struct ConversationView: View {
             ForEach(model.timelineItems) { item in
                 timelineRow(item, firstResponse: firstResponse, lastResponse: lastResponse, imagesByMessage: imagesByMessage, activeAnchor: activeAnchor, runningSince: runningSince, bottom: bottom)
                     .id(item.id)
-                    // Its height decides the opening anchor: a reply taller than the page opens at its first line.
-                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
-                        if item.id == model.timelineItems.last?.id { lastRowHeight = height }
-                    }
+                    .modifier(PinnedHeightProbe(pinned: isPinned(item)) { height in if abs(height - pinnedRowHeight) > 0.5 { pinnedRowHeight = height } })
             }
             if activeAnchor == nil, let runningSince {
                 LiveRunLabel(since: runningSince, compacting: model.compacting, showsDivider: true, font: .subheadline).modifier(HeaderContentEffect(bottom: bottom))
@@ -208,41 +212,30 @@ struct ConversationView: View {
             }
             ForEach(model.outgoing) { prompt in
                 OutgoingPromptRow(prompt: prompt).modifier(HeaderContentEffect(bottom: bottom)).id(prompt.id)
+                    .modifier(PinnedHeightProbe(pinned: pinnedSent?.outgoing == prompt.id) { height in if abs(height - pinnedRowHeight) > 0.5 { pinnedRowHeight = height } })
             }
             if let error = model.error {
                 Label(error, systemImage: "exclamationmark.circle").font(.footnote).foregroundStyle(.red).padding(12)
                     .frame(maxWidth: .infinity, alignment: .leading).background(Color.red.opacity(0.055), in: RoundedRectangle(cornerRadius: 14))
                     .modifier(HeaderContentEffect(bottom: bottom))
             }
-            // The page's foot is the last thing in the stack, so the marker below it is the true end of the
-            // content: anchoring that to the bottom lands exactly where a drag to the end does.
-            // A prompt this phone just sent takes the page's top with a blank page under it, waiting for the
-            // reply. Without that tail the top anchor cannot reach: the scroll view clamps at the content's
-            // end and the bubble only creeps upward.
-            // Measured before the tail: what this row reports never depends on the tail it sizes.
-            Color.clear.frame(height: 1)
-                .background {
-                    GeometryReader { content in
-                        Color.clear.preference(key: TimelineContentHeightPreferenceKey.self,
-                            value: content.frame(in: .named("chatTimeline")).maxY)
-                    }
-                }
-            // The tail keeps the sent prompt at the page's top while it still fits: it shrinks as the reply
-            // grows, so the prompt stays put and the bottom stays the end of the page. Once the reply is
-            // taller than the page there is no room left and following takes over.
-            if pinnedSent != nil { Color.clear.frame(height: max(0, bottom - timelineContentHeight)) }
-            Color.clear.frame(height: 18)
-            Color.clear.frame(height: 1).id("latest")
-                .background {
-                    GeometryReader { anchor in
-                        Color.clear.preference(key: TimelineBottomPreferenceKey.self,
-                            value: anchor.frame(in: .named("chatTimeline")).maxY)
-                    }
-                }
-        }.padding(.horizontal, 18).padding(.top, 12)
-            // A conversation shorter than the page rests against the composer, the way a chat log reads,
-            // instead of floating at the top with the page's empty below it.
-            .frame(minHeight: bottom, alignment: .bottom)
+        }
+        // The rows' own height, measured on a stack that holds no filler: a value that cannot depend on
+        // what it sizes. (Measuring the same stack the filler lives in made the difference always zero.)
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+            if abs(height - timelineContentHeight) > 0.5 { timelineContentHeight = height }
+        }
+
+        // The whole difference between the page and its content; above the rows when the end is showing.
+        // Below a pinned prompt it is the room left after the rows under that prompt, so its top can reach
+        // the page's top; the reply then grows into that room without moving the prompt.
+        if !tailFirst { Color.clear.frame(height: max(0, bottom - PinnedPrompt.foot - pinnedRowHeight)) }
+        // The page's foot, so the marker below it is the true end of the content: anchoring that to the
+        // bottom lands exactly where a drag to the end does.
+        Color.clear.frame(height: 18)
+        Color.clear.frame(height: 1).id("latest")
+        }
+        .padding(.horizontal, 18).padding(.top, 12)
             // A tap on the conversation puts the keyboard away; rows keep their own taps.
             .simultaneousGesture(TapGesture().onEnded { composerFocused = false })
     }
@@ -328,26 +321,35 @@ struct ConversationView: View {
     /// of points, so asking for the marker first resolves into the middle of an earlier reply. Asking for the
     /// row builds it; the marker is then in place for the last attempt.
     private func scrollToNewest(_ proxy: ScrollViewProxy) {
-        // A tall row is taller than the page only once it has laid out; until then the page's end is the target.
-        guard let newest = model.timelineItems.last?.id else { proxy.scrollTo("latest", anchor: .bottom); return }
-        guard lastRowHeight <= viewportHeight else { proxy.scrollTo(newest, anchor: .top); return }
-        proxy.scrollTo(newest, anchor: .bottom)
+        // A pinned prompt owns the page's position: the transcript refresh that records it, and the reply
+        // that then grows, arrive as ordinary new rows, and following them to the end would carry the
+        // prompt back off the top. The pin clears on a scroll or the latest button, which scrolls itself.
+        guard pinnedSent == nil else { return }
+        // The page's end is where a drag to the end lands, whatever the newest row's height: a reply
+        // taller than the page opens at its last line too, because that is the newest content the reader
+        // came back for. Asking for the row first builds it, so the end marker lands where it really is.
+        if let newest = model.timelineItems.last?.id { proxy.scrollTo(newest, anchor: .bottom) }
         proxy.scrollTo("latest", anchor: .bottom)
     }
     /// The scrolling page: the timeline and everything that follows, moves or restores its position.
-    private func timelineScroller(viewport: CGFloat) -> some View {
+    private func timelineScroller() -> some View {
         ScrollViewReader { proxy in
             ScrollView {
-                timeline(bottom: viewport) { Task { await loadOlder(proxy) } }
+                timeline(bottom: scrollHeight, tailFirst: pinnedSent == nil) { Task { await loadOlder(proxy) } }
+            }
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+                if abs(height - scrollHeight) > 0.5 { scrollHeight = height }
             }
             .scrollClipDisabled()
-            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { viewportHeight = $0 }
             .coordinateSpace(name: "chatTimeline")
-            .onPreferenceChange(TimelineBottomPreferenceKey.self) { bottom in
-                followed(bottom: bottom, viewport: viewport, proxy: proxy)
-            }
-            .onPreferenceChange(TimelineContentHeightPreferenceKey.self) { height in
-                if abs(height - timelineContentHeight) > 0.5 { timelineContentHeight = height }
+            // Whether the page rests at its end, measured by the scroll view itself: the timeline's
+            // preference lives in a different coordinate space (it starts below the top inset), so comparing
+            // it with a height was off by that inset and the page believed it was at the end when it was not.
+            .onScrollGeometryChange(for: Bool.self) { geometry in
+                geometry.contentOffset.y + geometry.containerSize.height >= geometry.contentSize.height - 32
+            } action: { old, atEnd in
+                _ = old
+                bottomVisible(atEnd)
             }
             .modifier(TimelineScrollInteraction(userScrolling: $userScrolling, atLatest: $atLatest, latestVisible: latestVisible))
             .onChange(of: userScrolling) { _, scrolling in
@@ -411,16 +413,18 @@ struct ConversationView: View {
         guard model.imageDraft.images.count < 4 else { model.imageDraft.error = String(localized: "error.image"); return }
         photoItems = []; showingPhotos = true
     }
+    /// Whether a recorded row is the one a pin holds, by the text the outgoing bubble showed.
+    private func isPinned(_ item: ConversationTimelineItem) -> Bool {
+        guard let pinned = pinnedSent, pinned.outgoing == nil else { return false }
+        return PinnedPromptText.matches(item.first, pinned.text)
+    }
     /// The page's follow decision, taken from the marker's position each time it is re-measured.
-    private func followed(bottom: CGFloat, viewport: CGFloat, proxy: ScrollViewProxy) {
+    private func bottomVisible(_ visible: Bool) {
         // Scrolling reports every frame; only a real change may invalidate the timeline.
-        let visible = bottom > 0 && bottom <= viewport + 32
         if latestVisible != visible { latestVisible = visible }
         if userScrolling || !atLatest {
             // While the page holds its place, the newest row coming into view does not resume following.
             if !holdingPlace, atLatest != visible { atLatest = visible }
-        } else if bottom.isFinite, !latestVisible {
-            scrollTrace.note("scroll follower"); scrollToNewest(proxy)
         }
     }
     /// Holds the prompt this phone just sent at the top of the page, with a blank page left under it.
@@ -435,6 +439,16 @@ struct ConversationView: View {
         pinnedSent = PinnedPrompt(outgoing: sent.id, text: sent.text)
         atLatest = true
         withAnimation { scrollTrace.note("scroll sent-prompt"); proxy.scrollTo(sent.id, anchor: .top) }
+        // The bubble is inserted and scrolled in the same update, so its top may not exist yet; ask again
+        // once it has laid out, the same way the opening scroll does.
+        settleTask?.cancel()
+        settleTask = Task { @MainActor in
+            for _ in 0..<3 {
+                try? await Task.sleep(for: .milliseconds(60))
+                guard !Task.isCancelled, pinnedSent?.outgoing == sent.id else { return }
+                proxy.scrollTo(sent.id, anchor: .top)
+            }
+        }
     }
     /// Moves the pin from the outgoing bubble to the transcript row that recorded it.
     private func handOverPin(_ proxy: ScrollViewProxy) {

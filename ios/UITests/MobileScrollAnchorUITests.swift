@@ -16,14 +16,16 @@ final class MobileScrollAnchorUITests: XCTestCase {
         XCTAssertLessThan(gap, 160, "A short conversation left \(Int(gap))pt of empty page under its newest message.")
         XCTAssertGreaterThan(reply.minY, 110, "The short conversation started under the header.")
     }
-    func testATallReplyOpensAtItsFirstLine() throws {
+    func testATallReplyOpensAtItsEnd() throws {
         try XCTSkipUnless(isTall, "This run's fixture holds the \(selectedShape ?? "default") transcript.")
         let app = try openConversation()
         let reply = try row(app, "message.tall-reply")
         XCTAssertGreaterThan(reply.height, 600, "The fixture's newest reply was not taller than the page.")
-        // Anchoring the page's end would carry this row's first line off the top; it must be readable on open.
-        XCTAssertGreaterThan(reply.minY, 110, "The tall reply opened with its first line above the header.")
-        XCTAssertLessThan(reply.minY, 180, "The tall reply opened below its first line.")
+        // The newest line is what the reader came back for: a reply taller than the page opens at its end,
+        // resting just above the composer, never with its last lines hidden behind it.
+        let composer = app.textFields.firstMatch.frame
+        XCTAssertLessThan(reply.maxY, composer.minY, "The tall reply's end is \(Int(reply.maxY - composer.minY))pt under the composer.")
+        XCTAssertLessThan(composer.minY - reply.maxY, 160, "The tall reply ended \(Int(composer.minY - reply.maxY))pt above the composer.")
     }
     /// A finished turn at the end of a long conversation must rest at the page's real end.
     ///
