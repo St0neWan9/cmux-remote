@@ -154,6 +154,7 @@ struct ConversationView: View {
             Button(String(localized: "pair.cancel"), role: .cancel) {}
         } message: { Text(String(localized: "chat.hard_stop_note")) }
         .sheet(item: $selecting) { request in SelectTextPage(request: request) }
+        .task(id: model.canSend) { await model.loadModelChoices() }
         .task(id: phase) {
             guard phase == .active else { model.suspendReads(); return }; model.resumeReads()
             await model.observeChanges()
@@ -483,7 +484,11 @@ struct ConversationView: View {
                 .buttonStyle(FloatingIconStyle()).accessibilityLabel(String(localized: "chat.back")).accessibilityIdentifier("chat.back")
             VStack(alignment: .leading, spacing: 3) {
                 Text(model.session.title).font(.subheadline.weight(.semibold)).lineLimit(1)
-                Text(hostName.isEmpty ? model.session.agent.capitalized : model.session.agent.capitalized + " · " + hostName).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                AgentModelMenu(subtitle: [model.session.agent.capitalized, model.modelLabel ?? "", hostName].filter { !$0.isEmpty }.joined(separator: " · "),
+                               current: model.modelLabel, choices: model.canSwitchModel ? model.modelChoices : nil,
+                               enabled: !model.busy && !model.working && model.pendingSend == nil) { name, label in
+                    Task { await model.switchModel(to: name, label: label) }
+                }
             }.frame(maxWidth: .infinity, alignment: .leading)
             Menu {
                 Button { showTiming = true } label: { Label(String(localized: "chat.timing"), systemImage: "clock") }.accessibilityIdentifier("chat.timing")

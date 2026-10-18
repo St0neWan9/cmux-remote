@@ -13,6 +13,7 @@ public actor TranscriptReader {
         let images: [TranscriptImageRecord]
         let messages: [ChatMessage]
         let presentation: TranscriptResponseReader.Result
+        let agentModel: AgentModelState?
     }
     private var observations: [String: Observation] = [:]
     /// Last-read order per path; an eviction takes the lowest, which is the least recently read.
@@ -105,7 +106,7 @@ public actor TranscriptReader {
         if let previous, previous.inode == inode, previous.size == size.intValue, previous.modified == modified {
             touch(path)
             return page(previous.messages, images: previous.images, presentation: previous.presentation, beforeSeq: beforeSeq, limit: limit, generation: previous.generation, clipped: previous.windowStart > 0,
-                        backgroundTasks: runningTasks(path, reports: reportsBackgroundTasks))
+                        backgroundTasks: runningTasks(path, reports: reportsBackgroundTasks), agentModel: previous.agentModel)
         }
         let (data, windowStart) = try window(path: url.path, size: size.intValue)
         // Cheap line scan over the same window the parse reads; a launch and its completion can sit far apart.
@@ -114,11 +115,13 @@ public actor TranscriptReader {
         let reset = previous == nil || previous?.inode != inode || size.intValue < (previous?.size ?? 0) || previous?.windowStart != windowStart
         let generation = reset ? UUID() : previous!.generation
         guard let end = data.lastIndex(of: 10) else {
-            store(Observation(inode: inode, size: size.intValue, modified: modified, generation: generation, windowStart: windowStart, images: [], messages: [], presentation: .init()), launches: scanned, for: path)
+            store(Observation(inode: inode, size: size.intValue, modified: modified, generation: generation, windowStart: windowStart, images: [], messages: [], presentation: .init(), agentModel: nil), launches: scanned, for: path)
             return page([], images: [], presentation: .init(), beforeSeq: beforeSeq, limit: limit, generation: generation, clipped: windowStart > 0,
                         backgroundTasks: runningTasks(path, reports: reportsBackgroundTasks))
         }
         let raw = String(decoding: data[...end], as: UTF8.self).split(separator: "\n", omittingEmptySubsequences: false).dropLast().map(String.init)
+        // Read before normalization, which folds away the command output that records a Claude switch.
+        let agentModel = TranscriptModelReader().read(lines: raw, agent: agent)
         let compaction = agent == "claude" ? ClaudeCompactionSummary().replace(raw) : .init(lines: raw, markers: [])
         let lines = agent == "claude" ? ClaudeTaskNoticeRewriter().normalize(ClaudeQueuedPromptNormalizer().normalize(compaction.lines)) : raw
         let result = agent == "claude" ? ClaudeTranscriptParser().parse(lines: lines, startingSeq: 0) : CodexTranscriptParser().parse(lines: lines, startingSeq: 0)
@@ -132,9 +135,9 @@ public actor TranscriptReader {
         let imageIndex = try TranscriptImageIndex().read(lines: lines, messages: messages, agent: agent)
         messages.append(contentsOf: imageIndex.supplementalMessages + compaction.markers); messages.sort { $0.seq < $1.seq }
         let presentation = TranscriptResponseReader().read(lines: lines, messages: messages, agent: agent)
-        store(Observation(inode: inode, size: size.intValue, modified: modified, generation: generation, windowStart: windowStart, images: imageIndex.records, messages: messages, presentation: presentation), launches: scanned, for: path)
+        store(Observation(inode: inode, size: size.intValue, modified: modified, generation: generation, windowStart: windowStart, images: imageIndex.records, messages: messages, presentation: presentation, agentModel: agentModel), launches: scanned, for: path)
         return page(messages, images: imageIndex.records, presentation: presentation, beforeSeq: beforeSeq, limit: limit, generation: generation, clipped: windowStart > 0,
-                    backgroundTasks: runningTasks(path, reports: reportsBackgroundTasks))
+                    backgroundTasks: runningTasks(path, reports: reportsBackgroundTasks), agentModel: agentModel)
     }
     /// The detached calls still open in one window, paired from launches, stops and completion notices.
     private func scannedLaunches(_ data: Data) -> [BackgroundTaskTracker.Launch] {
@@ -196,7 +199,7 @@ public actor TranscriptReader {
         return record
     }
 
-    private func page(_ messages: [ChatMessage], images: [TranscriptImageRecord], presentation: TranscriptResponseReader.Result, beforeSeq: Int?, limit: Int, generation: UUID, clipped: Bool, backgroundTasks: [BackgroundAgentTask]) -> ConversationSnapshot {
+    private func page(_ messages: [ChatMessage], images: [TranscriptImageRecord], presentation: TranscriptResponseReader.Result, beforeSeq: Int?, limit: Int, generation: UUID, clipped: Bool, backgroundTasks: [BackgroundAgentTask], agentModel: AgentModelState? = nil) -> ConversationSnapshot {
         let eligible = messages.filter { beforeSeq == nil || $0.seq < beforeSeq! }
         let count = min(max(limit, 1), 200)
         var start = max(0, eligible.count - count)
@@ -209,6 +212,7 @@ public actor TranscriptReader {
             currentTurnStartedAt: presentation.currentTurnStartedAt, currentTurnCompleted: presentation.currentTurnCompleted,
             images: images.filter { ids.contains($0.messageID) }.map { $0.reference(generation: generation.uuidString) },
             // Only the newest page reports them; an earlier page must not re-add a task the reader scrolled past.
-            backgroundTasks: beforeSeq == nil ? backgroundTasks : nil)
+            backgroundTasks: beforeSeq == nil ? backgroundTasks : nil,
+            agentModel: beforeSeq == nil ? agentModel : nil)
     }
 }
