@@ -36,3 +36,11 @@ struct BlurUnless: ViewModifier {
         if disabled { content } else { content.modifier(HeaderContentEffect(bottom: bottom)) }
     }
 }
+
+/// The edge blur for one line of a form, or nothing outside a conversation.
+struct EdgeBlur: ViewModifier {
+    let bottom: CGFloat?
+    func body(content: Content) -> some View {
+        if let bottom { content.modifier(HeaderContentEffect(bottom: bottom)) } else { content }
+    }
+}

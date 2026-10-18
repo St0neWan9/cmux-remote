@@ -34,8 +34,8 @@ private actor PhoneUIBackend: CmuxControlling {
                 .object([
                     "id": .string("plan"), "prompt": .string("用哪个方案?"), "multi_select": .bool(false),
                     "options": .array([
-                        .object(["id": .string("fast"), "label": .string("快速方案")]),
-                        .object(["id": .string("safe"), "label": .string("稳妥方案")]),
+                        .object(["id": .string("fast"), "label": .string("快速方案"), "description": .string("优先速度，改动较小，适合先验证想法")]),
+                        .object(["id": .string("safe"), "label": .string("稳妥方案"), "description": .string("优先稳定性，改动更完整，测试覆盖更多")]),
                     ]),
                 ]),
             ]),
@@ -55,8 +55,8 @@ private actor PhoneUIBackend: CmuxControlling {
                                         .object(["id": .string("safe"), "label": .string("稳妥方案")])])]),
             .object(["id": .string("scope"), "prompt": .string("改动范围?"), "multi_select": .bool(false),
                      "allow_custom": .bool(false), "allow_skip": .bool(false),
-                     "options": .array([.object(["id": .string("front"), "label": .string("只改前端")]),
-                                        .object(["id": .string("both"), "label": .string("前后端都改")])])]),
+                     "options": .array([.object(["id": .string("front"), "label": .string("只改前端"), "description": .string("只动手机界面，不改 Bridge")]),
+                                        .object(["id": .string("both"), "label": .string("前后端都改"), "description": .string("手机和 Bridge 一起改，需要重装桌面端")])])]),
         ]),
     ])
     /// The request the `awaiting-question` transcript's card answers; listed only under that flag.

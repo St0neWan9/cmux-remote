@@ -256,23 +256,16 @@ struct ConversationView: View {
                 MessageRow(message: item.first, projectRoot: model.session.cwd, openFile: model.client.allows(.projectRead) ? { selectedFile = $0; showProject = true } : nil, images: images, openImage: { selectedImage = $0 }, openDetail: openToolDetail,
                            pendingQuestion: prompt.flatMap { model.pendingQuestions[$0] }, answering: model.answeringQuestion,
                            answerQuestion: model.client.canReplyFeed ? { answers in Task { await model.answer(prompt: prompt ?? "", selections: answers) } } : nil,
-                           chosenAnswer: prompt.flatMap { model.answeredQuestions[$0] })
+                           chosenAnswer: prompt.flatMap { model.answeredQuestions[$0] }, edgeBlur: bottom)
             }
             if let response = lastResponse[item.id], response.completed, case .prose = item.first.kind {
                 ResponseFooter(response: response, text: model.responseText(response), quote: quote)
             }
         }
-        // An answerable question carries its own text field. A `visualEffect` rasterizes the subtree even with
-        // every layer effect disabled, and a rasterized `TextField` draws as the system's placeholder, so this
-        // row opts out of the modifier entirely rather than making it a no-op.
-        .modifier(BlurUnless(disabled: item.first.kind.questionPrompt.flatMap { model.pendingQuestions[$0] }.map(Self.formHasTextField) ?? false, bottom: bottom))
-    }
-    /// Whether a pending question's form includes a text field: only that row must skip the edge blur.
-    ///
-    /// A terminal menu's question names every answer it takes, so its form has no field and keeps the blur the
-    /// rest of the page has under the header and composer.
-    private static func formHasTextField(_ match: ConversationQuestions.Match) -> Bool {
-        match.isFirst && match.questions.contains { $0["allow_custom"].bool != false }
+        // A waiting question's form blurs line by line instead (see `FeedQuestionView.edgeBlur`): as one row it
+        // is taller than the screen, and rasterizing it whole on every frame made scrolling past it stutter. A
+        // `visualEffect` rasterizes what it wraps even with every effect disabled, so this row opts out entirely.
+        .modifier(BlurUnless(disabled: item.first.kind.questionPrompt.flatMap { model.pendingQuestions[$0] }.map(\.isFirst) ?? false, bottom: bottom))
     }
     /// Puts text into the follow-up draft as a Markdown quote, ahead of what is already typed.
     private func quote(_ text: String) {

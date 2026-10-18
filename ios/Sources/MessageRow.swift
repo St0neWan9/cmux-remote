@@ -18,6 +18,8 @@ struct MessageRow: View {
     var answerQuestion: (([String]) -> Void)?
     /// What this reader chose here, when the transcript has not recorded it yet.
     var chosenAnswer: String?
+    /// The conversation's visible bottom edge, so a waiting question's form blurs line by line at the edges.
+    var edgeBlur: CGFloat? = nil
     var body: some View {
         Group {
             if message.role == .user, case .prose(let value) = message.kind {
@@ -112,11 +114,12 @@ struct MessageRow: View {
             // pending request for this exact prompt is offered, and it is answered through the Feed.
             VStack(alignment: .leading, spacing: 12) {
                 Label(String(localized: "feed.title"), systemImage: "questionmark.bubble").font(.caption).foregroundStyle(.secondary)
+                    .modifier(EdgeBlur(bottom: pendingQuestion == nil ? nil : edgeBlur))
                 if let pendingQuestion, pendingQuestion.isFirst, let answerQuestion {
                     // The whole request is rendered on its first card, exactly as the Feed lists it: one reply
                     // carries one label per question, so a card cannot answer only its own.
                     // The form keeps its own identifiers: a container identifier would replace each control's.
-                    FeedQuestionView(questions: pendingQuestion.questions, busy: answering) { answers in answerQuestion(answers) }
+                    FeedQuestionView(questions: pendingQuestion.questions, busy: answering, edgeBlur: edgeBlur) { answers in answerQuestion(answers) }
                 } else {
                     Text(value.prompt)
                     // An answered question is a record of the choice, not a dead form: naming the answer is what

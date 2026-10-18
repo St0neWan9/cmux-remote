@@ -5,6 +5,10 @@ import CmuxRemoteCore
 struct FeedQuestionView: View {
     let questions: [JSONValue]
     let busy: Bool
+    /// In a conversation, the visible bottom edge: each line of the form blurs on its own under the header
+    /// and composer. Blurring the whole form as one row rasterized a texture taller than the screen on every
+    /// frame of a scroll; a line that never reaches an edge is never blurred.
+    var edgeBlur: CGFloat? = nil
     let submit: ([String]) -> Void
     @State private var drafts: [Int: FeedQuestionDraft] = [:]
     private var answers: [String] {
@@ -20,8 +24,8 @@ struct FeedQuestionView: View {
         VStack(alignment: .leading, spacing: 18) {
             ForEach(Array(questions.enumerated()), id: \.offset) { index, question in
                 VStack(alignment: .leading, spacing: 12) {
-                    if let header = question["header"].string { Text(header).font(.caption).foregroundStyle(.secondary) }
-                    Text(question["prompt"].string ?? question["question"].string ?? "").font(.body.weight(.medium))
+                    if let header = question["header"].string { Text(header).font(.caption).foregroundStyle(.secondary).modifier(EdgeBlur(bottom: edgeBlur)) }
+                    Text(question["prompt"].string ?? question["question"].string ?? "").font(.body.weight(.medium)).modifier(EdgeBlur(bottom: edgeBlur))
                     let options = (question["options"].array ?? []).enumerated().map { FeedQuestionOption(json: $0.element, fallbackIndex: $0.offset) }
                     ForEach(options) { option in
                         let label = option.label
@@ -38,6 +42,7 @@ struct FeedQuestionView: View {
                             }.frame(minHeight: 44).contentShape(Rectangle())
                         }.buttonStyle(.plain).disabled(busy).accessibilityIdentifier("feed.question.option." + String(index) + "." + option.id)
                             .accessibilityAddTraits(drafts[index]?.selected.contains(option.id) == true ? .isSelected : [])
+                            .modifier(EdgeBlur(bottom: edgeBlur))
                     }
                     // A prompt that names every answer it accepts withholds the extra ways to reply: typing a
                     // third option or sending nothing would be answers the Agent cannot act on.
@@ -60,6 +65,8 @@ struct FeedQuestionView: View {
                     .accessibilityIdentifier("feed.question.skip")
             }
             }
+            // The text field is left out: a rasterized field draws as its placeholder.
+            .modifier(EdgeBlur(bottom: edgeBlur))
         }
     }
 }
