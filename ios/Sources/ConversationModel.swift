@@ -58,6 +58,8 @@ final class ConversationModel {
     var modelLabel: String? { switchedModel?.label ?? agentModel?.model }
     /// What the agent's configuration on the Mac offers; nil until read, and from a Bridge that cannot switch.
     private(set) var modelChoices: ModelChoiceList?
+    /// A switch Claude Code asked to confirm and the Bridge declined for the reader; the page asks, then switches again.
+    var modelAwaitingConfirmation: (name: String, label: String)?
     var canSwitchModel: Bool { canSend && modelChoices != nil && ["claude", "codex"].contains(session.agent) }
     var error: String?
     var draft = ""
@@ -276,6 +278,8 @@ final class ConversationModel {
             let descriptors = try await descriptorsRead
             guard refreshReads.isCurrent(request) else { return }
             guard let current = descriptors.first(where: { $0.id == session.id }) else { throw BridgeError("read_only", "The cmux session is no longer available.", status: 404) }
+            // Whether the conversation can be written or reopened does not wait for the history, which may be large.
+            updateSession(current)
             var history = try await historyRead
             var full = tail == nil
             // A tail that does not reach the messages on screen would leave a gap, and one from a replaced
@@ -287,7 +291,6 @@ final class ConversationModel {
             let live = await liveRead
             guard refreshReads.isCurrent(request) else { return }
             if full { fullReadAt = Date() }
-            updateSession(current)
             // A page read from a replaced transcript is not merged into the one on screen; it replaces it.
             let continues = generation == history.generation
             if continues, !messages.isEmpty {
@@ -378,16 +381,21 @@ final class ConversationModel {
         } catch { logFailure("models", error, shown: false) }
     }
     /// Switches the agent to another model with its own model command. A failure is shown and never retried.
-    func switchModel(to name: String, label: String) async {
+    func switchModel(to name: String, label: String, confirmed: Bool = false) async {
         guard canSwitchModel, !busy, !working, pendingSend == nil else { return }
         busy = true; defer { busy = false }
+        modelAwaitingConfirmation = nil
         do {
-            let request = ModelSwitchRequest(model: name)
+            let request = ModelSwitchRequest(model: name, confirm: confirmed)
             let receipt = try await postModel(request)
             guard receipt.accepted, receipt.operationID == request.operationID else { throw BridgeError("outcome_unknown", "The model switch receipt could not be verified.", status: 504) }
             switchedModel = (label, agentModel); error = nil
             await refresh()
-        } catch { logFailure("model", error, shown: true); self.error = ErrorPresentation().message(error) }
+        } catch {
+            // Nothing changed: the Agent's own question was closed, and it is the reader's to answer.
+            if (error as? BridgeError)?.code == "model_confirm_required" { modelAwaitingConfirmation = (name, label); return }
+            logFailure("model", error, shown: true); self.error = ErrorPresentation().message(error)
+        }
     }
     func useSpeechDraft() { if let text = speech.takeText() { draft += (draft.isEmpty ? "" : "\n") + text } }
     /// Reopens the Agent session in a new terminal and follows the conversation once it reports back.

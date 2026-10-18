@@ -125,6 +125,12 @@ struct ConversationView: View {
         }
         .onDisappear { model.speech.suspend(); model.suspendReads(); photoLoadTask?.cancel(); model.imageDraft.cancelLoading() }
         .onChange(of: phase) { _, value in if value == .background { model.speech.suspend() }; if value != .active { model.suspendReads(); photoLoadTask?.cancel(); model.imageDraft.cancelLoading() } }
+        .alert(String(localized: "model.confirm_title"), isPresented: Binding(get: { model.modelAwaitingConfirmation != nil }, set: { if !$0 { model.modelAwaitingConfirmation = nil } })) {
+            Button(String(localized: "model.switch")) {
+                if let pending = model.modelAwaitingConfirmation { Task { await model.switchModel(to: pending.name, label: pending.label, confirmed: true) } }
+            }
+            Button(String(localized: "pair.cancel"), role: .cancel) {}
+        } message: { Text(String(format: String(localized: "model.confirm_note"), model.modelAwaitingConfirmation?.label ?? "")) }
         .alert(String(localized: "operation.inspected"), isPresented: $confirmPendingReset) {
             Button(String(localized: "operation.release")) { Task { await model.acknowledgePendingSend() } }
             Button(String(localized: "pair.cancel"), role: .cancel) {}

@@ -28,6 +28,7 @@ public actor SessionService {
     /// The session read in progress, shared by callers that arrive while it runs.
     private var sessionsRead: Task<[SessionDescriptor], any Error>?
     private let modelSwitch = CodexModelSwitch()
+    private let claudeConfirmation = ClaudeModelConfirmation()
 
     public init(cmux: any CmuxControlling, home: URL, transcriptRoots: [URL], mutations: MutationLedger? = nil, journal: MutationJournal? = nil, aliases: SessionAliasStore? = nil) {
         self.cmux = cmux; self.transcriptRoots = transcriptRoots.map { $0.resolvingSymlinksInPath().standardizedFileURL }
@@ -339,7 +340,7 @@ public actor SessionService {
     /// Only an agent waiting at its prompt is switched: a turn in progress would take the command as input.
     public func switchModel(id: String, request: ModelSwitchRequest, access: SessionAccess? = nil) async throws -> MutationReceipt {
         let name = try AgentModelName.validated(request.model)
-        let signature = try MutationLedger.fingerprint(action: "model", resource: id, payload: .string(name))
+        let signature = try MutationLedger.fingerprint(action: "model", resource: id, payload: .object(["model": .string(name), "confirm": .bool(request.confirm)]))
         if let receipt = try await existing(request.operationID, signature: signature, access: access) { return receipt }
         let session = try await verifiedBinding(id, requiresEmptyPrompt: !id.hasPrefix("tui:"), access: access)
         guard ["claude", "codex"].contains(session.agent) else { throw BridgeError("unsupported", "This agent cannot switch models from the phone.", status: 422) }
@@ -359,6 +360,13 @@ public actor SessionService {
                 params["text"] = .string("/model " + name)
                 let result = try await cmux.request("mobile.chat.send", params: params)
                 guard result["submitted"].bool != false else { throw BridgeError("outcome_unknown", "cmux did not confirm the model command; inspect the Agent.", status: 409) }
+                // A long conversation makes Claude Code ask before it switches; that question is answered as the reader chose.
+                if id.hasPrefix("tui:") {
+                    params["confirm"] = .bool(request.confirm)
+                    _ = try await cmux.request("mobile.chat.model", params: params)
+                } else {
+                    try await claudeConfirmation.settle(on: desktopConsole(session, access: access), confirm: request.confirm)
+                }
             } else if id.hasPrefix("tui:") {
                 params["candidates"] = .array(candidates.map(JSONValue.string)); if let effort { params["effort"] = .string(effort) }
                 let result = try await cmux.request("mobile.chat.model", params: params)

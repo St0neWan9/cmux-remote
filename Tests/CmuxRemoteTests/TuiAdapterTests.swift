@@ -119,6 +119,19 @@ import CmuxRemoteCore
         let after = try #require(try await service(adapter(source, root: root), root: root).sessions().first)
         #expect(after.id == id); #expect(after.writable); #expect(!after.resumable)
     }
+    @Test func aRunningTerminalShowingAnAgentMenuInsteadOfItsPromptIsNotOfferedForReopening() async throws {
+        let root = try temporary(); defer { try? FileManager.default.removeItem(at: root) }
+        let folder = root.appendingPathComponent(".claude/projects/-project")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try Data((#"{"type":"user","cwd":"/project"}"# + "\n").utf8).write(to: folder.appendingPathComponent(TuiResourceFixture.providerID + ".jsonl"))
+        let source = TuiResourceFixture(), session = service(adapter(source, root: root), root: root)
+        let id = try #require(try await session.sessions().first?.id)
+        // "Switch model?" replaces the prompt line; its cursor is followed by an ordinary space, not the prompt's.
+        await source.clearAgents()
+        await source.configure(replay: "\u{1b}[?2004h\u{1b}[H   Switch model?\r\n\r\n   \u{1b}[34m❯ 1. Yes, switch to Sonnet 5.5\u{1b}[0m\r\n     2. No, go back")
+        let after = try #require(try await service(adapter(source, root: root), root: root).sessions().first)
+        #expect(after.id == id); #expect(after.writable); #expect(!after.resumable); #expect(after.state != "ended")
+    }
     @Test func anUnreadableScreenIsNeitherWritableNorResumable() async throws {
         let root = try temporary(); defer { try? FileManager.default.removeItem(at: root) }
         let source = TuiResourceFixture(), session = service(adapter(source, root: root), root: root)

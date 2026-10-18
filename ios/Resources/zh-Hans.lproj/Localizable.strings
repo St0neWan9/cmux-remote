@@ -323,3 +323,5 @@
 "error.model_unavailable" = "Agent 不提供这个模型。";
 "error.model_switch_failed" = "模型选择框没有按预期响应，模型未改变。";
 "error.agent_busy" = "请等 Agent 完成当前回合后再切换模型。";
+"model.confirm_title" = "切换到这个模型？";
+"model.confirm_note" = "这个对话很长，换成 %@ 后，Claude Code 要用新模型把整个对话重新读一遍，下一条回复会更慢、消耗更多 token。";

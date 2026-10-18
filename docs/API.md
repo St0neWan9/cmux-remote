@@ -91,13 +91,18 @@ phone shows the reader's own choice until the transcript reports a different mod
 `haiku`, `fable`) plus the `modelPicker.options` in `~/.claude/settings.json`, and the `visibility: "list"` models of
 `~/.codex/models_cache.json`. Credentials in those files are never read into a response. At most 64 choices.
 
-`POST /v1/sessions/:id/model` takes `{model, operation_id}` and requires `conversationControl`. The name must be one
+`POST /v1/sessions/:id/model` takes `{model, operation_id, confirm?}` and requires `conversationControl`. The name must be one
 token of `[A-Za-z0-9._:/@+[]-]`, at most 128 bytes and not starting with `-` (`invalid_model`); it is never shell input.
 The binding is verified as for a send, and an agent whose turn is still running is refused (`agent_busy`), since it
 would take the command as a prompt. The operation is journaled like a send and never retried.
 
 - Claude Code: the Bridge sends `/model <name>` through `mobile.chat.send`. Claude applies it at once and also saves it as
   the default for new sessions (`persists_default: true`); its session-only choice exists only inside its own picker.
+  A long conversation makes Claude Code stop at "Switch model?" (the whole history is read again). The Bridge reads the
+  screen after the command: with `"confirm": true` in the request it takes the first option, otherwise it closes the
+  menu with Escape and answers `model_confirm_required` (409, nothing changed) so the phone can ask the reader and
+  send the request again with `confirm`. A menu that stays open is `outcome_unknown`. While any numbered menu is on a
+  daemon terminal's screen the Agent still counts as present, so the conversation is not offered for reopening.
 - Codex takes no model argument. The Bridge opens `/model`, reads the rendered picker, moves the highlight with arrow
   keys to the entry whose label matches the requested slug or its catalog label, then to the reasoning level the
   session's transcript last recorded (the picker's default otherwise), and confirms with `s`, which applies the choice to

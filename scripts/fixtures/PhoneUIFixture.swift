@@ -9,6 +9,8 @@ private actor PhoneUIBackend: CmuxControlling {
     private let workspace = "11111111-1111-1111-1111-111111111111"
     private let surface = "22222222-2222-2222-2222-222222222222"
     private var items: [JSONValue]
+    /// The model whose confirmation menu is on screen, until the phone answers it.
+    private var pendingModel: String?
     /// Set once the phone starts a session; the new conversation is then bound to `startedSurface`.
     private var started: (agent: String, cwd: String)?
     private let startedSurface = "77777777-7777-7777-7777-777777777777"
@@ -93,6 +95,12 @@ private actor PhoneUIBackend: CmuxControlling {
         let handle = try FileHandle(forWritingTo: transcript); defer { try? handle.close() }; try handle.seekToEnd()
         for row in rows { var data = try JSONEncoder().encode(row); data.append(10); try handle.write(contentsOf: data) }
     }
+    /// Claude Code records its model command as command output rather than a prompt.
+    private func recordModel(_ name: String, stamp: String) throws {
+        let command: JSONValue = .object(["type": .string("user"), "uuid": .string(UUID().uuidString), "timestamp": .string(stamp), "message": .object(["role": .string("user"), "content": .string("<command-name>/model</command-name>\n            <command-message>model</command-message>\n            <command-args>\(name)</command-args>")])])
+        let output: JSONValue = .object(["type": .string("user"), "uuid": .string(UUID().uuidString), "timestamp": .string(stamp), "message": .object(["role": .string("user"), "content": .string("<local-command-stdout>Set model to `\(name)` and saved as your default for new sessions</local-command-stdout>")])])
+        try Self.append([command, output], to: transcript)
+    }
     func request(_ method: String, params: [String: JSONValue]) async throws -> JSONValue {
         switch method {
         case "system.ping": return .object(["pong": .bool(true)])
@@ -144,6 +152,9 @@ private actor PhoneUIBackend: CmuxControlling {
         // The agent's working line lives only on the rendered screen, and the screen also carries the
         // terminal's own chrome, so the fixture renders both exactly as a live terminal would.
         case "surface.read_text":
+            if pendingModel != nil {
+                return .object(["text": .string(["⏺ Done.", "", "   Switch model?", "   Your next response will be slower and use more tokens", "", "   ❯ 1. Yes, switch to Sonnet 5.5", "     2. No, go back"].joined(separator: "\n"))])
+            }
             guard flag("report-working") else { return .object(["text": .string("")]) }
             return .object(["text": .string([
                 "⏺ The table now fits the message width.",
@@ -153,6 +164,12 @@ private actor PhoneUIBackend: CmuxControlling {
                 "╰──────────────────────────────────────╯",
                 "✻ Blanching… (54s · ↓ 2.3k tokens)",
             ].joined(separator: "\n"))])
+        case "mobile.terminal.input":
+            guard let name = pendingModel else { throw BridgeError("stale_binding", "Fixture has no menu open", status: 409) }
+            let text = params["text"]?.string ?? ""
+            if text == "1" { try recordModel(name, stamp: ISO8601DateFormatter().string(from: Date())) }
+            if text == "1" || text == "\u{1b}" { pendingModel = nil }
+            return .object(["accepted": .bool(true)])
         case "feed.list":
             // The inline question is listed only where its matching transcript card was seeded.
             var listed = items
@@ -211,9 +228,9 @@ private actor PhoneUIBackend: CmuxControlling {
             // Claude Code records its model command as command output rather than a prompt; no agent is switched.
             if images.isEmpty, input.hasPrefix("/model ") {
                 let name = String(input.dropFirst("/model ".count))
-                let command: JSONValue = .object(["type": .string("user"), "uuid": .string(UUID().uuidString), "timestamp": .string(stamp), "message": .object(["role": .string("user"), "content": .string("<command-name>/model</command-name>\n            <command-message>model</command-message>\n            <command-args>\(name)</command-args>")])])
-                let output: JSONValue = .object(["type": .string("user"), "uuid": .string(UUID().uuidString), "timestamp": .string(stamp), "message": .object(["role": .string("user"), "content": .string("<local-command-stdout>Set model to `\(name)` and saved as your default for new sessions</local-command-stdout>")])])
-                try Self.append([command, output], to: transcript)
+                // A long conversation makes Claude Code stop at its "Switch model?" menu; the name "heavy" stands in for one.
+                if name.hasPrefix("heavy") { pendingModel = name; return .object(["submitted": .bool(true)]) }
+                try recordModel(name, stamp: stamp)
                 return .object(["submitted": .bool(true)])
             }
             let user: JSONValue = .object(["type": .string("user"), "uuid": .string(UUID().uuidString), "timestamp": .string(stamp), "message": .object(["content": .string(input)])])
