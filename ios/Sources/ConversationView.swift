@@ -265,7 +265,14 @@ struct ConversationView: View {
         // An answerable question carries its own text field. A `visualEffect` rasterizes the subtree even with
         // every layer effect disabled, and a rasterized `TextField` draws as the system's placeholder, so this
         // row opts out of the modifier entirely rather than making it a no-op.
-        .modifier(BlurUnless(disabled: item.first.kind.questionPrompt.map { model.pendingQuestions[$0] != nil } ?? false, bottom: bottom))
+        .modifier(BlurUnless(disabled: item.first.kind.questionPrompt.flatMap { model.pendingQuestions[$0] }.map(Self.formHasTextField) ?? false, bottom: bottom))
+    }
+    /// Whether a pending question's form includes a text field: only that row must skip the edge blur.
+    ///
+    /// A terminal menu's question names every answer it takes, so its form has no field and keeps the blur the
+    /// rest of the page has under the header and composer.
+    private static func formHasTextField(_ match: ConversationQuestions.Match) -> Bool {
+        match.isFirst && match.questions.contains { $0["allow_custom"].bool != false }
     }
     /// Puts text into the follow-up draft as a Markdown quote, ahead of what is already typed.
     private func quote(_ text: String) {
