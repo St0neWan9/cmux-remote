@@ -23,11 +23,14 @@ struct TuiPendingDecision: Sendable {
     let kind: Kind
     /// The options a question-shaped dialog offers, as (label, key) pairs in display order.
     let choices: [(label: String, key: String)]
+    /// The Agent's own AskUserQuestion when the screen is its menu; its answers become menu keys.
+    let ask: AskUserQuestionRequest?
     init(id: String, binding: TuiSessionSnapshot.Binding, generation: String, revision: String, screenRevision: String,
-         screenText: String, allowKeys: [String], kind: Kind = .permissionRequest, choices: [(label: String, key: String)] = []) {
+         screenText: String, allowKeys: [String], kind: Kind = .permissionRequest, choices: [(label: String, key: String)] = [],
+         ask: AskUserQuestionRequest? = nil) {
         self.id = id; self.binding = binding; self.generation = generation; self.revision = revision
         self.screenRevision = screenRevision; self.screenText = screenText; self.allowKeys = allowKeys
-        self.kind = kind; self.choices = choices
+        self.kind = kind; self.choices = choices; self.ask = ask
     }
     var payload: JSONValue {
         let workstream = "cmux-feed-v1:" + Data(binding.provider.utf8).base64EncodedString() + ":" + Data(binding.id.utf8).base64EncodedString()
@@ -37,6 +40,11 @@ struct TuiPendingDecision: Sendable {
                             "workspace_id": .string(binding.workspaceID), "workstream_id": .string(workstream), "title": .string(binding.title),
                             "body": .string(screenText), "tool_name": .string("Permission"), "tool_input": .string(screenText),
                             "available_modes": .array([.string("once"), .string("deny")])])
+        case .question where ask != nil:
+            // The Agent's own questions, with the prompts its conversation card shows, so the card can answer them.
+            return .object(["request_id": .string(id), "kind": .string(kind.rawValue), "status": .string("pending"), "source": .string(binding.provider),
+                            "workspace_id": .string(binding.workspaceID), "workstream_id": .string(workstream), "title": .string(binding.title),
+                            "body": .string(screenText), "questions": .array(ask?.formQuestions ?? [])])
         case .question:
             // One question whose options are the dialog's own choices; the phone reuses its question form.
             let options: [JSONValue] = choices.map { .object(["id": .string($0.key), "label": .string($0.label)]) }
