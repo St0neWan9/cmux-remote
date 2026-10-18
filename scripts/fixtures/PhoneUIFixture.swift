@@ -41,6 +41,20 @@ private actor PhoneUIBackend: CmuxControlling {
             ]),
         ])
     }
+    /// A request that asked two questions: the first card carries both, the second stays a record.
+    private var multiQuestion: JSONValue = .object([
+        "id": .string("multi-question"), "request_id": .string("multi-question"),
+        "workstream_id": .string("cmux-feed-v1:" + Data("claude".utf8).base64EncodedString() + ":" + Data("fixture-session".utf8).base64EncodedString()),
+        "source": .string("claude"), "kind": .string("question"), "status": .string("pending"), "title": .string("Agent 提问"),
+        "questions": .array([
+            .object(["id": .string("plan"), "prompt": .string("用哪个方案?"), "multi_select": .bool(false),
+                     "options": .array([.object(["id": .string("fast"), "label": .string("快速方案")]),
+                                        .object(["id": .string("safe"), "label": .string("稳妥方案")])])]),
+            .object(["id": .string("scope"), "prompt": .string("改动范围?"), "multi_select": .bool(false),
+                     "options": .array([.object(["id": .string("front"), "label": .string("只改前端")]),
+                                        .object(["id": .string("both"), "label": .string("前后端都改")])])]),
+        ]),
+    ])
     /// The request the `awaiting-question` transcript's card answers; listed only under that flag.
     private var inlineQuestion: JSONValue
     /// A terminal dialog that only waits for Enter or Escape, shaped exactly as the Bridge's own prompt payload.
@@ -137,7 +151,10 @@ private actor PhoneUIBackend: CmuxControlling {
             ].joined(separator: "\n"))])
         case "feed.list":
             // The inline question is listed only where its matching transcript card was seeded.
-            return .object(["items": .array((flag("awaiting-question") ? [inlineQuestion, continueNotice] : []) + items)])
+            var listed = items
+            if flag("awaiting-question") { listed = [inlineQuestion, continueNotice] + listed }
+            if flag("awaiting-multi-question") { listed = [multiQuestion] + listed }
+            return .object(["items": .array(listed)])
         case "feed.permission.reply", "feed.exit_plan.reply", "feed.question.reply":
             guard let id = params["request_id"]?.string else { throw BridgeError("request_expired", "Fixture request ended") }
             // The inline question is answered where `feed.list` showed it, not only in the static items.
@@ -146,6 +163,12 @@ private actor PhoneUIBackend: CmuxControlling {
                 var fields = continueNotice.object ?? [:]
                 fields["status"] = .string("resolved"); fields["decision"] = .object(params)
                 continueNotice = .object(fields)
+                return .object(["delivered": .bool(true)])
+            }
+            if id == "multi-question", flag("awaiting-multi-question"), multiQuestion["status"].string == "pending" {
+                var fields = multiQuestion.object ?? [:]
+                fields["status"] = .string("resolved"); fields["decision"] = .object(params)
+                multiQuestion = .object(fields)
                 return .object(["delivered": .bool(true)])
             }
             if id == "inline-question", flag("awaiting-question"), inlineQuestion["status"].string == "pending" {
@@ -239,6 +262,7 @@ private actor PhoneUIBackend: CmuxControlling {
         let shape = selfFlag("short-conversation") ? "chat-short.jsonl"
             : selfFlag("tall-reply") ? "chat-tall.jsonl"
             : selfFlag("awaiting-question") ? "chat-question.jsonl"
+            : selfFlag("awaiting-multi-question") ? "chat-multi-question.jsonl"
             : selfFlag("long-conversation") ? "chat-long.jsonl" : "chat.jsonl"
         let transcript = root.appendingPathComponent(shape)
         if !FileManager.default.fileExists(atPath: transcript.path) {
@@ -271,6 +295,17 @@ private actor PhoneUIBackend: CmuxControlling {
                 let askText = String(decoding: try JSONSerialization.data(withJSONObject: ask), as: UTF8.self)
                 let rows = [
                     #"{"type":"user","uuid":"ask-user","timestamp":"2026-10-12T01:00:00Z","message":{"content":"帮我选个方案"}}"#,
+                    askText]
+                try Data((rows.joined(separator: "\n") + "\n").utf8).write(to: transcript)
+            } else if selfFlag("awaiting-multi-question") {
+                let ask: [String: Any] = ["type": "assistant", "uuid": "ask-multi", "timestamp": "2026-10-12T01:00:02Z",
+                                          "message": ["content": [["type": "tool_use", "id": "ask-multi-plan", "name": "AskUserQuestion",
+                                                                  "input": ["questions": [
+                                                                    ["question": "用哪个方案?", "options": [["label": "快速方案"], ["label": "稳妥方案"]]],
+                                                                    ["question": "改动范围?", "options": [["label": "只改前端"], ["label": "前后端都改"]]]]]]]]]
+                let askText = String(decoding: try JSONSerialization.data(withJSONObject: ask), as: UTF8.self)
+                let rows = [
+                    #"{"type":"user","uuid":"ask-multi-user","timestamp":"2026-10-12T01:00:00Z","message":{"content":"帮我选个方案和范围"}}"#,
                     askText]
                 try Data((rows.joined(separator: "\n") + "\n").utf8).write(to: transcript)
             } else if selfFlag("long-conversation") {

@@ -7,19 +7,33 @@ import Foundation
 /// the key. Only a pending question naming this exact agent and session is matched: a question from another
 /// conversation, or one already answered, must never make a card look answerable.
 public struct ConversationQuestions: Sendable {
+    /// One card's view of the request that answers it.
+    ///
+    /// A request that asked several questions is answered by one reply carrying one label per question, in
+    /// the order they were asked, so a card must know the whole request: the first card carries the form for
+    /// every question, and the later ones show it as a record rather than offering a short answer.
+    public struct Match: Sendable, Equatable {
+        public let requestID: String
+        /// Every question the request asked, in the order the reply must answer them.
+        public let questions: [JSONValue]
+        /// This card's own question, within `questions`.
+        public let index: Int
+        public var isFirst: Bool { index == 0 }
+        public var question: JSONValue { questions[index] }
+    }
     public init() {}
     /// The questions that may be answered from this conversation, keyed by prompt.
-    public func pending(_ items: [JSONValue], agent: String, sessionID: String) -> [String: JSONValue] {
+    public func pending(_ items: [JSONValue], agent: String, sessionID: String) -> [String: Match] {
         let binding = FeedWorkspaceBinding()
-        var matched: [String: JSONValue] = [:]
+        var matched: [String: Match] = [:]
         for item in items where item["kind"].string == "question" && item["status"].string == "pending" {
-            guard let bound = binding.session(for: item), bound.agent == agent, bound.id == sessionID else { continue }
-            // The Feed answers a request with one label per question it asked. A card shows one question, so
-            // answering a request that asked several would send it a short answer; only a single question
-            // is offered here, and the rest stay records until they are answered together in the Feed.
+            guard let bound = binding.session(for: item), bound.agent == agent, bound.id == sessionID,
+                  let requestID = item["request_id"].string else { continue }
             let questions = item["questions"].array ?? []
-            guard questions.count == 1, let question = questions.first, let prompt = question["prompt"].string else { continue }
-            matched[prompt] = .object(["request_id": item["request_id"] ?? .null, "question": question])
+            for (index, question) in questions.enumerated() {
+                guard let prompt = question["prompt"].string else { continue }
+                matched[prompt] = Match(requestID: requestID, questions: questions, index: index)
+            }
         }
         return matched
     }

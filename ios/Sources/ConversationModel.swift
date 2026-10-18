@@ -42,7 +42,7 @@ final class ConversationModel {
     ///
     /// The transcript holds the question the agent asked; the Feed holds the request that may be answered.
     /// A card is answered only where both exist and name the same conversation and prompt.
-    private(set) var pendingQuestions: [String: JSONValue] = [:]
+    private(set) var pendingQuestions: [String: ConversationQuestions.Match] = [:]
     /// Whether answering is in flight, so a card does not accept a second tap.
     var answeringQuestion = false
     /// Answers given from this phone during the session, keyed by the prompt's own words.
@@ -452,11 +452,16 @@ final class ConversationModel {
     }
     /// Answers the agent's question with the labels the reader chose, in the order the questions were asked.
     func answer(prompt: String, selections: [String]) async {
-        guard let pending = pendingQuestions[prompt], let requestID = pending["request_id"].string, !answeringQuestion else { return }
+        guard let pending = pendingQuestions[prompt], !answeringQuestion else { return }
         answeringQuestion = true; defer { answeringQuestion = false }
         do {
-            _ = try await replyFeed(requestID, ConversationQuestions().reply(requestID: requestID, selections: selections))
-            pendingQuestions[prompt] = nil; answeredQuestions[prompt] = selections.joined(separator: ", "); await refresh()
+            _ = try await replyFeed(pending.requestID, ConversationQuestions().reply(requestID: pending.requestID, selections: selections))
+            // Every card of that request becomes a record, each naming the answer it was given.
+            for (card, match) in pendingQuestions where match.requestID == pending.requestID {
+                pendingQuestions[card] = nil
+                if match.index < selections.count { answeredQuestions[card] = selections[match.index] }
+            }
+            await refresh()
         } catch { logFailure("question.reply", error, shown: true); self.error = ErrorPresentation().message(error) }
     }
 }
