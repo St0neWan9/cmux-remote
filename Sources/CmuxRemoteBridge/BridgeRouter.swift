@@ -174,20 +174,20 @@ public struct BridgeRouter: Sendable {
                     if let offset = query["offset"], Int(offset) == nil { throw BridgeError("invalid_input", "The text offset is invalid.") }
                     if let limit = query["limit"], Int(limit) == nil { throw BridgeError("invalid_input", "The text page size is invalid.") }
                     data = try encode(await service.toolText(id: id, messageID: messageID, generation: generation, field: field,
-                                                            offset: query["offset"].flatMap(Int.init) ?? 0, contentID: query["content_id"], limit: query["limit"].flatMap(Int.init) ?? 16_384, access: access))
+                                                            offset: query["offset"].flatMap(Int.init) ?? 0, contentID: query["content_id"], limit: query["limit"].flatMap(Int.init) ?? 16_384, discovered: client != nil, access: access))
                 case ("GET", "image"):
                     guard let reference = query["reference_id"], let generation = query["generation"], reference.range(of: "^[0-9a-f]{64}$", options: .regularExpression) != nil else { throw BridgeError("invalid_input", "A recorded image reference and generation are required.") }
-                    data = try await service.image(id: id, referenceID: reference, generation: generation, access: access); image = true
-                // The scope check above just ran discovery; the service resolves this id from it rather than again.
+                    data = try await service.image(id: id, referenceID: reference, generation: generation, discovered: client != nil, access: access); image = true
+                // The scope check above just ran discovery; every read below resolves this id from it rather than again.
                 case ("GET", "preview"): data = try encode(await service.preview(id: id, discovered: client != nil, access: access))
-                case ("GET", "changes"): data = try encode(await service.changes(id: id, access: access))
-                case ("GET", "diff"): data = try encode(await service.diff(id: id, path: query["path"], access: access))
+                case ("GET", "changes"): data = try encode(await service.changes(id: id, discovered: client != nil, access: access))
+                case ("GET", "diff"): data = try encode(await service.diff(id: id, path: query["path"], discovered: client != nil, access: access))
                 case ("GET", "file"):
                     guard let relative = query["path"] else { throw BridgeError("invalid_input", "A relative file path is required.") }
-                    data = try encode(await service.file(id: id, path: relative, access: access))
+                    data = try encode(await service.file(id: id, path: relative, discovered: client != nil, access: access))
                 case ("POST", "send"): data = try encode(await service.send(id: id, request: JSONDecoder().decode(SendRequest.self, from: body), access: access))
                 case ("POST", "interrupt"): data = try encode(await service.interrupt(id: id, request: JSONDecoder().decode(InterruptRequest.self, from: body), access: access))
-                case ("GET", "models"): data = try encode(await service.models(id: id, access: access))
+                case ("GET", "models"): data = try encode(await service.models(id: id, discovered: client != nil, access: access))
                 case ("POST", "model"): data = try encode(await service.switchModel(id: id, request: JSONDecoder().decode(ModelSwitchRequest.self, from: body), access: access))
                 // Reopening a conversation starts an Agent in its workspace, so it is a start-class action, not control.
                 case ("POST", "resume"):

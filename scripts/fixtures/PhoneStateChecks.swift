@@ -484,7 +484,9 @@ private actor DeferredToolPage {
         failures += reconnectChecks.failures
         let edgeBackChecks = EdgeBackChecks.run()
         failures += edgeBackChecks.failures
+        let modelMenuChecks = await ModelMenuChecks.run()
+        failures += modelMenuChecks.failures
         if !failures.isEmpty { print(failures.joined(separator: "\n")); exit(1) }
-        print("Phone state: 20 existing behavioral checks, \(mediaChecks) image/draft/receipt checks and \(detailChecks) tool-detail checks, \(readChecks.count) conversation read checks and \(cacheChecks.count) conversation cache checks and \(syncChecks.count) running-sync checks and \(fastChecks.count) fast-read checks and \(historicalImageChecks.count) historical-image checks and \(speechChecks.count) speech checks and \(multiHostChecks.count) multi-Mac checks and \(reconnectChecks.count) reconnect checks and \(edgeBackChecks.count) edge-back checks passed.")
+        print("Phone state: 20 existing behavioral checks, \(mediaChecks) image/draft/receipt checks and \(detailChecks) tool-detail checks, \(readChecks.count) conversation read checks and \(cacheChecks.count) conversation cache checks and \(syncChecks.count) running-sync checks and \(fastChecks.count) fast-read checks and \(historicalImageChecks.count) historical-image checks and \(speechChecks.count) speech checks and \(multiHostChecks.count) multi-Mac checks and \(reconnectChecks.count) reconnect checks and \(edgeBackChecks.count) edge-back checks and \(modelMenuChecks.count) model-menu checks passed.")
     }
 }

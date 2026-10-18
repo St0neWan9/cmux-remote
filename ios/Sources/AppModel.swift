@@ -29,6 +29,8 @@ final class AppModel {
     @ObservationIgnored var backgroundedAt: Date?
     /// Paces automatic redials of lost Macs; it outlives one supervision pass so a person's retry can reset it.
     @ObservationIgnored let reconnectSchedule = ReconnectSchedule()
+    /// Each Mac's model choices per agent, shared by its conversations.
+    @ObservationIgnored let modelChoices = ModelChoiceCache()
     /// Macs the schedule keeps retrying in the background: the pages stop showing their dial and their failure,
     /// until one of them connects or a person asks for a retry.
     var quietHosts: Set<String> = []
@@ -424,7 +426,7 @@ final class AppModel {
         let model = ConversationModel(session: session, client: client, speechInput: makeSpeechInput(),
             loadRecovery: { try await store.load(scope: scope, sessionID: id) },
             saveRecovery: { try await store.save($0, scope: scope, sessionID: id) },
-            cache: conversations)
+            cache: conversations, modelCache: modelChoices)
         conversationModels[key] = model
         return model
     }
