@@ -12,6 +12,10 @@ struct FeedQuestionView: View {
             (drafts[index] ?? FeedQuestionDraft()).answer(options: (questions[index]["options"].array ?? []).enumerated().map { FeedQuestionOption(json: $0.element, fallbackIndex: $0.offset) })
         }
     }
+    /// A request that cannot be skipped takes one answer per question; sending fewer would be refused.
+    private var missingRequired: Bool {
+        questions.allSatisfy { $0["allow_skip"].bool == false } && answers.count < questions.count
+    }
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             ForEach(Array(questions.enumerated()), id: \.offset) { index, question in
@@ -49,7 +53,7 @@ struct FeedQuestionView: View {
             ActionRow {
             Button(String(localized: "feed.submit")) { submit(answers) }
                 .buttonStyle(FloatingButtonStyle(prominent: true))
-                .disabled(busy || (answers.isEmpty && !(!questions.isEmpty && questions.allSatisfy { ($0["options"].array ?? []).isEmpty })))
+                .disabled(busy || (answers.isEmpty && !(!questions.isEmpty && questions.allSatisfy { ($0["options"].array ?? []).isEmpty })) || missingRequired)
                 .accessibilityIdentifier("feed.question.submit")
             if questions.contains(where: { $0["allow_skip"].bool != false }) {
                 Button(String(localized: "feed.skip_questions")) { submit([]) }.buttonStyle(FloatingButtonStyle()).disabled(busy || questions.isEmpty)

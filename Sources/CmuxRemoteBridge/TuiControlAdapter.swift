@@ -25,10 +25,12 @@ public actor TuiControlAdapter: CmuxControlling {
     private let journalWindow: UInt64
     private let restoreInterval: Duration
     private let modelSwitch: CodexModelSwitch
+    /// The gap between the keys of a menu answer, so each arrives as its own keypress.
+    private let keyPause: Duration
     public init(client: any TuiResourceRequesting, transcripts: TuiTranscriptLocator, attachments: TuiAttachmentStore? = nil, decisions: MutationLedger = MutationLedger(), archive: TuiBindingRepository? = nil,
-                restoreChecks: Int = 8, restoreInterval: Duration = .milliseconds(150), journalWindow: UInt64 = 20_000) {
+                restoreChecks: Int = 8, restoreInterval: Duration = .milliseconds(150), journalWindow: UInt64 = 20_000, keyPause: Duration = .milliseconds(250)) {
         self.client = client; self.transcripts = transcripts; self.attachments = attachments; self.decisions = decisions; self.archive = archive
-        self.restoreChecks = restoreChecks; self.restoreInterval = restoreInterval; self.journalWindow = journalWindow
+        self.restoreChecks = restoreChecks; self.restoreInterval = restoreInterval; self.journalWindow = journalWindow; self.keyPause = keyPause
         modelSwitch = CodexModelSwitch(interval: restoreInterval)
     }
     public func identity() -> String? { pinnedIdentity }
@@ -86,7 +88,7 @@ public actor TuiControlAdapter: CmuxControlling {
             let current = try await snapshot(); var next: [String: TuiPendingDecision] = [:]
             for binding in current.bindings where binding.state == "needs_input" {
                 let screen = try await client.resource("terminal.screen.read", params: current.selectors(binding), idempotencyKey: nil)
-                if let decision = TuiDecisionParser().permission(snapshot: current, binding: binding, screen: screen),
+                if let decision = TuiDecisionParser().permission(snapshot: current, binding: binding, screen: screen, ask: pendingAsk(binding, screen: screen)),
                    let operation = UUID(uuidString: String(decision.id.dropFirst("tui-decision:".count))),
                    try await decisions.scopedOperation(clientID: "tui_decision", operationID: operation) == nil { next[decision.id] = decision }
             }
@@ -98,6 +100,16 @@ public actor TuiControlAdapter: CmuxControlling {
             }
             let keys = mode == "once" ? original.allowKeys : ["escape"]
             return try await answer(id, original, keys: keys, action: "tui-permission", payload: .string(mode))
+        case "feed.question.reply" where params["request_id"]?.string.flatMap({ pending[$0]?.ask }) != nil:
+            // The Agent's AskUserQuestion menu: one answer per question becomes the digits and moves that give it.
+            guard let id = params["request_id"]?.string, let original = pending[id], let ask = original.ask,
+                  let selections = params["selections"]?.array, selections.allSatisfy({ $0.string != nil }) else {
+                throw BridgeError("request_expired", "This question is no longer available.", status: 409)
+            }
+            guard let keys = ask.keys(for: selections.compactMap(\.string)) else {
+                throw BridgeError("invalid_input", "Answer every question with one of its own options.")
+            }
+            return try await answer(id, original, keys: keys, action: "tui-ask", payload: .array(selections))
         case "feed.question.reply":
             // A notice that only waits for Enter or Escape. The phone sends the label it chose; the key comes from
             // the decision the Bridge parsed, so no screen text can become input.
@@ -333,6 +345,21 @@ public actor TuiControlAdapter: CmuxControlling {
     ///
     /// Permission and prompt choices share this: both are one non-retried key write bound to the screen revision
     /// that produced the request, with a durable intent so no second device, new operation id or restart repeats it.
+    /// The AskUserQuestion a Claude Agent's transcript has pending, read only when the screen shows a menu.
+    ///
+    /// Locating a transcript walks the Agent's history folders, so it waits for the menu's own footer.
+    private func pendingAsk(_ binding: TuiSessionSnapshot.Binding, screen: JSONValue) -> AskUserQuestionRequest? {
+        guard binding.provider == "claude", screen["text"].string?.contains("Enter to select") == true,
+              let path = (try? transcripts.locate([binding]))?[binding.id], let handle = FileHandle(forReadingAtPath: path) else { return nil }
+        defer { try? handle.close() }
+        // The newest megabyte holds the call the Agent is waiting on; a partial first line is dropped.
+        let window: UInt64 = 1 << 20
+        guard let size = try? handle.seekToEnd() else { return nil }
+        try? handle.seek(toOffset: size > window ? size - window : 0)
+        guard var data = try? handle.readToEnd() else { return nil }
+        if size > window, let newline = data.firstIndex(of: UInt8(ascii: "\n")) { data = data[data.index(after: newline)...] }
+        return AskUserQuestionRequest.pending(in: data)
+    }
     private func answer(_ id: String, _ original: TuiPendingDecision, keys: [String], action: String, payload: JSONValue) async throws -> JSONValue {
         guard let operation = UUID(uuidString: String(id.dropFirst("tui-decision:".count))) else {
             throw BridgeError("request_expired", "This daemon request is no longer available.", status: 409)
@@ -340,7 +367,7 @@ public actor TuiControlAdapter: CmuxControlling {
         let current = try await snapshot()
         guard current.generation == original.generation, let binding = current.bindings.first(where: { $0.id == original.binding.id }), binding == original.binding else { throw stale() }
         let screen = try await client.resource("terminal.screen.read", params: current.selectors(binding), idempotencyKey: nil)
-        guard let fresh = TuiDecisionParser().permission(snapshot: current, binding: binding, screen: screen), fresh.id == original.id else {
+        guard let fresh = TuiDecisionParser().permission(snapshot: current, binding: binding, screen: screen, ask: original.ask), fresh.id == original.id else {
             throw BridgeError("request_expired", "The screen changed before the decision.", status: 409)
         }
         let fingerprint = try MutationLedger.fingerprint(action: action, resource: id, payload: payload)
@@ -348,17 +375,32 @@ public actor TuiControlAdapter: CmuxControlling {
             guard prior.receipt != nil else { throw BridgeError("outcome_unknown", "The previous decision is not confirmed; inspect the Agent.", status: 409) }
             return .object(["delivered": .bool(true)])
         }
-        var fields = current.selectors(binding); fields["keys"] = .array(keys.map(JSONValue.string)); fields["expected_revision"] = .string(current.revision)
-        try await effect("terminal.input.keys", fields: fields, key: "cmux-remote:decision:" + operation.uuidString.lowercased(), generation: current.generation)
+        let key = "cmux-remote:decision:" + operation.uuidString.lowercased()
+        if original.ask == nil {
+            var fields = current.selectors(binding); fields["keys"] = .array(keys.map(JSONValue.string)); fields["expected_revision"] = .string(current.revision)
+            _ = try await effect("terminal.input.keys", fields: fields, key: key, generation: current.generation)
+        } else {
+            // A menu reads keys that arrive together as one pasted string and ignores it, so its answer goes in one
+            // key at a time with a pause between, each under its own idempotency key and the revision the last returned.
+            var revision = current.revision
+            for (index, menuKey) in keys.enumerated() {
+                if index > 0 { try await Task.sleep(for: keyPause) }
+                var fields = current.selectors(binding); fields["keys"] = .array([.string(menuKey)]); fields["expected_revision"] = .string(revision)
+                revision = try await effect("terminal.input.keys", fields: fields, key: key + ":\(index)", generation: current.generation)
+            }
+        }
         _ = try await decisions.complete(clientID: "tui_decision", operationID: operation); pending[id] = nil
         return .object(["delivered": .bool(true)])
     }
-    private func effect(_ operation: String, fields: [String: JSONValue], key: String, generation: String) async throws {
+    /// Applies one daemon mutation and returns the revision its receipt reports.
+    @discardableResult
+    private func effect(_ operation: String, fields: [String: JSONValue], key: String, generation: String) async throws -> String {
         let result = try await client.resource(operation, params: fields, idempotencyKey: key)
         guard result["value"].object != nil, result["generation"].string == generation,
               let revision = result["revision"].string, UInt64(revision) != nil, result["replayed"].bool != nil else {
             throw BridgeError("outcome_unknown", "The daemon omitted a valid mutation receipt; inspect before repeating input.", status: 409)
         }
+        return revision
     }
     private func snapshot() async throws -> TuiSessionSnapshot {
         let current = try TuiSessionSnapshot(await client.resource("session.snapshot", params: ["machine": .string("current"), "session": .string("current")], idempotencyKey: nil))
