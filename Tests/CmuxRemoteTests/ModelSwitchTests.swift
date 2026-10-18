@@ -14,6 +14,10 @@ private actor DesktopModelCmux: CmuxControlling {
     var inputs: [String] = []
     /// Rebinds the conversation to another terminal once this many inputs arrived.
     var moveAfterInputs: Int?
+    /// Claude Code stops at "Switch model?" after the next model command, as it does for a long conversation.
+    var asksToConfirm = false
+    private var menu: [String]?
+    private(set) var confirmed = false
     init(agent: String, path: String, state: String = "idle") { self.agent = agent; self.path = path; self.state = state }
     func request(_ method: String, params: [String: JSONValue]) async throws -> JSONValue {
         switch method {
@@ -25,13 +29,21 @@ private actor DesktopModelCmux: CmuxControlling {
             return .object(["workspace_id": .string("workspace"), "surface_id": .string(surface), "terminal": .bool(true), "agent": .bool(true),
                             "state": .string("empty"), "blocks_typing": .bool(false)])
         case "mobile.chat.send":
-            sent.append(params["text"]?.string ?? ""); return .object(["submitted": .bool(true)])
+            sent.append(params["text"]?.string ?? "")
+            if asksToConfirm { menu = ["⏺ Done.", "", "   Switch model?", "   Your next response will be slower and use more tokens", "", "   ❯ 1. Yes, switch to Sonnet 5.5", "     2. No, go back"] }
+            return .object(["submitted": .bool(true)])
         case "surface.read_text":
-            return .object(["text": .string(picker.rows.joined(separator: "\n"))])
+            return .object(["text": .string((menu ?? picker.rows).joined(separator: "\n"))])
         case "mobile.terminal.input":
             guard params["surface_id"]?.string == surface else { throw BridgeError("stale_binding", "Fixture surface moved", status: 409) }
             let text = params["text"]?.string ?? ""
-            inputs.append(text); picker.input(text)
+            inputs.append(text)
+            if menu != nil {
+                if text == "1" { confirmed = true }
+                if text == "1" || text == "\u{1b}" { menu = nil }
+                return .object(["accepted": .bool(true)])
+            }
+            picker.input(text)
             if inputs.count == moveAfterInputs { surface = "surface-2" }
             return .object(["accepted": .bool(true)])
         default: return .object(["sessions": .array([])])
@@ -39,6 +51,7 @@ private actor DesktopModelCmux: CmuxControlling {
     }
     func configure(follows: Bool = true, closesOnSession: Bool = true) { picker.follows = follows; picker.closesOnSession = closesOnSession }
     func setState(_ value: String) { state = value }
+    func askToConfirm() { asksToConfirm = true }
     func moveSurface(afterInputs count: Int) { moveAfterInputs = count }
     func applied() -> (model: String, effort: String, sessionOnly: Bool)? { picker.applied }
     func promptEscapes() -> Int { picker.promptEscapes }
@@ -169,6 +182,42 @@ private actor EmulatedConsole {
         // A different model under the same operation is a different payload, never a second write.
         await #expect(throws: BridgeError.self) { try await service.switchModel(id: "live", request: ModelSwitchRequest(model: "haiku", operationID: request.operationID)) }
         #expect(await cmux.sent.count == 1)
+    }
+
+    @Test func aClaudeConfirmationIsDeclinedAndReportedUnlessTheReaderConfirmed() async throws {
+        let root = try temporary(); defer { try? FileManager.default.removeItem(at: root) }
+        let cmux = DesktopModelCmux(agent: "claude", path: root.appendingPathComponent("t.jsonl").path)
+        await cmux.askToConfirm()
+        let service = SessionService(cmux: cmux, home: root, transcriptRoots: [root])
+        await #expect(throws: BridgeError("model_confirm_required", "Claude Code asks to confirm this model switch; nothing changed.", status: 409)) {
+            try await service.switchModel(id: "live", request: ModelSwitchRequest(model: "sonnet"))
+        }
+        // The menu was closed with Escape and never answered yes, so the Agent is back at its prompt unchanged.
+        #expect(await cmux.inputs == ["\u{1b}"]); #expect(await cmux.confirmed == false)
+        // The reader's second, explicit choice takes the first option once.
+        let receipt = try await service.switchModel(id: "live", request: ModelSwitchRequest(model: "sonnet", confirm: true))
+        #expect(receipt.accepted)
+        #expect(await cmux.inputs == ["\u{1b}", "1"]); #expect(await cmux.confirmed)
+    }
+
+    @Test func aClaudeSwitchWithoutAQuestionTypesNothingMore() async throws {
+        let root = try temporary(); defer { try? FileManager.default.removeItem(at: root) }
+        let cmux = DesktopModelCmux(agent: "claude", path: root.appendingPathComponent("t.jsonl").path)
+        let service = SessionService(cmux: cmux, home: root, transcriptRoots: [root])
+        _ = try await service.switchModel(id: "live", request: ModelSwitchRequest(model: "opus", confirm: true))
+        #expect(await cmux.inputs.isEmpty)
+    }
+
+    @Test func aNumberedMenuIsToldApartFromAPromptAndAShell() {
+        let menu = ["   Switch model?", "", "   ❯ 1. Yes, switch to Sonnet 5.5", "     2. No, go back"]
+        #expect(AgentMenuScreen(rows: menu).isShown); #expect(AgentMenuScreen(rows: menu).asksToConfirmModelSwitch)
+        // A permission menu is a menu too, but not this question.
+        let permission = ["❯\u{00a0}1. Yes", "  2. No"]
+        #expect(AgentMenuScreen(rows: permission).isShown); #expect(!AgentMenuScreen(rows: permission).asksToConfirmModelSwitch)
+        #expect(!AgentMenuScreen(rows: ["❯\u{00a0}", "  ⏵⏵ bypass permissions on"]).isShown)
+        #expect(!AgentMenuScreen(rows: ["valuz@Studio [~/project]", "-> 1. not a menu"]).isShown)
+        // A lone option is not a choice.
+        #expect(!AgentMenuScreen(rows: ["❯ 1. Only"]).isShown)
     }
 
     @Test func aTurnInProgressOrAnUnsafeNameNeverReachesTheAgent() async throws {

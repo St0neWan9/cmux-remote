@@ -420,7 +420,8 @@ final class AppModel {
     /// Own in-flight and unresolved sends across pushed-view navigation.
     func conversation(session: SessionDescriptor, client: RemoteClient) -> ConversationModel {
         let key = client.operationRecoveryScope + ":" + session.id
-        if let existing = conversationModels[key] { return existing }
+        // The list was just read, so a page opened again starts from its state rather than the one it last saw.
+        if let existing = conversationModels[key] { existing.updateSession(session); return existing }
         if conversationModels.count >= 32 { conversationModels = conversationModels.filter { $0.value.busy || $0.value.pendingSend != nil } }
         let store = pendingSends; let scope = client.operationRecoveryScope; let id = session.id
         let model = ConversationModel(session: session, client: client, speechInput: makeSpeechInput(),
