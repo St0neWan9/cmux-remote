@@ -94,8 +94,8 @@ final class ConversationModel {
     private let readModels: @Sendable () async throws -> ModelChoiceList
     /// The Mac's model lists, shared with every other conversation on it.
     private let modelCache: ModelChoiceCache?
-    /// Whether this conversation has read the list itself, rather than only showing the shared one.
-    private var modelsRead = false
+    /// A model-list read in flight, so opening the page twice in a row does not read it twice.
+    private var modelsLoading = false
     private let postModel: @Sendable (ModelSwitchRequest) async throws -> MutationReceipt
     private let refreshReads = ReadRequestOwner()
     private let olderReads = ReadRequestOwner()
@@ -362,17 +362,18 @@ final class ConversationModel {
     }
     /// Reads the models the agent offers. A Bridge without model switching answers with an error and leaves none.
     ///
-    /// The list belongs to the Mac and the agent, so a list another conversation read is shown at once while this
-    /// one reads its own; a read cancelled by leaving the page is made again the next time it opens.
+    /// The list belongs to the Mac and the agent, so the last list any conversation read is shown at once while
+    /// this one reads afresh. It is read every time the page opens or the app returns: the owner edits the agent's
+    /// configuration on the Mac while the app keeps running, and a list read once per launch went stale for days.
     func loadModelChoices() async {
-        guard canSend, !modelsRead, ["claude", "codex"].contains(session.agent) else { return }
+        guard canSend, !modelsLoading, ["claude", "codex"].contains(session.agent) else { return }
+        modelsLoading = true; defer { modelsLoading = false }
         let scope = client.operationRecoveryScope, agent = session.agent
-        if modelChoices == nil, let shared = modelCache?.list(scope: scope, agent: agent) { modelChoices = shared }
+        // An unchanged list is never assigned again: the menu may be open, and any change rebuilds it.
+        if let shared = modelCache?.list(scope: scope, agent: agent), shared != modelChoices { modelChoices = shared }
         do {
             let list = try await readModels()
-            // An unchanged list is not assigned again: the menu may be open, and any change rebuilds it.
             if modelChoices != list { modelChoices = list }
-            modelsRead = true
             modelCache?.store(list, scope: scope, agent: agent)
         } catch { logFailure("models", error, shown: false) }
     }
