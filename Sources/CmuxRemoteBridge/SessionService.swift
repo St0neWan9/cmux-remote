@@ -24,10 +24,12 @@ public actor SessionService {
     private var eventBoot: String?
     private var eventSequence: Int?
     private let aliases: SessionAliasStore?
+    private let modelCatalog: ModelChoiceCatalog
+    private let modelSwitch = CodexModelSwitch()
 
     public init(cmux: any CmuxControlling, home: URL, transcriptRoots: [URL], mutations: MutationLedger? = nil, journal: MutationJournal? = nil, aliases: SessionAliasStore? = nil) {
         self.cmux = cmux; self.transcriptRoots = transcriptRoots.map { $0.resolvingSymlinksInPath().standardizedFileURL }
-        self.files = ProjectFilePolicy(home: home); self.mutations = mutations ?? MutationLedger(); self.journal = journal; self.aliases = aliases
+        self.files = ProjectFilePolicy(home: home); self.modelCatalog = ModelChoiceCatalog(home: home); self.mutations = mutations ?? MutationLedger(); self.journal = journal; self.aliases = aliases
     }
 
     /// The Agent session a conversation currently answers for: a desktop resume forks the Agent's
@@ -304,6 +306,68 @@ public actor SessionService {
             guard result["submitted"].bool != false else { throw BridgeError("outcome_unknown", "cmux did not confirm prompt submission; inspect its draft before retrying.", status: 409) }
             return try await complete(request.operationID, access: access)
         } catch { journal?.uncertain(id: request.operationID); throw mutationError(error) }
+    }
+
+    /// The models this conversation's agent offers on this Mac.
+    public func models(id: String, access: SessionAccess? = nil) async throws -> ModelChoiceList {
+        let record = try await authorizedRecord(id, capability: .conversationRead, access: access)
+        let list = modelCatalog.choices(agent: record.descriptor.agent)
+        try await recheck(record, capability: .conversationRead, access: access)
+        return list
+    }
+
+    /// Switches a live agent to another model with the agent's own command.
+    ///
+    /// Claude Code takes `/model <name>` as an ordinary prompt and saves it as its default for new sessions.
+    /// Codex has no model argument, so its picker is walked and the choice applied to this session only.
+    /// Only an agent waiting at its prompt is switched: a turn in progress would take the command as input.
+    public func switchModel(id: String, request: ModelSwitchRequest, access: SessionAccess? = nil) async throws -> MutationReceipt {
+        let name = try AgentModelName.validated(request.model)
+        let signature = try MutationLedger.fingerprint(action: "model", resource: id, payload: .string(name))
+        if let receipt = try await existing(request.operationID, signature: signature, access: access) { return receipt }
+        let session = try await verifiedBinding(id, requiresEmptyPrompt: !id.hasPrefix("tui:"), access: access)
+        guard ["claude", "codex"].contains(session.agent) else { throw BridgeError("unsupported", "This agent cannot switch models from the phone.", status: 422) }
+        guard !session.state.hasPrefix("working") else { throw BridgeError("agent_busy", "Wait for the Agent to finish its turn before switching models.", status: 409) }
+        // Codex lists models by label, so the offered label is matched as well as the id; the session keeps its effort.
+        var candidates = [name], effort: String?
+        if session.agent == "codex" {
+            if let label = modelCatalog.choices(agent: "codex").choices.first(where: { $0.id.lowercased() == name.lowercased() })?.label { candidates.append(label) }
+            if let path = records[id]?.transcript { effort = try? await reader.history(path: path, agent: "codex", beforeSeq: nil, limit: 1).agentModel?.effort }
+        }
+        if let receipt = try await begin(request.operationID, signature: signature, workspace: session.workspaceID, capability: .conversationControl, access: access) { return receipt }
+        try await validateMutationBinding(session, access: access)
+        do {
+            let key = IdentityCryptography().digest(Data(((access?.clientID ?? "owner") + ":" + request.operationID.uuidString).utf8))
+            var params: [String: JSONValue] = ["session_id": .string(await liveSessionID(session.id)), "operation_id": .string(request.operationID.uuidString), "backend_operation_key": .string(key), "workspace_id": .string(session.workspaceID!), "surface_id": .string(session.surfaceID!)]
+            if session.agent == "claude" {
+                params["text"] = .string("/model " + name)
+                let result = try await cmux.request("mobile.chat.send", params: params)
+                guard result["submitted"].bool != false else { throw BridgeError("outcome_unknown", "cmux did not confirm the model command; inspect the Agent.", status: 409) }
+            } else if id.hasPrefix("tui:") {
+                params["candidates"] = .array(candidates.map(JSONValue.string)); if let effort { params["effort"] = .string(effort) }
+                let result = try await cmux.request("mobile.chat.model", params: params)
+                guard result["switched"].bool == true else { throw BridgeError("outcome_unknown", "The daemon did not confirm the model switch; inspect the Agent.", status: 409) }
+            } else {
+                try await modelSwitch.run(on: desktopConsole(session, access: access), candidates: candidates, effort: effort)
+            }
+            return try await complete(request.operationID, access: access)
+        } catch { journal?.uncertain(id: request.operationID); throw mutationError(error) }
+    }
+
+    /// The desktop terminal behind a verified binding; every write first rechecks that the same terminal is still there.
+    private func desktopConsole(_ session: SessionDescriptor, access: SessionAccess?) -> AgentConsole {
+        let cmux = cmux, target: [String: JSONValue] = ["workspace_id": .string(session.workspaceID!), "surface_id": .string(session.surfaceID!)]
+        return AgentConsole(rows: {
+            (try await cmux.request("surface.read_text", params: target))["text"].string?.components(separatedBy: .newlines) ?? []
+        }, write: { [self] text, _ in
+            let state = try await cmux.request("surface.input_state", params: target)
+            guard state["workspace_id"].string?.lowercased() == session.workspaceID?.lowercased(), state["surface_id"].string?.lowercased() == session.surfaceID?.lowercased(),
+                  state["terminal"].bool != false else { throw BridgeError("stale_binding", "The agent's terminal binding changed. Refresh the task.", status: 409) }
+            try await validateMutationBinding(session, access: access)
+            var params = target; params["text"] = .string(text)
+            let result = try await cmux.request("mobile.terminal.input", params: params)
+            guard result["accepted"].bool != false else { throw BridgeError("outcome_unknown", "cmux did not confirm terminal input; inspect the Agent.", status: 409) }
+        })
     }
 
     /// Reopens one Agent session in a new terminal, continuing the same conversation.

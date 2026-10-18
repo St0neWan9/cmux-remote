@@ -315,3 +315,12 @@
 "sessions.title_menu" = "会话选项";
 "feed.title_count" = "待处理事项（%lld）";
 "chat.copy_text" = "复制";
+"model.switch" = "切换模型";
+"model.custom" = "其他模型…";
+"model.custom_placeholder" = "模型名或别名";
+"model.note_default" = "Claude Code 会同时把它设为新会话的默认模型。";
+"model.note_session" = "只对当前会话生效。";
+"error.invalid_model" = "模型名不能包含空格或特殊字符。";
+"error.model_unavailable" = "Agent 不提供这个模型。";
+"error.model_switch_failed" = "模型选择框没有按预期响应，模型未改变。";
+"error.agent_busy" = "请等 Agent 完成当前回合后再切换模型。";

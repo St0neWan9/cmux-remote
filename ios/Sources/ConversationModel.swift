@@ -50,6 +50,15 @@ final class ConversationModel {
     /// The transcript records the question but not the choice, so until the next history read carries it the
     /// card would show no answer; this keeps the reader's own choice visible where they made it.
     private(set) var answeredQuestions: [String: String] = [:]
+    /// The model the transcript last reported.
+    private(set) var agentModel: AgentModelState?
+    /// A switch this phone made that the transcript has not reported yet, with the report it was made over.
+    /// Codex records a new model only with its next turn, so until then the page shows the reader's choice.
+    private var switchedModel: (label: String, over: AgentModelState?)?
+    var modelLabel: String? { switchedModel?.label ?? agentModel?.model }
+    /// What the agent's configuration on the Mac offers; nil until read, and from a Bridge that cannot switch.
+    private(set) var modelChoices: ModelChoiceList?
+    var canSwitchModel: Bool { canSend && modelChoices != nil && ["claude", "codex"].contains(session.agent) }
     var error: String?
     var draft = ""
     let imageDraft = ImageDraftModel()
@@ -82,6 +91,8 @@ final class ConversationModel {
     private let readFeed: @Sendable () async throws -> [JSONValue]
     /// Answers one of those requests.
     private let replyFeed: @Sendable (String, JSONValue) async throws -> MutationReceipt
+    private let readModels: @Sendable () async throws -> ModelChoiceList
+    private let postModel: @Sendable (ModelSwitchRequest) async throws -> MutationReceipt
     private let refreshReads = ReadRequestOwner()
     private let olderReads = ReadRequestOwner()
     private var readsEnabled = true
@@ -107,6 +118,8 @@ final class ConversationModel {
          readTail: (@Sendable (Int) async throws -> ConversationSnapshot)? = nil,
          readFeed: (@Sendable () async throws -> [JSONValue])? = nil,
          replyFeed: (@Sendable (String, JSONValue) async throws -> MutationReceipt)? = nil,
+         readModels: (@Sendable () async throws -> ModelChoiceList)? = nil,
+         postModel: (@Sendable (ModelSwitchRequest) async throws -> MutationReceipt)? = nil,
          cache: ConversationCache? = nil) {
         self.session = session; self.client = client; speech = SpeechDraftModel(input: speechInput ?? UnavailableSpeechInput())
         let id = session.id
@@ -126,6 +139,8 @@ final class ConversationModel {
         // Questions live in the Feed, beside the transcript: the card the agent asked and the request that answers it.
         self.readFeed = readFeed ?? { try await client.get("/v1/feed", as: JSONValue.self)["items"].array ?? [] }
         self.replyFeed = replyFeed ?? { requestID, body in try await client.post("/v1/feed/\(requestID)/reply", body: body, as: MutationReceipt.self) }
+        self.readModels = readModels ?? { try await client.get("/v1/sessions/\(id)/models", as: ModelChoiceList.self) }
+        self.postModel = postModel ?? { try await client.post("/v1/sessions/\(id)/model", body: $0, as: MutationReceipt.self) }
         self.cache = cache
     }
     /// Shows what was read last, so opening a conversation never starts blank.
@@ -147,6 +162,7 @@ final class ConversationModel {
         images = history.images ?? []
         responses = history.responses ?? []
         backgroundTasks = history.backgroundTasks ?? []
+        agentModel = history.agentModel
         recordedRunSeconds = history.recordedRunSeconds; recordedTurnCount = history.recordedTurnCount ?? 0
         currentTurnStartedAt = history.currentTurnStartedAt; currentTurnCompleted = history.currentTurnCompleted ?? false
         timelineItems = ConversationTimeline().items(from: messages)
@@ -293,6 +309,9 @@ final class ConversationModel {
             }
             // Only a newest-page read carries them, so an earlier page must not clear the set.
             if history.backgroundTasks != nil { backgroundTasks = history.backgroundTasks ?? [] }
+            // Both full and tail reads are the newest page, which is the one that reports the model.
+            agentModel = history.agentModel
+            if let switched = switchedModel, switched.over != agentModel { switchedModel = nil }
             recordedRunSeconds = history.recordedRunSeconds; recordedTurnCount = history.recordedTurnCount ?? 0
             currentTurnStartedAt = history.currentTurnStartedAt; currentTurnCompleted = history.currentTurnCompleted ?? false
             timelineItems = ConversationTimeline().items(from: messages)
@@ -336,6 +355,24 @@ final class ConversationModel {
             }
         }
         if let reanchor, readsEnabled, olderReads.isCurrent(reanchor), generation == sourceGeneration { await refresh() }
+    }
+    /// Reads the models the agent offers. A Bridge without model switching answers with an error and leaves none.
+    func loadModelChoices() async {
+        guard canSend, modelChoices == nil, ["claude", "codex"].contains(session.agent) else { return }
+        do { modelChoices = try await readModels() }
+        catch { logFailure("models", error, shown: false) }
+    }
+    /// Switches the agent to another model with its own model command. A failure is shown and never retried.
+    func switchModel(to name: String, label: String) async {
+        guard canSwitchModel, !busy, !working, pendingSend == nil else { return }
+        busy = true; defer { busy = false }
+        do {
+            let request = ModelSwitchRequest(model: name)
+            let receipt = try await postModel(request)
+            guard receipt.accepted, receipt.operationID == request.operationID else { throw BridgeError("outcome_unknown", "The model switch receipt could not be verified.", status: 504) }
+            switchedModel = (label, agentModel); error = nil
+            await refresh()
+        } catch { logFailure("model", error, shown: true); self.error = ErrorPresentation().message(error) }
     }
     func useSpeechDraft() { if let text = speech.takeText() { draft += (draft.isEmpty ? "" : "\n") + text } }
     /// Reopens the Agent session in a new terminal and follows the conversation once it reports back.

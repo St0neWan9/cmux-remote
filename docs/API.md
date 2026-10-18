@@ -14,6 +14,8 @@ Version 2 uses a device-signed `Authorization: CmuxV2` proof and approved worksp
 | GET /v1/sessions/:id/preview | surface.read_text + prose extractor | replaceable preview, availability |
 | POST /v1/sessions/:id/send | fixed mobile.chat.send | text, optional attachments, and operation_id |
 | POST /v1/sessions/:id/interrupt | mobile.chat.interrupt or explicit send_key | hard and operation_id |
+| GET /v1/sessions/:id/models | the agent's own configuration on the Mac | choices, accepts_custom, persists_default |
+| POST /v1/sessions/:id/model | `/model <name>` (Claude) or the Codex `/model` picker | model and operation_id |
 | GET /v1/feed | feed.list | captured Feed items; not all provider approvals |
 | POST /v1/feed/:request/reply | feed.permission/question/exit_plan.reply | matching kind, decision fields, operation_id |
 | GET /v1/sessions/:id/changes | local Git | porcelain change entries |
@@ -77,6 +79,34 @@ rewritten into that record by the resumed process. Until cmux updates the bindin
 answers `not_found` ("The agent's terminal moved") for both the old and the new surface, so a conversation
 reopened this way is readable but still not writable from the phone. Opening it once on the Mac, or waiting for
 the next Agent hook after a turn started in that terminal, does not change that record in cmux 0.65.2.
+
+## Switching models
+
+The newest history page carries `agentModel` (`{model, effort?}`), the model the transcript last reported: for Claude
+Code the model of its latest main-thread reply or the label its `/model` command printed (subagent replies are skipped),
+for Codex the `model` and `effort` of its latest `turn_context`. Codex records a switch only with its next turn, so the
+phone shows the reader's own choice until the transcript reports a different model. Older pages omit the field.
+
+`GET /v1/sessions/:id/models` reads names only from the owner's files: Claude's aliases (`default`, `opus`, `sonnet`,
+`haiku`, `fable`) plus the `modelPicker.options` in `~/.claude/settings.json`, and the `visibility: "list"` models of
+`~/.codex/models_cache.json`. Credentials in those files are never read into a response. At most 64 choices.
+
+`POST /v1/sessions/:id/model` takes `{model, operation_id}` and requires `conversationControl`. The name must be one
+token of `[A-Za-z0-9._:/@+[]-]`, at most 128 bytes and not starting with `-` (`invalid_model`); it is never shell input.
+The binding is verified as for a send, and an agent whose turn is still running is refused (`agent_busy`), since it
+would take the command as a prompt. The operation is journaled like a send and never retried.
+
+- Claude Code: the Bridge sends `/model <name>` through `mobile.chat.send`. Claude applies it at once and also saves it as
+  the default for new sessions (`persists_default: true`); its session-only choice exists only inside its own picker.
+- Codex takes no model argument. The Bridge opens `/model`, reads the rendered picker, moves the highlight with arrow
+  keys to the entry whose label matches the requested slug or its catalog label, then to the reasoning level the
+  session's transcript last recorded (the picker's default otherwise), and confirms with `s`, which applies the choice to
+  this session only and leaves `~/.codex/config.toml` unchanged. Every move is checked on screen before the next key.
+  A model the picker does not list is `model_unavailable`, a picker that does not follow is `model_switch_failed`; both
+  close the picker with Escape, only while it is still on screen, before anything applies. A picker still open after the
+  final key is `outcome_unknown`. On a cmux-tui daemon this runs inside the adapter as `mobile.chat.model` with
+  revision-bound `terminal.input.write` effects; on desktop cmux it uses `surface.read_text` and `mobile.terminal.input`,
+  rechecking `surface.input_state` before every write, so a terminal rebound mid-switch receives nothing more.
 
 ## Terminal mirror resources
 

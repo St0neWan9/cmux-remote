@@ -83,6 +83,8 @@ The phone generates one operation UUID per logical send, interrupt or decision. 
 
 The journal is bounded to 16,384 operation keys and 16 MiB, with no automatic eviction that would make old mutations executable again. Full, corrupted, truncated or unavailable storage stops writes. Prompts, terminal input and credentials are not stored in it. No automatic POST retry is added. This is durable protection against repeated attempts, not an atomic exactly-once transaction with cmux or proof that an Agent processed input. Explicit negative backend acknowledgements remain unknown; a lost completion write also retains an unknown intent. Old versions' in-memory receipts cannot be reconstructed by this implementation.
 
+A model switch uses the agent's own command and the same ledger. Claude Code receives `/model <name>` as a send; Codex, whose command takes no argument, has its picker walked with each move verified on screen and the choice confirmed for its session only. No model, provider or credential setting is written by the Bridge. Only an agent waiting at its prompt is switched.
+
 Feed replies require a currently pending matching request and its supported kind. Ordinary Codex hook telemetry cannot be upgraded into an actionable approval by the Bridge. Unsupported actions remain visibly unsupported; numeric-key answering is not presented as a reliable generic approval adapter.
 
 ## Files and changes

@@ -24,10 +24,12 @@ public actor TuiControlAdapter: CmuxControlling {
     private let restoreChecks: Int
     private let journalWindow: UInt64
     private let restoreInterval: Duration
+    private let modelSwitch: CodexModelSwitch
     public init(client: any TuiResourceRequesting, transcripts: TuiTranscriptLocator, attachments: TuiAttachmentStore? = nil, decisions: MutationLedger = MutationLedger(), archive: TuiBindingRepository? = nil,
                 restoreChecks: Int = 8, restoreInterval: Duration = .milliseconds(150), journalWindow: UInt64 = 20_000) {
         self.client = client; self.transcripts = transcripts; self.attachments = attachments; self.decisions = decisions; self.archive = archive
         self.restoreChecks = restoreChecks; self.restoreInterval = restoreInterval; self.journalWindow = journalWindow
+        modelSwitch = CodexModelSwitch(interval: restoreInterval)
     }
     public func identity() -> String? { pinnedIdentity }
     public func ownsDecision(_ id: String) -> Bool { pending[id] != nil }
@@ -221,8 +223,40 @@ public actor TuiControlAdapter: CmuxControlling {
             if lastSent.count >= 200, lastSent[binding.id] == nil { lastSent.removeAll() }
             lastSent[binding.id] = imagePaths.isEmpty ? text : nil
             return .object(["submitted": .bool(true)])
+        case "mobile.chat.model":
+            // Codex has no model argument, so its picker is walked here; a Claude switch is an ordinary send.
+            guard let id = params["session_id"]?.string, let operationKey = params["backend_operation_key"]?.string, operationKey.count == 64,
+                  operationKey.allSatisfy({ $0.isASCII && $0.isHexDigit }),
+                  let candidates = params["candidates"]?.array?.compactMap(\.string), (1...4).contains(candidates.count) else {
+                throw BridgeError("invalid_input", "A stable model switch identity and a model are required.")
+            }
+            let current = try await snapshot()
+            guard let binding = activeBinding(id: id, in: current),
+                  params["workspace_id"]?.string?.lowercased() == binding.workspaceID,
+                  params["surface_id"]?.string?.lowercased() == binding.surfaceID else { throw stale() }
+            guard binding.provider == "codex" else { throw unsupported() }
+            _ = try await clearPromptForSend(current, binding: binding, operationKey: operationKey)
+            let key = "cmux-remote:model:" + operationKey.lowercased() + ":"
+            let console = AgentConsole(rows: { [self] in try await consoleRows(binding) },
+                                       write: { [self] text, step in try await consoleWrite(binding, text: text, key: key + step) })
+            try await modelSwitch.run(on: console, candidates: candidates, effort: params["effort"]?.string)
+            return .object(["switched": .bool(true)])
         default: throw unsupported()
         }
+    }
+    /// The rendered rows of a conversation's terminal, only while the same Agent still holds it.
+    private func consoleRows(_ binding: TuiSessionSnapshot.Binding) async throws -> [String] {
+        let current = try await snapshot()
+        guard stillBound(binding, in: current) else { throw stale() }
+        return try await terminalState(current, binding: binding).rows
+    }
+    /// One fixed write into that terminal, bound to the revision it was checked at.
+    private func consoleWrite(_ binding: TuiSessionSnapshot.Binding, text: String, key: String) async throws {
+        let current = try await snapshot()
+        guard stillBound(binding, in: current) else { throw stale() }
+        var request = current.selectors(binding)
+        request["text"] = .string(text); request["expected_revision"] = .string(current.revision)
+        try await effect("terminal.input.write", fields: request, key: key, generation: current.generation)
     }
     /// Folds agent hooks committed since the last read; an unreadable journal falls back to the daemon's own states.
     private func hookActivity(_ current: TuiSessionSnapshot) async -> [String: String] {
