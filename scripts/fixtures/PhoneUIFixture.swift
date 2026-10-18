@@ -204,6 +204,14 @@ private actor PhoneUIBackend: CmuxControlling {
                 paths.append(file.path)
             }
             let input = (paths + [params["text"]?.string ?? ""]).joined(separator: " ")
+            // Claude Code records its model command as command output rather than a prompt; no agent is switched.
+            if images.isEmpty, input.hasPrefix("/model ") {
+                let name = String(input.dropFirst("/model ".count))
+                let command: JSONValue = .object(["type": .string("user"), "uuid": .string(UUID().uuidString), "timestamp": .string(stamp), "message": .object(["role": .string("user"), "content": .string("<command-name>/model</command-name>\n            <command-message>model</command-message>\n            <command-args>\(name)</command-args>")])])
+                let output: JSONValue = .object(["type": .string("user"), "uuid": .string(UUID().uuidString), "timestamp": .string(stamp), "message": .object(["role": .string("user"), "content": .string("<local-command-stdout>Set model to `\(name)` and saved as your default for new sessions</local-command-stdout>")])])
+                try Self.append([command, output], to: transcript)
+                return .object(["submitted": .bool(true)])
+            }
             let user: JSONValue = .object(["type": .string("user"), "uuid": .string(UUID().uuidString), "timestamp": .string(stamp), "message": .object(["content": .string(input)])])
             let replyText = "UI fixture received \(images.count) image(s) and your prompt. No agent was started."
             let reply: JSONValue = .object(["type": .string("assistant"), "uuid": .string(UUID().uuidString), "timestamp": .string(stamp), "message": .object(["content": .array([.object(["type": .string("text"), "text": .string(replyText)])])])])

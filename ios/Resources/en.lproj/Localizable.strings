@@ -315,3 +315,12 @@
 "sessions.title_menu" = "Conversation options";
 "feed.title_count" = "Waiting for you (%lld)";
 "chat.copy_text" = "Copy";
+"model.switch" = "Switch model";
+"model.custom" = "Other model…";
+"model.custom_placeholder" = "Model name or alias";
+"model.note_default" = "Claude Code also saves it as the default for new sessions.";
+"model.note_session" = "Applies to this session only.";
+"error.invalid_model" = "Use a model name without spaces or special characters.";
+"error.model_unavailable" = "The agent does not offer this model.";
+"error.model_switch_failed" = "The model picker did not respond as expected. Nothing changed.";
+"error.agent_busy" = "Wait for the agent to finish its turn, then switch models.";

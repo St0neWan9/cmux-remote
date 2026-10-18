@@ -53,6 +53,10 @@ struct ErrorPresentation {
         case "launch_unsupported": return String(localized: "error.launch_unsupported")
         case "prompt_required": return String(localized: "error.prompt_required")
         case "directory_forbidden", "directory_missing": return String(localized: "error.directory")
+        case "invalid_model": return String(localized: "error.invalid_model")
+        case "model_unavailable": return String(localized: "error.model_unavailable")
+        case "model_switch_failed": return String(localized: "error.model_switch_failed")
+        case "agent_busy": return String(localized: "error.agent_busy")
         default:
             // Keep the code visible in the banner until all unhandled codes are confirmed handled.
             if let code {
