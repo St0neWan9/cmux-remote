@@ -51,7 +51,7 @@ struct SessionListView: View {
         AppNavigationStack {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: MobileDesign.sectionGap) {
-                    HostFilterTabs(hosts: links.map { HostFilterTabs.Host(id: $0.id, name: $0.name, state: model.linkStates[$0.id], failed: model.hostErrors[$0.id] != nil, workspaces: model.workspaces(of: $0.id)) },
+                    HostFilterTabs(hosts: links.map { HostFilterTabs.Host(id: $0.id, name: $0.name, state: model.linkStates[$0.id], failed: model.hostErrors[$0.id] != nil, quiet: model.quietHosts.contains($0.id), workspaces: model.workspaces(of: $0.id)) },
                                    selection: $hostFilter, workspaceID: $workspaceID)
                     PendingReminder(feed: PendingFeed.combined(pendingHosts(shownLinks).map { PendingFeed(count: $0.count, firstTitle: model.pending[$0.id]?.firstTitle) }),
                                     hosts: pendingHosts(shownLinks).filter { $0.count > 0 }) { id in feedHostID = id; showFeed = true }
@@ -130,7 +130,7 @@ struct SessionListView: View {
                     if hosted.isEmpty && !loading {
                         Text(String(localized: !canRead ? "sessions.no_read_grant" : (model.hostedSessions.isEmpty ? "sessions.empty" : "sessions.no_matches"))).foregroundStyle(.secondary).padding(.vertical, 12)
                     }
-                    // The bar already says the Mac is unreachable, and a Mac retried in the background is not shown
+                    // The Mac's tab already says it is unreachable, and a Mac retried in the background is not shown
                     // as failing; the red line is for other failures.
                     if let error, !multiple, model.connectionState != .disconnected, model.quietHosts.isEmpty { Text(error).font(.footnote).foregroundStyle(.red) }
                 }.frame(maxWidth: .infinity, alignment: .leading)
@@ -140,10 +140,7 @@ struct SessionListView: View {
             .background(Color.white.ignoresSafeArea())
             .toolbar(.hidden, for: .navigationBar)
             .safeAreaInset(edge: .top, spacing: 0) {
-                VStack(spacing: 6) {
-                    header
-                    ConnectionStatusBar(state: model.connectionState, hostName: model.offlineHostName) { Task { await model.reconnect(onlyLost: true) } }
-                }
+                header
             }
             .onChange(of: workspaces.map(\.id)) { _, ids in if let workspaceID, !ids.contains(workspaceID) { self.workspaceID = nil } }
             .onChange(of: links.map(\.id)) { _, ids in if let hostFilter, !ids.contains(hostFilter) { self.hostFilter = nil } }

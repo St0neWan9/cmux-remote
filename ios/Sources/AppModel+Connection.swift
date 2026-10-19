@@ -11,11 +11,6 @@ extension AppModel {
         if states.contains(.disconnected) { return .disconnected }
         return states.isEmpty ? nil : .connected
     }
-    /// The Mac to name in the bar when exactly one of several is unreachable.
-    var offlineHostName: String? {
-        let offline = links.filter { linkStates[$0.id] == .disconnected && !quietHosts.contains($0.id) }
-        return links.count > 1 && offline.count == 1 ? offline.first?.name : nil
-    }
     /// The state of one Mac's link, for a conversation that belongs to it.
     func connectionState(of client: RemoteClient) -> LinkState? {
         links.first { $0.client === client }.flatMap { linkStates[$0.id] }
