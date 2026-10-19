@@ -271,6 +271,7 @@
 "sessions.recent" = "Recent";
 "connection.reconnecting" = "Reconnecting…";
 "connection.offline" = "Can’t reach your Mac";
+"connection.connected" = "Connected";
 "connection.retry" = "Retry";
 "connection.offline_named" = "Can’t reach %@";
 "start.title" = "New Conversation";
