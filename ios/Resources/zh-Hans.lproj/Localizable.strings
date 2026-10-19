@@ -271,6 +271,7 @@
 "sessions.recent" = "最近";
 "connection.reconnecting" = "正在重新连接…";
 "connection.offline" = "无法连接到 Mac";
+"connection.connected" = "已连接";
 "connection.retry" = "重试";
 "connection.offline_named" = "无法连接到 %@";
 "start.title" = "新会话";
