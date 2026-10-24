@@ -17,6 +17,8 @@ interface Bootstrap {
  * a new name. A room holds only state its Bridge re-registers on every connection. */
 const placement = { locationHint: "wnam" } as const;
 const directory = (env: Env) => env.DIRECTORY.get(env.DIRECTORY.idFromName("directory:wnam"), placement);
+// A Bridge stamps its directory window from its own clock; allow a slow-synced Mac to run ahead of the edge.
+const CLOCK_SKEW_SECONDS = 60;
 const identity = (value: unknown): value is string => typeof value === "string" && /^[0-9a-f]{64}$/.test(value);
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -177,7 +179,7 @@ export class RelayRoom extends DurableObject<Env> {
     try { signed = JSON.parse(new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(unbase64(data, 8192))) as Signed<Bootstrap>; } catch { throw new RelayFailure("invalid_directory"); }
     const value = signed?.value, now = Math.floor(Date.now() / 1000), relay = value?.endpoint?.relay;
     if (value?.version !== 2 || value.host?.id !== hostID || value.host.publicKey !== hostKey || !relay || relay.origin !== state.origin
-      || !Number.isSafeInteger(value.expiresAt) || value.expiresAt <= now || value.expiresAt > now + 600
+      || !Number.isSafeInteger(value.expiresAt) || value.expiresAt <= now || value.expiresAt > now + 600 + CLOCK_SKEW_SECONDS
       || typeof value.host.name !== "string" || value.host.name.length > 128) throw new RelayFailure("invalid_directory");
     await verify(signed, "bootstrap", hostKey);
     const permit = relay.admission?.value;

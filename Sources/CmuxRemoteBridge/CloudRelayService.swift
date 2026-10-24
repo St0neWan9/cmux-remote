@@ -96,7 +96,7 @@ public actor CloudRelayService {
                 }
             } catch {
                 failure = socket?.failureCode() ?? "connection_failed"
-                BridgeLog.shared.warning("relay", "relay socket ended code=\(failure ?? "?") error=\(error)")
+                BridgeLog.shared.warning("relay", "relay socket ended code=\(failure ?? "?") peer=\(socket?.closeDetail() ?? "no_socket") error=\(error)")
             }
             await disconnect()
             guard generation == id, !Task.isCancelled else { break }
