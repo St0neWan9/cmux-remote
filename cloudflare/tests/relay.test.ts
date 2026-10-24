@@ -110,3 +110,28 @@ test("a registered Bridge lists only its own signed bootstrap and leaves the dir
     assert.deepEqual(await list(), []);
   } finally { await f.mf.dispose(); }
 });
+
+test("a Bridge whose clock runs ahead still lists, but a window beyond the skew allowance closes its socket", async () => {
+  const f = await fixture();
+  try {
+    const bridge = (await f.bridge()).webSocket!; bridge.accept();
+    const ready = next(bridge); bridge.send(JSON.stringify({ kind: "registry", revoked: [] })); await ready;
+    const origin = "https://relay.example", now = Math.floor(Date.now() / 1000);
+    const bootstrap = async (expiresAt: number) => {
+      const windowID = crypto.randomUUID();
+      const permit = await f.host.sign({ version: 3, hostID: f.host.id, origin, permitID: windowID, kind: "enrollment", expiresAt }, "relay3-permit");
+      return f.host.sign({ version: 2, host: { id: f.host.id, publicKey: f.host.publicKey, certificateSHA256: "a".repeat(64), name: "Studio Mac" },
+        endpoint: { host: "192.168.1.2", port: 7740, relay: { origin, admission: permit } }, workspaces: ["11111111-1111-1111-1111-111111111111"], windowID, expiresAt }, "bootstrap");
+    };
+    const list = async () => (await (await f.mf.dispatchFetch(origin + "/v3/directory")).json() as { hosts: string[] }).hosts;
+    const send = async (expiresAt: number) => bridge.send(JSON.stringify({ kind: "directory", data: base64(new TextEncoder().encode(JSON.stringify(await bootstrap(expiresAt)))) }));
+    // Five seconds ahead of the edge, as a Mac whose clock drifted would stamp it.
+    await send(now + 605);
+    let hosts: string[] = [];
+    for (let attempt = 0; attempt < 20 && hosts.length === 0; attempt++) { hosts = await list(); if (!hosts.length) await new Promise(r => setTimeout(r, 50)); }
+    assert.equal(hosts.length, 1);
+    const closed = new Promise(resolve => bridge.addEventListener("close", resolve));
+    await send(now + 900);
+    await closed;
+  } finally { await f.mf.dispose(); }
+});
