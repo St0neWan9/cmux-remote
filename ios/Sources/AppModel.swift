@@ -244,9 +244,7 @@ final class AppModel {
                     } catch {
                         guard !Task.isCancelled, pendingEnrollment === enrollment else { break }
                         self.error = ErrorPresentation().message(error)
-                        if let network = error as? URLError,
-                           [.notConnectedToInternet, .networkConnectionLost, .timedOut, .cannotFindHost, .cannotConnectToHost, .dnsLookupFailed].contains(network.code),
-                           enrollment.request.value.expiresAt > Int(Date().timeIntervalSince1970) { continue }
+                        if EnrollmentPollRetry().shouldRetry(error, expiresAt: enrollment.request.value.expiresAt, now: Int(Date().timeIntervalSince1970)) { continue }
                         break
                     }
                 }
