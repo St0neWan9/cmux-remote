@@ -12,6 +12,10 @@ import CmuxRemoteCore
         #expect(!SessionFilter.working.matches(ended, query: "", workspaceID: nil))
         #expect(SessionFilter.readOnly.matches(ended, query: "codex", workspaceID: nil))
         #expect(!SessionFilter.readOnly.matches(live, query: "", workspaceID: nil))
+        // An idle Agent whose terminal is still bound can be talked to, so it is Running, not history.
+        let idle = SessionDescriptor(id: "c", agent: "claude", title: "Waiting", cwd: "/projects/cmux", workspaceID: "ABC", surfaceID: "s", state: "idle")
+        #expect(SessionFilter.working.matches(idle, query: "", workspaceID: nil))
+        #expect(!SessionFilter.readOnly.matches(idle, query: "", workspaceID: nil))
     }
     @Test func questionsSwitchBetweenCustomAndOrderedMultiSelect() {
         var draft = FeedQuestionDraft()
