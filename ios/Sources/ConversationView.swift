@@ -66,6 +66,8 @@ struct ConversationView: View {
                 header
                 ConnectionStatusBar(state: linkState) { Task { await reconnect() } }
             }
+            // The bar's own frost: a system material blurs what scrolls under it without rasterizing a row.
+            .background(.ultraThinMaterial)
         }
         .task { for await state in model.client.linkStates() { linkState = state } }
         .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -101,6 +103,7 @@ struct ConversationView: View {
                 } else if !model.canSend { Text(String(localized: "sessions.read_only")).font(.caption).foregroundStyle(.secondary) }
                 composer
             }.padding(.horizontal, 14).padding(.top, 14).padding(.bottom, 10)
+            .background(.ultraThinMaterial)
         }
         .photosPicker(isPresented: $showingPhotos, selection: $photoItems, maxSelectionCount: max(1, 4 - model.imageDraft.images.count), selectionBehavior: .ordered, matching: .images)
         .fileImporter(isPresented: $showingImageFiles, allowedContentTypes: [.image], allowsMultipleSelection: true) { result in
@@ -210,22 +213,22 @@ struct ConversationView: View {
                     .modifier(PinnedHeightProbe(pinned: isPinned(item)) { height in if abs(height - pinnedRowHeight) > 0.5 { pinnedRowHeight = height } })
             }
             if activeAnchor == nil, let runningSince {
-                LiveRunLabel(since: runningSince, compacting: model.compacting, showsDivider: true, font: .subheadline).modifier(HeaderContentEffect(bottom: bottom))
+                LiveRunLabel(since: runningSince, compacting: model.compacting, showsDivider: true, font: .subheadline)
             }
             if let preview = model.preview {
                 VStack(alignment: .leading, spacing: 10) {
                     Label(String(localized: "chat.preview"), systemImage: "ellipsis.bubble").font(.caption).foregroundStyle(.secondary)
                     MarkdownMessageView(text: preview)
-                }.modifier(HeaderContentEffect(bottom: bottom))
+                }
             }
             ForEach(model.outgoing) { prompt in
-                OutgoingPromptRow(prompt: prompt).modifier(HeaderContentEffect(bottom: bottom)).id(prompt.id)
+                OutgoingPromptRow(prompt: prompt).id(prompt.id)
                     .modifier(PinnedHeightProbe(pinned: pinnedSent?.outgoing == prompt.id) { height in if abs(height - pinnedRowHeight) > 0.5 { pinnedRowHeight = height } })
             }
             if let error = model.error {
                 Label(error, systemImage: "exclamationmark.circle").font(.footnote).foregroundStyle(.red).padding(12)
                     .frame(maxWidth: .infinity, alignment: .leading).background(Color.red.opacity(0.055), in: RoundedRectangle(cornerRadius: 14))
-                    .modifier(HeaderContentEffect(bottom: bottom))
+
             }
         }
         // The rows' own height, measured on a stack that holds no filler: a value that cannot depend on
@@ -272,7 +275,6 @@ struct ConversationView: View {
         // A waiting question's form blurs line by line instead (see `FeedQuestionView.edgeBlur`): as one row it
         // is taller than the screen, and rasterizing it whole on every frame made scrolling past it stutter. A
         // `visualEffect` rasterizes what it wraps even with every effect disabled, so this row opts out entirely.
-        .modifier(BlurUnless(disabled: item.first.kind.questionPrompt.flatMap { model.pendingQuestions[$0] }.map(\.isFirst) ?? false, bottom: bottom))
     }
     /// Puts text into the follow-up draft as a Markdown quote, ahead of what is already typed.
     private func quote(_ text: String) {
