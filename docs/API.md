@@ -11,6 +11,7 @@ Version 2 uses a device-signed `Authorization: CmuxV2` proof and approved worksp
 | GET /v1/sessions | cmux-bound chat.sessions.dump / agent hooks, enriched by vault.sessions | cmux sessions only; external history excluded; known ended sessions read-only |
 | GET /v1/sessions/:id/history?before_seq=&limit= | local transcript, pinned upstream parser | messages, has_more, generation, clipped |
 | GET /v1/sessions/:id/tool-detail?message_id=&generation=&field=&offset=&content_id= | complete transcript tool field | bounded revision-bound text page |
+| GET /v1/sessions/:id/tasks/:task_id?offset=&limit= | the agent's own task record for a detached call | subagent conversation, or paged command output |
 | GET /v1/sessions/:id/preview | surface.read_text + prose extractor | replaceable preview, availability |
 | POST /v1/sessions/:id/send | fixed mobile.chat.send | text, optional attachments, and operation_id |
 | POST /v1/sessions/:id/interrupt | mobile.chat.interrupt or explicit send_key | hard and operation_id |
@@ -190,6 +191,17 @@ Ordinary history preserves the upstream 2,048-character input-detail and
 16,384-character body/output/diff budgets. The inline card wraps all received text
 and uses the conversation's vertical scroll. `View full record` opens an explicit
 paged read of the underlying committed transcript field.
+
+`GET /v2/sessions/:id/tasks/:task_id` reads what one background task produced. An
+asynchronous Agent's own conversation is returned as a normal history snapshot
+(`kind: agent`); a detached command's output is returned as `kind: output` text,
+paged from the beginning by byte offset (default and maximum 65,536 bytes per
+page, at most 262,144). Pages end on a UTF-8 character boundary, `next_offset` is
+absent at the end of the record, and `total_bytes` reports the size. `running`
+says whether the conversation still counts the task as running. A task whose
+record has been removed from the Mac answers `task_unavailable`; the task id is
+validated as an identifier and never used as a path. Subscribing to the same path
+reports each change while the task writes.
 
 `GET /v2/sessions/:id/tool-detail` requires `message_id`, the current history
 `generation`, and a supported `field`: `input`/`output` for a tool or terminal
