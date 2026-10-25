@@ -5,13 +5,16 @@ import CmuxRemoteCore
 /// Reuses upstream call identities, then supplements image blocks omitted by its text projection.
 struct TranscriptImageIndex {
     struct Result { let records: [TranscriptImageRecord]; let supplementalMessages: [ChatMessage] }
-    func read(lines: [String], messages: [ChatMessage], agent: String) throws -> Result {
+    /// - Parameter startingSeq: The record number of the first line, so an appended chunk keeps the
+    ///   sequence numbers a whole-record read would have given it.
+    func read(lines: [String], messages: [ChatMessage], agent: String, startingSeq: Int = 0) throws -> Result {
         var records: [TranscriptImageRecord] = []
         var supplemental: [ChatMessage] = []
         var calls: [String: ChatMessage] = [:]
         var recordedPaths: [(path: String, seq: Int, data: Data)] = []
         let known = Set(messages.map(\.id))
-        for (seq, line) in lines.enumerated() {
+        for (offset, line) in lines.enumerated() {
+            let seq = startingSeq + offset
             try Task.checkCancellation()
             guard let root = try? JSONDecoder().decode(JSONValue.self, from: Data(line.utf8)), root["isSidechain"].bool != true else { continue }
             if agent == "claude" {

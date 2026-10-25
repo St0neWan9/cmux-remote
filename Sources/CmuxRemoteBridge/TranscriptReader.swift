@@ -14,6 +14,16 @@ public actor TranscriptReader {
         let messages: [ChatMessage]
         let presentation: TranscriptResponseReader.Result
         let agentModel: AgentModelState?
+        /// The first byte after the last complete record parsed, so an appended chunk resumes here.
+        let parsedThrough: Int
+        /// The highest record number parsed; the next record continues from it.
+        let lastSeq: Int
+        /// The turn fold, carried so an open turn continues across chunks.
+        let responseState: TranscriptResponseReader.State
+        /// The detached-call scan, carried so earlier launches stay paired with later completions.
+        let trackerState: BackgroundTaskTracker.State
+        /// The newest records, so a tool call and its result pair across a chunk edge.
+        let tailLines: [String]
     }
     private var observations: [String: Observation] = [:]
     /// Last-read order per path; an eviction takes the lowest, which is the least recently read.
@@ -58,16 +68,24 @@ public actor TranscriptReader {
     /// Evicts the least recently read record, one per insertion, instead of the whole cache: a burst of
     /// new paths used to guarantee a full re-parse of every conversation still open. A record and its
     /// launches leave together, so a cached record never answers without its running tasks.
-    private func store(_ observation: Observation, launches scanned: [BackgroundTaskTracker.Launch], for path: String) {
+    private func store(_ observation: Observation, for path: String) {
         if observations[path] == nil, observations.count >= Self.capacity,
            let oldest = observationOrder.min(by: { $0.value < $1.value })?.key {
             observations[oldest] = nil; launches[oldest] = nil; observationOrder[oldest] = nil
         }
-        observations[path] = observation; launches[path] = scanned; touch(path)
+        observations[path] = observation
+        launches[path] = observation.trackerState.launched.values.sorted { $0.task.id < $1.task.id }
+        touch(path)
     }
-    /// The newest complete lines of a transcript within the read window, and where that window starts.
-    private func window(path: String, size: Int) throws -> (data: Data, start: Int) {
-        let start = size > windowLimit ? (size - windowLimit + windowStep - 1) / windowStep * windowStep : 0
+    /// Where a read of this size starts: the newest bytes within the window, in whole steps so record
+    /// numbers stay put while the file grows.
+    private func windowStart(size: Int) -> Int {
+        size > windowLimit ? (size - windowLimit + windowStep - 1) / windowStep * windowStep : 0
+    }
+    /// The newest complete lines of a transcript within the read window, where that window starts, and the
+    /// absolute offset of the returned data's first byte.
+    private func window(path: String, size: Int) throws -> (data: Data, start: Int, offset: Int) {
+        let start = windowStart(size: size)
         let handle = try FileHandle(forReadingFrom: URL(fileURLWithPath: path)); defer { try? handle.close() }
         // One byte before the window shows whether it begins on a line boundary.
         let readStart = max(0, start - 1)
@@ -77,10 +95,11 @@ public actor TranscriptReader {
             try Task.checkCancellation()
             data.append(chunk)
         }
-        guard start > 0 else { return (data, 0) }
+        guard start > 0 else { return (data, 0, 0) }
         // A record cut by the window start is never parsed.
-        guard let firstBreak = data.firstIndex(of: 10) else { return (Data(), start) }
-        return (Data(data[data.index(after: firstBreak)...]), start)
+        guard let firstBreak = data.firstIndex(of: 10) else { return (Data(), start, start) }
+        let offset = start + data.distance(from: data.startIndex, to: firstBreak)
+        return (Data(data[data.index(after: firstBreak)...]), start, offset)
     }
     /// - Parameter reportsBackgroundTasks: Whether the agent process that owns this record is still running.
     ///   Its detached tasks die with it, so an ended session reports none, whatever its record says.
@@ -108,15 +127,26 @@ public actor TranscriptReader {
             return page(previous.messages, images: previous.images, presentation: previous.presentation, beforeSeq: beforeSeq, limit: limit, generation: previous.generation, clipped: previous.windowStart > 0,
                         backgroundTasks: runningTasks(path, reports: reportsBackgroundTasks), agentModel: previous.agentModel)
         }
-        let (data, windowStart) = try window(path: url.path, size: size.intValue)
+        let windowStart = windowStart(size: size.intValue)
+        // A record that only grew is read from where the last read stopped; parsing the whole window again
+        // would cost as much as the file, which is what made a busy conversation slow to reach the phone.
+        if let previous, previous.inode == inode, size.intValue > previous.size, previous.windowStart == windowStart,
+           previous.parsedThrough >= previous.windowStart, previous.parsedThrough <= size.intValue,
+           let appended = try append(path: path, agent: agent, previous: previous, through: size.intValue, modified: modified) {
+            touch(path)
+            return page(appended.messages, images: appended.images, presentation: appended.presentation, beforeSeq: beforeSeq, limit: limit, generation: previous.generation, clipped: windowStart > 0,
+                        backgroundTasks: runningTasks(path, reports: reportsBackgroundTasks), agentModel: appended.agentModel)
+        }
+        let (data, resolvedStart, dataOffset) = try window(path: url.path, size: size.intValue)
         // Cheap line scan over the same window the parse reads; a launch and its completion can sit far apart.
         let scanned = scannedLaunches(data)
         // A moved window renumbers records, so clients re-anchor exactly as after truncation.
-        let reset = previous == nil || previous?.inode != inode || size.intValue < (previous?.size ?? 0) || previous?.windowStart != windowStart
+        let reset = previous == nil || previous?.inode != inode || size.intValue < (previous?.size ?? 0) || previous?.windowStart != resolvedStart
         let generation = reset ? UUID() : previous!.generation
         guard let end = data.lastIndex(of: 10) else {
-            store(Observation(inode: inode, size: size.intValue, modified: modified, generation: generation, windowStart: windowStart, images: [], messages: [], presentation: .init(), agentModel: nil), launches: scanned, for: path)
-            return page([], images: [], presentation: .init(), beforeSeq: beforeSeq, limit: limit, generation: generation, clipped: windowStart > 0,
+            store(Observation(inode: inode, size: size.intValue, modified: modified, generation: generation, windowStart: resolvedStart, images: [], messages: [], presentation: .init(), agentModel: nil,
+                              parsedThrough: dataOffset + data.count, lastSeq: -1, responseState: .init(), trackerState: scanned, tailLines: []), for: path)
+            return page([], images: [], presentation: .init(), beforeSeq: beforeSeq, limit: limit, generation: generation, clipped: resolvedStart > 0,
                         backgroundTasks: runningTasks(path, reports: reportsBackgroundTasks))
         }
         let raw = String(decoding: data[...end], as: UTF8.self).split(separator: "\n", omittingEmptySubsequences: false).dropLast().map(String.init)
@@ -134,16 +164,74 @@ public actor TranscriptReader {
         }
         let imageIndex = try TranscriptImageIndex().read(lines: lines, messages: messages, agent: agent)
         messages.append(contentsOf: imageIndex.supplementalMessages + compaction.markers); messages.sort { $0.seq < $1.seq }
-        let presentation = TranscriptResponseReader().read(lines: lines, messages: messages, agent: agent)
-        store(Observation(inode: inode, size: size.intValue, modified: modified, generation: generation, windowStart: windowStart, images: imageIndex.records, messages: messages, presentation: presentation, agentModel: agentModel), launches: scanned, for: path)
-        return page(messages, images: imageIndex.records, presentation: presentation, beforeSeq: beforeSeq, limit: limit, generation: generation, clipped: windowStart > 0,
+        var responseState = TranscriptResponseReader.State()
+        TranscriptResponseReader().consume(lines: lines, startingSeq: 0, messages: messages, agent: agent, into: &responseState)
+        let presentation = TranscriptResponseReader().snapshot(responseState)
+        store(Observation(inode: inode, size: size.intValue, modified: modified, generation: generation, windowStart: resolvedStart, images: imageIndex.records, messages: messages, presentation: presentation, agentModel: agentModel,
+                          parsedThrough: dataOffset + end + 1, lastSeq: lines.count - 1, responseState: responseState, trackerState: scanned, tailLines: Array(lines.suffix(64))), for: path)
+        return page(messages, images: imageIndex.records, presentation: presentation, beforeSeq: beforeSeq, limit: limit, generation: generation, clipped: resolvedStart > 0,
                     backgroundTasks: runningTasks(path, reports: reportsBackgroundTasks), agentModel: agentModel)
     }
+    /// Parses only the records appended since the previous read, carrying the fold state forward.
+    /// Returns nil when nothing complete was appended, so the caller answers from the cached record.
+    private func append(path: String, agent: String, previous: Observation, through size: Int, modified: Date?) throws -> Observation? {
+        let handle = try FileHandle(forReadingFrom: URL(fileURLWithPath: path)); defer { try? handle.close() }
+        try handle.seek(toOffset: UInt64(previous.parsedThrough))
+        var chunk = Data()
+        while chunk.count < size - previous.parsedThrough,
+              let part = try handle.read(upToCount: min(1_048_576, size - previous.parsedThrough - chunk.count)), !part.isEmpty {
+            try Task.checkCancellation(); chunk.append(part)
+        }
+        guard let end = chunk.lastIndex(of: 10) else { return nil }
+        let complete = Data(chunk[...end])
+        let raw = String(decoding: complete, as: UTF8.self).split(separator: "\n", omittingEmptySubsequences: false).dropLast().map(String.init)
+        guard !raw.isEmpty else { return nil }
+        let startingSeq = previous.lastSeq + 1
+        var tracker = previous.trackerState
+        BackgroundTaskTracker().consume(raw, into: &tracker)
+        let agentModel = TranscriptModelReader().read(lines: raw, agent: agent) ?? previous.agentModel
+        let compaction = agent == "claude" ? ClaudeCompactionSummary().replace(raw, startingSeq: startingSeq) : .init(lines: raw, markers: [])
+        let lines = agent == "claude" ? ClaudeTaskNoticeRewriter().normalize(ClaudeQueuedPromptNormalizer().normalize(compaction.lines)) : raw
+        let result = agent == "claude" ? ClaudeTranscriptParser().parse(lines: lines, startingSeq: startingSeq) : CodexTranscriptParser().parse(lines: lines, startingSeq: startingSeq)
+        var positions: [String: Int] = [:]
+        for (index, message) in previous.messages.enumerated() where positions[message.id] == nil { positions[message.id] = index }
+        var messages = previous.messages
+        for update in result.updatedMessages {
+            if let index = positions[update.id] { messages[index] = update }
+        }
+        for message in result.messages where positions[message.id] == nil {
+            positions[message.id] = messages.count; messages.append(message)
+        }
+        // An image pairs a tool call with its result; the edge between two reads can fall between them.
+        let context = Array(previous.tailLines.suffix(64))
+        let contextStart = startingSeq - context.count
+        let combined = context + lines
+        let contextMessages = messages.filter { $0.seq >= contextStart }
+        let imageIndex = try TranscriptImageIndex().read(lines: combined, messages: contextMessages, agent: agent, startingSeq: contextStart)
+        var images = previous.images
+        var imageIDs = Set(images.map { $0.reference(generation: "deduplicate").id })
+        for record in imageIndex.records { let id = record.reference(generation: "deduplicate").id; if imageIDs.insert(id).inserted { images.append(record) } }
+        for message in imageIndex.supplementalMessages + compaction.markers where positions[message.id] == nil {
+            positions[message.id] = messages.count; messages.append(message)
+        }
+        messages.sort { $0.seq < $1.seq }
+        var responseState = previous.responseState
+        TranscriptResponseReader().consume(lines: lines, startingSeq: startingSeq, messages: messages.filter { $0.seq >= startingSeq }, agent: agent, into: &responseState)
+        let presentation = TranscriptResponseReader().snapshot(responseState)
+        let observation = Observation(inode: previous.inode, size: size, modified: modified, generation: previous.generation, windowStart: previous.windowStart,
+                                      images: Array(images.suffix(512)), messages: messages, presentation: presentation, agentModel: agentModel,
+                                      parsedThrough: previous.parsedThrough + complete.count, lastSeq: startingSeq + lines.count - 1,
+                                      responseState: responseState, trackerState: tracker, tailLines: Array(lines.suffix(64)))
+        store(observation, for: path)
+        return observation
+    }
     /// The detached calls still open in one window, paired from launches, stops and completion notices.
-    private func scannedLaunches(_ data: Data) -> [BackgroundTaskTracker.Launch] {
-        guard let end = data.lastIndex(of: 10) else { return [] }
+    private func scannedLaunches(_ data: Data) -> BackgroundTaskTracker.State {
+        var state = BackgroundTaskTracker.State()
+        guard let end = data.lastIndex(of: 10) else { return state }
         let lines = String(decoding: data[...end], as: UTF8.self).split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
-        return BackgroundTaskTracker().launches(in: lines)
+        BackgroundTaskTracker().consume(lines, into: &state)
+        return state
     }
     /// This record's tasks still running now; none once the agent that owned them has ended.
     private func runningTasks(_ path: String, reports: Bool) -> [BackgroundAgentTask] {
