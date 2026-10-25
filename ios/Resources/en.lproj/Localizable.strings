@@ -102,6 +102,7 @@
 "chat.background.waiting" = "Waiting for output…";
 "chat.background.empty" = "The task has not written anything yet.";
 "chat.background.loadMore" = "Load more";
+"chat.background.loadEarlier" = "Load earlier";
 "chat.running_duration" = "Working %@";
 "chat.worked_duration" = "Worked for %@";
 "chat.duration_seconds" = "%ds";
