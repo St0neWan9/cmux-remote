@@ -16,7 +16,7 @@ struct ActivityGroupView: View {
     @State private var expanded: Bool?
     /// Groups past this many operations open on their own page: expanding one inside the timeline makes a single
     /// enormous row, which SwiftUI lays out in full and a phone takes seconds to draw.
-    static let inlineLimit = 6
+    static let inlineLimit = 5
     @State private var showingAll = false
     /// The row this group belongs to, so expanding it keeps its place in the timeline.
     @Environment(\.holdPlace) private var holdPlace
