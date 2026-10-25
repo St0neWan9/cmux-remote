@@ -59,6 +59,9 @@ struct BackgroundTaskTracker {
             // the few rows that can carry a signal. Nothing else in a record can start or finish a task.
             guard Self.carriesASignal(line) else { continue }
             guard let data = line.data(using: .utf8), let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
+            // A request blob replays rows that were already folded in, including a launch whose completion came
+            // later in the record; reading it again would revive a finished task. Only records count.
+            guard Self.isRecord(value["type"] as? String) else { continue }
             let stamp = Self.timestamp(value["timestamp"] as? String)
             for call in Self.toolCalls(in: value) {
                 guard let id = call["id"] as? String else { continue }
@@ -89,6 +92,11 @@ struct BackgroundTaskTracker {
             // A completion notice names the tool call it finishes.
             for id in Self.completedToolUseIDs(in: value) { state.launched[id] = nil }
         }
+    }
+    /// The record kinds a task signal can come from; request payload copies replay earlier rows.
+    private static func isRecord(_ type: String?) -> Bool {
+        guard let type else { return false }
+        return ["user", "assistant", "queue-operation", "attachment"].contains(type)
     }
     /// When a Monitor stops on its own: launch time plus its declared timeout, never past the ceiling.
     private static func monitorDeadline(_ input: [String: Any], launchedAt: Date?) -> Date? {

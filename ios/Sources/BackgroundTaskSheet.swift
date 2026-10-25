@@ -24,12 +24,15 @@ struct BackgroundTaskSheet: View {
     @State private var loading = false
     /// The stored copy is shown before the first read, as the conversation page does.
     @State private var cache = BackgroundTaskCache()
+    /// Bumped when content lands, so the newest line is on screen without the reader hunting for it.
+    @State private var landAtBottom = 0
     private var scope: String { client.operationRecoveryScope }
 
     private static let pageSize = 65_536
 
     var body: some View {
         NavigationStack {
+            ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
                     HStack(spacing: 7) {
@@ -64,7 +67,10 @@ struct BackgroundTaskSheet: View {
                         }.foregroundStyle(.secondary).padding(.top, 4)
                         .accessibilityIdentifier("chat.background.running")
                     }
+                    Color.clear.frame(height: 1).id("task.bottom")
                 }.padding(.horizontal, 14).padding(.vertical, 12)
+            }
+            .onChange(of: landAtBottom) { withAnimation(.snappy(duration: 0.18)) { proxy.scrollTo("task.bottom", anchor: .bottom) } }
             }
             .navigationTitle(task.summary.isEmpty ? task.tool : task.summary)
             .navigationBarTitleDisplayMode(.inline)
@@ -93,6 +99,7 @@ struct BackgroundTaskSheet: View {
         totalBytes = entry.totalBytes
         running = entry.running
         nextOffset = entry.nextOffset
+        landAtBottom += 1
     }
     private func save() {
         let entry = BackgroundTaskCache.Entry(snapshot: content, text: output, loadedBytes: loadedBytes,
@@ -118,11 +125,14 @@ struct BackgroundTaskSheet: View {
             nextOffset = page.nextOffset; totalBytes = page.totalBytes ?? 0
             failure = nil
             save()
+            landAtBottom += 1
         } catch {
             // A record that disappeared after content arrived keeps what is on screen; only an empty sheet
             // reports the failure in place of an answer.
             let message = ErrorPresentation().message(error)
             if messages.isEmpty && output.isEmpty { failure = message } else { failure = nil }
+            // A record the Mac no longer has cannot be running here; stop showing progress for it.
+            if (error as? BridgeError)?.code == "task_unavailable" { running = false }
         }
     }
 
