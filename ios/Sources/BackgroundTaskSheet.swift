@@ -14,6 +14,7 @@ struct BackgroundTaskSheet: View {
     let client: RemoteClient
     @Environment(\.dismiss) private var dismiss
     @State private var messages: [ChatMessage] = []
+    @State private var content: ConversationSnapshot?
     @State private var output = ""
     @State private var loadedBytes = 0
     @State private var nextOffset: Int?
@@ -21,6 +22,9 @@ struct BackgroundTaskSheet: View {
     @State private var running = true
     @State private var failure: String?
     @State private var loading = false
+    /// The stored copy is shown before the first read, as the conversation page does.
+    @State private var cache = BackgroundTaskCache()
+    private var scope: String { client.operationRecoveryScope }
 
     private static let pageSize = 65_536
 
@@ -71,6 +75,7 @@ struct BackgroundTaskSheet: View {
                 }
             }
             .task {
+                await restore()
                 await load(from: 0)
                 for await _ in client.changes(paths: ["/v1/sessions/\(sessionID)/tasks/\(task.id)"]) {
                     await follow()
@@ -79,6 +84,22 @@ struct BackgroundTaskSheet: View {
         }
     }
 
+    /// Shows what was read last, so reopening the sheet is never blank, then the read below confirms it.
+    private func restore() async {
+        guard let entry = await cache.load(scope: scope, sessionID: sessionID, taskID: task.id) else { return }
+        messages = entry.snapshot?.messages ?? []
+        output = entry.text ?? ""
+        loadedBytes = entry.loadedBytes
+        totalBytes = entry.totalBytes
+        running = entry.running
+        nextOffset = entry.nextOffset
+    }
+    private func save() {
+        let entry = BackgroundTaskCache.Entry(snapshot: content, text: output, loadedBytes: loadedBytes,
+                                              nextOffset: nextOffset, totalBytes: totalBytes, running: running, storedAt: Date())
+        let scope = scope, sessionID = sessionID, taskID = task.id
+        Task { await cache.save(entry, scope: scope, sessionID: sessionID, taskID: taskID) }
+    }
     private func load(from offset: Int) async {
         loading = true; defer { loading = false }
         do {
@@ -87,6 +108,7 @@ struct BackgroundTaskSheet: View {
                                             as: BackgroundTaskContent.self)
             running = page.running
             if page.kind == .agent {
+                content = page.snapshot
                 messages = page.snapshot?.messages ?? []
             } else if offset == 0 {
                 output = page.text ?? ""; loadedBytes = page.nextOffset ?? (page.totalBytes ?? 0)
@@ -95,6 +117,7 @@ struct BackgroundTaskSheet: View {
             }
             nextOffset = page.nextOffset; totalBytes = page.totalBytes ?? 0
             failure = nil
+            save()
         } catch {
             // A record that disappeared after content arrived keeps what is on screen; only an empty sheet
             // reports the failure in place of an answer.
