@@ -29,13 +29,8 @@ struct ActivityGroupView: View {
     }
     /// Consecutive operations sit next to each other; reasoning text is set apart by a small gap.
     private var rows: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ForEach(Array(item.messages.enumerated()), id: \.element.id) { index, message in
-                let row = MessageRow(message: message, projectRoot: projectRoot, openFile: openFile, images: images, openImage: openImage, openDetail: openDetail)
-                let previousIsOperation = index > 0 && MessageRow(message: item.messages[index - 1]).isOperation
-                row.padding(.top, index == 0 || (row.isOperation && previousIsOperation) ? 0 : 8)
-            }
-        }
+        MessageRows(messages: item.messages, projectRoot: projectRoot, openFile: openFile, images: images,
+                    openImage: openImage, openDetail: openDetail)
     }
     private var group: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -62,13 +57,9 @@ struct ActivityGroupView: View {
         .sheet(isPresented: $showingAll) {
             NavigationStack {
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 0) {
-                        ForEach(Array(item.messages.enumerated()), id: \.element.id) { index, message in
-                            let row = MessageRow(message: message, projectRoot: projectRoot, openFile: openFile, images: images, openImage: openImage, openDetail: openDetail)
-                            let previousIsOperation = index > 0 && MessageRow(message: item.messages[index - 1]).isOperation
-                            row.padding(.top, index == 0 || (row.isOperation && previousIsOperation) ? 0 : 8)
-                        }
-                    }.padding(.horizontal, 14).padding(.vertical, 12)
+                    MessageRows(messages: item.messages, projectRoot: projectRoot, openFile: openFile, images: images,
+                                openImage: openImage, openDetail: openDetail, lazy: true)
+                        .padding(.horizontal, 14).padding(.vertical, 12)
                 }
                 .navigationTitle(String.localizedStringWithFormat(String(localized: "chat.activity_count"), item.operationCount))
                 .navigationBarTitleDisplayMode(.inline)
