@@ -14,6 +14,10 @@ struct ActivityGroupView: View {
     var isLatest = false
     /// The reader's own choice, which wins until the group stops being the newest.
     @State private var expanded: Bool?
+    /// Groups past this many operations open on their own page: expanding one inside the timeline makes a single
+    /// enormous row, which SwiftUI lays out in full and a phone takes seconds to draw.
+    static let inlineLimit = 6
+    @State private var showingAll = false
     /// The row this group belongs to, so expanding it keeps its place in the timeline.
     @Environment(\.holdPlace) private var holdPlace
     private var isExpanded: Bool { expanded ?? isLatest }
@@ -36,6 +40,8 @@ struct ActivityGroupView: View {
     private var group: some View {
         VStack(alignment: .leading, spacing: 4) {
             Button {
+                // A large group is read on its own page, lazily, instead of growing this row by thousands of points.
+                if item.operationCount > Self.inlineLimit { showingAll = true; return }
                 // The reader is looking at this group: the page stays put while its height changes.
                 holdPlace()
                 // Not animated: an animated height change at the bottom of a running conversation moved the page.
@@ -51,6 +57,22 @@ struct ActivityGroupView: View {
             if isExpanded {
                 rows
                     .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .sheet(isPresented: $showingAll) {
+            NavigationStack {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(Array(item.messages.enumerated()), id: \.element.id) { index, message in
+                            let row = MessageRow(message: message, projectRoot: projectRoot, openFile: openFile, images: images, openImage: openImage, openDetail: openDetail)
+                            let previousIsOperation = index > 0 && MessageRow(message: item.messages[index - 1]).isOperation
+                            row.padding(.top, index == 0 || (row.isOperation && previousIsOperation) ? 0 : 8)
+                        }
+                    }.padding(.horizontal, 14).padding(.vertical, 12)
+                }
+                .navigationTitle(String.localizedStringWithFormat(String(localized: "chat.activity_count"), item.operationCount))
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar { ToolbarItem(placement: .topBarTrailing) { Button(String(localized: "page.close")) { showingAll = false } } }
             }
         }
         // The next message closes it, whatever the reader chose while it was the newest.

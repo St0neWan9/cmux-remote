@@ -66,8 +66,9 @@ struct ConversationView: View {
                 header
                 ConnectionStatusBar(state: linkState) { Task { await reconnect() } }
             }
-            // The bar's own frost: a system material blurs what scrolls under it without rasterizing a row.
-            .background(.ultraThinMaterial)
+            // A translucent white veil, like the page itself: content shows faintly under it, with no material
+            // tint and no per-row rasterization.
+            .background(Color.white.opacity(0.82))
         }
         .task { for await state in model.client.linkStates() { linkState = state } }
         .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -103,7 +104,7 @@ struct ConversationView: View {
                 } else if !model.canSend { Text(String(localized: "sessions.read_only")).font(.caption).foregroundStyle(.secondary) }
                 composer
             }.padding(.horizontal, 14).padding(.top, 14).padding(.bottom, 10)
-            .background(.ultraThinMaterial)
+            .background(Color.white.opacity(0.82))
         }
         .photosPicker(isPresented: $showingPhotos, selection: $photoItems, maxSelectionCount: max(1, 4 - model.imageDraft.images.count), selectionBehavior: .ordered, matching: .images)
         .fileImporter(isPresented: $showingImageFiles, allowedContentTypes: [.image], allowsMultipleSelection: true) { result in
@@ -215,12 +216,9 @@ struct ConversationView: View {
             if activeAnchor == nil, let runningSince {
                 LiveRunLabel(since: runningSince, compacting: model.compacting, showsDivider: true, font: .subheadline)
             }
-            if let preview = model.preview {
-                VStack(alignment: .leading, spacing: 10) {
-                    Label(String(localized: "chat.preview"), systemImage: "ellipsis.bubble").font(.caption).foregroundStyle(.secondary)
-                    MarkdownMessageView(text: preview)
-                }
-            }
+            // The live tail changes on every poll; keeping that read in its own view stops the whole timeline
+            // from being rebuilt for each delta.
+            LivePreviewRow(model: model)
             ForEach(model.outgoing) { prompt in
                 OutgoingPromptRow(prompt: prompt).id(prompt.id)
                     .modifier(PinnedHeightProbe(pinned: pinnedSent?.outgoing == prompt.id) { height in if abs(height - pinnedRowHeight) > 0.5 { pinnedRowHeight = height } })
@@ -523,5 +521,19 @@ struct ConversationView: View {
             } label: { Image(systemName: "ellipsis").font(.system(size: 22, weight: .medium)).frame(width: 44, height: 44).background(Color.white, in: Circle()).shadow(color: .black.opacity(0.07), radius: 10, y: 3) }
                 .tint(.primary).accessibilityLabel(String(localized: "chat.more")).accessibilityIdentifier("chat.more")
         }.padding(.horizontal, MobileDesign.pageInset).padding(.vertical, 8)
+    }
+}
+
+/// The agent's live tail. It is deliberately a separate view: reading `model.preview` in the timeline's body
+/// made every delta re-evaluate the whole page.
+private struct LivePreviewRow: View {
+    let model: ConversationModel
+    var body: some View {
+        if let preview = model.preview {
+            VStack(alignment: .leading, spacing: 10) {
+                Label(String(localized: "chat.preview"), systemImage: "ellipsis.bubble").font(.caption).foregroundStyle(.secondary)
+                MarkdownMessageView(text: preview)
+            }
+        }
     }
 }
