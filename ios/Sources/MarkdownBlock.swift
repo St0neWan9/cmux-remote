@@ -9,6 +9,16 @@ struct MarkdownBlock: Identifiable {
     var headingLevel: Int? = nil
     var listMarker: String? = nil
     var table: MarkdownTable? = nil
+    /// Inline styles parsed once. `Text(.init(_:))` re-parses Markdown every time SwiftUI lays the row out,
+    /// which on a streaming conversation with long messages kept the main thread busy.
+    let attributed: AttributedString
+    init(id: Int, text: String, code: Bool, headingLevel: Int? = nil, listMarker: String? = nil, table: MarkdownTable? = nil) {
+        self.id = id; self.text = text; self.code = code
+        self.headingLevel = headingLevel; self.listMarker = listMarker; self.table = table
+        attributed = code ? AttributedString(text)
+            : (try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace, failurePolicy: .returnPartiallyParsedIfPossible)))
+              ?? AttributedString(text)
+    }
     static func parse(_ text: String) -> [Self] {
         var blocks: [Self] = []
         for (index, value) in text.components(separatedBy: "```").enumerated() {

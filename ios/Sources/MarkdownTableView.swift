@@ -57,9 +57,21 @@ struct MarkdownTableView: View {
             .textSelection(.enabled)
     }
     /// Inline Markdown with code spans dimmed, as they read in the desktop transcript.
-    private func styled(_ markdown: String) -> AttributedString {
+    private func styled(_ markdown: String) -> AttributedString { MarkdownCellStyleCache.styled(markdown) }
+}
+
+/// A table cell's inline styles, parsed once. A cell is laid out on every pass the table takes.
+enum MarkdownCellStyleCache {
+    private final class Box: NSObject { let value: AttributedString; init(_ value: AttributedString) { self.value = value } }
+    nonisolated(unsafe) private static let cache: NSCache<NSString, Box> = {
+        let cache = NSCache<NSString, Box>(); cache.countLimit = 512; return cache
+    }()
+    static func styled(_ markdown: String) -> AttributedString {
+        let key = markdown as NSString
+        if let cached = cache.object(forKey: key) { return cached.value }
         var value = (try? AttributedString(markdown: markdown, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(markdown)
         for run in value.runs where run.inlinePresentationIntent?.contains(.code) == true { value[run.range].foregroundColor = .secondary }
+        cache.setObject(Box(value), forKey: key)
         return value
     }
 }
