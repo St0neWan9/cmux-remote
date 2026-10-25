@@ -227,7 +227,7 @@ final class ConversationModel {
     /// Reads once, then again only after the Bridge reports a change, and at most once per interval: a running turn
     /// changes every few seconds, and waiting lets those changes coalesce into one read.
     ///
-    /// Only the history is watched. A Bridge link carries at most eight subscriptions, and the conversation on
+    /// Only the history is watched. A Bridge link carries at most sixteen subscriptions, and the conversation on
     /// screen, the session list and the feed already use some; the live tail is read with the history anyway.
     private func followHidden(every interval: Duration) async {
         await syncHidden()
