@@ -439,8 +439,18 @@ public actor TuiControlAdapter: CmuxControlling {
         }
         return "/bin/zsh"
     }
+    /// The last rendered grid per terminal. Replaying VT state is the most expensive read the Bridge does, and a
+    /// terminal the phone polls between changes has the same bytes, so an unchanged screen answers from here.
+    private var terminalStates: [String: (key: String, state: TuiTerminalState)] = [:]
     private func terminalState(_ current: TuiSessionSnapshot, binding: TuiSessionSnapshot.Binding) async throws -> TuiTerminalState {
-        try TuiTerminalState(await client.resource("terminal.state.read", params: current.selectors(binding), idempotencyKey: nil))
+        let payload = try await client.resource("terminal.state.read", params: current.selectors(binding), idempotencyKey: nil)
+        let encoded = payload["state_base64"].string ?? ""
+        let key = IdentityCryptography().digest(Data("\(payload["cols"].int ?? 0):\(payload["rows"].int ?? 0):\(encoded)".utf8))
+        if let cached = terminalStates[binding.id], cached.key == key { return cached.state }
+        let state = try TuiTerminalState(payload)
+        if terminalStates.count >= 256 { terminalStates.removeAll() }
+        terminalStates[binding.id] = (key, state)
+        return state
     }
     private func descriptor(_ binding: TuiSessionSnapshot.Binding) -> [String: JSONValue] {
         ["session_id": .string(binding.id), "agent": .string(binding.provider), "title": .string(binding.title), "cwd": binding.cwd.map(JSONValue.string) ?? .null,
