@@ -103,6 +103,7 @@
 "chat.background.empty" = "这个任务还没有输出。";
 "chat.background.loadMore" = "加载更多";
 "chat.background.loadEarlier" = "加载更早";
+"chat.background.command" = "命令";
 "chat.running_duration" = "运行中 %@";
 "chat.worked_duration" = "运行 %@";
 "chat.duration_seconds" = "%ds";
