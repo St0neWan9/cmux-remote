@@ -59,6 +59,16 @@ import CmuxRemoteCore
         // Its completion notice names the call, as for any other background task.
         #expect(BackgroundTaskTracker().running(in: rows + [completion(toolUseID: "toolu_async")], at: Date()).isEmpty)
     }
+
+    /// A request payload copy replays rows already folded in; re-reading a launch whose completion came later
+    /// would revive a finished task, which is what kept a finished command on the phone.
+    @Test func aReplayedRequestBlobDoesNotReviveAFinishedTask() {
+        let rows = [launch(id: "toolu_b"), completion(toolUseID: "toolu_b")]
+        #expect(BackgroundTaskTracker().running(in: rows, at: Date()).isEmpty)
+        let replay = try! String(decoding: JSONSerialization.data(withJSONObject: ["type": "api-request-blob", "message": ["content": [["type": "tool_use", "id": "toolu_b", "name": "Bash", "input": ["run_in_background": true]]]]]), as: UTF8.self)
+        #expect(BackgroundTaskTracker().running(in: rows + [replay], at: Date()).isEmpty)
+    }
+
     /// `Monitor` and `Workflow` always detach: their input carries no `run_in_background`, so waiting
     /// for that flag would miss every one of them. Read from a real session's own Monitor calls.
     @Test func aMonitorCallIsDetachedWithoutAnyFlag() {
