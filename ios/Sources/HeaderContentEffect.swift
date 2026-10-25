@@ -27,16 +27,37 @@ struct HeaderContentEffect: ViewModifier {
     }
 }
 
-/// Applies the blur to a row, or leaves it alone where the row holds a control that must stay interactive.
+/// Applies the blur to a row, or leaves it alone where the row holds a control that must stay interactive or is
+/// too tall to rasterize.
 ///
 /// There is no way to turn the effect off from inside it: a `visualEffect` rasterizes the subtree it wraps
-/// whether or not its layer effects are enabled, and a rasterized `TextField` becomes a placeholder. The
-/// modifier must therefore not be attached at all.
+/// whether or not its layer effects are enabled, and a rasterized `TextField` becomes a placeholder, while a
+/// row past the GPU texture limit draws nothing at all. The modifier must therefore not be attached at all.
+///
+/// The height is kept here, not by the timeline: expanding a group changes one row, and that must not
+/// recompute the whole page.
 struct BlurUnless: ViewModifier {
     let disabled: Bool
     let bottom: CGFloat
+    /// Only crosses the threshold once per resize: writing every measured height would re-lay out the row on
+    /// each pass, which a page of expanded tool groups turned into a freeze.
+    @State private var tooTall = true
     func body(content: Content) -> some View {
-        if disabled { content } else { content.modifier(HeaderContentEffect(bottom: bottom)) }
+        content
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { measured in
+                let tall = measured >= HeaderContentEffect.rasterLimit
+                if tall != tooTall { tooTall = tall }
+            }
+            .modifier(ConditionalHeaderBlur(enabled: !disabled && !tooTall, bottom: bottom))
+    }
+}
+
+/// The effect itself, attached only when the row can be rasterized.
+private struct ConditionalHeaderBlur: ViewModifier {
+    let enabled: Bool
+    let bottom: CGFloat
+    func body(content: Content) -> some View {
+        if enabled { content.modifier(HeaderContentEffect(bottom: bottom)) } else { content }
     }
 }
 
