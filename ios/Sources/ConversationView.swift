@@ -68,7 +68,7 @@ struct ConversationView: View {
             }
             // A translucent white veil, like the page itself: content shows faintly under it, with no material
             // tint and no per-row rasterization.
-            .background(Color.white.opacity(0.9))
+            .background(Color.white.opacity(0.95))
         }
         .task { for await state in model.client.linkStates() { linkState = state } }
         .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -104,7 +104,7 @@ struct ConversationView: View {
                 } else if !model.canSend { Text(String(localized: "sessions.read_only")).font(.caption).foregroundStyle(.secondary) }
                 composer
             }.padding(.horizontal, 14).padding(.top, 14).padding(.bottom, 10)
-            .background(Color.white.opacity(0.9))
+            .background(Color.white.opacity(0.95))
         }
         .photosPicker(isPresented: $showingPhotos, selection: $photoItems, maxSelectionCount: max(1, 4 - model.imageDraft.images.count), selectionBehavior: .ordered, matching: .images)
         .fileImporter(isPresented: $showingImageFiles, allowedContentTypes: [.image], allowsMultipleSelection: true) { result in
