@@ -28,6 +28,12 @@ struct BackgroundTaskSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
+                    HStack(spacing: 7) {
+                        Image(systemName: task.tool == "Agent" ? "person.2" : "terminal").font(.caption)
+                        Text(task.tool).font(.caption.weight(.medium))
+                        Text(task.summary).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                        Spacer(minLength: 0)
+                    }.foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading)
                     if let failure {
                         Text(failure).font(.callout).foregroundStyle(.secondary)
                     } else if loading && messages.isEmpty && output.isEmpty {
@@ -35,7 +41,7 @@ struct BackgroundTaskSheet: View {
                     } else if task.tool == "Agent" || !messages.isEmpty {
                         ForEach(messages) { message in MessageRow(message: message) }
                     } else {
-                        Text(output.isEmpty ? String(localized: "chat.background.empty") : output)
+                        Text(output.isEmpty ? String(localized: running ? "chat.background.waiting" : "chat.background.empty") : output)
                             .font(.system(.footnote, design: .monospaced))
                             .textSelection(.enabled)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -44,6 +50,15 @@ struct BackgroundTaskSheet: View {
                                 .buttonStyle(.bordered)
                                 .accessibilityIdentifier("chat.background.more")
                         }
+                    }
+                    if running {
+                        HStack(spacing: 7) {
+                            ProgressView().controlSize(.mini)
+                            Text(String(localized: "chat.background.running")).font(.caption)
+                            Spacer()
+                            if totalBytes > 0 { Text(ByteCountFormatter.string(fromByteCount: Int64(totalBytes), countStyle: .file)).font(.caption2) }
+                        }.foregroundStyle(.secondary).padding(.top, 4)
+                        .accessibilityIdentifier("chat.background.running")
                     }
                 }.padding(.horizontal, 14).padding(.vertical, 12)
             }
@@ -81,13 +96,16 @@ struct BackgroundTaskSheet: View {
             nextOffset = page.nextOffset; totalBytes = page.totalBytes ?? 0
             failure = nil
         } catch {
-            // A task that finished leaves the conversation's running list; its record was still readable above.
-            failure = (error as? BridgeError)?.message ?? ErrorPresentation().message(error)
+            // A record that disappeared after content arrived keeps what is on screen; only an empty sheet
+            // reports the failure in place of an answer.
+            let message = ErrorPresentation().message(error)
+            if messages.isEmpty && output.isEmpty { failure = message } else { failure = nil }
         }
     }
 
     /// A change notice: read what the record gained, not the whole of it again.
     private func follow() async {
+        guard !loading else { return }
         if task.tool == "Agent" || !messages.isEmpty {
             await load(from: 0)
             return
