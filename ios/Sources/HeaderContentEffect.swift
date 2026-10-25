@@ -2,6 +2,9 @@ import SwiftUI
 
 /// Blur only the message ink that enters the header or the composer area; the page itself stays white.
 struct HeaderContentEffect: ViewModifier {
+    /// Past this height a row is not rasterized at all: the offscreen texture would exceed what the GPU can
+    /// hold, and the row would draw nothing. The modifier is not attached instead, so the row still draws.
+    static let rasterLimit: CGFloat = 3_000
     /// The visible bottom edge in the timeline's coordinates; content below it is under the composer.
     var bottom: CGFloat = .infinity
     func body(content: Content) -> some View {
@@ -12,7 +15,7 @@ struct HeaderContentEffect: ViewModifier {
             // scroll without an offscreen pass, and rows far outside are not built by the lazy timeline at all.
             // A layer effect rasterizes the whole row; past the GPU texture limit it draws nothing,
             // so a very tall row scrolls unblurred rather than as a blank page.
-            let rasterizable = frame.height < 3_000
+            let rasterizable = frame.height < Self.rasterLimit
             let underHeader = rasterizable && frame.minY < 10 && frame.maxY > -400
             let underFooter = rasterizable && bottom.isFinite && frame.maxY > bottom - 10 && frame.minY < bottom + 400
             return effect
