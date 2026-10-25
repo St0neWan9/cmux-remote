@@ -157,6 +157,15 @@ public struct BridgeRouter: Sendable {
                     feed = .object(["items": .array((feed["items"].array ?? []).filter { allowed($0["workspace_id"].string, current) })])
                 }
                 data = try encode(feed)
+            } else if method == "GET", path.count == 5, path[0...1] == ["v1", "sessions"], path[3] == "tasks" {
+                let id = path[2], taskID = path[4]
+                if let client {
+                    let sessions = try await service.sessions()
+                    guard let session = sessions.first(where: { $0.id == id }), let workspace = session.workspaceID else { throw BridgeError("scope_denied", "This session is outside this device's workspaces.", status: 403) }
+                    try await require(client, .conversationRead, workspace: workspace)
+                }
+                data = try encode(await service.backgroundTask(id: id, taskID: taskID, offset: query["offset"].flatMap(Int.init) ?? 0,
+                                                               limit: query["limit"].flatMap(Int.init) ?? 65_536, discovered: client != nil, access: access))
             } else if path.count == 4, path[0...1] == ["v1", "sessions"] {
                 let id = path[2]
                 let capability: ClientCapability = method == "POST" ? .conversationControl : (["changes", "diff", "file"].contains(path[3]) ? .projectRead : .conversationRead)
