@@ -30,6 +30,8 @@ struct ConversationView: View {
     @State private var scrollHeight: CGFloat = 0
     /// The pinned prompt's own height, which with the page's foot is all the room its tail leaves.
     @State private var pinnedRowHeight: CGFloat = 0
+    /// Row heights as laid out, so the blur is never attached to a row too tall to rasterize.
+    @State private var rowHeights: [String: CGFloat] = [:]
     @State private var scrollTrace = ScrollTrace()
     /// A message opened on its own page to select part of it.
     @State private var selecting: SelectTextPage.Request?
@@ -272,7 +274,15 @@ struct ConversationView: View {
         // A waiting question's form blurs line by line instead (see `FeedQuestionView.edgeBlur`): as one row it
         // is taller than the screen, and rasterizing it whole on every frame made scrolling past it stutter. A
         // `visualEffect` rasterizes what it wraps even with every effect disabled, so this row opts out entirely.
-        .modifier(BlurUnless(disabled: item.first.kind.questionPrompt.flatMap { model.pendingQuestions[$0] }.map(\.isFirst) ?? false, bottom: bottom))
+        // Measured before the effect is attached: a row past the raster limit would draw nothing with it.
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+            if abs((rowHeights[item.id] ?? 0) - height) > 0.5 {
+                if rowHeights.count > 512 { rowHeights.removeAll() }
+                rowHeights[item.id] = height
+            }
+        }
+        .modifier(BlurUnless(disabled: item.first.kind.questionPrompt.flatMap { model.pendingQuestions[$0] }.map(\.isFirst) ?? false
+                             || (rowHeights[item.id] ?? .greatestFiniteMagnitude) >= HeaderContentEffect.rasterLimit, bottom: bottom))
     }
     /// Puts text into the follow-up draft as a Markdown quote, ahead of what is already typed.
     private func quote(_ text: String) {
