@@ -40,6 +40,7 @@
 "project.changes" = "改动文件";
 "error.outcome_unknown" = "操作结果未知，请检查会话后再决定是否重新发送。";
 "error.read_only" = "此会话是只读的，或绑定的智能体已停止。请回到会话列表刷新后重试。";
+"error.task_unavailable" = "这个任务的记录已经不在这台 Mac 上了。";
 "error.input_busy" = "桌面上有草稿或未处理的问题，请先处理。";
 "error.socket" = "请打开 cmux 并检查 socket 访问设置。";
 "error.history" = "此历史记录不可用，或超过当前读取上限。";
@@ -97,6 +98,8 @@
 "chat.response_time" = "回复时间";
 "chat.compacting" = "正在压缩上下文 %@";
 "chat.background.count" = "%ld 个后台任务正在运行";
+"chat.background.running" = "运行中";
+"chat.background.waiting" = "等待输出…";
 "chat.background.empty" = "这个任务还没有输出。";
 "chat.background.loadMore" = "加载更多";
 "chat.running_duration" = "运行中 %@";

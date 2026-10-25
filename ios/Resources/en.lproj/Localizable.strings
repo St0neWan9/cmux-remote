@@ -40,6 +40,7 @@
 "project.changes" = "Changed files";
 "error.outcome_unknown" = "The result is unknown. Check the conversation before sending again.";
 "error.read_only" = "This session is read-only or its agent has stopped. Go back to the session list and refresh.";
+"error.task_unavailable" = "This task's record is no longer on the Mac.";
 "error.input_busy" = "The desktop has a draft or open question. Resolve it first.";
 "error.socket" = "Open cmux and check its socket access settings.";
 "error.history" = "This history is unavailable or exceeds the initial read limit.";
@@ -97,6 +98,8 @@
 "chat.response_time" = "Reply time";
 "chat.compacting" = "Compacting context %@";
 "chat.background.count" = "%ld background tasks running";
+"chat.background.running" = "Running";
+"chat.background.waiting" = "Waiting for output…";
 "chat.background.empty" = "The task has not written anything yet.";
 "chat.background.loadMore" = "Load more";
 "chat.running_duration" = "Working %@";
