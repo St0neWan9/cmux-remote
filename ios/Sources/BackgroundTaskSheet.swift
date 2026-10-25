@@ -14,6 +14,9 @@ struct BackgroundTaskSheet: View {
     let client: RemoteClient
     @Environment(\.dismiss) private var dismiss
     @State private var messages: [ChatMessage] = []
+    /// Whether the Agent's conversation has earlier messages than the page on screen.
+    @State private var hasMore = false
+    @State private var loadingEarlier = false
     @State private var content: ConversationSnapshot?
     @State private var output = ""
     @State private var loadedBytes = 0
@@ -46,6 +49,15 @@ struct BackgroundTaskSheet: View {
                     } else if loading && messages.isEmpty && output.isEmpty {
                         ProgressView().frame(maxWidth: .infinity).padding(.top, 40)
                     } else if task.tool == "Agent" || !messages.isEmpty {
+                        // Reaching the top loads the page before it, as the conversation page does.
+                        if hasMore {
+                            Group { if loadingEarlier { ProgressView().controlSize(.small) } else { Color.clear } }
+                                .frame(maxWidth: .infinity).frame(height: 28)
+                                .onGeometryChange(for: Bool.self) { $0.frame(in: .named("taskSheet")).minY > -240 } action: { near in
+                                    if near, hasMore, !loadingEarlier { Task { await loadEarlier() } }
+                                }
+                                .accessibilityIdentifier("chat.background.earlier")
+                        }
                         // The same rows and rhythm as the timeline's groups, so a tool item reads the same here.
                         MessageRows(messages: messages, lazy: true)
                     } else {
@@ -71,6 +83,7 @@ struct BackgroundTaskSheet: View {
                     Color.clear.frame(height: 1).id("task.bottom")
                 }.padding(.horizontal, 14).padding(.vertical, 12)
             }
+            .coordinateSpace(name: "taskSheet")
             .onChange(of: landAtBottom) { withAnimation(.snappy(duration: 0.18)) { proxy.scrollTo("task.bottom", anchor: .bottom) } }
             }
             .navigationTitle(task.summary.isEmpty ? task.tool : task.summary)
@@ -118,6 +131,7 @@ struct BackgroundTaskSheet: View {
             if page.kind == .agent {
                 content = page.snapshot
                 messages = page.snapshot?.messages ?? []
+                hasMore = page.snapshot?.hasMore ?? false
             } else if offset == 0 {
                 output = page.text ?? ""; loadedBytes = page.nextOffset ?? (page.totalBytes ?? 0)
             } else {
@@ -137,6 +151,22 @@ struct BackgroundTaskSheet: View {
         }
     }
 
+    /// The page before the oldest message on screen, so a long Agent conversation can be read from its start.
+    private func loadEarlier() async {
+        guard let first = messages.first else { return }
+        loadingEarlier = true; defer { loadingEarlier = false }
+        do {
+            let page = try await client.get("/v1/sessions/\(sessionID)/tasks/\(task.id)",
+                                            query: ["offset": "0", "limit": String(Self.pageSize), "before_seq": String(first.seq)],
+                                            as: BackgroundTaskContent.self)
+            guard let earlier = page.snapshot else { return }
+            messages = earlier.messages + messages
+            hasMore = earlier.hasMore
+            failure = nil
+        } catch {
+            failure = (error as? BridgeError)?.message ?? ErrorPresentation().message(error)
+        }
+    }
     /// A change notice: read what the record gained, not the whole of it again.
     private func follow() async {
         guard !loading else { return }
