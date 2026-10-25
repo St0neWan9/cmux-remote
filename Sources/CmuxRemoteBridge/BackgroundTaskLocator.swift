@@ -8,6 +8,14 @@ import CmuxRemoteCore
 /// Both layouts belong to the local agent installation, so every lookup is a probe: a missing file is answered
 /// as "no content", never as a failure of the session itself.
 public struct BackgroundTaskLocator: Sendable {
+    /// The id one tool call runs under, remembered per record; a miss costs a stream of the record, so the
+    /// answer is kept for the life of the reader.
+    private final class RuntimeIDs: @unchecked Sendable {
+        private let lock = NSLock(); private var values: [String: String] = [:]
+        func get(_ key: String) -> String? { lock.withLock { values[key] } }
+        func set(_ key: String, _ value: String) { lock.withLock { if values.count < 4_096 { values[key] = value } } }
+    }
+    private let runtimeIDs = RuntimeIDs()
     public struct Location: Sendable, Equatable {
         public let kind: BackgroundTaskContent.Kind
         public let path: String
@@ -57,7 +65,9 @@ public struct BackgroundTaskLocator: Sendable {
             .appendingPathComponent(session.lastPathComponent)
             .appendingPathComponent("tasks")
         var candidates = [directory.appendingPathComponent(taskID + ".output")]
-        if let runtime = runtimeTaskID(transcript: transcript, toolUseID: taskID) { candidates.insert(directory.appendingPathComponent(runtime + ".output"), at: 0) }
+        let key = transcript + "\u{0}" + taskID
+        let runtime = runtimeIDs.get(key) ?? runtimeTaskID(transcript: transcript, toolUseID: taskID)
+        if let runtime { runtimeIDs.set(key, runtime); candidates.insert(directory.appendingPathComponent(runtime + ".output"), at: 0) }
         let root = URL(fileURLWithPath: temporaryRoot).resolvingSymlinksInPath().path + "/"
         for file in candidates where FileManager.default.fileExists(atPath: file.path) {
             // An Agent task's own record is reached through its sidecar above; a symlink here would leave the session.
@@ -67,19 +77,27 @@ public struct BackgroundTaskLocator: Sendable {
         }
         return nil
     }
-    /// The id a launch result reports, read from the record's own tail: the result line names the tool call.
+    /// The id a launch result reports, read from the record: only the result's own row names the id the task
+    /// runs under, and a task started long ago may sit far above the newest pages, so the whole record is
+    /// streamed once and the scan stops at the first row that names it.
     private func runtimeTaskID(transcript: String, toolUseID: String) -> String? {
         guard let handle = try? FileHandle(forReadingFrom: URL(fileURLWithPath: transcript)) else { return nil }
         defer { try? handle.close() }
-        guard let size = (try? FileManager.default.attributesOfItem(atPath: transcript)[.size] as? NSNumber)?.intValue else { return nil }
-        let window = 4 * 1_048_576
-        guard (try? handle.seek(toOffset: UInt64(max(0, size - window)))) != nil,
-              let data = try? handle.read(upToCount: window) else { return nil }
-        // The launch result, not the call that started it: only its row names the id the task runs under.
-        for line in String(decoding: data, as: UTF8.self).split(separator: "\n") where line.contains(toolUseID) {
-            guard let marker = line.range(of: "Command running in background with ID: ") else { continue }
-            let id = line[marker.upperBound...].prefix { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-" || $0 == "_") }
-            if !id.isEmpty { return String(id) }
+        var pending = Data()
+        var scanned = 0
+        let limit = 268_435_456
+        while scanned < limit, let chunk = try? handle.read(upToCount: 1_048_576), !chunk.isEmpty {
+            scanned += chunk.count
+            pending.append(chunk)
+            // A row is only read when its newline has arrived; the unfinished tail is kept for the next chunk.
+            while let end = pending.lastIndex(of: 10) {
+                let line = pending[pending.startIndex...end]
+                pending.removeSubrange(pending.startIndex...end)
+                guard let text = String(data: line, encoding: .utf8), text.contains(toolUseID) else { continue }
+                guard let marker = text.range(of: "Command running in background with ID: ") else { continue }
+                let id = text[marker.upperBound...].prefix { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-" || $0 == "_") }
+                if !id.isEmpty { return String(id) }
+            }
         }
         return nil
     }
