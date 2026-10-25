@@ -38,6 +38,7 @@ struct ErrorPresentation {
         case "invalid_input", "too_large": return String(localized: "error.input_value")
         case "project_unavailable": return String(localized: "error.project")
         case "session_not_found": return String(localized: "error.read_only")
+        case "task_unavailable": return String(localized: "error.task_unavailable")
         case "operation_conflict": return String(localized: "error.operation_conflict")
         case "receipt_capacity": return String(localized: "error.receipt_capacity")
         case "receipt_storage", "invalid_state": return String(localized: "error.receipt_storage")

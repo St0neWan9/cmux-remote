@@ -52,6 +52,24 @@ import CmuxRemoteCore
         #expect(second.total == 8)
     }
 
+
+    /// The file is named by the id the launch result reports, which sits on a later line than the call itself.
+    @Test func aDetachedCommandIsFoundByItsLaunchResultId() throws {
+        let root = try temporary(); defer { try? FileManager.default.removeItem(at: root) }
+        let (transcript, session) = try layout(root)
+        let (call, result) = (#"{"type":"assistant","uuid":"a1","message":{"content":[{"type":"tool_use","id":"toolu_bg","name":"Bash","input":{"command":"sleep 600","run_in_background":true}}]}}"#,
+                              #"{"type":"user","uuid":"r1","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_bg","content":"Command running in background with ID: run1"}]}}"#)
+        try Data((call + "\n" + result + "\n").utf8).write(to: URL(fileURLWithPath: transcript))
+        let tempRoot = root.appendingPathComponent("tmp")
+        let tasks = tempRoot.appendingPathComponent(session.deletingLastPathComponent().lastPathComponent)
+            .appendingPathComponent(session.lastPathComponent).appendingPathComponent("tasks")
+        try FileManager.default.createDirectory(at: tasks, withIntermediateDirectories: true)
+        try Data("hello\n".utf8).write(to: tasks.appendingPathComponent("run1.output"))
+        let location = try #require(BackgroundTaskLocator(temporaryRoot: tempRoot.path).locate(transcript: transcript, taskID: "toolu_bg"))
+        #expect(location.kind == .output)
+        #expect(location.path.hasSuffix("run1.output"))
+    }
+
     @Test func anEmptyOrMissingRecordIsNotATask() throws {
         let root = try temporary(); defer { try? FileManager.default.removeItem(at: root) }
         let locator = BackgroundTaskLocator(temporaryRoot: root.path)
