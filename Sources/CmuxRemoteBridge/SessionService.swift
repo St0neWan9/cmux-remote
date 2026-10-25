@@ -27,12 +27,69 @@ public actor SessionService {
     private let modelCatalog: ModelChoiceCatalog
     /// The session read in progress, shared by callers that arrive while it runs.
     private var sessionsRead: Task<[SessionDescriptor], any Error>?
+    private let taskLocator: BackgroundTaskLocator
     private let modelSwitch = CodexModelSwitch()
     private let claudeConfirmation = ClaudeModelConfirmation()
 
-    public init(cmux: any CmuxControlling, home: URL, transcriptRoots: [URL], mutations: MutationLedger? = nil, journal: MutationJournal? = nil, aliases: SessionAliasStore? = nil) {
+    public init(cmux: any CmuxControlling, home: URL, transcriptRoots: [URL], mutations: MutationLedger? = nil, journal: MutationJournal? = nil, aliases: SessionAliasStore? = nil,
+                taskLocator: BackgroundTaskLocator = BackgroundTaskLocator()) {
         self.cmux = cmux; self.transcriptRoots = transcriptRoots.map { $0.resolvingSymlinksInPath().standardizedFileURL }
         self.files = ProjectFilePolicy(home: home); self.modelCatalog = ModelChoiceCatalog(home: home); self.mutations = mutations ?? MutationLedger(); self.journal = journal; self.aliases = aliases
+        self.taskLocator = taskLocator
+    }
+
+
+    /// What one background task produced: the asynchronous Agent's own conversation, or a detached command's output.
+    /// The task's record lives outside the conversation, so the read is bounded and paged like any other text.
+    public func backgroundTask(id: String, taskID: String, offset: Int, limit: Int, discovered: Bool = false, access: SessionAccess? = nil) async throws -> BackgroundTaskContent {
+        guard BackgroundTaskLocator.isValid(taskID), offset >= 0 else { throw BridgeError("invalid_input", "Choose a task and a valid text offset.", status: 422) }
+        let record = try await authorizedRecord(id, capability: .conversationRead, discovered: discovered, access: access)
+        guard let path = record.transcript else { throw BridgeError("task_unavailable", "No readable conversation record is available.", status: 404) }
+        let listed = try await reader.history(path: path, agent: record.descriptor.agent, beforeSeq: nil, limit: 1,
+                                              allowsUncreatedTranscript: record.descriptor.writable, reportsBackgroundTasks: record.descriptor.writable)
+        let running = listed.backgroundTasks?.first { $0.id == taskID }
+        guard let location = taskLocator.locate(transcript: path, taskID: taskID) else {
+            throw BridgeError("task_unavailable", "This task's own record is no longer on this Mac.", status: 404)
+        }
+        let tool = running?.tool ?? (location.kind == .agent ? "Agent" : "Bash")
+        let content: BackgroundTaskContent
+        switch location.kind {
+        case .agent:
+            // A subagent writes the same records as a main conversation, so the phone reads it the same way.
+            let conversation = try await reader.history(path: location.path, agent: "claude", beforeSeq: nil, limit: 100, includesSidechain: true)
+            content = BackgroundTaskContent(taskID: taskID, tool: tool, summary: running?.summary ?? "", kind: .agent,
+                                            running: running != nil, snapshot: conversation)
+        case .output:
+            let page = try Self.outputPage(location.path, offset: offset, limit: limit)
+            content = BackgroundTaskContent(taskID: taskID, tool: tool, summary: running?.summary ?? "", kind: .output,
+                                            running: running != nil, text: page.text, offset: offset, nextOffset: page.next, totalBytes: page.total)
+        }
+        try await recheck(record, capability: .conversationRead, access: access)
+        return content
+    }
+    /// A page of a task's output, ending on a character boundary so the next page can continue from `next`.
+    static func outputPage(_ path: String, offset: Int, limit: Int) throws -> (text: String, next: Int?, total: Int) {
+        let attributes = try FileManager.default.attributesOfItem(atPath: path)
+        guard let total = (attributes[.size] as? NSNumber)?.intValue, offset <= total else {
+            throw BridgeError("invalid_input", "The text offset is invalid.", status: 422)
+        }
+        let count = min(max(limit, 1), 262_144)
+        let handle = try FileHandle(forReadingFrom: URL(fileURLWithPath: path)); defer { try? handle.close() }
+        try handle.seek(toOffset: UInt64(offset))
+        let read = try handle.read(upToCount: min(count, total - offset)) ?? Data()
+        let data = trimmedToCharacterBoundary(read)
+        let next = offset + data.count < total ? offset + data.count : nil
+        return (String(decoding: data, as: UTF8.self), next, total)
+    }
+    /// Drops a trailing UTF-8 scalar that the page cut in half; the next page starts on a whole character.
+    private static func trimmedToCharacterBoundary(_ data: Data) -> Data {
+        var lead = data.count
+        while lead > 0, data[lead - 1] & 0xC0 == 0x80 { lead -= 1 }
+        guard lead > 0 else { return Data() }
+        let byte = data[lead - 1]
+        let width = byte < 0x80 ? 1 : byte < 0xC0 ? 0 : byte < 0xE0 ? 2 : byte < 0xF0 ? 3 : 4
+        // The page ends after this scalar's lead byte and any continuation bytes it already holds.
+        return data.count - (lead - 1) < width ? data.prefix(lead - 1) : data
     }
 
     /// The Agent session a conversation currently answers for: a desktop resume forks the Agent's
@@ -224,6 +281,14 @@ public actor SessionService {
     /// The session list is assembled from three daemon reads and a preview is the daemon's screen text,
     /// so both answer nil and are rebuilt on every tick, as before.
     func subscriptionStamp(_ resource: LinkSubscriptionResource) async -> (stamp: String, workspace: String)? {
+        // A task's record is a file beside the conversation; its size and write time are the whole answer.
+        if case .sessionTask(let id, let taskID) = resource, let record = records[id], let path = record.transcript,
+           let workspace = record.descriptor.workspaceID,
+           let location = taskLocator.locate(transcript: path, taskID: taskID),
+           let attributes = try? FileManager.default.attributesOfItem(atPath: location.path),
+           let size = (attributes[.size] as? NSNumber)?.intValue, let modified = (attributes[.modificationDate] as? Date) {
+            return ("task:\(location.path):\(size):\(modified.timeIntervalSinceReferenceDate)", workspace)
+        }
         guard case .sessionHistory(let id) = resource, let record = records[id], let path = record.transcript,
               let workspace = record.descriptor.workspaceID else { return nil }
         let descriptor = record.descriptor

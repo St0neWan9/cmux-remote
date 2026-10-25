@@ -97,6 +97,8 @@
 "chat.response_time" = "回复时间";
 "chat.compacting" = "正在压缩上下文 %@";
 "chat.background.count" = "%ld 个后台任务正在运行";
+"chat.background.empty" = "这个任务还没有输出。";
+"chat.background.loadMore" = "加载更多";
 "chat.running_duration" = "运行中 %@";
 "chat.worked_duration" = "运行 %@";
 "chat.duration_seconds" = "%ds";

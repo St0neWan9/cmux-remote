@@ -62,6 +62,19 @@ public actor TranscriptReader {
         return "\(cached.generation.uuidString):\(inode):\(size):\(modified.timeIntervalSinceReferenceDate):\(running)"
     }
 
+    /// A subagent record shares the main record's shape but marks every row `isSidechain`; the pinned parser drops
+    /// those rows, so a subagent's own conversation is read with the mark removed first.
+    private static func withoutSidechain(_ lines: [String]) -> [String] {
+        lines.map { line in
+            guard line.contains("\"isSidechain\"") else { return line }
+            guard let data = line.data(using: .utf8),
+                  var object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  object.removeValue(forKey: "isSidechain") != nil,
+                  let encoded = try? JSONSerialization.data(withJSONObject: object),
+                  let text = String(data: encoded, encoding: .utf8) else { return line }
+            return text
+        }
+    }
     private func touch(_ path: String) {
         observationSequence += 1; observationOrder[path] = observationSequence
     }
@@ -104,10 +117,13 @@ public actor TranscriptReader {
     /// - Parameter reportsBackgroundTasks: Whether the agent process that owns this record is still running.
     ///   Its detached tasks die with it, so an ended session reports none, whatever its record says.
     public func history(path: String, agent: String, beforeSeq: Int?, limit: Int, allowsUncreatedTranscript: Bool = false,
-                        reportsBackgroundTasks: Bool = true) throws -> ConversationSnapshot {
-        let url = URL(fileURLWithPath: path)
+                        reportsBackgroundTasks: Bool = true, includesSidechain: Bool = false) throws -> ConversationSnapshot {
+        // One record read two ways keeps two cached records; the phone asks for a subagent only by its own file.
+        let path = includesSidechain ? path + "\u{0}sidechain" : path
+        let file = includesSidechain ? String(path.dropLast("\u{0}sidechain".count)) : path
+        let url = URL(fileURLWithPath: file)
         let attributes: [FileAttributeKey: Any]
-        do { attributes = try FileManager.default.attributesOfItem(atPath: path) }
+        do { attributes = try FileManager.default.attributesOfItem(atPath: file) }
         catch {
             let failure = error as NSError
             // A newly bound agent may not create its JSONL until the first prompt.
@@ -132,12 +148,12 @@ public actor TranscriptReader {
         // would cost as much as the file, which is what made a busy conversation slow to reach the phone.
         if let previous, previous.inode == inode, size.intValue > previous.size, previous.windowStart == windowStart,
            previous.parsedThrough >= previous.windowStart, previous.parsedThrough <= size.intValue,
-           let appended = try append(path: path, agent: agent, previous: previous, through: size.intValue, modified: modified) {
+           let appended = try append(path: file, agent: agent, previous: previous, through: size.intValue, modified: modified, includesSidechain: includesSidechain, key: path) {
             touch(path)
             return page(appended.messages, images: appended.images, presentation: appended.presentation, beforeSeq: beforeSeq, limit: limit, generation: previous.generation, clipped: windowStart > 0,
                         backgroundTasks: runningTasks(path, reports: reportsBackgroundTasks), agentModel: appended.agentModel)
         }
-        let (data, resolvedStart, dataOffset) = try window(path: url.path, size: size.intValue)
+        let (data, resolvedStart, dataOffset) = try window(path: file, size: size.intValue)
         // Cheap line scan over the same window the parse reads; a launch and its completion can sit far apart.
         let scanned = scannedLaunches(data)
         // A moved window renumbers records, so clients re-anchor exactly as after truncation.
@@ -149,7 +165,8 @@ public actor TranscriptReader {
             return page([], images: [], presentation: .init(), beforeSeq: beforeSeq, limit: limit, generation: generation, clipped: resolvedStart > 0,
                         backgroundTasks: runningTasks(path, reports: reportsBackgroundTasks))
         }
-        let raw = String(decoding: data[...end], as: UTF8.self).split(separator: "\n", omittingEmptySubsequences: false).dropLast().map(String.init)
+        let decoded = String(decoding: data[...end], as: UTF8.self).split(separator: "\n", omittingEmptySubsequences: false).dropLast().map(String.init)
+        let raw = includesSidechain ? Self.withoutSidechain(decoded) : decoded
         // Read before normalization, which folds away the command output that records a Claude switch.
         let agentModel = TranscriptModelReader().read(lines: raw, agent: agent)
         let compaction = agent == "claude" ? ClaudeCompactionSummary().replace(raw) : .init(lines: raw, markers: [])
@@ -174,7 +191,7 @@ public actor TranscriptReader {
     }
     /// Parses only the records appended since the previous read, carrying the fold state forward.
     /// Returns nil when nothing complete was appended, so the caller answers from the cached record.
-    private func append(path: String, agent: String, previous: Observation, through size: Int, modified: Date?) throws -> Observation? {
+    private func append(path: String, agent: String, previous: Observation, through size: Int, modified: Date?, includesSidechain: Bool, key: String) throws -> Observation? {
         let handle = try FileHandle(forReadingFrom: URL(fileURLWithPath: path)); defer { try? handle.close() }
         try handle.seek(toOffset: UInt64(previous.parsedThrough))
         var chunk = Data()
@@ -184,7 +201,8 @@ public actor TranscriptReader {
         }
         guard let end = chunk.lastIndex(of: 10) else { return nil }
         let complete = Data(chunk[...end])
-        let raw = String(decoding: complete, as: UTF8.self).split(separator: "\n", omittingEmptySubsequences: false).dropLast().map(String.init)
+        let decoded = String(decoding: complete, as: UTF8.self).split(separator: "\n", omittingEmptySubsequences: false).dropLast().map(String.init)
+        let raw = includesSidechain ? Self.withoutSidechain(decoded) : decoded
         guard !raw.isEmpty else { return nil }
         let startingSeq = previous.lastSeq + 1
         var tracker = previous.trackerState
@@ -222,7 +240,7 @@ public actor TranscriptReader {
                                       images: Array(images.suffix(512)), messages: messages, presentation: presentation, agentModel: agentModel,
                                       parsedThrough: previous.parsedThrough + complete.count, lastSeq: startingSeq + lines.count - 1,
                                       responseState: responseState, trackerState: tracker, tailLines: Array(lines.suffix(64)))
-        store(observation, for: path)
+        store(observation, for: key)
         return observation
     }
     /// The detached calls still open in one window, paired from launches, stops and completion notices.
