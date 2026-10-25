@@ -75,11 +75,12 @@ public struct BackgroundTaskLocator: Sendable {
         let window = 4 * 1_048_576
         guard (try? handle.seek(toOffset: UInt64(max(0, size - window)))) != nil,
               let data = try? handle.read(upToCount: window) else { return nil }
-        let text = String(decoding: data, as: UTF8.self)
-        guard let call = text.range(of: "\"tool_use_id\":\"" + toolUseID + "\"") ?? text.range(of: "\"tool_use_id\": \"" + toolUseID + "\"") else { return nil }
-        let after = text[call.upperBound...].prefix(4_096)
-        guard let marker = after.range(of: "Command running in background with ID: ") else { return nil }
-        let id = after[marker.upperBound...].prefix { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-" || $0 == "_") }
-        return id.isEmpty ? nil : String(id)
+        // The launch result, not the call that started it: only its row names the id the task runs under.
+        for line in String(decoding: data, as: UTF8.self).split(separator: "\n") where line.contains(toolUseID) {
+            guard let marker = line.range(of: "Command running in background with ID: ") else { continue }
+            let id = line[marker.upperBound...].prefix { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-" || $0 == "_") }
+            if !id.isEmpty { return String(id) }
+        }
+        return nil
     }
 }
