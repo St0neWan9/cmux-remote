@@ -6,7 +6,7 @@ final class LinkSocket: Sendable {
     let task: URLSessionWebSocketTask
     private let session: URLSession
     /// LAN sockets fail fast so the relay is tried promptly; relay sockets allow slow mobile and cross-border TLS.
-    init(url: URL, delegate: (any URLSessionDelegate)? = nil, headers: [String: String] = [:], timeout: TimeInterval = 4) {
+    init(url: URL, delegate: (any URLSessionDelegate)? = nil, headers: [String: String] = [:], timeout: TimeInterval = 8) {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForRequest = timeout; configuration.httpShouldSetCookies = false
         session = URLSession(configuration: configuration, delegate: delegate ?? RelaySessionDelegate(), delegateQueue: nil)
