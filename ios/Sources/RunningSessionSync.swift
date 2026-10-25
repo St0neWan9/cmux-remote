@@ -22,8 +22,9 @@ import Foundation
     /// The single read for each conversation that just finished.
     private var finishing: [String: Task<Void, Never>] = [:]
 
-    /// Two at most: each follower holds one of the eight subscriptions a Bridge link allows.
-    init(limit: Int = 2, interval: Duration = .seconds(8)) {
+    /// Four at most: each follower holds one subscription of the sixteen a Bridge link allows, which still leaves
+    /// the list, the feed and the open conversation their own.
+    init(limit: Int = 4, interval: Duration = .seconds(8)) {
         self.limit = limit; self.interval = interval
     }
 
