@@ -15,6 +15,7 @@ actor BackgroundTaskCache {
     }
     struct Entry: Codable, Sendable {
         let snapshot: ConversationSnapshot?
+        var command: String? = nil
         let text: String?
         let loadedBytes: Int
         let nextOffset: Int?

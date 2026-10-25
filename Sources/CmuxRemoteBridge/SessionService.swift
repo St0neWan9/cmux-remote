@@ -62,7 +62,8 @@ public actor SessionService {
         case .output:
             let page = try Self.outputPage(location.path, offset: offset, limit: limit)
             content = BackgroundTaskContent(taskID: taskID, tool: tool, summary: running?.summary ?? "", kind: .output,
-                                            running: running != nil, text: page.text, offset: offset, nextOffset: page.next, totalBytes: page.total)
+                                            running: running != nil, command: taskLocator.launchCommand(transcript: path, toolUseID: taskID),
+                                            text: page.text, offset: offset, nextOffset: page.next, totalBytes: page.total)
         }
         try await recheck(record, capability: .conversationRead, access: access)
         return content

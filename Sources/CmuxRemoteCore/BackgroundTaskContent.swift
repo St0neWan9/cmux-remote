@@ -15,6 +15,8 @@ public struct BackgroundTaskContent: Codable, Sendable {
     public let running: Bool
     /// The subagent's conversation, for `.agent`.
     public let snapshot: ConversationSnapshot?
+    /// The command the task ran, for `.output`, when the record names it.
+    public let command: String?
     /// The command output, for `.output`.
     public let text: String?
     /// Where `text` starts, and where the next page starts; nil at the end of the record.
@@ -23,8 +25,9 @@ public struct BackgroundTaskContent: Codable, Sendable {
     /// The output's size, so a reader can tell how much is left.
     public let totalBytes: Int?
     public init(taskID: String, tool: String, summary: String, kind: Kind, running: Bool, snapshot: ConversationSnapshot? = nil,
-                text: String? = nil, offset: Int? = nil, nextOffset: Int? = nil, totalBytes: Int? = nil) {
+                command: String? = nil, text: String? = nil, offset: Int? = nil, nextOffset: Int? = nil, totalBytes: Int? = nil) {
         self.taskID = taskID; self.tool = tool; self.summary = summary; self.kind = kind; self.running = running
-        self.snapshot = snapshot; self.text = text; self.offset = offset; self.nextOffset = nextOffset; self.totalBytes = totalBytes
+        self.snapshot = snapshot; self.command = command; self.text = text
+        self.offset = offset; self.nextOffset = nextOffset; self.totalBytes = totalBytes
     }
 }
