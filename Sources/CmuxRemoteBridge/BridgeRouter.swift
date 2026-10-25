@@ -165,7 +165,8 @@ public struct BridgeRouter: Sendable {
                     try await require(client, .conversationRead, workspace: workspace)
                 }
                 data = try encode(await service.backgroundTask(id: id, taskID: taskID, offset: query["offset"].flatMap(Int.init) ?? 0,
-                                                               limit: query["limit"].flatMap(Int.init) ?? 65_536, discovered: client != nil, access: access))
+                                                               limit: query["limit"].flatMap(Int.init) ?? 65_536, beforeSeq: query["before_seq"].flatMap(Int.init),
+                                                               discovered: client != nil, access: access))
             } else if path.count == 4, path[0...1] == ["v1", "sessions"] {
                 let id = path[2]
                 let capability: ClientCapability = method == "POST" ? .conversationControl : (["changes", "diff", "file"].contains(path[3]) ? .projectRead : .conversationRead)

@@ -41,7 +41,7 @@ public actor SessionService {
 
     /// What one background task produced: the asynchronous Agent's own conversation, or a detached command's output.
     /// The task's record lives outside the conversation, so the read is bounded and paged like any other text.
-    public func backgroundTask(id: String, taskID: String, offset: Int, limit: Int, discovered: Bool = false, access: SessionAccess? = nil) async throws -> BackgroundTaskContent {
+    public func backgroundTask(id: String, taskID: String, offset: Int, limit: Int, beforeSeq: Int? = nil, discovered: Bool = false, access: SessionAccess? = nil) async throws -> BackgroundTaskContent {
         guard BackgroundTaskLocator.isValid(taskID), offset >= 0 else { throw BridgeError("invalid_input", "Choose a task and a valid text offset.", status: 422) }
         let record = try await authorizedRecord(id, capability: .conversationRead, discovered: discovered, access: access)
         guard let path = record.transcript else { throw BridgeError("task_unavailable", "No readable conversation record is available.", status: 404) }
@@ -56,7 +56,7 @@ public actor SessionService {
         switch location.kind {
         case .agent:
             // A subagent writes the same records as a main conversation, so the phone reads it the same way.
-            let conversation = try await reader.history(path: location.path, agent: "claude", beforeSeq: nil, limit: 100, includesSidechain: true)
+            let conversation = try await reader.history(path: location.path, agent: "claude", beforeSeq: beforeSeq, limit: 100, includesSidechain: true)
             content = BackgroundTaskContent(taskID: taskID, tool: tool, summary: running?.summary ?? "", kind: .agent,
                                             running: running != nil, snapshot: conversation)
         case .output:
