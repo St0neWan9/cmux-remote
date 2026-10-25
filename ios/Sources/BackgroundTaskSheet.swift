@@ -46,7 +46,8 @@ struct BackgroundTaskSheet: View {
                     } else if loading && messages.isEmpty && output.isEmpty {
                         ProgressView().frame(maxWidth: .infinity).padding(.top, 40)
                     } else if task.tool == "Agent" || !messages.isEmpty {
-                        ForEach(messages) { message in MessageRow(message: message) }
+                        // The same rows and rhythm as the timeline's groups, so a tool item reads the same here.
+                        MessageRows(messages: messages, lazy: true)
                     } else {
                         Text(output.isEmpty ? String(localized: running ? "chat.background.waiting" : "chat.background.empty") : output)
                             .font(.system(.footnote, design: .monospaced))
