@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 import CmuxRemoteBridge
+import CmuxRemoteCore
 import CmuxAgentChat
 
 @Suite struct TranscriptTests {
@@ -102,5 +103,55 @@ import CmuxAgentChat
         #expect(page.messages.count == 1)
         if case .prose(let prose) = page.messages[0].kind { #expect(prose.text == "Codex reply") }
         else { Issue.record("Expected a prose message") }
+    }
+}
+
+@Suite struct IncrementalTranscriptReadTests {
+    private func temporary() throws -> URL {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory
+    }
+    private func row(_ text: String) -> Data { Data((text + "\n").utf8) }
+    private func expectSame(_ incremental: ConversationSnapshot, _ whole: ConversationSnapshot) {
+        #expect(incremental.messages.map { $0.id } == whole.messages.map { $0.id })
+        #expect(incremental.messages.map { $0.seq } == whole.messages.map { $0.seq })
+        #expect(incremental.responses == whole.responses)
+        #expect(incremental.recordedRunSeconds == whole.recordedRunSeconds)
+        #expect(incremental.recordedTurnCount == whole.recordedTurnCount)
+        #expect(incremental.currentTurnStartedAt == whole.currentTurnStartedAt)
+        #expect(incremental.currentTurnCompleted == whole.currentTurnCompleted)
+        #expect((incremental.images ?? []).count == (whole.images ?? []).count)
+        #expect(incremental.messages.count == whole.messages.count)
+    }
+    /// A growing record must answer exactly as a whole-record read would, including turn boundaries,
+    /// recorded durations, images and detached tasks that span two reads.
+    @Test func appendedRecordsAnswerLikeAFullRead() async throws {
+        let directory = try temporary(); defer { try? FileManager.default.removeItem(at: directory) }
+        let file = directory.appendingPathComponent("chat.jsonl")
+        let chunks: [String] = [
+            #"{"type":"user","uuid":"u1","timestamp":"2026-10-24T10:00:00.000Z","message":{"content":"Run it in the background"}}"# + "\n" +
+            #"{"type":"assistant","uuid":"a1","timestamp":"2026-10-24T10:00:01.000Z","message":{"content":[{"type":"tool_use","id":"tool1","name":"Bash","input":{"command":"sleep 100","run_in_background":true}}]}}"# + "\n",
+            #"{"type":"user","uuid":"r1","timestamp":"2026-10-24T10:00:02.000Z","message":{"content":[{"type":"tool_result","tool_use_id":"tool1","content":"Command running in background with ID: bg1"}]}}"# + "\n" +
+            #"{"type":"assistant","uuid":"a2","timestamp":"2026-10-24T10:00:03.000Z","message":{"content":[{"type":"text","text":"Started"}]}}"# + "\n",
+            #"{"type":"system","uuid":"s1","subtype":"turn_duration","timestamp":"2026-10-24T10:00:09.000Z","durationMs":8000}"# + "\n" +
+            #"{"type":"user","uuid":"u2","timestamp":"2026-10-24T10:00:10.000Z","message":{"content":"And now the next thing"}}"# + "\n" +
+            #"{"type":"assistant","uuid":"a3","timestamp":"2026-10-24T10:00:11.000Z","message":{"content":[{"type":"text","text":"On it"}]}}"# + "\n"
+        ]
+        try FileManager.default.createFile(atPath: file.path, contents: nil)
+        let handle = try FileHandle(forWritingTo: file); try handle.seekToEnd()
+        let reader = TranscriptReader()
+        for chunk in chunks {
+            try handle.write(contentsOf: Data(chunk.utf8))
+            try handle.synchronize()
+            let incremental = try await reader.history(path: file.path, agent: "claude", beforeSeq: nil, limit: 100)
+            let whole = try await TranscriptReader().history(path: file.path, agent: "claude", beforeSeq: nil, limit: 100)
+            expectSame(incremental, whole)
+        }
+        try handle.close()
+        // The background task started in the first chunk is still known after later chunks.
+        let last = try await reader.history(path: file.path, agent: "claude", beforeSeq: nil, limit: 100)
+        let running = last.backgroundTasks?.map { $0.id } ?? []
+        #expect(running == ["tool1"])
     }
 }
