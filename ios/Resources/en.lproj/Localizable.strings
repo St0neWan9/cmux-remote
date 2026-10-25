@@ -97,6 +97,8 @@
 "chat.response_time" = "Reply time";
 "chat.compacting" = "Compacting context %@";
 "chat.background.count" = "%ld background tasks running";
+"chat.background.empty" = "The task has not written anything yet.";
+"chat.background.loadMore" = "Load more";
 "chat.running_duration" = "Working %@";
 "chat.worked_duration" = "Worked for %@";
 "chat.duration_seconds" = "%ds";
