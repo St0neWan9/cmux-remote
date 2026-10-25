@@ -77,6 +77,35 @@ public struct BackgroundTaskLocator: Sendable {
         }
         return nil
     }
+    /// The command a tool call ran, when the record keeps it; the phone shows it above the output.
+    public func launchCommand(transcript: String, toolUseID: String) -> String? {
+        guard Self.isValid(toolUseID) else { return nil }
+        let key = transcript + "\u{0}cmd\u{0}" + toolUseID
+        if let cached = runtimeIDs.get(key) { return cached }
+        guard let handle = try? FileHandle(forReadingFrom: URL(fileURLWithPath: transcript)) else { return nil }
+        defer { try? handle.close() }
+        var pending = Data()
+        while let chunk = try? handle.read(upToCount: 1_048_576), !chunk.isEmpty {
+            pending.append(chunk)
+            while let end = pending.lastIndex(of: 10) {
+                let line = pending[pending.startIndex...end]
+                pending.removeSubrange(pending.startIndex...end)
+                guard let text = String(data: line, encoding: .utf8), text.contains(toolUseID), text.contains("\"tool_use\"") else { continue }
+                guard let data = text.data(using: .utf8),
+                      let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let content = (root["message"] as? [String: Any])?["content"] as? [[String: Any]] else { continue }
+                for block in content where block["type"] as? String == "tool_use" && block["id"] as? String == toolUseID {
+                    guard let input = block["input"] as? [String: Any] else { continue }
+                    let command = (input["command"] as? String) ?? (input["script"] as? String) ?? (input["file_path"] as? String)
+                    guard let command else { continue }
+                    let bounded = String(command.prefix(16_384))
+                    runtimeIDs.set(key, bounded)
+                    return bounded
+                }
+            }
+        }
+        return nil
+    }
     /// The id a launch result reports, read from the record: only the result's own row names the id the task
     /// runs under, and a task started long ago may sit far above the newest pages, so the whole record is
     /// streamed once and the scan stops at the first row that names it.

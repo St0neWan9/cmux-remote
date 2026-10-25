@@ -15,6 +15,7 @@ struct BackgroundTaskSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var messages: [ChatMessage] = []
     /// Whether the Agent's conversation has earlier messages than the page on screen.
+    @State private var command: String?
     @State private var hasMore = false
     @State private var loadingEarlier = false
     @State private var content: ConversationSnapshot?
@@ -61,6 +62,15 @@ struct BackgroundTaskSheet: View {
                         // The same rows and rhythm as the timeline's groups, so a tool item reads the same here.
                         MessageRows(messages: messages, lazy: true)
                     } else {
+                        if let command {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Label(String(localized: "chat.background.command"), systemImage: "terminal").font(.caption).foregroundStyle(.secondary)
+                                Text(command).font(.system(.footnote, design: .monospaced)).textSelection(.enabled)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(10)
+                                    .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
+                            }.accessibilityIdentifier("chat.background.command")
+                        }
                         Text(output.isEmpty ? String(localized: running ? "chat.background.waiting" : "chat.background.empty") : output)
                             .font(.system(.footnote, design: .monospaced))
                             .textSelection(.enabled)
@@ -113,10 +123,11 @@ struct BackgroundTaskSheet: View {
         totalBytes = entry.totalBytes
         running = entry.running
         nextOffset = entry.nextOffset
+        command = entry.command
         landAtBottom += 1
     }
     private func save() {
-        let entry = BackgroundTaskCache.Entry(snapshot: content, text: output, loadedBytes: loadedBytes,
+        let entry = BackgroundTaskCache.Entry(snapshot: content, command: command, text: output, loadedBytes: loadedBytes,
                                               nextOffset: nextOffset, totalBytes: totalBytes, running: running, storedAt: Date())
         let scope = scope, sessionID = sessionID, taskID = task.id
         Task { await cache.save(entry, scope: scope, sessionID: sessionID, taskID: taskID) }
@@ -138,6 +149,7 @@ struct BackgroundTaskSheet: View {
                 output += page.text ?? ""; loadedBytes = page.nextOffset ?? (page.totalBytes ?? 0)
             }
             nextOffset = page.nextOffset; totalBytes = page.totalBytes ?? 0
+            if let sent = page.command { command = sent }
             failure = nil
             save()
             landAtBottom += 1
