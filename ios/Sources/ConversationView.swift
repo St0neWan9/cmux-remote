@@ -66,9 +66,9 @@ struct ConversationView: View {
                 header
                 ConnectionStatusBar(state: linkState) { Task { await reconnect() } }
             }
-            // A light system frost under a white veil: content under the bar is blurred, the page stays white and
-            // no message row is rasterized.
-            .background(BarFrost())
+            // A translucent white veil, like the page itself: content shows faintly under it, with no material
+            // tint and no per-row rasterization.
+            .background(Color.white.opacity(0.9))
         }
         .task { for await state in model.client.linkStates() { linkState = state } }
         .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -104,7 +104,7 @@ struct ConversationView: View {
                 } else if !model.canSend { Text(String(localized: "sessions.read_only")).font(.caption).foregroundStyle(.secondary) }
                 composer
             }.padding(.horizontal, 14).padding(.top, 14).padding(.bottom, 10)
-            .background(BarFrost())
+            .background(Color.white.opacity(0.9))
         }
         .photosPicker(isPresented: $showingPhotos, selection: $photoItems, maxSelectionCount: max(1, 4 - model.imageDraft.images.count), selectionBehavior: .ordered, matching: .images)
         .fileImporter(isPresented: $showingImageFiles, allowedContentTypes: [.image], allowsMultipleSelection: true) { result in
@@ -536,15 +536,4 @@ private struct LivePreviewRow: View {
             }
         }
     }
-}
-
-/// The frosted background behind the header and the composer: a light system blur with a white veil over it, so
-/// the result reads white rather than grey.
-struct BarFrost: UIViewRepresentable {
-    func makeUIView(context: Context) -> UIVisualEffectView {
-        let view = UIVisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterialLight))
-        view.backgroundColor = UIColor.white.withAlphaComponent(0.62)
-        return view
-    }
-    func updateUIView(_ view: UIVisualEffectView, context: Context) {}
 }
