@@ -36,14 +36,24 @@ struct BackgroundTaskTracker {
     func running(in lines: [String], at now: Date) -> [BackgroundAgentTask] {
         launches(in: lines).filter { $0.isRunning(at: now) }.map(\.task)
     }
-    /// Every detached call no completion, stop or notice has ended, with the deadline it declares.
-    func launches(in lines: [String]) -> [Launch] {
+    /// What the lines read so far established; a later chunk continues from it, so appended records are
+    /// scanned once instead of walking the whole conversation again.
+    struct State: Sendable {
         var launched: [String: Launch] = [:]
         /// The task id each launch reported, which is how `TaskStop` names it.
         var toolUseByTaskID: [String: String] = [:]
         /// Agent calls without the flag: Claude Code now starts every subagent asynchronously, and only the
         /// launch result ("Async agent launched …") says so. They count once that result arrives.
         var asyncCandidates: [String: Launch] = [:]
+    }
+    /// Every detached call no completion, stop or notice has ended, with the deadline it declares.
+    func launches(in lines: [String]) -> [Launch] {
+        var state = State()
+        consume(lines, into: &state)
+        return state.launched.values.sorted { $0.task.id < $1.task.id }
+    }
+    /// Folds one chunk of records into `state`; chunks must arrive in record order.
+    func consume(_ lines: [String], into state: inout State) {
         for line in lines {
             // Every refresh walks the whole record, so a cheap substring test keeps the JSON parse for
             // the few rows that can carry a signal. Nothing else in a record can start or finish a task.
@@ -55,7 +65,7 @@ struct BackgroundTaskTracker {
                 let input = call["input"] as? [String: Any] ?? [:]
                 if call["name"] as? String == "TaskStop" {
                     for taskID in [input["task_id"], input["shell_id"]].compactMap({ $0 as? String }) {
-                        if let launch = toolUseByTaskID[taskID] { launched[launch] = nil }
+                        if let launch = state.toolUseByTaskID[taskID] { state.launched[launch] = nil }
                     }
                     continue
                 }
@@ -64,22 +74,21 @@ struct BackgroundTaskTracker {
                     ?? (call["name"] as? String) ?? ""
                 let launch = Launch(task: BackgroundAgentTask(id: id, tool: call["name"] as? String ?? "Task", summary: Self.shorten(summary)),
                                     deadline: call["name"] as? String == "Monitor" ? Self.monitorDeadline(input, launchedAt: stamp) : nil)
-                if Self.runsInBackground(call) { launched[id] = launch }
-                else if call["name"] as? String == "Agent" { asyncCandidates[id] = launch }
+                if Self.runsInBackground(call) { state.launched[id] = launch }
+                else if call["name"] as? String == "Agent" { state.asyncCandidates[id] = launch }
             }
             for (toolUseID, text) in Self.toolResults(in: value) {
-                guard let candidate = asyncCandidates.removeValue(forKey: toolUseID), text.contains("Async agent launched") else { continue }
-                launched[toolUseID] = candidate
+                guard let candidate = state.asyncCandidates.removeValue(forKey: toolUseID), text.contains("Async agent launched") else { continue }
+                state.launched[toolUseID] = candidate
             }
-            for (toolUseID, text) in Self.toolResults(in: value) where launched[toolUseID] != nil {
+            for (toolUseID, text) in Self.toolResults(in: value) where state.launched[toolUseID] != nil {
                 if let taskID = Self.matches(#"(?:with ID: |Monitor started \(task |agentId: )([A-Za-z0-9_-]+)"#, in: text).first {
-                    toolUseByTaskID[taskID] = toolUseID
+                    state.toolUseByTaskID[taskID] = toolUseID
                 }
             }
             // A completion notice names the tool call it finishes.
-            for id in Self.completedToolUseIDs(in: value) { launched[id] = nil }
+            for id in Self.completedToolUseIDs(in: value) { state.launched[id] = nil }
         }
-        return launched.values.sorted { $0.task.id < $1.task.id }
     }
     /// When a Monitor stops on its own: launch time plus its declared timeout, never past the ceiling.
     private static func monitorDeadline(_ input: [String: Any], launchedAt: Date?) -> Date? {
