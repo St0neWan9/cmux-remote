@@ -15,7 +15,7 @@ class ReleaseConfig
     @app_store_app_id = env["CMUX_REMOTE_IOS_APP_STORE_APP_ID"].to_s
     @app_store_app_id = defaults["app_store_app_id"].to_s if @app_store_app_id.empty?
     @output = File.expand_path(env.fetch("CMUX_REMOTE_IOS_OUTPUT", "../../.build/ios-release"), __dir__)
-    raise "Invalid or unrelated bundle identity" unless @bundle_id.match?(/\Acom\.st0newan9\.cmux-remote(?:\.[A-Za-z0-9-]+)*\z/)
+    raise "Invalid bundle identity" unless @bundle_id.match?(/\A[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+\z/)
     raise "Invalid Apple team" unless @team_id.match?(/\A[A-Z0-9]{10}\z/)
     raise "Invalid version" unless @version.match?(/\A\d+\.\d+\.\d+\z/)
     raise "Invalid build number" unless @build_number.match?(/\A[1-9]\d{0,8}\z/)

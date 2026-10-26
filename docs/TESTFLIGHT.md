@@ -13,13 +13,13 @@ Swift project needs neither CocoaPods nor an extension profile.
 
 | Setting | Value |
 | --- | --- |
-| Bundle ID | `com.st0newan9.cmux-remote` |
-| Apple team | `UUHLDZ2S48` (same team as the Valuz configuration) |
+| Bundle ID | `cmux-remote.mobile` |
+| Apple team | `7G42499LWB` (Huiyuan Jia, individual) |
 | Marketing version | `0.1.0` |
 | Phone display name | `Cmux Remote` |
-| App Store Connect name | `Cmux Remote Companion` |
-| App Store Connect app ID | `6821932840` |
-| App Store profile name | `cmux remote App Store com.st0newan9.cmux-remote` |
+| App Store Connect name | `Cmux Remote Personal` |
+| App Store Connect app ID | `6827037964` |
+| App Store profile name | `cmux-remote mobile App Store` |
 
 A build number is required for every packaging run. Choose a new positive
 integer for every upload. `--version` and `--build-number` override the defaults
@@ -27,8 +27,7 @@ without editing the generated project. The GitHub workflow derives a build
 number from its run number and attempt unless an explicit one is provided;
 when also uploading locally, coordinate the numbers to avoid reuse.
 
-For a fork, update the bundle/team/app record in `Release.json` and the bundle validation in
-`ios/fastlane/release_config.rb` to your own identity. Do not use `io.valuz` or the
+For a fork, update the bundle/team/app record in `Release.json` to your own identity. Do not use `io.valuz` or the
 official cmux identity. `CMUX_REMOTE_IOS_TEAM_ID`, `CMUX_REMOTE_IOS_BUNDLE_ID`,
 `CMUX_REMOTE_IOS_PROFILE_NAME` and `CMUX_REMOTE_IOS_OUTPUT` can override release
 settings. If changing the bundle ID, also select its own profile name.

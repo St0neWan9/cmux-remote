@@ -76,7 +76,7 @@ mkdir -p "$HOME/Applications" "$HOME/.local/bin"
 if [ -e "$HOME/Applications/CmuxRemoteMac.app" ]; then
   alpha_installed_id=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' \
     "$HOME/Applications/CmuxRemoteMac.app/Contents/Info.plist")
-  if [ "$alpha_installed_id" != 'com.st0newan9.cmux-remote.mac' ]; then
+  if [ "$alpha_installed_id" != 'cmux-remote.desktop' ]; then
     echo '目标位置不是本项目的 Companion，已停止安装' >&2
     exit 1
   fi
