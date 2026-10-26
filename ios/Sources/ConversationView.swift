@@ -484,10 +484,9 @@ struct ConversationView: View {
             holdingPlace = false; pinnedSent = nil; atLatest = true
             withAnimation { scrollTrace.note("scroll latest-button"); scrollToNewest(proxy) }
         } label: {
-            Image(systemName: "arrow.down").font(.system(size: 20, weight: .medium)).frame(width: 42, height: 42)
-                .background(Color.white, in: Circle()).shadow(color: .black.opacity(0.1), radius: 10, y: 4)
+            Image(systemName: "arrow.down")
         }
-        .buttonStyle(.plain).accessibilityLabel(String(localized: "chat.latest"))
+        .buttonStyle(FloatingIconStyle()).accessibilityLabel(String(localized: "chat.latest"))
         .accessibilityIdentifier("chat.latest").padding(.bottom, 10)
     }
     /// The menu's refresh redials a link that may be dead before reading, and shows the dial while it happens.
@@ -518,7 +517,7 @@ struct ConversationView: View {
                     Button { Task { await model.interrupt() } } label: { Label(String(localized: "chat.stop"), systemImage: "stop.circle") }
                     Button(role: .destructive) { confirmHardStop = true } label: { Label(String(localized: "chat.hard_stop"), systemImage: "stop.circle.fill") }
                 }
-            } label: { Image(systemName: "ellipsis").font(.system(size: 22, weight: .medium)).frame(width: 44, height: 44).background(Color.white, in: Circle()).shadow(color: .black.opacity(0.07), radius: 10, y: 3) }
+            } label: { Image(systemName: "ellipsis").font(.system(size: 22, weight: .medium)).modifier(FloatingGlassCircle()) }
                 .tint(.primary).accessibilityLabel(String(localized: "chat.more")).accessibilityIdentifier("chat.more")
         }.padding(.horizontal, MobileDesign.pageInset).padding(.vertical, 8)
     }

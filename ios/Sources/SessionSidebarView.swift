@@ -74,8 +74,7 @@ struct SessionSidebarView: View {
                             Image(systemName: host.failed ? "exclamationmark.triangle" : "laptopcomputer").font(.system(size: 20))
                                 .foregroundStyle(host.failed ? Color.red : Color.primary)
                             Text(host.name).font(.subheadline.weight(.medium)).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
-                            Image(systemName: "gearshape").font(.system(size: 19)).frame(width: 40, height: 40)
-                                .background(Color.white, in: Circle()).shadow(color: .black.opacity(0.07), radius: 12, y: 3)
+                            Image(systemName: "gearshape").font(.system(size: 19)).modifier(FloatingGlassCircle(size: 40))
                         }.frame(minHeight: 48).contentShape(Rectangle())
                     }.buttonStyle(.plain).accessibilityIdentifier("sidebar.connection." + host.id)
                 }
