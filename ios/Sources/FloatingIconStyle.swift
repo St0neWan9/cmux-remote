@@ -28,11 +28,20 @@ struct FloatingGlassCircle: ViewModifier {
     func body(content: Content) -> some View {
         Group {
             if #available(iOS 26.0, *) {
-                content.frame(width: size, height: size).glassEffect(.regular.interactive(), in: .circle)
+                content.frame(width: size, height: size).glassEffect(.regular, in: .circle)
             } else {
                 content.frame(width: size, height: size).background(Color.white, in: Circle())
                     .shadow(color: MobileDesign.shadow, radius: 12, y: 3)
             }
         }
+    }
+}
+
+extension View {
+    /// The system's own glass button on iOS 26. It is a real `ButtonStyle`, so it shares the button's gesture
+    /// instead of adding an interactive layer on the label, which could swallow the first tap.
+    @ViewBuilder func floatingIconButton() -> some View {
+        if #available(iOS 26.0, *) { buttonStyle(.glass) }
+        else { buttonStyle(FloatingIconStyle()) }
     }
 }
