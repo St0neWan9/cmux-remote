@@ -48,7 +48,9 @@ struct SideDrawer<Main: View, Drawer: View>: View {
                     }
                     .offset(x: offset)
                 if !isPresented && allowsEdgeOpening {
-                    Color.clear.frame(width: 20).contentShape(Rectangle())
+                    // Narrower than the leading page inset: the edge strip must not sit over the header's first
+                    // button, which takes the left part of that inset.
+                    Color.clear.frame(width: 12).contentShape(Rectangle())
                         .gesture(drag(width: width, opening: true))
                         .accessibilityHidden(true)
                 }
