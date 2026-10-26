@@ -239,7 +239,10 @@ struct SessionListView: View {
             } else {
                 Button { model.sidebarOpen = true } label: {
                     Image(systemName: "line.3.horizontal")
-                }.floatingIconButton().accessibilityLabel(String(localized: "sessions.sidebar")).accessibilityIdentifier("sessions.sidebar")
+                }.floatingIconButton()
+                    // The visible glass is smaller than the control; a tap a few points off still opens it.
+                    .contentShape(Circle().inset(by: -8))
+                    .accessibilityLabel(String(localized: "sessions.sidebar")).accessibilityIdentifier("sessions.sidebar")
                 Spacer(minLength: 0)
                 SessionTitleMenu(sortMode: $sortMode,
                                  feeds: pendingHosts(model.links), canStart: !model.startTargets.isEmpty,
