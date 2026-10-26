@@ -85,9 +85,10 @@ print((value or {}).get(sys.argv[1], "") if isinstance(value, dict) else "")
 }
 
 # Submit, then poll: `--wait` gives up on Apple's queue after half an hour and answers with a timeout
-# message instead of a status, which is a slow submission — not a failed one.
+# message instead of a status, which is a slow submission — not a failed one. The queue has been seen to
+# take forty minutes, so the wait is longer and can be raised with CMUX_REMOTE_NOTARY_TIMEOUT_SECONDS.
 submit() {
-  local id status answer deadline=$((SECONDS + 1800))
+  local id status answer deadline=$((SECONDS + ${CMUX_REMOTE_NOTARY_TIMEOUT_SECONDS:-3600}))
   answer="$(xcrun notarytool submit "$1" "${notary[@]}" --output-format json 2>&1 || true)"
   id="$(notary_field id "$answer")"
   status="$(notary_field status "$answer")"
