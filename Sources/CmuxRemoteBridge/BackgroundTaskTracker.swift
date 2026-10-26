@@ -20,6 +20,15 @@ struct BackgroundTaskTracker {
         let deadline: Date?
         func isRunning(at now: Date) -> Bool { deadline.map { now < $0 } ?? true }
     }
+    /// A launch a failure notice ended, and when it said so.
+    ///
+    /// A background agent that dies on an API error is retried under the same task, and the retry writes no
+    /// new launch row: the notice is the last thing the conversation says about it. Its own sidecar record
+    /// is what keeps changing, so the moment the notice arrived is kept to tell a retry from a stale record.
+    struct Settled: Sendable, Equatable {
+        let launch: Launch
+        let at: Date?
+    }
     /// A Monitor without `timeout_ms` uses the tool's default, and none outlives the tool's ceiling.
     static let monitorDefaultTimeout: TimeInterval = 300
     static let monitorMaximumTimeout: TimeInterval = 3_600
@@ -40,8 +49,12 @@ struct BackgroundTaskTracker {
     /// scanned once instead of walking the whole conversation again.
     struct State: Sendable {
         var launched: [String: Launch] = [:]
+        /// Every launch a failure notice ended, kept in case the agent retried it. Completion notices are final.
+        var failed: [String: Settled] = [:]
         /// The task id each launch reported, which is how `TaskStop` names it.
         var toolUseByTaskID: [String: String] = [:]
+        /// The same pairing the other way, so a failed launch can name its sidecar record.
+        var taskIDByToolUse: [String: String] = [:]
         /// Agent calls without the flag: Claude Code now starts every subagent asynchronously, and only the
         /// launch result ("Async agent launched …") says so. They count once that result arrives.
         var asyncCandidates: [String: Launch] = [:]
@@ -68,7 +81,10 @@ struct BackgroundTaskTracker {
                 let input = call["input"] as? [String: Any] ?? [:]
                 if call["name"] as? String == "TaskStop" {
                     for taskID in [input["task_id"], input["shell_id"]].compactMap({ $0 as? String }) {
-                        if let launch = state.toolUseByTaskID[taskID] { state.launched[launch] = nil }
+                        if let launch = state.toolUseByTaskID[taskID] {
+                            state.launched[launch] = nil; state.failed[launch] = nil
+                            state.taskIDByToolUse[launch] = nil
+                        }
                     }
                     continue
                 }
@@ -77,7 +93,7 @@ struct BackgroundTaskTracker {
                     ?? (call["name"] as? String) ?? ""
                 let launch = Launch(task: BackgroundAgentTask(id: id, tool: call["name"] as? String ?? "Task", summary: Self.shorten(summary)),
                                     deadline: call["name"] as? String == "Monitor" ? Self.monitorDeadline(input, launchedAt: stamp) : nil)
-                if Self.runsInBackground(call) { state.launched[id] = launch }
+                if Self.runsInBackground(call) { state.failed[id] = nil; state.launched[id] = launch }
                 else if call["name"] as? String == "Agent" { state.asyncCandidates[id] = launch }
             }
             for (toolUseID, text) in Self.toolResults(in: value) {
@@ -87,10 +103,19 @@ struct BackgroundTaskTracker {
             for (toolUseID, text) in Self.toolResults(in: value) where state.launched[toolUseID] != nil {
                 if let taskID = Self.matches(#"(?:with ID: |Monitor started \(task |agentId: )([A-Za-z0-9_-]+)"#, in: text).first {
                     state.toolUseByTaskID[taskID] = toolUseID
+                    state.taskIDByToolUse[toolUseID] = taskID
                 }
             }
-            // A completion notice names the tool call it finishes.
-            for id in Self.completedToolUseIDs(in: value) { state.launched[id] = nil }
+            // A completion notice names the tool call it finishes. A failure ends it only until the agent
+            // retries, so it is kept apart rather than dropped.
+            for notice in Self.notices(in: value) {
+                if let launch = state.launched.removeValue(forKey: notice.id) {
+                    if notice.failed { state.failed[notice.id] = Settled(launch: launch, at: stamp) }
+                    else { state.failed[notice.id] = nil; state.taskIDByToolUse[notice.id] = nil }
+                } else if !notice.failed {
+                    state.failed[notice.id] = nil
+                }
+            }
         }
     }
     /// The record kinds a task signal can come from; request payload copies replay earlier rows.
@@ -140,15 +165,17 @@ struct BackgroundTaskTracker {
         let input = call["input"] as? [String: Any] ?? [:]
         return input["run_in_background"] as? Bool == true || input["runInBackground"] as? Bool == true
     }
-    /// The tool-call ids a `<task-notification>` block finishes.
+    /// The tool-call ids a `<task-notification>` block finishes, and whether it ended in failure.
     ///
     /// The block reaches the record in more than one shape: a queue row's own `content`, an
     /// `attachment`'s `prompt`, and a `tool_result`'s content inside a user message. All are searched so
     /// a finished task is never left looking like it is still running.
-    private static func completedToolUseIDs(in value: [String: Any]) -> [String] {
-        let texts = Self.noticeTexts(in: value)
-        let matches = texts.flatMap { $0.contains("<task-notification>") ? Self.matches(#"<tool-use-id>([^<]+)</tool-use-id>"#, in: $0) : [] }
-        return matches
+    private static func notices(in value: [String: Any]) -> [(id: String, failed: Bool)] {
+        Self.noticeTexts(in: value).flatMap { text -> [(id: String, failed: Bool)] in
+            guard text.contains("<task-notification>") else { return [] }
+            let failed = text.contains("<status>failed</status>")
+            return Self.matches(#"<tool-use-id>([^<]+)</tool-use-id>"#, in: text).map { (id: $0, failed: failed) }
+        }
     }
     /// Every string on one record that could carry a completion notice.
     private static func noticeTexts(in value: [String: Any]) -> [String] {
