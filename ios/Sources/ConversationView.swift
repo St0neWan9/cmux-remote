@@ -486,7 +486,10 @@ struct ConversationView: View {
         } label: {
             Image(systemName: "arrow.down")
         }
-        .buttonStyle(FloatingIconStyle()).accessibilityLabel(String(localized: "chat.latest"))
+        .floatingIconButton().accessibilityLabel(String(localized: "chat.latest"))
+        // A tap that lands just outside a 44-point circle is a tap on the page; this keeps the whole visible
+        // control, and a little more, his to press.
+        .contentShape(Circle().inset(by: -8))
         .accessibilityIdentifier("chat.latest").padding(.bottom, 10)
     }
     /// The menu's refresh redials a link that may be dead before reading, and shows the dial while it happens.
@@ -498,7 +501,7 @@ struct ConversationView: View {
     private var header: some View {
         HStack(spacing: 12) {
             Button { dismiss() } label: { Image(systemName: "chevron.left") }
-                .buttonStyle(FloatingIconStyle()).accessibilityLabel(String(localized: "chat.back")).accessibilityIdentifier("chat.back")
+                .floatingIconButton().accessibilityLabel(String(localized: "chat.back")).accessibilityIdentifier("chat.back")
             VStack(alignment: .leading, spacing: 3) {
                 Text(model.session.title).font(.subheadline.weight(.semibold)).lineLimit(1)
                 AgentModelMenu(subtitle: [model.session.agent.capitalized, model.modelLabel ?? "", hostName].filter { !$0.isEmpty }.joined(separator: " · "),

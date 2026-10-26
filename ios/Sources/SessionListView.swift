@@ -235,11 +235,11 @@ struct SessionListView: View {
             if showSearch || !query.isEmpty {
                 SessionSearchField(query: $query, focusOnAppear: true)
                 Button { showSearch = false; query = "" } label: { Image(systemName: "xmark") }
-                    .buttonStyle(FloatingIconStyle()).accessibilityLabel(String(localized: "sessions.close_search")).accessibilityIdentifier("sessions.search.close")
+                    .floatingIconButton().accessibilityLabel(String(localized: "sessions.close_search")).accessibilityIdentifier("sessions.search.close")
             } else {
                 Button { model.sidebarOpen = true } label: {
                     Image(systemName: "line.3.horizontal")
-                }.buttonStyle(FloatingIconStyle()).accessibilityLabel(String(localized: "sessions.sidebar")).accessibilityIdentifier("sessions.sidebar")
+                }.floatingIconButton().accessibilityLabel(String(localized: "sessions.sidebar")).accessibilityIdentifier("sessions.sidebar")
                 Spacer(minLength: 0)
                 SessionTitleMenu(sortMode: $sortMode,
                                  feeds: pendingHosts(model.links), canStart: !model.startTargets.isEmpty,
@@ -250,7 +250,7 @@ struct SessionListView: View {
                 Spacer(minLength: 0)
                 Button { showSearch = true } label: {
                     Image(systemName: "magnifyingglass")
-                }.buttonStyle(FloatingIconStyle()).accessibilityLabel(String(localized: "sessions.search")).accessibilityIdentifier("sessions.search")
+                }.floatingIconButton().accessibilityLabel(String(localized: "sessions.search")).accessibilityIdentifier("sessions.search")
             }
         }.padding(.horizontal, MobileDesign.pageInset).padding(.vertical, 10)
     }
