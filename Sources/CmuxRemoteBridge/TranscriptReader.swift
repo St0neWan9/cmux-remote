@@ -37,6 +37,8 @@ public actor TranscriptReader {
     /// answered from this cache.
     private var launches: [String: [BackgroundTaskTracker.Launch]] = [:]
     private static let capacity = 32
+    /// How long a retried background agent's own record counts as proof that it is running again.
+    private static let resumeWindow: TimeInterval = 900
     /// A Monitor's deadline passes while its record stays unchanged, so running is decided at read time.
     private let now: @Sendable () -> Date
     public init(windowLimit: Int = 33_554_432, windowStep: Int = 8_388_608, now: @escaping @Sendable () -> Date = { Date() }) {
@@ -56,9 +58,10 @@ public actor TranscriptReader {
               let modified = attributes[.modificationDate] as? Date else { return nil }
         let inode = "\(attributes[.systemFileNumber] ?? "unknown")"
         guard cached.inode == inode, cached.size == size, cached.modified == modified else { return nil }
-        // A Monitor's deadline changes the answer while the file stays still.
+        // A Monitor's deadline changes the answer while the file stays still, and so does a retried agent
+        // whose sidecar record came back to life.
         let moment = now()
-        let running = (launches[path] ?? []).filter { $0.isRunning(at: moment) }.count
+        let running = runningTasks(path: path, at: moment).count
         return "\(cached.generation.uuidString):\(inode):\(size):\(modified.timeIntervalSinceReferenceDate):\(running)"
     }
 
@@ -254,8 +257,40 @@ public actor TranscriptReader {
     /// This record's tasks still running now; none once the agent that owned them has ended.
     private func runningTasks(_ path: String, reports: Bool) -> [BackgroundAgentTask] {
         guard reports else { return [] }
-        let moment = now()
-        return (launches[path] ?? []).filter { $0.isRunning(at: moment) }.map(\.task)
+        return runningTasks(path: path, at: now())
+    }
+    /// Every detached task the record leaves in flight: launches no notice ended, plus failures the agent
+    /// has retried.
+    private func runningTasks(path: String, at moment: Date) -> [BackgroundAgentTask] {
+        var tasks = (launches[path] ?? []).filter { $0.isRunning(at: moment) }.map(\.task)
+        if let state = observations[path]?.trackerState {
+            for task in resumedTasks(path: path, state: state, at: moment) where !tasks.contains(where: { $0.id == task.id }) {
+                tasks.append(task)
+            }
+        }
+        return tasks.sorted { $0.id < $1.id }
+    }
+    /// Background agents a failure notice ended that are writing their own record again.
+    ///
+    /// Claude Code retries an agent that died on an API error without appending a new launch row, so the
+    /// conversation still ends at the failure and the phone would hide a task the TUI shows running. The
+    /// retry keeps writing `subagents/agent-<taskID>.jsonl` beside the session, and a record touched after
+    /// the notice is the only evidence it left.
+    private func resumedTasks(path: String, state: BackgroundTaskTracker.State, at moment: Date) -> [BackgroundAgentTask] {
+        let file = path.hasSuffix("\u{0}sidechain") ? String(path.dropLast("\u{0}sidechain".count)) : path
+        let session = URL(fileURLWithPath: file).deletingPathExtension()
+        var tasks: [BackgroundAgentTask] = []
+        for (toolUseID, settled) in state.failed {
+            guard let taskID = state.taskIDByToolUse[toolUseID] else { continue }
+            let record = session.appendingPathComponent("subagents/agent-\(taskID).jsonl").path
+            guard let attributes = try? FileManager.default.attributesOfItem(atPath: record),
+                  let modified = attributes[.modificationDate] as? Date else { continue }
+            // A record written at failure time is the task that just died, not a retry.
+            if let at = settled.at, modified <= at.addingTimeInterval(1) { continue }
+            guard moment.timeIntervalSince(modified) < Self.resumeWindow else { continue }
+            tasks.append(settled.launch.task)
+        }
+        return tasks
     }
     /// Read a tool's complete supported text without inflating ordinary history snapshots.
     public func toolText(path: String, agent: String, messageID: String, generation: String,
