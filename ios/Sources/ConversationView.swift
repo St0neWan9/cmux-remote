@@ -56,6 +56,11 @@ struct ConversationView: View {
     init(model: ConversationModel, hostName: String = "") {
         _model = State(initialValue: model); self.hostName = hostName
     }
+    /// The first history read has not answered yet: the page is loading, not empty.
+    ///
+    /// Drawn as a centred overlay instead of a row, because the empty timeline's blank tail rests an only row
+    /// against the composer, where the label would sit half under it.
+    private var showsInitialLoading: Bool { model.messages.isEmpty && model.error == nil && model.historyGeneration == nil }
     var body: some View {
         timelineScroller()
         .background(Color.white.ignoresSafeArea())
@@ -187,7 +192,7 @@ struct ConversationView: View {
         // The blank tail goes above the rows while the page shows its end: a conversation shorter than the
         // page then rests against the composer. A prompt this phone sent takes the tail below itself instead,
         // so the reply grows into the room under it; the total is the same either way, so the page does not move.
-        if tailFirst { Color.clear.frame(height: max(0, bottom - timelineContentHeight)) }
+        if tailFirst && !showsInitialLoading { Color.clear.frame(height: max(0, bottom - timelineContentHeight)) }
         // The rows' own height, measured where nothing else can stretch it.
         LazyVStack(alignment: .leading, spacing: 6) {
             if model.hasMore {
@@ -203,10 +208,8 @@ struct ConversationView: View {
                     .onDisappear { topNear = false }
             }
             else if model.clipped { Text(String(localized: "chat.clipped")).font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: .infinity).padding(.top, 12).accessibilityIdentifier("chat.clipped") }
-            if model.messages.isEmpty && model.error == nil {
-                // Until the first history read returns, an empty list means "loading", not "no conversation".
-                if model.historyGeneration == nil { ProgressView(String(localized: "chat.loading")).frame(maxWidth: .infinity).padding(.top, 40) }
-                else { ContentUnavailableView(String(localized: "chat.empty"), systemImage: "bubble.left.and.bubble.right") }
+            if model.messages.isEmpty && model.error == nil && !showsInitialLoading {
+                ContentUnavailableView(String(localized: "chat.empty"), systemImage: "bubble.left.and.bubble.right")
             }
             ForEach(model.timelineItems) { item in
                 timelineRow(item, firstResponse: firstResponse, lastResponse: lastResponse, imagesByMessage: imagesByMessage, activeAnchor: activeAnchor, runningSince: runningSince, bottom: bottom)
@@ -379,6 +382,13 @@ struct ConversationView: View {
             .overlay(alignment: .bottom) {
                 if !latestVisible && (!atLatest || pinnedSent != nil) {
                     latestButton(proxy)
+                }
+            }
+            // The first read's spinner sits in the middle of the page, not in the timeline: a timeline holding a
+            // single row would rest it against the composer, half under it.
+            .overlay {
+                if showsInitialLoading {
+                    ProgressView(String(localized: "chat.loading")).frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
             .onChange(of: model.timelineItems.last?.id) { _, _ in
