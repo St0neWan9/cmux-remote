@@ -12,14 +12,14 @@ final class MobileTuiQuestionUITests: XCTestCase {
         guard let bootstrap = ProcessInfo.processInfo.environment["CMUX_REMOTE_TUI_QUESTION_BOOTSTRAP"], !bootstrap.isEmpty else {
             throw XCTSkip("Run against a cmux-tui daemon with an Agent waiting on a question.")
         }
-        let enrolling = XCUIApplication(bundleIdentifier: "com.st0newan9.cmux-remote")
+        let enrolling = XCUIApplication(bundleIdentifier: "cmux-remote.mobile")
         enrolling.launchEnvironment["CMUX_REMOTE_TEST_ENROLLMENT_PATH"] = bootstrap
         enrolling.launchArguments = ["-AppleLanguages", "(zh-Hans)"]
         enrolling.launch()
         Thread.sleep(forTimeInterval: 15)
         enrolling.terminate()
 
-        let app = XCUIApplication(bundleIdentifier: "com.st0newan9.cmux-remote")
+        let app = XCUIApplication(bundleIdentifier: "cmux-remote.mobile")
         app.launchArguments = ["-AppleLanguages", "(zh-Hans)"]
         app.launch()
         // CMUX_REMOTE_TUI_QUESTION_SESSION names the waiting conversation exactly; an earlier probe has the same title.

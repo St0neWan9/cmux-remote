@@ -5,7 +5,7 @@ source_app="$PWD/.build/macos/Build/Products/Debug/CmuxRemote.app"
 destination="${CMUX_REMOTE_MAC_DESTINATION:-$HOME/Applications/CmuxRemote.app}"
 # Earlier installs used other bundle names; retire only those exact bundles of this app.
 legacy_apps=("$HOME/Applications/CmuxRemoteMac.app" "$HOME/Applications/Cmux Remote.app")
-expected="com.st0newan9.cmux-remote.mac"
+expected="cmux-remote.desktop"
 test -d "$source_app" || { echo "Run scripts/build-macos.sh first." >&2; exit 1; }
 test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$source_app/Contents/Info.plist")" = "$expected"
 if [[ -e "$destination" ]]; then
