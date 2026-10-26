@@ -20,14 +20,14 @@ struct WhitePage<Content: View>: View {
                     if dismissal == .back {
                         Button { if let back { back() } else { dismiss() } } label: {
                             Image(systemName: "chevron.left")
-                        }.buttonStyle(FloatingIconStyle()).accessibilityLabel(String(localized: "page.back"))
+                        }.floatingIconButton().accessibilityLabel(String(localized: "page.back"))
                             .accessibilityIdentifier("page.back")
                     } else { Color.clear.frame(width: 44, height: 44) }
                     Text(title).font(.headline).multilineTextAlignment(.center).lineLimit(2).frame(maxWidth: .infinity)
                     if dismissal == .close {
                         Button { if let back { back() } else { dismiss() } } label: {
                             Image(systemName: "xmark")
-                        }.buttonStyle(FloatingIconStyle()).accessibilityLabel(String(localized: "page.close"))
+                        }.floatingIconButton().accessibilityLabel(String(localized: "page.close"))
                             .accessibilityIdentifier("page.close")
                     } else { Color.clear.frame(width: 44, height: 44) }
                 }.padding(.horizontal, MobileDesign.pageInset).padding(.vertical, 8).background(Color.white)
