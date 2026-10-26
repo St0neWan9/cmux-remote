@@ -42,7 +42,7 @@ Immediate Bridge restart after an active HTTPS connection originally failed with
 
 The independent Mac containing app and public sidebar extension compile with the
 Swift 6 toolchain on Apple Silicon. Deep/strict code-signature checks pass and
-`pluginkit` registers one `com.st0newan9.cmux-remote.mac.sidebar` extension under
+`pluginkit` registers one `cmux-remote.desktop.sidebar` extension under
 the official production extension point. Official cmux was not modified,
 restarted, or re-signed; its selected sidebar was not changed.
 

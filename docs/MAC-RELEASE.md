@@ -59,7 +59,7 @@ These are secrets of the `testflight` GitHub environment, which only `main` and
 | `CMUX_REMOTE_MAC_CERT_PASSWORD` | P12 password |
 | `CMUX_REMOTE_IOS_API_KEY_B64`, `_KEY_ID`, `_ISSUER` | App Store Connect API key, reused for `notarytool` |
 
-The Developer ID certificate is issued to the owner team `UUHLDZ2S48`. Creating
+The Developer ID certificate is issued to the owner team `7G42499LWB`. Creating
 one requires the Account Holder. Keep the private key and P12 outside Git.
 
 ## Local packaging

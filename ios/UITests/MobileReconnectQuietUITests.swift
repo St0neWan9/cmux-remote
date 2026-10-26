@@ -11,7 +11,7 @@ final class MobileReconnectQuietUITests: XCTestCase {
             throw XCTSkip("Run with the two-Mac reconnect host script.")
         }
         for mac in ["a", "b"] {
-            let app = XCUIApplication(bundleIdentifier: "com.st0newan9.cmux-remote")
+            let app = XCUIApplication(bundleIdentifier: "cmux-remote.mobile")
             app.launchEnvironment["CMUX_REMOTE_TEST_ENROLLMENT_PATH"] = "\(root)/\(mac)/bootstrap.json"
             app.launchArguments = ["-AppleLanguages", "(zh-Hans)"]
             app.launch()
@@ -21,7 +21,7 @@ final class MobileReconnectQuietUITests: XCTestCase {
         FileManager.default.createFile(atPath: "\(root)/kill-b", contents: Data())
         Thread.sleep(forTimeInterval: 4)
 
-        let app = XCUIApplication(bundleIdentifier: "com.st0newan9.cmux-remote")
+        let app = XCUIApplication(bundleIdentifier: "cmux-remote.mobile")
         app.launchArguments = ["-AppleLanguages", "(zh-Hans)"]
         app.launch()
         let started = Date()
