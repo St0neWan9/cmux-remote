@@ -20,3 +20,19 @@ struct FloatingIconStyle: ButtonStyle {
         }
     }
 }
+
+/// The same look for a control that is not a `Button` (a `Menu` label, an icon inside a row): the system's glass on
+/// iOS 26, the app's white circle on older systems.
+struct FloatingGlassCircle: ViewModifier {
+    var size: CGFloat = MobileDesign.controlHeight
+    func body(content: Content) -> some View {
+        Group {
+            if #available(iOS 26.0, *) {
+                content.frame(width: size, height: size).glassEffect(.regular.interactive(), in: .circle)
+            } else {
+                content.frame(width: size, height: size).background(Color.white, in: Circle())
+                    .shadow(color: MobileDesign.shadow, radius: 12, y: 3)
+            }
+        }
+    }
+}
