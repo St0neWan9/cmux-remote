@@ -70,14 +70,40 @@ for binary in "$main_binary" "$helper"; do
   fi
 done
 
+# One field of a notary JSON answer, or empty when the answer is not JSON: a dropped connection or a
+# timeout message used to fail the whole packaging run with a decoder traceback.
+notary_field() {
+  local name="$1" text="$2"
+  python3 -c '
+import json, sys
+try:
+    value = json.loads(sys.stdin.read())
+except (ValueError, UnicodeDecodeError):
+    value = {}
+print((value or {}).get(sys.argv[1], "") if isinstance(value, dict) else "")
+' "$name" <<<"$text" 2>/dev/null || true
+}
+
+# Submit, then poll: `--wait` gives up on Apple's queue after half an hour and answers with a timeout
+# message instead of a status, which is a slow submission — not a failed one.
 submit() {
-  local result status id
-  result="$(xcrun notarytool submit "$1" "${notary[@]}" --wait --timeout 30m --output-format json)" || true
-  status="$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("status",""))' <<<"$result")"
-  id="$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("id",""))' <<<"$result")"
-  echo "Notarization $id: $status"
+  local id status answer deadline=$((SECONDS + 1800))
+  answer="$(xcrun notarytool submit "$1" "${notary[@]}" --output-format json 2>&1 || true)"
+  id="$(notary_field id "$answer")"
+  status="$(notary_field status "$answer")"
+  if [[ -z "$id" ]]; then
+    echo "Notarization submission failed: $(head -c 400 <<<"$answer" | tr '\n' ' ')" >&2
+    exit 1
+  fi
+  while [[ "$status" != "Accepted" && "$status" != "Invalid" && "$status" != "Rejected" && "$SECONDS" -lt "$deadline" ]]; do
+    sleep 15
+    answer="$(xcrun notarytool info "$id" "${notary[@]}" --output-format json 2>&1 || true)"
+    status="$(notary_field status "$answer")"
+  done
+  echo "Notarization $id: ${status:-still in progress}"
   if [[ "$status" != "Accepted" ]]; then
-    [[ -n "$id" ]] && xcrun notarytool log "$id" "${notary[@]}" || true
+    # A log only exists once Apple finished judging the submission.
+    [[ "$status" == "Invalid" || "$status" == "Rejected" ]] && xcrun notarytool log "$id" "${notary[@]}" || true
     exit 1
   fi
 }
