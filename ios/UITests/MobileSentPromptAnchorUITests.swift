@@ -8,7 +8,7 @@ final class MobileSentPromptAnchorUITests: XCTestCase {
         guard let pairingPath = ProcessInfo.processInfo.environment["CMUX_REMOTE_TEST_PAIRING_PATH"], !pairingPath.isEmpty else {
             throw XCTSkip("Supply an isolated fixture pairing file to send without real sessions.")
         }
-        let app = XCUIApplication(bundleIdentifier: "com.st0newan9.cmux-remote")
+        let app = XCUIApplication(bundleIdentifier: "cmux-remote.mobile")
         app.launchEnvironment["CMUX_REMOTE_TEST_PAIRING_PATH"] = pairingPath
         app.launchArguments = ["-AppleLanguages", "(zh-Hans)"]
         app.launch()
