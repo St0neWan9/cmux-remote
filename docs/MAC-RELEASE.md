@@ -64,15 +64,20 @@ one requires the Account Holder. Keep the private key and P12 outside Git.
 
 ## Local packaging
 
-Run the same scripts with local files instead of Base64 secrets:
+`scripts/package-macos-local.sh` runs the same signing and packaging with local files instead of the
+Base64 secret bundle:
 
 ```sh
-CMUX_REMOTE_MAC_CERT_P12_PATH=/path/developer-id.p12 \
-CMUX_REMOTE_MAC_CERT_PASSWORD_PATH=/path/developer-id.p12.password \
-CMUX_REMOTE_NOTARY_KEY_PATH=/path/AuthKey_XXXX.p8 \
-CMUX_REMOTE_NOTARY_KEY_ID=XXXX CMUX_REMOTE_NOTARY_ISSUER=ISSUER-UUID \
-python3 scripts/with-macos-signing.py scripts/package-macos.sh --version=0.1.0 --notarize
+scripts/package-macos-local.sh \
+  --p12 /path/developer-id.p12 --p12-password-file /path/developer-id.p12.password \
+  --notary-key /path/AuthKey_XXXX.p8 --notary-key-id XXXX \
+  --notary-issuer ISSUER-UUID --version=0.1.0 --build-number=1 --notarize
 ```
+
+Every path is absolute and read only by `scripts/with-macos-signing.py`, which imports the certificate
+into a throwaway keychain and deletes it afterwards; nothing secret is printed. The flags have
+`CMUX_REMOTE_MAC_CERT_P12_PATH`, `CMUX_REMOTE_MAC_CERT_PASSWORD_PATH`, `CMUX_REMOTE_NOTARY_KEY_PATH`,
+`CMUX_REMOTE_NOTARY_KEY_ID` and `CMUX_REMOTE_NOTARY_ISSUER` as environment equivalents.
 
 Omit `--notarize` for a signed but unnotarized local build; Gatekeeper will
 reject it on other Macs. Artifacts are written to `.build/macos-release/dist`.
