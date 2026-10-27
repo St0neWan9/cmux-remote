@@ -1,5 +1,5 @@
 import os
 
 extension Logger {
-    static let clientLink = Logger(subsystem: "com.st0newan9.cmux-remote", category: "link")
+    static let clientLink = Logger(subsystem: "cmux-remote", category: "link")
 }
