@@ -144,6 +144,19 @@ final class AppModel {
         catch { self.error = ErrorPresentation().message(error) }
     }
     func discover() async {
+        #if DEBUG
+        // Screenshot and UI runs need a deterministic list: the real one names whatever Macs are on the
+        // network, which must not end up in a store listing.
+        if let path = ProcessInfo.processInfo.environment["CMUX_REMOTE_TEST_NEARBY_PATH"],
+           let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
+           let entries = try? JSONDecoder().decode([TestNearbyEntry].self, from: data) {
+            discovered = entries.map { entry in
+                let host = HostIdentity(id: entry.id, publicKey: entry.id, certificateSHA256: entry.id, name: entry.name)
+                return DiscoveredBridge(host: host, service: .hostPort(host: .ipv4(.loopback), port: 1))
+            }
+            return
+        }
+        #endif
         defer { discovery.stop() }
         for await values in discovery.start() {
             guard !Task.isCancelled else { break }; discovered = values
@@ -442,3 +455,11 @@ final class AppModel {
         if links.isEmpty { enrollmentGeneration = UUID(); stopEnrollmentMonitor() }
     }
 }
+
+#if DEBUG
+/// One entry of the test-only nearby list read from `CMUX_REMOTE_TEST_NEARBY_PATH`.
+struct TestNearbyEntry: Decodable {
+    let id: String
+    let name: String
+}
+#endif
