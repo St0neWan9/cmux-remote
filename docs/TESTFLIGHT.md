@@ -156,8 +156,10 @@ guards. Future uploads must use an unused build number.
 ## Checking build status locally
 
 `scripts/testflight-status.py` lists the app's latest builds with their processing and
-internal/external TestFlight state. It reads a local App Store Connect API key from
-`~/.appstoreconnect/config.json` (`key_id`, `issuer_id`, `key_path` to an owner-only
-`.p8`); the key never enters this repository. Uploads use `skip_waiting_for_build_processing`,
+internal/external TestFlight state. It reads the same App Store Connect API key the release
+uses, `~/.cmux-remote-release/huiyuanjia/notary.json` (`key_id`, `issuer_id`, `key_path` to an
+owner-only `.p8`); `CMUX_REMOTE_ASC_CONFIG` names another. The key never enters this
+repository. A key from the retired account sees none of this app's builds, so an empty list
+means the wrong key. Uploads use `skip_waiting_for_build_processing`,
 so a successful workflow means "uploaded", not "installable": wait until the build shows
 `processing=VALID` and `internal=IN_BETA_TESTING`.
