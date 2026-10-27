@@ -10,6 +10,10 @@ final class MobileStoreScreenshotsUITests: XCTestCase {
         let app = XCUIApplication(bundleIdentifier: "cmux-remote.mobile")
         app.launchEnvironment["CMUX_REMOTE_TEST_PAIRING_PATH"] = pairingPath
         app.launchArguments = ["-AppleLanguages", "(en)"]
+        // A listing must not name the Macs that happen to be on this network; the fixture supplies the list.
+        if let nearby = ProcessInfo.processInfo.environment["CMUX_REMOTE_TEST_NEARBY_PATH"], !nearby.isEmpty {
+            app.launchEnvironment["CMUX_REMOTE_TEST_NEARBY_PATH"] = nearby
+        }
         app.launch()
         XCTAssertTrue(app.buttons["sessions.sidebar"].waitForExistence(timeout: 15))
         capture(app, "01-sessions")
