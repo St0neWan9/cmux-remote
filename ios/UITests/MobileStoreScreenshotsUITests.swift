@@ -21,22 +21,25 @@ final class MobileStoreScreenshotsUITests: XCTestCase {
         app.scrollViews.firstMatch.swipeDown(velocity: .slow)
         sleep(2)
         capture(app, "02-conversation")
-        let image = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "image.history.")).firstMatch
-        if image.waitForExistence(timeout: 5) {
-            image.tap()
-            XCTAssertTrue(app.buttons["page.back"].waitForExistence(timeout: 8))
-            sleep(2)
-            capture(app, "03-image")
-            app.buttons["page.back"].tap()
-            XCTAssertTrue(app.buttons["chat.back"].waitForExistence(timeout: 8))
-        }
-        app.buttons["chat.more"].tap()
-        app.buttons["chat.feed"].tap()
-        XCTAssertTrue(app.buttons["page.back"].waitForExistence(timeout: 8))
+        // The detached tasks sit above the input box; open them to name each one.
+        app.scrollViews.firstMatch.swipeUp(velocity: .slow)
+        sleep(1)
+        app.scrollViews.firstMatch.swipeUp(velocity: .slow)
         sleep(2)
-        capture(app, "04-questions")
-        app.buttons["page.back"].tap()
-        XCTAssertTrue(app.buttons["chat.back"].waitForExistence(timeout: 8))
+        let bar = app.buttons["chat.background"]
+        XCTAssertTrue(bar.waitForExistence(timeout: 5), "The conversation shows no background tasks")
+        capture(app, "03-background-bar")
+        bar.tap()
+        sleep(2)
+        capture(app, "04-background-list")
+        app.buttons["chat.back"].tap()
+        XCTAssertTrue(app.buttons["sessions.sidebar"].waitForExistence(timeout: 8))
+        app.buttons["sessions.sidebar"].tap()
+        let addDevice = app.buttons["sidebar.add_device"]
+        XCTAssertTrue(addDevice.waitForExistence(timeout: 5))
+        addDevice.tap()
+        sleep(3)
+        capture(app, "05-add-a-mac")
     }
     private func capture(_ app: XCUIApplication, _ name: String) {
         let attachment = XCTAttachment(screenshot: app.screenshot())
