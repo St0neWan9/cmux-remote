@@ -1,83 +1,183 @@
-# cmux-remote
+# CmuxRemote
 
-An independent Mac companion and native iPhone app for the official cmux application and its local cmux-tui daemons. Pair over your local network, read existing Claude/Codex conversations, see a live text preview, send prompts, stop work, answer supported Feed approvals, and inspect project changes and files. No cmux cloud account is involved.
+Read, reply to and steer the coding agent running in your Mac terminal — from
+your iPhone.
 
-The phone receives structured chat data. It does not render a terminal. cmux continues owning the agents and terminals; this project does not connect to Claude or Codex APIs.
+CmuxRemote is an independent companion for the free, open-source
+[cmux](https://cmux.com) terminal. It pairs with one Mac, shows the conversation
+that Mac is having, and lets you answer what the agent asks while you are away
+from the desk. There is no account, no analytics, and no server run by this
+project: the phone talks to your Mac over your local network, or through a
+Cloudflare relay you deploy to your own account.
 
-## Build and run
+CmuxRemote is not an official cmux product.
 
-Requires macOS 14+ and Swift 6. The iPhone app requires iOS 17+.
+<p align="center">
+  <img src="docs/images/phone-sessions.png" width="220" alt="Workspaces and conversations">
+  <img src="docs/images/phone-conversation.png" width="220" alt="A live conversation">
+  <img src="docs/images/phone-questions.png" width="220" alt="Answering the agent">
+  <img src="docs/images/phone-image.png" width="220" alt="Image preview">
+</p>
 
-```sh
-swift build
-.build/debug/cmux-remote serve --pair
-```
+## What you get
 
-`serve --pair` opens a short-lived enrollment window and displays a QR code. Scan it in the iPhone app, then approve that exact device on the Mac. The QR supplies host identity and certificate trust; it no longer contains a permanent shared token. The phone saves its own private identity and signed grant. Bonjour finds nearby Bridges, while QR and manual entry remain available when discovery is unavailable.
+- **Live conversation** — replies, tool calls, diffs and images as they happen.
+- **Send prompts and stop work** — with the same agent and the same terminal.
+- **Answer questions** — the questions and permission prompts the agent raises
+  arrive as cards you can act on.
+- **Background agents** — see what is still running, including agents that
+  recovered after an error.
+- **Switch the model** — from the conversation header, using the agent's own
+  picker.
+- **Images** — preview screenshots and pinch to zoom.
 
-```sh
-.build/debug/cmux-remote enrollment pending
-.build/debug/cmux-remote enrollment approve REQUEST_ID --workspace WORKSPACE_UUID --control
-.build/debug/cmux-remote clients list
-.build/debug/cmux-remote clients revoke CLIENT_ID
-```
+The phone shows structured chat data; it is not a terminal, and it never talks
+to an AI provider itself. cmux keeps owning the agents and terminals.
 
-Each device has separately revocable access to explicitly approved workspaces. Omit `--control` for viewing-only access. The new protocol is documented in [Connection v2](docs/CONNECTION-V2.md), including bootstrap verification, owner commands, per-request signatures, endpoint relocation and legacy migration. `serve --legacy` is an explicit migration mode; ordinary v2 enrollment never promotes an old shared token.
+## What you need
 
-For the desktop backend, open official cmux and run the Bridge **inside a cmux terminal**. The default `cmuxOnly` socket mode rejects processes started outside cmux, including the bundled CLI. `--socket`, `CMUX_SOCKET_PATH` and `--cli` can select the installed socket/CLI; they do not bypass its access policy. The Bridge never changes socket settings. Agent input uses the existing official cmux session, and no provider connection is created by this app.
+| | |
+| --- | --- |
+| Mac | macOS 14 Sonoma or later |
+| cmux | the official app, installed and running |
+| iPhone | iOS 18 or later |
 
-The same Bridge automatically discovers local same-user cmux-tui daemons, including terminals opened by managed `cmux ssh` from another Mac. Both backends appear together without a mode switch. A daemon-only host does not need a local desktop cmux instance. Use `--tui-socket /absolute/path/to/daemon.sock` for custom socket locations. [Daemon adapter](docs/CMUX-TUI-ADAPTER.md) documents discovery, images, interruptions and the limited recognized permission prompts.
+## Install
 
-Generate and build the phone project:
+### 1. cmux on your Mac
 
-```sh
-python3 scripts/generate-ios-project.py
-scripts/build-ios.sh
-open ios/CmuxRemote.xcodeproj
-```
+CmuxRemote drives the official cmux app, so install that first:
 
-The project defaults to the owner's Apple team; choose your own signing team for
-a fork or physical iPhone installation. There is no dependency on cmux's iOS app
-or signing identity. [TestFlight packaging](docs/TESTFLIGHT.md) covers the signed
-IPA and manual GitHub Actions upload workflow.
+- Download: <https://cmux.com> or the [cmux repository](https://github.com/manaflow-ai/cmux)
+- Open cmux once and start a session, so it creates its own socket.
 
-The signed and notarized Mac menu bar app is published on
-[GitHub Releases](https://github.com/St0neWan9/cmux-remote/releases); see
-[Mac release packaging](docs/MAC-RELEASE.md).
+### 2. CmuxRemote for Mac (the menu bar app)
 
-## Design and verification
+- Download the latest `CmuxRemote-<version>.dmg` from
+  [Releases](https://github.com/St0neWan9/cmux-remote/releases).
+- Open the disk image, drag **CmuxRemote** to *Applications*, and launch it.
+  It lives in the menu bar, with no Dock icon.
+- The download is signed with a Developer ID and notarized by Apple. If you
+  already have an older copy, quit it first and replace it.
+- Verify the download against `SHA256SUMS.txt` in the same release if you like.
 
-- [Detailed design](docs/DESIGN.md)
-- [API and source mapping](docs/API.md)
-- [Local cmux-tui daemon adapter](docs/CMUX-TUI-ADAPTER.md)
-- [Unified WebSocket and Cloudflare relay — implementation status](docs/WEBSOCKET-RELAY.md)
-- [Cloudflare setup and local relay checks](cloudflare/README.md)
-- [Development and validation](docs/DEVELOPMENT.md)
-- [Native Remote groups and terminal mirrors](docs/MAC-EXTENSION.md)
-- [Planned shared discovery, enrollment, and Mac mirroring](docs/UNIFIED-CONNECTION-PLAN.md)
+The app only does something once you turn on sharing — it never modifies cmux,
+its socket settings, or an installed cmux copy.
 
-LAN discovery and per-client authorization are shared by the iPhone client and
-the Mac Companion. A public sidebar extension and snapshot-based terminal mirror
-are available as a development implementation; see the Mac guide for build,
-enrollment and capability requirements. Native/lossless mirror parity and a
-physical two-Mac acceptance run are not established by the package tests.
+### 3. The iPhone app
 
-Run `scripts/verify.sh` for package tests and build. The first implementation is a development baseline, not a promise of complete provider-version compatibility. Live screen extraction is a best-effort preview; transcript messages replace it when committed. Historical sessions without a verified live surface are read-only. Codex Feed actions only work when cmux exposes an actionable request.
+- **TestFlight** — builds are distributed to testers on TestFlight. Ask for an
+  invitation, or use the public link once one is published.
+- **App Store** — in progress.
+- **From source** — see [Build from source](#build-from-source); Xcode 26 and an
+  Apple ID with an iOS development team are enough for your own device.
+
+## Pair your iPhone
+
+1. On the Mac, open **CmuxRemote** in the menu bar → **Share This Mac**, and
+   turn sharing on.
+2. Open **Add a device** and start pairing; a QR code appears.
+3. On the iPhone, open CmuxRemote, scan the code, then approve that exact device
+   on the Mac. Every device is listed under **Devices** and can be revoked on its
+   own.
+4. Choose which workspaces the device may read. Sharing a folder under **Shared
+   folders** makes it available to new sessions from the phone.
+
+The QR code carries the Mac's identity and certificate trust, not a permanent
+password: each device keeps its own key and signed grant. Bonjour finds a nearby
+Mac automatically; the QR and manual entry are the fallback.
+
+## Use it
+
+- Open the sidebar to switch between Macs, workspaces and conversations.
+- Tap a conversation to read it, type a prompt at the bottom, or press stop.
+- A pending decision appears at the top of the list; open it to answer or to
+  allow one action.
+- Tap an image to open it, pinch to zoom, double tap to fill the screen.
+- The header's model menu switches the agent's model the same way the terminal
+  would.
+
+## Optional: your own Cloudflare relay
+
+Sharing works on the local network with no extra setup. To reach the Mac from
+another network, deploy a relay **to your own Cloudflare account** — this
+project ships no relay service and no shared address.
+
+1. Install Node.js and log in to Cloudflare:
+
+   ```sh
+   cd cloudflare
+   npm ci
+   npx wrangler login
+   ```
+
+2. From the repository root, deploy and store a registration key:
+
+   ```sh
+   scripts/deploy-relay.sh ~/.local/state/cmux-remote/relay-registration-key
+   ```
+
+   The script generates the key if it does not exist, deploys the Worker, stores
+   the key as a Worker secret, and prints the Worker's HTTPS origin.
+
+3. On the Mac, open **CmuxRemote → Share This Mac** and fill **Cloud relay** with
+   that origin and the key file path, then save and restart sharing. The same
+   pairing works for both LAN and relay.
+
+See [cloudflare/README.md](cloudflare/README.md) for limits, costs and local
+verification.
 
 ## Troubleshooting
 
-### Phone disconnects while the Mac display is off
+### The phone loses the Mac while its display is off
 
 macOS App Nap freezes cmux when its windows are occluded and the display is
-asleep, so the bridge's local cmux RPC calls hang and the phone sees no data
-until the display wakes. Disable App Nap for cmux and restart it:
+asleep. Disable App Nap for cmux and restart it:
 
 ```sh
 defaults write com.cmuxterm.app NSAppSleepDisabled -bool YES
 ```
 
-Then quit and relaunch cmux. To revert: `defaults delete com.cmuxterm.app NSAppSleepDisabled`.
+Revert with `defaults delete com.cmuxterm.app NSAppSleepDisabled`.
+
+### The phone cannot find the Mac
+
+Check that sharing is on, that both devices are on the same network, and that
+the device is still listed under **Devices** (a revoked device cannot connect).
+With a relay, check that the Worker is deployed and that the key file matches the
+Worker secret.
+
+## Privacy
+
+No account, no analytics, no developer-run server. Pairing keys stay in the
+iPhone Keychain and on your Mac. Read the [privacy policy](docs/PRIVACY.md).
+
+## Build from source
+
+Requires macOS 14+ and Swift 6. The iPhone app needs Xcode 26.
+
+```sh
+swift build
+.build/debug/cmux-remote serve --pair      # run the Bridge inside a cmux terminal
+
+python3 scripts/generate-ios-project.py    # generate the Xcode project
+scripts/build-ios.sh                       # build for the Simulator
+```
+
+Set your own signing team in `ios/Release.json` before installing on a device.
+`scripts/verify.sh` runs the test suite. The Bridge must run inside a cmux
+terminal unless cmux's socket mode allows otherwise — the Bridge never changes
+that setting.
+
+## Documentation
+
+- [Design](docs/DESIGN.md) — protocol, authority and data ownership
+- [Connection v2](docs/CONNECTION-V2.md) — pairing, grants and signing
+- [cmux-tui daemon adapter](docs/CMUX-TUI-ADAPTER.md)
+- [WebSocket and Cloudflare relay](docs/WEBSOCKET-RELAY.md)
+- [Mac release packaging](docs/MAC-RELEASE.md) · [TestFlight packaging](docs/TESTFLIGHT.md)
+- [Development and validation](docs/DEVELOPMENT.md)
 
 ## License
 
-GPL-3.0-or-later. The pinned cmux parsing package retains its upstream copyright and license. SwiftNIO, SwiftNIO SSL and the backend-only SwiftTerm dependency retain their own licenses. This project is independent and is not an official cmux product.
+GPL-3.0. See [LICENSE](LICENSE).
