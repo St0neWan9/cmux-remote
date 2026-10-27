@@ -10,4 +10,5 @@ python3 scripts/check-phone-state.py
 python3 scripts/check-localization.py
 python3 scripts/check-macos-localization.py
 python3 scripts/check-ios-release.py
+scripts/check-signing-material.sh
 git diff --check
