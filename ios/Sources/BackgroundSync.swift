@@ -11,7 +11,7 @@ import BackgroundTasks
 /// This is a poll, not a push: the wake dials, reads and lets the app be suspended again, so a message that arrives
 /// while the app is away is read at the next wake rather than as it arrives.
 enum BackgroundSync {
-    static let identifier = "com.st0newan9.cmux-remote.sync"
+    static let identifier = "cmux-remote.sync"
     static let enabledKey = "backgroundSync"
     /// The earliest start iOS is asked for. It is a floor, not a schedule: the system may run the task later, and
     /// skips it entirely in Low Power Mode or when the app has been force quit.
