@@ -134,6 +134,10 @@ actor LinkServerSession {
         } catch is CancellationError {
             // The client cancelled this request only; the link and its other requests continue.
             BridgeLog.shared.debug("link", "link response cancelled id=\(id.prefix(8))")
+        } catch let timeout as LinkConsumerTimeout {
+            // A consumer that stopped acknowledging loses this response only. Closing the channel here used to take
+            // every other request and subscription with it, and the phone redialled over one slow read.
+            BridgeLog.shared.warning("link", "link response expired id=\(id.prefix(8)) status=\(response.status) sent=\(timeout.sent) acknowledged=\(timeout.acknowledged); the response ends, the channel stays")
         } catch {
             BridgeLog.shared.warning("link", "link response failed id=\(id.prefix(8)) status=\(response.status) reason=\(error); closing session")
             await close()
@@ -159,9 +163,10 @@ actor LinkServerSession {
             } onCancel: { Task { await self.expire(id, token: token, error: CancellationError()) } }
         }
     }
-    private func expire(_ id: String, token: UUID, error: any Error = BridgeError("socket_unavailable", "The link consumer timed out.", status: 504)) {
-        guard deliveries[id]?.token == token, let waiter = deliveries[id]?.waiter else { return }
-        deliveries[id]?.waiter = nil; waiter.resume(throwing: error)
+    private func expire(_ id: String, token: UUID, error: (any Error)? = nil) {
+        guard let item = deliveries[id], item.token == token, let waiter = item.waiter else { return }
+        deliveries[id]?.waiter = nil
+        waiter.resume(throwing: error ?? LinkConsumerTimeout(sent: item.sent, acknowledged: item.acknowledged))
     }
     private func observe(_ frame: LinkFrame, clientID: String) async {
         defer { subscriptions[frame.id] = nil }
