@@ -248,8 +248,9 @@ secrets configured, and this app's Apple record/access remains to be verified.
 
 ## First signed iPhone package — 2026-10-12
 
-The owner account registered `com.st0newan9.cmux-remote` and created the separate
-App Store Connect record **Cmux Remote Companion**, Apple ID `6821932840`.
+The owner account registered the app's first bundle ID and created a separate
+App Store Connect record for it; both are retired, see *Signing moved to the
+Huiyuan Jia record* below.
 The phone's invariant display name is **Cmux Remote** in English and Simplified
 Chinese. Its new opaque 1024-pixel icon incorporates cmux's cyan-to-violet
 chevron reference; the generation prompts and upstream provenance are recorded
