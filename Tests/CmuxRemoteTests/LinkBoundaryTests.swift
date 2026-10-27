@@ -17,7 +17,7 @@ import CmuxRemoteCore
         } catch { raw?.socket.close(); await fixture.stop(); throw error }
     }
     @Test(.timeLimit(.minutes(1)))
-    func slowConsumerDoesNotBlockOtherRequestsAndIsEventuallyDisconnected() async throws {
+    func slowConsumerLosesOnlyItsOwnResponseAndTheLinkCarriesOn() async throws {
         let fixture = try await LinkIntegrationFixture.create(text: String(repeating: "bounded ", count: 2_000), recordCount: 28)
         var raw: LinkRawConnection?
         do {
@@ -31,16 +31,14 @@ import CmuxRemoteCore
             while response.id == stalled { #expect(response.final == false); response = try await connection.next() }
             #expect(response.id == other); #expect(response.final == true)
             try await connection.ack(response)
-            // No acknowledgement for the first request: the rest of its window may still arrive, but never more,
-            // and the link then closes at the production deadline instead of buffering indefinitely.
-            var stalledChunks = 1
-            do {
-                while true {
-                    let late = try await connection.next()
-                    #expect(late.id == stalled); stalledChunks += 1
-                    if stalledChunks > LinkServerSession.chunkWindow { Issue.record("A stalled response exceeded its window"); break }
-                }
-            } catch {}
+            // No acknowledgement for the first request: its window stops there and the production deadline ends that
+            // response alone. The channel keeps its link, so the phone does not redial over one stalled read.
+            try await Task.sleep(for: .seconds(21))
+            let after = try await connection.read("/v2/sessions", connection: fixture.connection)
+            while true {
+                let frame = try await connection.next()
+                if frame.id == after, frame.final == true { break }
+            }
             connection.socket.close(); await fixture.stop()
         } catch { raw?.socket.close(); await fixture.stop(); throw error }
     }

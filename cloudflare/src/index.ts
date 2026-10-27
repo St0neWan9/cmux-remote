@@ -60,10 +60,13 @@ export class RelayRoom extends DurableObject<Env> {
         this.claimNonce("bridge:" + proof.nonce, proof.timestamp + 61, now);
         const existing = await this.ctx.storage.get<string>("hostKey");
         if (existing && existing !== proof.hostPublicKey) throw new RelayFailure("host_changed");
+        const channel = crypto.randomUUID();
         await this.ctx.storage.put("hostKey", proof.hostPublicKey);
         await this.ctx.storage.put("hostID", hostID);
+        // The room names its one live bridge by channel, so a superseded socket cannot be mistaken for it.
+        await this.ctx.storage.put("bridgeChannel", channel);
         for (const socket of this.ctx.getWebSockets()) socket.close(1012, "bridge_replaced");
-        metadata = { role: "bridge", channel: crypto.randomUUID(), ready: false, window: now, messages: 0, byteCount: 0, origin: url.origin };
+        metadata = { role: "bridge", channel, ready: false, window: now, messages: 0, byteCount: 0, origin: url.origin };
       } else if (role === "client") {
         const bridge = this.bridge(); if (!bridge) throw new RelayFailure("bridge_offline", 503);
         const owner = bridge.deserializeAttachment() as Connection;
@@ -115,7 +118,10 @@ export class RelayRoom extends DurableObject<Env> {
         if (!bridge || owner?.channel !== state.bridge) throw new RelayFailure("bridge_offline");
         bridge.send(JSON.stringify({ kind: "data", channel_id: state.channel, data: base64(message) }));
       } else {
-        if (this.bridge() !== socket || typeof message !== "string" || message.length > 3_000_000) throw new RelayFailure("invalid_bridge_packet");
+        // The current registration's own channel decides, not which socket the room's list happens to return first:
+        // a replaced bridge is told so, and the live one is never rejected for a stale sibling.
+        if (state.channel !== await this.ctx.storage.get<string>("bridgeChannel")) { socket.close(1012, "bridge_replaced"); return; }
+        if (typeof message !== "string" || message.length > 3_000_000) throw new RelayFailure("invalid_bridge_packet");
         const envelope = JSON.parse(message) as { kind: string; channel_id?: string; data?: string; revoked?: unknown[] };
         // The Bridge's liveness ping. Answering here is the only proof its registration is still this room's:
         // the WebSocket ping is answered by the edge, so a replaced room would otherwise look alive.
@@ -139,7 +145,12 @@ export class RelayRoom extends DurableObject<Env> {
         }
         if (!envelope.channel_id || !/^[0-9a-f-]{36}$/.test(envelope.channel_id)) throw new RelayFailure("invalid_channel");
         const peer = this.ctx.getWebSockets("channel:" + envelope.channel_id).find(x => x.readyState === 1 && (x.deserializeAttachment() as Connection).bridge === state.channel);
-        if (!peer) return; // A cancelled connection has no offline queue.
+        if (!peer) {
+          // Nothing offline is queued: end the channel so the Bridge frees it instead of waiting out an ack that
+          // can never arrive.
+          socket.send(JSON.stringify({ kind: "close", channel_id: envelope.channel_id }));
+          return;
+        }
         if (envelope.kind === "close") peer.close(1000, "bridge_closed");
         else if (envelope.kind === "data" && envelope.data) {
           const data = unbase64(envelope.data, 2_100_000); peer.send(data);
@@ -154,11 +165,12 @@ export class RelayRoom extends DurableObject<Env> {
     if (state?.role === "bridge") {
       const hostID = await this.ctx.storage.get<string>("hostID");
       console.log(`relay bridge-disconnected host=${hostID?.slice(0, 8) ?? "unknown"}`);
-      const replacement = this.bridge();
-      if (!replacement || (replacement.deserializeAttachment() as Connection).channel === state.channel) {
+      // Only the current registration's loss takes the room's clients with it; a socket a newer registration
+      // already replaced leaves the new bridge and its channels alone.
+      const current = await this.ctx.storage.get<string>("bridgeChannel");
+      if (current === state.channel) {
         for (const peer of this.ctx.getWebSockets("client")) if ((peer.deserializeAttachment() as Connection).bridge === state.channel) peer.close(1012, "bridge_offline");
         // An offline host leaves the directory; its next registration lists it again.
-        const hostID = await this.ctx.storage.get<string>("hostID");
         if (hostID) await directory(this.env).fetch("https://directory/remove", { method: "POST", body: JSON.stringify({ hostID }) });
       }
     } else if (state?.role === "client") {
