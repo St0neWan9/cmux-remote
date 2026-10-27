@@ -81,6 +81,38 @@ final class MobileGestureUITests: XCTestCase {
         swipeBack(app)
         XCTAssertTrue(app.buttons["sessions.sidebar"].waitForExistence(timeout: 5))
     }
+    /// The preview takes a pinch and a double tap without leaving the page or swallowing the back swipe.
+    func testImagePreviewAnswersPinchAndDoubleTap() throws {
+        guard let pairingPath = ProcessInfo.processInfo.environment["CMUX_REMOTE_TEST_PAIRING_PATH"], !pairingPath.isEmpty else {
+            throw XCTSkip("Supply an isolated fixture pairing file to test the preview without real sessions.")
+        }
+        let app = XCUIApplication(bundleIdentifier: "cmux-remote.mobile")
+        app.launchEnvironment["CMUX_REMOTE_TEST_PAIRING_PATH"] = pairingPath
+        app.launchArguments = ["-AppleLanguages", "(zh-Hans)"]
+        app.launch()
+        XCTAssertTrue(app.buttons["sessions.sidebar"].waitForExistence(timeout: 10))
+        app.buttons["sessions.sidebar"].tap()
+        app.buttons.matching(NSPredicate(format: "identifier ENDSWITH %@", "fixture-session")).firstMatch.tap()
+        XCTAssertTrue(app.buttons["chat.back"].waitForExistence(timeout: 5))
+        let image = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "image.history.")).firstMatch
+        XCTAssertTrue(image.waitForExistence(timeout: 5))
+        image.tap()
+        XCTAssertTrue(app.buttons["page.back"].waitForExistence(timeout: 5))
+        let preview = app.images.firstMatch
+        XCTAssertTrue(preview.waitForExistence(timeout: 5))
+        // Pinch the page, not the picture: XCUITest bounds a pinch by the element it is sent to, and a
+        // fitted photo is smaller than the screen.
+        let window = app.windows.firstMatch
+        window.pinch(withScale: 2, velocity: 1)
+        window.pinch(withScale: 0.5, velocity: -1)
+        preview.doubleTap()
+        preview.doubleTap()
+        capture(app, "image-zoomed")
+        // The page survived the gestures and still answers the back swipe.
+        XCTAssertTrue(app.buttons["page.back"].waitForExistence(timeout: 5))
+        swipeBack(app)
+        XCTAssertTrue(app.buttons["chat.back"].waitForExistence(timeout: 5))
+    }
     private func capture(_ app: XCUIApplication, _ name: String) {
         let attachment = XCTAttachment(screenshot: app.screenshot())
         attachment.name = name; attachment.lifetime = .keepAlways; add(attachment)
