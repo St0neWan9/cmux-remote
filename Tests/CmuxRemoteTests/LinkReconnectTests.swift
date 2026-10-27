@@ -53,4 +53,9 @@ import CmuxRemoteCore
         #expect(!LinkClientConnection.mayDropLink(pendingMethods: ["GET", "POST"]))
         #expect(LinkClientConnection.mayDropLink(pendingMethods: []))
     }
+    /// Only a link that delivered nothing through the whole deadline is condemned; one still answering keeps it.
+    @Test func aTimedOutReadKeepsALinkThatIsStillDelivering() {
+        #expect(LinkClientConnection.mayDropLink(pendingMethods: ["GET"], silentFor: .seconds(21)))
+        #expect(!LinkClientConnection.mayDropLink(pendingMethods: ["GET"], silentFor: .seconds(3)))
+    }
 }
