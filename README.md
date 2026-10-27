@@ -13,10 +13,9 @@ Cloudflare relay you deploy to your own account.
 CmuxRemote is not an official cmux product.
 
 <p align="center">
-  <img src="docs/images/phone-sessions.png" width="220" alt="Workspaces and conversations">
-  <img src="docs/images/phone-conversation.png" width="220" alt="A live conversation">
-  <img src="docs/images/phone-questions.png" width="220" alt="Answering the agent">
-  <img src="docs/images/phone-image.png" width="220" alt="Image preview">
+  <img src="docs/images/phone-workspaces.png" width="220" alt="Workspaces and conversations">
+  <img src="docs/images/phone-background-tasks.png" width="220" alt="Background agents">
+  <img src="docs/images/phone-add-a-mac.png" width="220" alt="Pairing a Mac">
 </p>
 
 ## What you get
