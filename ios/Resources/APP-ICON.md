@@ -6,7 +6,8 @@ It was generated with the built-in image generation tool, then normalized from
 its own icon mask; the artwork fills the square canvas.
 
 The phone display name is **Cmux Remote** in English and Simplified Chinese.
-The App Store Connect record is **Cmux Remote Companion**, Apple ID `6821932840`.
+The App Store Connect record is **Cmux Remote for Mobile**, Apple ID `6827037964`,
+under the individual team `7G42499LWB`.
 
 ## Generation prompt
 

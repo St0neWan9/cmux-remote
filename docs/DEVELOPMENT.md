@@ -291,3 +291,14 @@ profile and deep/strict code-signature guard. The CI run did not upload that
 second build. Account screenshots and signed packages stay under `.build/`,
 outside Git. Physical iPhone installation and paired LAN use remain separate
 acceptance steps.
+
+## Signing moved to the Huiyuan Jia record — 2026-10-26
+
+The iPhone app now ships under the individual team `7G42499LWB` (Huiyuan Jia) with
+bundle ID `cmux-remote.mobile` and App Store Connect record **Cmux Remote for
+Mobile**, Apple ID `6827037964`. The earlier record (**Cmux Remote Companion**,
+`6821932840`, team `UUHLDZ2S48`) and its Apple Distribution identity are retired:
+no workflow, script or local check uses them. The new account's API key lives at
+`~/.cmux-remote-release/huiyuanjia/notary.json`, which `scripts/testflight-status.py`
+reads; an App Store Connect key only lists its own account's apps, so a retired
+key reports an empty build list rather than an error.
