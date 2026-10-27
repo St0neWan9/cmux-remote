@@ -12,6 +12,8 @@ struct ConversationView: View {
     @State private var userScrolling = false
     @State private var latestVisible = true
     @State private var initiallyScrolled = false
+    /// Whether this visit has already opened the page; a return from a pushed page must not re-open it.
+    @State private var openedConversation = false
     /// The opening scroll, which waits for the stored copy to appear before it settles.
     @State private var initialScroll: Task<Void, Never>?
     /// Retries the opening jump: a row's height is known only after it lays out.
@@ -399,7 +401,12 @@ struct ConversationView: View {
             .onChange(of: model.preview) { _, _ in if atLatest { scrollTrace.note("scroll preview"); scrollToNewest(proxy) } }
             // Opening a cached conversation re-enters with its follow state; start from the last message.
             .onAppear {
-                userScrolling = false; atLatest = true; holdingPlace = false
+                userScrolling = false
+                // Coming back from a pushed page — the preview, a tool detail, the timing sheet — is not
+                // opening the conversation again: the reader's place and any expanded card stay as they were.
+                guard !openedConversation else { return }
+                openedConversation = true
+                atLatest = true; holdingPlace = false
                 initialScroll = Task {
                     // Show the conversation read last, then settle once the fresh read lands.
                     await model.restoreStored()

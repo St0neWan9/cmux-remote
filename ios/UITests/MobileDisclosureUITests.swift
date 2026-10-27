@@ -36,6 +36,37 @@ final class MobileDisclosureUITests: XCTestCase {
         assertCardStaysInPlace(app, scenario: "inside an open group", prefix: "tool.disclosure.")
     }
 
+    /// Closing a pushed page (the tool detail) returns to the conversation as it was left: the card the
+    /// reader opened stays open, and the page does not run back to the newest message.
+    func testClosingTheToolDetailLeavesTheCardOpenAndThePageInPlace() throws {
+        guard let pairingPath = ProcessInfo.processInfo.environment["CMUX_REMOTE_TEST_PAIRING_PATH"], !pairingPath.isEmpty else {
+            throw XCTSkip("Supply an isolated fixture pairing file to test tool details without real sessions.")
+        }
+        let app = XCUIApplication(bundleIdentifier: "cmux-remote.mobile")
+        app.launchEnvironment["CMUX_REMOTE_TEST_PAIRING_PATH"] = pairingPath
+        app.launchArguments = ["-AppleLanguages", "(zh-Hans)"]
+        app.launch()
+        let session = app.buttons.matching(NSPredicate(format: "identifier ENDSWITH %@", "fixture-session")).firstMatch
+        XCTAssertTrue(session.waitForExistence(timeout: 10))
+        session.tap()
+        XCTAssertTrue(app.buttons["chat.back"].waitForExistence(timeout: 5))
+        sleep(2)
+        let group = app.buttons["activity.design-tool"]
+        if group.exists, group.value as? String != "已展开" { group.tap(); sleep(1) }
+        let card = app.buttons["tool.disclosure.design-tool"]
+        XCTAssertTrue(card.waitForExistence(timeout: 5), "No tool card to open")
+        if card.value as? String != "已展开" { card.tap(); sleep(1) }
+        let detail = app.buttons["tool.detail.design-tool"]
+        XCTAssertTrue(detail.waitForExistence(timeout: 5), "The open card has no detail action")
+        let before = card.frame.midY
+        detail.tap()
+        XCTAssertTrue(app.buttons["page.back"].waitForExistence(timeout: 5))
+        swipeBack(app)
+        XCTAssertTrue(app.buttons["chat.back"].waitForExistence(timeout: 5))
+        XCTAssertEqual(card.value as? String, "已展开", "Closing the detail collapsed the card")
+        XCTAssertTrue(card.isHittable, "The card left the page")
+        XCTAssertLessThan(abs(card.frame.midY - before), 120, "The page ran away from where it was left")
+    }
     /// Without a card opened, the page at the latest message still follows what arrives.
     func testThePageAtTheLatestMessageFollowsNewMessages() throws {
         guard let pairingPath = ProcessInfo.processInfo.environment["CMUX_REMOTE_TEST_PAIRING_PATH"], !pairingPath.isEmpty else {
@@ -96,5 +127,10 @@ final class MobileDisclosureUITests: XCTestCase {
             }
             XCTAssertLessThan(worst, 3, "\(action) a tool card \(scenario) moved it by \(worst)pt; trace \(trace.joined(separator: " "))")
         }
+    }
+    private func swipeBack(_ app: XCUIApplication) {
+        let window = app.windows.firstMatch
+        window.coordinate(withNormalizedOffset: CGVector(dx: 0.02, dy: 0.5))
+            .press(forDuration: 0.1, thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.5)))
     }
 }
