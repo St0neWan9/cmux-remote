@@ -17,17 +17,17 @@ private actor PhoneUIBackend: CmuxControlling {
     init(root: URL, transcript: URL) {
         self.root = root; self.transcript = transcript
         let questions: [JSONValue] = [
-            .object(["id": .string("q1"), "prompt": .string("请选择一个同名选项，验证 ID 不串选"), "multi_select": .bool(false), "options": .array([
-                .object(["id": .string("first"), "label": .string("同名选项"), "description": .string("第一个选项")]),
-                .object(["id": .string("second"), "label": .string("同名选项"), "description": .string("第二个选项")])])]),
-            .object(["id": .string("q2"), "prompt": .string("请选择多个项目，或填写自定义答案"), "multi_select": .bool(true), "options": .array([
-                .object(["id": .string("code"), "label": .string("代码")]), .object(["id": .string("tests"), "label": .string("测试")])])])]
+            .object(["id": .string("q1"), "prompt": .string("Which item should the agent edit?"), "multi_select": .bool(false), "options": .array([
+                .object(["id": .string("first"), "label": .string("Navigation"), "description": .string("The sidebar and headers")]),
+                .object(["id": .string("second"), "label": .string("Navigation"), "description": .string("The drawer and its gestures")])])]),
+            .object(["id": .string("q2"), "prompt": .string("What should the change cover?"), "multi_select": .bool(true), "options": .array([
+                .object(["id": .string("code"), "label": .string("Source")]), .object(["id": .string("tests"), "label": .string("Tests")])])])]
         let workstream = "cmux-feed-v1:" + Data("claude".utf8).base64EncodedString() + ":" + Data("fixture-session".utf8).base64EncodedString()
         items = [
-            .object(["id": .string("question"), "request_id": .string("question"), "workstream_id": .string(workstream), "source": .string("claude"), "kind": .string("question"), "status": .string("pending"), "title": .string("UI 测试：问题表单"), "questions": .array(questions)]),
-            .object(["id": .string("permission"), "request_id": .string("permission"), "workstream_id": .string(workstream), "source": .string("claude"), "kind": .string("permissionRequest"), "status": .string("pending"), "tool_name": .string("UI 测试：允许一次"), "tool_input": .string("只记录此测试决策，不执行任何工具。")]),
-            .object(["id": .string("plan"), "request_id": .string("plan"), "workstream_id": .string(workstream), "source": .string("claude"), "kind": .string("exitPlan"), "status": .string("pending"), "title": .string("UI 测试：计划反馈"), "plan": .string("1. 验证白色页面\n2. 验证本地表单状态\n\n此计划不会执行代码或修改实际权限。")]),
-            .object(["id": .string("result"), "workstream_id": .string(workstream), "source": .string("claude"), "kind": .string("toolResult"), "status": .string("telemetry"), "tool_name": .string("UI 测试：错误结果"), "tool_result": .string("UI_FIXTURE_ERROR_OUTPUT_VISIBLE"), "tool_result_is_error": .bool(true)])]
+            .object(["id": .string("question"), "request_id": .string("question"), "workstream_id": .string(workstream), "source": .string("claude"), "kind": .string("question"), "status": .string("pending"), "title": .string("Which workspace should the agent use?"), "questions": .array(questions)]),
+            .object(["id": .string("permission"), "request_id": .string("permission"), "workstream_id": .string(workstream), "source": .string("claude"), "kind": .string("permissionRequest"), "status": .string("pending"), "tool_name": .string("Allow once"), "tool_input": .string("Records this test decision only; no tool runs.")]),
+            .object(["id": .string("plan"), "request_id": .string("plan"), "workstream_id": .string(workstream), "source": .string("claude"), "kind": .string("exitPlan"), "status": .string("pending"), "title": .string("Plan feedback"), "plan": .string("1. Check the white page layout\n2. Check the local form state\n\nThis plan runs no code and changes no permissions.")]),
+            .object(["id": .string("result"), "workstream_id": .string(workstream), "source": .string("claude"), "kind": .string("toolResult"), "status": .string("telemetry"), "tool_name": .string("Build failed"), "tool_result": .string("UI_FIXTURE_ERROR_OUTPUT_VISIBLE"), "tool_result_is_error": .bool(true)])]
         self.inlineQuestion = .object([
             "id": .string("inline-question"), "request_id": .string("inline-question"),
             "workstream_id": .string(workstream), "source": .string("claude"),
@@ -37,7 +37,7 @@ private actor PhoneUIBackend: CmuxControlling {
                     "id": .string("plan"), "prompt": .string("用哪个方案?"), "multi_select": .bool(false),
                     "options": .array([
                         .object(["id": .string("fast"), "label": .string("快速方案"), "description": .string("优先速度，改动较小，适合先验证想法")]),
-                        .object(["id": .string("safe"), "label": .string("稳妥方案"), "description": .string("优先稳定性，改动更完整，测试覆盖更多")]),
+                        .object(["id": .string("safe"), "label": .string("Thorough"), "description": .string("Steadier: a wider change with more tests")]),
                     ]),
                 ]),
             ]),
@@ -75,14 +75,14 @@ private actor PhoneUIBackend: CmuxControlling {
         "questions": .array([.object([
             "id": .string("continue"), "prompt": .string("终端正在等待你的选择"), "multi_select": .bool(false),
             "allow_custom": .bool(false), "allow_skip": .bool(false),
-            "options": .array([.object(["id": .string("enter"), "label": .string("继续")]),
-                               .object(["id": .string("escape"), "label": .string("取消")])]),
+            "options": .array([.object(["id": .string("enter"), "label": .string("Continue")]),
+                               .object(["id": .string("escape"), "label": .string("Cancel")])]),
         ])]),
     ])
     /// The vault title; a `no-vault-title` file stands in for a session cmux has not named.
     private var vaultTitle: String {
         if flag("no-vault-title") { return "" }
-        return (try? String(contentsOf: root.deletingLastPathComponent().appendingPathComponent("vault-title"), encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "UI 测试：连接与页面"
+        return (try? String(contentsOf: root.deletingLastPathComponent().appendingPathComponent("vault-title"), encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "Fix the sidebar hit area"
     }
     /// Opt-in fixture behaviors, switched by an empty file in the state directory or by the launch
     /// environment, so a UI test can select them without guessing where the fixture keeps its state.
@@ -106,7 +106,7 @@ private actor PhoneUIBackend: CmuxControlling {
         case "system.ping": return .object(["pong": .bool(true)])
         case "system.capabilities": return .object(["methods": .array([])])
         case "workspace.list":
-            var listed: [JSONValue] = [.object(["id": .string(workspace), "title": .string("UI fixture workspace"), "current_directory": .string(root.path)])]
+            var listed: [JSONValue] = [.object(["id": .string(workspace), "title": .string("cmux-remote"), "current_directory": .string(root.path)])]
             // A second, empty workspace, so a test can choose between the Mac's workspaces.
             if flag("two-workspaces") { listed.append(.object(["id": .string("33333333-3333-3333-3333-333333333333"), "title": .string("Second workspace"), "current_directory": .string(root.path)])) }
             return .object(["workspaces": .array(listed)])
@@ -122,24 +122,24 @@ private actor PhoneUIBackend: CmuxControlling {
                         #"{"type":"assistant","uuid":"r2","timestamp":"2026-10-12T01:00:05Z","message":{"content":"重启前的回答"}}"#,
                     ].joined(separator: "\n").appending("\n").utf8).write(to: resumed)
                 }
-                rows.append(.object(["session_id": .string("fixture-resumable"), "agent": .string("claude"), "title": .string("UI 测试：可恢复会话"), "cwd": .string(root.path), "file": .string(resumed.path), "resumable": .bool(true)]))
+                rows.append(.object(["session_id": .string("fixture-resumable"), "agent": .string("claude"), "title": .string("Release checklist"), "cwd": .string(root.path), "file": .string(resumed.path), "resumable": .bool(true)]))
             }
-            if let started { rows.append(.object(["session_id": .string("fixture-started"), "agent": .string(started.agent), "title": .string("UI 测试：新会话"), "cwd": .string(started.cwd), "file": .string(root.appendingPathComponent("started.jsonl").path)])) }
+            if let started { rows.append(.object(["session_id": .string("fixture-started"), "agent": .string(started.agent), "title": .string("New session"), "cwd": .string(started.cwd), "file": .string(root.appendingPathComponent("started.jsonl").path)])) }
             return .object(["sessions": .array(rows)])
         // A started session is only recorded here: no terminal opens and no agent runs.
         case "surface.create":
             guard params["type"]?.string == "terminal", let input = params["initial_input"]?.string, let cwd = params["working_directory"]?.string else { throw BridgeError("invalid_params", "fixture") }
             started = (String(input.split(separator: " ").first ?? "claude").trimmingCharacters(in: .newlines), cwd)
-            try Data((#"{"type":"user","uuid":"started","timestamp":"2026-10-12T02:00:00Z","message":{"content":"新会话已在 Mac 上启动"}}"# + "\n").utf8).write(to: root.appendingPathComponent("started.jsonl"))
+            try Data((#"{"type":"user","uuid":"started","timestamp":"2026-10-12T02:00:00Z","message":{"content":"A new session started on the Mac"}}"# + "\n").utf8).write(to: root.appendingPathComponent("started.jsonl"))
             return .object(["surface_id": .string(startedSurface)])
         case "system.tree":
             // The tab name stands in for a cmux rename, which the bridge reads from the tree.
             let configured = try? String(contentsOf: root.deletingLastPathComponent().appendingPathComponent("tab-title"), encoding: .utf8)
             let trimmed = configured?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            let title = trimmed.isEmpty ? "UI 测试：连接与页面" : trimmed
+            let title = trimmed.isEmpty ? "Fix the sidebar hit area" : trimmed
             let surfaceRow: JSONValue = .object(["id": .string(surface), "type": .string("terminal"), "title": .string(title)])
             let paneRow: JSONValue = .object(["id": .string(surface), "surfaces": .array([surfaceRow])])
-            let workspaceRow: JSONValue = .object(["id": .string(workspace), "title": .string("UI fixture workspace"), "panes": .array([paneRow])])
+            let workspaceRow: JSONValue = .object(["id": .string(workspace), "title": .string("cmux-remote"), "panes": .array([paneRow])])
             return .object(["windows": .array([.object(["workspaces": .array([workspaceRow])])])])
         case "chat.sessions.dump":
             var rows: [JSONValue] = [.object(["session_id": .string("fixture-session"), "agent": .string("claude"), "workspace_id": .string(workspace), "surface_id": .string(surface), "state": .string(flag("report-working") ? "working" : "idle"), "cwd": .string(root.path)])]
@@ -202,9 +202,9 @@ private actor PhoneUIBackend: CmuxControlling {
             guard let index = items.firstIndex(where: { $0["request_id"].string == id && $0["status"].string == "pending" }), var fields = items[index].object else { throw BridgeError("request_expired", "Fixture request ended") }
             fields["status"] = .string("resolved"); fields["decision"] = .object(params); items[index] = .object(fields)
             if id == "question" {
-                var next = fields; next["id"] = .string("question-next"); next["request_id"] = .string("question-next"); next["status"] = .string("pending"); next["title"] = .string("UI 测试：新问题不继承旧选项"); next.removeValue(forKey: "decision"); items.insert(.object(next), at: 0)
+                var next = fields; next["id"] = .string("question-next"); next["request_id"] = .string("question-next"); next["status"] = .string("pending"); next["title"] = .string("New question without the old choices"); next.removeValue(forKey: "decision"); items.insert(.object(next), at: 0)
             } else if id == "question-next" {
-                var next = fields; next["id"] = .string("question-empty"); next["request_id"] = .string("question-empty"); next["status"] = .string("pending"); next["title"] = .string("UI 测试：无选项可空提交"); next["questions"] = .array([.object(["id": .string("empty"), "prompt": .string("可直接提交空回答"), "options": .array([])])]); next.removeValue(forKey: "decision"); items.insert(.object(next), at: 0)
+                var next = fields; next["id"] = .string("question-empty"); next["request_id"] = .string("question-empty"); next["status"] = .string("pending"); next["title"] = .string("Question with no options"); next["questions"] = .array([.object(["id": .string("empty"), "prompt": .string("Submit an empty answer"), "options": .array([])])]); next.removeValue(forKey: "decision"); items.insert(.object(next), at: 0)
             }
             return .object(["delivered": .bool(true)])
         case "mobile.chat.interrupt": return .object(["interrupted": .bool(true)])
@@ -360,9 +360,9 @@ private actor PhoneUIBackend: CmuxControlling {
                 readText,
                 ##"{"type":"user","uuid":"design-result","timestamp":"2026-10-12T01:00:03Z","message":{"content":[{"type":"tool_result","tool_use_id":"design-read","content":"# UI fixture project\n\nLeft aligned file contents.\n"}]}}"##,
                 imageText,
-                #"{"type":"assistant","uuid":"a","timestamp":"2026-10-12T01:00:05Z","message":{"content":[{"type":"text","text":"页面使用白色背景，按钮和输入框悬浮显示。这个测试环境不会启动智能体，也不会更改真实权限。"}]}}"#,
+                #"{"type":"assistant","uuid":"a","timestamp":"2026-10-12T01:00:05Z","message":{"content":[{"type":"text","text":"The page keeps a white background; the buttons and the field float above it. This preview starts no agent and changes no permissions."}]}}"#,
                 // A reply with a pipe table: its columns must keep their own rendering when the text is selected.
-                #"{"type":"assistant","uuid":"table","timestamp":"2026-10-12T01:00:07Z","message":{"content":[{"type":"text","text":"| 项目 | 结果 |\n| --- | --- |\n| 构建 | 通过 |\n| 测试 | 通过 |"}]}}"#,
+                #"{"type":"assistant","uuid":"table","timestamp":"2026-10-12T01:00:07Z","message":{"content":[{"type":"text","text":"| Check | Result |\n| --- | --- |\n| Build | Passed |\n| Tests | Passed |"}]}}"#,
                 #"{"type":"system","subtype":"turn_duration","durationMs":5000,"timestamp":"2026-10-12T01:00:06Z"}"#]
                 try Data((rows.joined(separator: "\n") + "\n").utf8).write(to: transcript)
             }
