@@ -125,7 +125,22 @@ actor LinkClientConnection {
                 report(.connected)
                 let trace = trace
                 heartbeat = Task { [weak self] in
-                    do { while !Task.isCancelled { try await Task.sleep(for: .seconds(25)); try await Self.ping(ready.socket) } }
+                    do {
+                        while !Task.isCancelled {
+                            try await Task.sleep(for: .seconds(25))
+                            do { try await Self.ping(ready.socket) }
+                            catch {
+                                guard !Task.isCancelled else { return }
+                                // A relay can return data without answering the control frame: a missed pong ends the
+                                // link only when nothing else arrived through the same window. The phone used to drop
+                                // a working link every 37 seconds this way, then redial.
+                                guard await self?.silent(on: ready.socket, for: Self.pongDeadline) == true else {
+                                    await self?.missedPing(ready.socket); continue
+                                }
+                                throw error
+                            }
+                        }
+                    }
                     catch {
                         guard !Task.isCancelled else { return }
                         let timedOut = (error as? URLError)?.code == .timedOut
@@ -296,6 +311,15 @@ actor LinkClientConnection {
         }
         if timedOut { trace("timed-out request keeps a link that is still delivering silent=\(silence.components.seconds)s pending=\(pending.count)") }
         try? await send(LinkFrame(kind: "cancel", id: id))
+    }
+    /// Whether the link delivered nothing for `window`: a missed pong that no frame followed is a dead path, while one
+    /// the link kept working through is a busy relay.
+    private func silent(on source: LinkSocket, for window: Duration) -> Bool {
+        socket === source && ContinuousClock.now - lastInbound >= window
+    }
+    private func missedPing(_ source: LinkSocket) {
+        guard socket === source else { return }
+        trace("heartbeat ping missed but the link is delivering silent=\((ContinuousClock.now - lastInbound).components.seconds)s")
     }
     /// Whether the link may be torn down: never under an in-flight write, which would then have an unknown outcome,
     /// and never while frames are still arriving, which marks a slow response rather than a dead path.
