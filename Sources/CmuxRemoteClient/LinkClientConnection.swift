@@ -34,6 +34,8 @@ actor LinkClientConnection {
     private var subscriptions: [String: AsyncThrowingStream<LinkFrame, any Error>.Continuation] = [:]
     /// Recently cancelled IDs; the Bridge may already have frames for them in flight.
     private var abandoned: [String] = []
+    /// The last time any frame arrived; a single read's deadline must not condemn a link that is still delivering.
+    private var lastInbound = ContinuousClock.now
     private var closed = false
     private let report: @Sendable (LinkState) -> Void
     /// One short credential-free line per dial, path outcome, heartbeat loss, link loss and timed-out request.
@@ -242,6 +244,7 @@ actor LinkClientConnection {
     }
     private func received(_ data: Data, source: LinkSocket) async throws {
         guard socket === source else { return }
+        lastInbound = .now
         guard cipher != nil else { throw CancellationError() }
         let frame = try cipher!.open(data)
         if pending[frame.id] == nil, subscriptions[frame.id] == nil, abandoned.contains(frame.id) { return }
@@ -283,15 +286,22 @@ actor LinkClientConnection {
         }
         subscriptions.removeValue(forKey: id)?.finish()
         abandoned.append(id); if abandoned.count > 64 { abandoned.removeFirst() }
-        // A read that outlived its deadline points at a dead link: the next request dials again instead of waiting too.
-        if timedOut, Self.mayDropLink(pendingMethods: pending.values.map(\.method)) {
-            if socket != nil { trace("dropping link after a timed-out request") }
+        // A read that outlived its deadline points at a dead link only if the link delivered nothing meanwhile: the
+        // next request then dials instead of waiting out the same deadline. A link that is still delivering keeps its
+        // other requests and this one fails alone, which is what the caller retries.
+        let silence = ContinuousClock.now - lastInbound
+        if timedOut, Self.mayDropLink(pendingMethods: pending.values.map(\.method), silentFor: silence) {
+            if socket != nil { trace("dropping link after a timed-out request silent=\(silence.components.seconds)s") }
             await failed(URLError(.timedOut)); return
         }
+        if timedOut { trace("timed-out request keeps a link that is still delivering silent=\(silence.components.seconds)s pending=\(pending.count)") }
         try? await send(LinkFrame(kind: "cancel", id: id))
     }
-    /// Whether the link may be torn down: never under an in-flight write, which would then have an unknown outcome.
-    static func mayDropLink(pendingMethods: [String]) -> Bool { !pendingMethods.contains("POST") }
+    /// Whether the link may be torn down: never under an in-flight write, which would then have an unknown outcome,
+    /// and never while frames are still arriving, which marks a slow response rather than a dead path.
+    static func mayDropLink(pendingMethods: [String], silentFor: Duration = .seconds(20)) -> Bool {
+        !pendingMethods.contains("POST") && silentFor >= .seconds(20)
+    }
     /// A ping with a deadline: a lost path never answers, and the socket alone may not report it.
     private static func ping(_ socket: LinkSocket) async throws {
         try await withThrowingTaskGroup(of: Void.self) { group in
