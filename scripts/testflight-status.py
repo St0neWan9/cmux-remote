@@ -1,13 +1,18 @@
 #!/usr/bin/env python3
 """List this app's recent TestFlight builds with the local App Store Connect API key.
 
-Reads ~/.appstoreconnect/config.json (key_id, issuer_id, key_path). The private key
+Reads the key this app ships under: ~/.cmux-remote-release/huiyuanjia/notary.json
+(key_id, issuer_id, key_path); CMUX_REMOTE_ASC_CONFIG names another. The private key
 stays on disk; it is passed to openssl by path and never printed.
+
+An App Store Connect key only sees its own account's apps, so a key from the retired
+account lists nothing here: an empty result means the wrong key, not a missing build.
 """
 import base64, json, os, subprocess, sys, time, urllib.request
 from pathlib import Path
 
 APP_ID = json.loads((Path(__file__).resolve().parents[1] / "ios/Release.json").read_text())["app_store_app_id"]
+ASC_CONFIG = os.environ.get("CMUX_REMOTE_ASC_CONFIG") or "~/.cmux-remote-release/huiyuanjia/notary.json"
 
 def b64(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
@@ -40,7 +45,7 @@ def get(path: str, bearer: str) -> dict:
         return json.load(response)
 
 def main() -> int:
-    config = json.loads(Path("~/.appstoreconnect/config.json").expanduser().read_text())
+    config = json.loads(Path(ASC_CONFIG).expanduser().read_text())
     bearer = token(config)
     builds = get(f"/v1/builds?filter[app]={APP_ID}&sort=-uploadedDate&limit=5&include=preReleaseVersion,buildBetaDetail", bearer)
     versions = {item["id"]: item["attributes"].get("version") for item in builds.get("included", []) if item["type"] == "preReleaseVersions"}
