@@ -29,7 +29,7 @@ public final class BridgeLog: @unchecked Sendable {
     public func warning(_ category: String, _ message: String) { write(.warning, category, message) }
     public func error(_ category: String, _ message: String) { write(.error, category, message) }
     private func write(_ level: Level, _ category: String, _ message: String) {
-        let logger = Logger(subsystem: "com.st0newan9.cmux-remote.mac", category: category)
+        let logger = Logger(subsystem: "cmux-remote.mac", category: category)
         switch level {
         case .debug: logger.debug("\(message, privacy: .public)")
         case .info: logger.info("\(message, privacy: .public)")

@@ -4,7 +4,7 @@
 <dict>
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array>
-		<string>com.st0newan9.cmux-remote.sync</string>
+		<string>cmux-remote.sync</string>
 	</array>
 	<key>UIBackgroundModes</key>
 	<array>
