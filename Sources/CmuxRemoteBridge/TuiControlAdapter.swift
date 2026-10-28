@@ -262,6 +262,25 @@ public actor TuiControlAdapter: CmuxControlling {
             guard !candidates.isEmpty else { throw BridgeError("invalid_input", "A stable model switch identity and a model are required.") }
             try await modelSwitch.run(on: console, candidates: candidates, effort: params["effort"]?.string)
             return .object(["switched": .bool(true)])
+        case "mobile.terminal.rename":
+            // The daemon names a tab, not a terminal: the id comes from the same snapshot that proved the binding.
+            guard let id = params["session_id"]?.string, let title = params["title"]?.string,
+                  let operationKey = params["backend_operation_key"]?.string, operationKey.count == 64,
+                  operationKey.allSatisfy({ $0.isASCII && $0.isHexDigit }) else {
+                throw BridgeError("invalid_input", "A stable rename identity and a title are required.")
+            }
+            let current = try await snapshot()
+            guard let binding = activeBinding(id: id, in: current),
+                  params["workspace_id"]?.string?.lowercased() == binding.workspaceID,
+                  params["surface_id"]?.string?.lowercased() == binding.surfaceID,
+                  let tab = current.tabIDs[binding.terminal] else { throw stale() }
+            var request = current.selectors(binding)
+            request["tab"] = .string(tab)
+            request["name"] = .string(title)
+            request["source"] = .string("user")
+            request["expected_generation"] = .string(current.generation)
+            try await effect("tab.rename", fields: request, key: "cmux-remote:rename:" + operationKey.lowercased(), generation: current.generation)
+            return .object(["title": .string(title)])
         default: throw unsupported()
         }
     }

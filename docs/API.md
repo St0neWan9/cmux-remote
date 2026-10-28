@@ -17,6 +17,7 @@ Version 2 uses a device-signed `Authorization: CmuxV2` proof and approved worksp
 | POST /v1/sessions/:id/interrupt | mobile.chat.interrupt or explicit send_key | hard and operation_id |
 | GET /v1/sessions/:id/models | the agent's own configuration on the Mac | choices, accepts_custom, persists_default |
 | POST /v1/sessions/:id/model | `/model <name>` (Claude) or the Codex `/model` picker | model and operation_id |
+| POST /v1/sessions/:id/title | `mobile.terminal.rename` (desktop) or `tab.rename` (cmux-tui) | title and operation_id; an empty title clears the custom name |
 | GET /v1/feed | feed.list | captured Feed items; not all provider approvals |
 | POST /v1/feed/:request/reply | feed.permission/question/exit_plan.reply | matching kind, decision fields, operation_id |
 | GET /v1/sessions/:id/changes | local Git | porcelain change entries |

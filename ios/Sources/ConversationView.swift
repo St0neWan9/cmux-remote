@@ -45,6 +45,8 @@ struct ConversationView: View {
     @State private var photoItems: [PhotosPickerItem] = []
     @State private var photoLoadTask: Task<Void, Never>?
     @State private var confirmPendingReset = false
+    @State private var showRename = false
+    @State private var renameDraft = ""
     @State private var selectedImage: ConversationImageReference?
     @State private var selectedToolDetail: ToolDetailReference?
     /// The page's height above the keyboard; the composer may use half of it.
@@ -142,6 +144,11 @@ struct ConversationView: View {
             }
             Button(String(localized: "pair.cancel"), role: .cancel) {}
         } message: { Text(String(format: String(localized: "model.confirm_note"), model.modelAwaitingConfirmation?.label ?? "")) }
+        .alert(String(localized: "chat.rename_title"), isPresented: $showRename) {
+            TextField(String(localized: "chat.rename_placeholder"), text: $renameDraft)
+            Button(String(localized: "chat.rename_save")) { let title = renameDraft; Task { await model.rename(to: title) } }
+            Button(String(localized: "pair.cancel"), role: .cancel) {}
+        } message: { Text(String(localized: "chat.rename_note")) }
         .alert(String(localized: "operation.inspected"), isPresented: $confirmPendingReset) {
             Button(String(localized: "operation.release")) { Task { await model.acknowledgePendingSend() } }
             Button(String(localized: "pair.cancel"), role: .cancel) {}
@@ -520,7 +527,7 @@ struct ConversationView: View {
             Button { dismiss() } label: { Image(systemName: "chevron.left") }
                 .floatingIconButton().accessibilityLabel(String(localized: "chat.back")).accessibilityIdentifier("chat.back")
             VStack(alignment: .leading, spacing: 3) {
-                Text(model.session.title).font(.subheadline.weight(.semibold)).lineLimit(1)
+                Text(model.shownTitle).font(.subheadline.weight(.semibold)).lineLimit(1)
                 AgentModelMenu(subtitle: [model.session.agent.capitalized, model.modelLabel ?? "", hostName].filter { !$0.isEmpty }.joined(separator: " · "),
                                current: model.modelLabel, choices: model.canSwitchModel ? model.modelChoices : nil,
                                enabled: !model.busy && !model.working && model.pendingSend == nil) { name, label in
@@ -529,6 +536,9 @@ struct ConversationView: View {
                 .equatable()
             }.frame(maxWidth: .infinity, alignment: .leading)
             Menu {
+                if model.client.allows(.conversationControl) {
+                    Button { renameDraft = model.shownTitle; showRename = true } label: { Label(String(localized: "chat.rename"), systemImage: "pencil") }.accessibilityIdentifier("chat.rename")
+                }
                 Button { showTiming = true } label: { Label(String(localized: "chat.timing"), systemImage: "clock") }.accessibilityIdentifier("chat.timing")
                 if model.client.allows(.projectRead) { Button { selectedFile = ""; showProject = true } label: { Label(String(localized: "project.title"), systemImage: "doc.text.magnifyingglass") }.accessibilityIdentifier("chat.project") }
                 if model.client.allows(.feedRead) { Button { showFeed = true } label: { Label(String(localized: "feed.title"), systemImage: "checkmark.bubble") }.accessibilityIdentifier("chat.feed") }
