@@ -2,17 +2,18 @@ import Testing
 @testable import CmuxRemoteCore
 
 @Suite struct ActivityGroupPolicyTests {
-    @Test func theNewestSmallGroupOpens() {
-        #expect(ActivityGroupPolicy.showsInline(operationCount: 0, isLatest: true, choice: nil))
-        #expect(ActivityGroupPolicy.showsInline(operationCount: ActivityGroupPolicy.inlineLimit, isLatest: true, choice: nil))
+    /// The running group stays open so its work can be followed; it stops being newest once the next one arrives.
+    @Test func theNewestGroupStaysOpen() {
+        #expect(ActivityGroupPolicy.isExpanded(isLatest: true, choice: nil))
+        #expect(ActivityGroupPolicy.isExpanded(isLatest: true, choice: true))
+        #expect(!ActivityGroupPolicy.isExpanded(isLatest: false, choice: nil))
+        #expect(ActivityGroupPolicy.isExpanded(isLatest: false, choice: true))
     }
-    /// A running Agent's group keeps growing; past the limit it stays summarised even while it is the newest.
-    @Test func aGroupPastTheLimitStaysSummarised() {
-        #expect(!ActivityGroupPolicy.showsInline(operationCount: ActivityGroupPolicy.inlineLimit + 1, isLatest: true, choice: nil))
-        #expect(!ActivityGroupPolicy.showsInline(operationCount: 40, isLatest: true, choice: true))
-    }
-    @Test func anOlderGroupFollowsTheReadersChoice() {
-        #expect(ActivityGroupPolicy.showsInline(operationCount: 2, isLatest: false, choice: true))
-        #expect(!ActivityGroupPolicy.showsInline(operationCount: 2, isLatest: false, choice: nil))
+    /// Past the limit the group draws its newest slice instead of growing into one enormous row.
+    @Test func aLongGroupDrawsOnlyItsNewestSlice() {
+        #expect(ActivityGroupPolicy.drawsWhole(operationCount: 0))
+        #expect(ActivityGroupPolicy.drawsWhole(operationCount: ActivityGroupPolicy.inlineLimit))
+        #expect(!ActivityGroupPolicy.drawsWhole(operationCount: ActivityGroupPolicy.inlineLimit + 1))
+        #expect(!ActivityGroupPolicy.drawsWhole(operationCount: 200))
     }
 }
