@@ -99,6 +99,9 @@ final class ConversationModel {
     /// A model-list read in flight, so opening the page twice in a row does not read it twice.
     private var modelsLoading = false
     private let postModel: @Sendable (ModelSwitchRequest) async throws -> MutationReceipt
+    private let renameSession: @Sendable (SessionRenameRequest) async throws -> MutationReceipt
+    /// The title this page shows after a rename, until the next read brings the same name from cmux.
+    private var renamedTitle: String?
     private let refreshReads = ReadRequestOwner()
     private let olderReads = ReadRequestOwner()
     private var readsEnabled = true
@@ -126,6 +129,7 @@ final class ConversationModel {
          replyFeed: (@Sendable (String, JSONValue) async throws -> MutationReceipt)? = nil,
          readModels: (@Sendable () async throws -> ModelChoiceList)? = nil,
          postModel: (@Sendable (ModelSwitchRequest) async throws -> MutationReceipt)? = nil,
+         renameSession: (@Sendable (SessionRenameRequest) async throws -> MutationReceipt)? = nil,
          cache: ConversationCache? = nil, modelCache: ModelChoiceCache? = nil) {
         self.session = session; self.client = client; self.modelCache = modelCache; speech = SpeechDraftModel(input: speechInput ?? UnavailableSpeechInput())
         let id = session.id
@@ -147,6 +151,7 @@ final class ConversationModel {
         self.replyFeed = replyFeed ?? { requestID, body in try await client.post("/v1/feed/\(requestID)/reply", body: body, as: MutationReceipt.self) }
         self.readModels = readModels ?? { try await client.get("/v1/sessions/\(id)/models", as: ModelChoiceList.self) }
         self.postModel = postModel ?? { try await client.post("/v1/sessions/\(id)/model", body: $0, as: MutationReceipt.self) }
+        self.renameSession = renameSession ?? { try await client.post("/v1/sessions/\(id)/title", body: $0, as: MutationReceipt.self) }
         self.cache = cache
     }
     /// Shows what was read last, so opening a conversation never starts blank.
@@ -396,6 +401,21 @@ final class ConversationModel {
             if (error as? BridgeError)?.code == "model_confirm_required" { modelAwaitingConfirmation = (name, label); return }
             logFailure("model", error, shown: true); self.error = ErrorPresentation().message(error)
         }
+    }
+    /// The title this page shows: a rename it just made, otherwise the one the list was opened with.
+    var shownTitle: String { renamedTitle ?? session.title }
+    /// Renames the conversation's tab in cmux, which the Mac and every paired device then read; an empty name clears it.
+    func rename(to title: String) async {
+        guard !busy else { return }
+        busy = true; defer { busy = false }
+        do {
+            let request = SessionRenameRequest(title: title)
+            let receipt = try await renameSession(request)
+            guard receipt.accepted, receipt.operationID == request.operationID else { throw BridgeError("outcome_unknown", "The rename receipt could not be verified.", status: 504) }
+            renamedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+            error = nil
+            await refresh()
+        } catch { logFailure("rename", error, shown: true); self.error = ErrorPresentation().message(error) }
     }
     func useSpeechDraft() { if let text = speech.takeText() { draft += (draft.isEmpty ? "" : "\n") + text } }
     /// Reopens the Agent session in a new terminal and follows the conversation once it reports back.

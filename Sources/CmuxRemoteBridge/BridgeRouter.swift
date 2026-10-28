@@ -199,6 +199,7 @@ public struct BridgeRouter: Sendable {
                 case ("POST", "interrupt"): data = try encode(await service.interrupt(id: id, request: JSONDecoder().decode(InterruptRequest.self, from: body), access: access))
                 case ("GET", "models"): data = try encode(await service.models(id: id, discovered: client != nil, access: access))
                 case ("POST", "model"): data = try encode(await service.switchModel(id: id, request: JSONDecoder().decode(ModelSwitchRequest.self, from: body), access: access))
+                case ("POST", "title"): data = try encode(await service.rename(id: id, request: JSONDecoder().decode(SessionRenameRequest.self, from: body), access: access))
                 // Reopening a conversation starts an Agent in its workspace, so it is a start-class action, not control.
                 case ("POST", "resume"):
                     try await require(client, .conversationStart)
