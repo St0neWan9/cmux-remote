@@ -16,11 +16,17 @@ struct ActivityGroupView: View {
     @State private var expanded: Bool?
     /// Groups past this many operations open on their own page: expanding one inside the timeline makes a single
     /// enormous row, which SwiftUI lays out in full and a phone takes seconds to draw.
-    static let inlineLimit = 5
+    static let inlineLimit = ActivityGroupPolicy.inlineLimit
     @State private var showingAll = false
     /// The row this group belongs to, so expanding it keeps its place in the timeline.
     @Environment(\.holdPlace) private var holdPlace
-    private var isExpanded: Bool { expanded ?? isLatest }
+    /// Whether the group is open inside the timeline. A group past the inline limit belongs on its own page even
+    /// while it is the newest: a running Agent's group grows by the second, and one enormous row is what made the
+    /// page stutter while it kept working. The summary row keeps counting, so the work is still visible.
+    static func showsInline(operationCount: Int, isLatest: Bool, choice: Bool?) -> Bool {
+        ActivityGroupPolicy.showsInline(operationCount: operationCount, isLatest: isLatest, choice: choice)
+    }
+    private var isExpanded: Bool { Self.showsInline(operationCount: item.operationCount, isLatest: isLatest, choice: expanded) }
     var body: some View {
         if item.operationCount == 0 {
             // Only reasoning, no operations: nothing to summarize, so it is shown directly.
