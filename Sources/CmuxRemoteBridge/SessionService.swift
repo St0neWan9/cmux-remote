@@ -444,6 +444,30 @@ public actor SessionService {
         } catch { journal?.uncertain(id: request.operationID); throw mutationError(error) }
     }
 
+    /// Renames the conversation's terminal tab in cmux, so the name shows on the Mac and on every paired device.
+    /// An empty title clears the custom name and lets cmux show its own again.
+    public func rename(id: String, request: SessionRenameRequest, access: SessionAccess? = nil) async throws -> MutationReceipt {
+        let title = try SessionTitle.validated(request.title)
+        let signature = try MutationLedger.fingerprint(action: "title", resource: id, payload: .object(["title": .string(title)]))
+        if let receipt = try await existing(request.operationID, signature: signature, access: access) { return receipt }
+        let session = try await verifiedBinding(id, requiresEmptyPrompt: false, access: access)
+        if let receipt = try await begin(request.operationID, signature: signature, workspace: session.workspaceID, capability: .conversationControl, access: access) { return receipt }
+        try await validateMutationBinding(session, access: access)
+        do {
+            var params: [String: JSONValue] = ["workspace_id": .string(session.workspaceID!), "surface_id": .string(session.surfaceID!), "title": .string(title)]
+            if id.hasPrefix("tui:") {
+                let key = IdentityCryptography().digest(Data(((access?.clientID ?? "owner") + ":" + request.operationID.uuidString).utf8))
+                params["session_id"] = .string(await liveSessionID(session.id))
+                params["backend_operation_key"] = .string(key)
+            }
+            let result = try await cmux.request("mobile.terminal.rename", params: params)
+            guard result["title"].string != nil || result["renamed"].bool == true else {
+                throw BridgeError("outcome_unknown", "cmux did not confirm the new title; inspect the tab.", status: 409)
+            }
+            return try await complete(request.operationID, access: access)
+        } catch { journal?.uncertain(id: request.operationID); throw mutationError(error) }
+    }
+
     /// The desktop terminal behind a verified binding; every write first rechecks that the same terminal is still there.
     private func desktopConsole(_ session: SessionDescriptor, access: SessionAccess?) -> AgentConsole {
         let cmux = cmux, target: [String: JSONValue] = ["workspace_id": .string(session.workspaceID!), "surface_id": .string(session.surfaceID!)]

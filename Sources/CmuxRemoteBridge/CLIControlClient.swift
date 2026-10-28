@@ -53,7 +53,7 @@ public struct CLIControlClient: CmuxControlling {
             } onCancel: { if process.isRunning { process.terminate() } }
             let data = await stdout; _ = await stderr
             guard status == 0 else {
-                let mutation = ["mobile.chat.send", "mobile.chat.interrupt", "mobile.terminal.input", "workspace.create", "workspace.select", "workspace.group.create", "workspace.group.add", "workspace.reorder_many", "surface.create", "surface.split", "surface.action", "surface.move", "surface.split_off", "surface.reorder", "surface.close", "feed.permission.reply", "feed.question.reply", "feed.exit_plan.reply"].contains(method)
+                let mutation = ["mobile.chat.send", "mobile.chat.interrupt", "mobile.terminal.input", "mobile.terminal.rename", "workspace.create", "workspace.select", "workspace.group.create", "workspace.group.add", "workspace.reorder_many", "surface.create", "surface.split", "surface.action", "surface.move", "surface.split_off", "surface.reorder", "surface.close", "feed.permission.reply", "feed.question.reply", "feed.exit_plan.reply"].contains(method)
                 throw BridgeError(mutation ? "outcome_unknown" : "socket_unavailable", mutation ? "Inspect the task before repeating this operation." : "Open cmux and check the official CLI's socket access.", status: 503)
             }
             guard data.count <= 8_388_608, let value = try? JSONDecoder().decode(JSONValue.self, from: data) else { throw BridgeError("invalid_response", "The official CLI returned an invalid response.", status: 502) }

@@ -110,6 +110,11 @@
 "chat.duration_minutes" = "%dm %02ds";
 "chat.duration_hours" = "%dh %02dm";
 "chat.timing" = "Conversation time";
+"chat.rename" = "Rename";
+"chat.rename_title" = "Rename conversation";
+"chat.rename_placeholder" = "Tab title";
+"chat.rename_save" = "Save";
+"chat.rename_note" = "The name also appears on your Mac in cmux. Leave it empty to go back to the automatic name.";
 "chat.recorded_turns" = "Recorded duration from %ld completed turns.";
 "chat.no_timing" = "No recorded running duration is available.";
 "chat.timing_note" = "Recorded running time excludes gaps between turns. Missing durations are not counted; response estimates use transcript timestamps.";

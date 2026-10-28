@@ -110,6 +110,11 @@
 "chat.duration_minutes" = "%dm %02ds";
 "chat.duration_hours" = "%dh %02dm";
 "chat.timing" = "对话时间";
+"chat.rename" = "重命名";
+"chat.rename_title" = "对话重命名";
+"chat.rename_placeholder" = "标签标题";
+"chat.rename_save" = "保存";
+"chat.rename_note" = "名称会同步到 Mac 上 cmux 的标签页。留空则恢复自动命名。";
 "chat.recorded_turns" = "已记录 %ld 轮回复的运行时间。";
 "chat.no_timing" = "暂无已记录的运行时长。";
 "chat.timing_note" = "已记录的运行时间不包含轮次之间的空闲时间。缺失的时长不计入累计；响应耗时估算使用会话记录的时间戳。";
