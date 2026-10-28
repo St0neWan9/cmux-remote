@@ -461,7 +461,9 @@ public actor SessionService {
                 params["backend_operation_key"] = .string(key)
             }
             let result = try await cmux.request("mobile.terminal.rename", params: params)
-            guard result["title"].string != nil || result["renamed"].bool == true else {
+            // cmux answers with the title it holds, which is null once the custom name is cleared: the key is the
+            // acknowledgement, not a value.
+            guard result.object?["title"] != nil || result["renamed"].bool == true else {
                 throw BridgeError("outcome_unknown", "cmux did not confirm the new title; inspect the tab.", status: 409)
             }
             return try await complete(request.operationID, access: access)
