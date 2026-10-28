@@ -215,6 +215,9 @@ public struct BridgeRouter: Sendable {
             return HTTPResourceResponse(status: 200, data: data, contentType: image ? "image/jpeg" : "application/json; charset=utf-8")
         } catch {
             let failure = (error as? BridgeError) ?? BridgeError("invalid_request", "The request could not be processed.")
+            // A refused mutation is the one failure worth a log line: the phone shows its code, but which request
+            // produced it, and at which stage, is only visible here.
+            if method == "POST" { BridgeLog.shared.warning("mutation", "POST \(uri) refused code=\(failure.code) status=\(failure.status) message=\(failure.message)") }
             return HTTPResourceResponse(status: failure.status, data: (try? encode(["error": failure])) ?? Data(), contentType: "application/json; charset=utf-8")
         }
     }

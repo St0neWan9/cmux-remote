@@ -28,6 +28,9 @@ struct TuiSessionSnapshot: Sendable {
     let terminalTitles: [String: String]
     /// Each terminal tab's own identity, so a rename can name the tab the conversation runs in.
     let tabIDs: [String: String]
+    /// The pane and screen a tab hangs from: a tab operation names its whole parent chain.
+    let tabPanes: [String: String]
+    let tabScreens: [String: String]
     /// Terminals the daemon still reports as running. A conversation whose Agent stopped reporting keeps its
     /// terminal, so this is what separates a resumed Agent the daemon has forgotten from a historical one.
     let runningTerminals: Set<String>
@@ -57,10 +60,15 @@ struct TuiSessionSnapshot: Sendable {
         let workspaceRows = try indexed("workspaces", "ws"), screens = try indexed("screens", "screen"), panes = try indexed("panes", "pane"), terminals = try indexed("terminals", "term")
         _ = try indexed("tabs", "tab"); _ = try indexed("agents", "agent")
         var memberships: [String: Set<String>] = [:], tabNames: [String: String] = [:], tabIDs: [String: String] = [:]
+        var tabPanes: [String: String] = [:], tabScreens: [String: String] = [:]
         for tab in arrays["tabs"]! {
             guard tab["content_kind"].string == "terminal", let terminal = tab["content_id"].string else { continue }
             if let name = tab["name"].string?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty { tabNames[terminal] = name }
             if let id = tab["id"].string, tabIDs[terminal] == nil { tabIDs[terminal] = id }
+            if let pane = tab["pane_id"].string {
+                tabPanes[terminal] = pane
+                if let screen = panes[pane]?["screen_id"].string { tabScreens[terminal] = screen }
+            }
             guard terminals[terminal] != nil, let pane = tab["pane_id"].string.flatMap({ panes[$0] }),
                   let screen = pane["screen_id"].string.flatMap({ screens[$0] }), let workspace = screen["workspace_id"].string, workspaceRows[workspace] != nil else {
                 throw BridgeError("invalid_response", "The daemon terminal has an invalid ownership path.", status: 502)
@@ -83,7 +91,7 @@ struct TuiSessionSnapshot: Sendable {
         rawWorkspaces = Dictionary(uniqueKeysWithValues: workspaceRows.keys.map { (identity.uuid(machine: machineID, session: sessionID, resource: $0), $0) })
         surfaces = Set(terminals.keys.map { identity.uuid(machine: machineID, session: sessionID, resource: $0) })
         terminalTitles = terminals.compactMapValues { $0["title"].string }
-        self.tabIDs = tabIDs
+        self.tabIDs = tabIDs; self.tabPanes = tabPanes; self.tabScreens = tabScreens
         runningTerminals = Set(terminals.compactMap { id, row in
             row["running"].bool == true && row["lifecycle"].string == "running" ? identity.uuid(machine: machineID, session: sessionID, resource: id) : nil
         })
