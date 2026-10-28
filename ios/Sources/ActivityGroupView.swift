@@ -14,19 +14,15 @@ struct ActivityGroupView: View {
     var isLatest = false
     /// The reader's own choice, which wins until the group stops being the newest.
     @State private var expanded: Bool?
-    /// Groups past this many operations open on their own page: expanding one inside the timeline makes a single
-    /// enormous row, which SwiftUI lays out in full and a phone takes seconds to draw.
+    /// Groups past this many operations draw only their newest slice here; the rest is read on their own page.
     static let inlineLimit = ActivityGroupPolicy.inlineLimit
     @State private var showingAll = false
     /// The row this group belongs to, so expanding it keeps its place in the timeline.
     @Environment(\.holdPlace) private var holdPlace
-    /// Whether the group is open inside the timeline. A group past the inline limit belongs on its own page even
-    /// while it is the newest: a running Agent's group grows by the second, and one enormous row is what made the
-    /// page stutter while it kept working. The summary row keeps counting, so the work is still visible.
-    static func showsInline(operationCount: Int, isLatest: Bool, choice: Bool?) -> Bool {
-        ActivityGroupPolicy.showsInline(operationCount: operationCount, isLatest: isLatest, choice: choice)
-    }
-    private var isExpanded: Bool { Self.showsInline(operationCount: item.operationCount, isLatest: isLatest, choice: expanded) }
+    /// The group stays open while it is the newest, so a running Agent stays readable, but a long one draws only
+    /// its newest slice: one enormous row is what made the page stutter and left a blank page behind a collapse.
+    private var isExpanded: Bool { ActivityGroupPolicy.isExpanded(isLatest: isLatest, choice: expanded) }
+    private var drawsWhole: Bool { ActivityGroupPolicy.drawsWhole(operationCount: item.operationCount) }
     var body: some View {
         if item.operationCount == 0 {
             // Only reasoning, no operations: nothing to summarize, so it is shown directly.
@@ -35,14 +31,15 @@ struct ActivityGroupView: View {
     }
     /// Consecutive operations sit next to each other; reasoning text is set apart by a small gap.
     private var rows: some View {
-        MessageRows(messages: item.messages, projectRoot: projectRoot, openFile: openFile, images: images,
-                    openImage: openImage, openDetail: openDetail)
+        let shown = drawsWhole ? item.messages : Array(item.messages.suffix(ActivityGroupPolicy.windowMessages))
+        return MessageRows(messages: shown, projectRoot: projectRoot, openFile: openFile, images: images,
+                           openImage: openImage, openDetail: openDetail)
     }
     private var group: some View {
         VStack(alignment: .leading, spacing: 4) {
             Button {
-                // A large group is read on its own page, lazily, instead of growing this row by thousands of points.
-                if item.operationCount > Self.inlineLimit { showingAll = true; return }
+                // A long group is read on its own page, lazily; the row here only ever draws its newest slice.
+                if !drawsWhole { showingAll = true; return }
                 // The reader is looking at this group: the page stays put while its height changes.
                 holdPlace()
                 // Not animated: an animated height change at the bottom of a running conversation moved the page.
