@@ -22,8 +22,10 @@ struct MessageRows: View {
         }
     }
     @ViewBuilder private var rows: some View {
-        ForEach(messages.indices, id: \.self) { index in
-            let message = messages[index]
+        // Rows are identified by the message, never by its position: a refresh that prepends earlier messages
+        // would otherwise re-identify every row below it, and an index captured by a lazily built row can point
+        // past the end of the array the next refresh installs.
+        ForEach(Array(messages.enumerated()), id: \.element.id) { index, message in
             let row = MessageRow(message: message, projectRoot: projectRoot, openFile: openFile, images: images,
                                  openImage: openImage, openDetail: openDetail)
             let previousIsOperation = index > 0 && MessageRow(message: messages[index - 1]).isOperation
