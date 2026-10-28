@@ -274,11 +274,12 @@ public actor TuiControlAdapter: CmuxControlling {
                   params["workspace_id"]?.string?.lowercased() == binding.workspaceID,
                   params["surface_id"]?.string?.lowercased() == binding.surfaceID,
                   let tab = current.tabIDs[binding.terminal] else { throw stale() }
-            var request = current.selectors(binding)
-            request["tab"] = .string(tab)
-            request["name"] = .string(title)
-            request["source"] = .string("user")
-            request["expected_generation"] = .string(current.generation)
+            // A tab operation names the chain down to the tab, not the terminal the conversation runs in.
+            var request: [String: JSONValue] = ["machine": .string(current.machine), "session": .string(current.session),
+                                                "workspace": .string(binding.workspace), "tab": .string(tab),
+                                                "name": .string(title), "source": .string("user")]
+            if let pane = current.tabPanes[binding.terminal] { request["pane"] = .string(pane) }
+            if let screen = current.tabScreens[binding.terminal] { request["screen"] = .string(screen) }
             try await effect("tab.rename", fields: request, key: "cmux-remote:rename:" + operationKey.lowercased(), generation: current.generation)
             return .object(["title": .string(title)])
         default: throw unsupported()

@@ -57,6 +57,7 @@ public struct TuiResourceSocketClient: TuiResourceRequesting {
             case "operation.unsupported", "protocol.unsupported": code = "unsupported"
             default: code = "socket_denied"
             }
+            if code == "socket_denied" { BridgeLog.shared.warning("daemon", "resource op=\(operation) refused code=\(reply["error"]["code"].string ?? "-") message=\(reply["error"]["message"].string ?? "-")") }
             throw BridgeError(code, "The daemon could not confirm this resource operation.", status: 409)
         }
         return reply["result"]
