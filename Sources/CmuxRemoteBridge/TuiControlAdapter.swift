@@ -46,7 +46,7 @@ public actor TuiControlAdapter: CmuxControlling {
             _ = try await snapshot(); return .object(["backend": .string("cmux-tui")])
         case "system.capabilities":
             return .object(["backend": .string("cmux-tui"), "protocol": .string("cmux.protocol/2"), "attachments": .bool(attachments != nil), "feed_decisions": .bool(true), "native_mirror": .bool(false)])
-        case "workspace.list": return .object(["workspaces": .array(try await snapshot().workspaces)])
+        case "workspace.list": return .object(["workspaces": .array(try await snapshot().occupiedWorkspaces)])
         case "vault.sessions", "chat.sessions.dump":
             let current = try await snapshot()
             let liveIDs = Set(current.bindings.map(\.id))
