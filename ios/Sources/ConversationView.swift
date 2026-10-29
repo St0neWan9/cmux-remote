@@ -408,6 +408,7 @@ struct ConversationView: View {
             .onChange(of: model.preview) { _, _ in if atLatest { scrollTrace.note("scroll preview"); scrollToNewest(proxy) } }
             // Opening a cached conversation re-enters with its follow state; start from the last message.
             .onAppear {
+                diagLog(.info, category: "open", "page appeared messages=\(model.messages.count)")
                 userScrolling = false
                 // Coming back from a pushed page — the preview, a tool detail, the timing sheet — is not
                 // opening the conversation again: the reader's place and any expanded card stay as they were.
