@@ -160,11 +160,16 @@ final class ConversationModel {
     /// whether or not the conversation changed, and a stored generation the Bridge has replaced is ignored.
     func restoreStored() async {
         guard messages.isEmpty, generation == nil, let cache else { return }
+        let started = ContinuousClock.now
         guard let entry = await cache.load(scope: client.operationRecoveryScope, sessionID: session.id) else { return }
+        let loaded = ContinuousClock.now
         // The read may have landed while the stored copy was being read; the fresh one wins.
         guard readsEnabled, messages.isEmpty, generation == nil else { return }
         generation = entry.snapshot.generation; hasMore = entry.snapshot.hasMore
         applyStored(entry.snapshot, live: entry.preview)
+        // Opening a long conversation should be instant; when it is not, this says whether the stored copy or its
+        // layout was the cost.
+        diagLog(.info, category: "open", "restored messages=\(messages.count) items=\(timelineItems.count) load=\(loaded - started) apply=\(ContinuousClock.now - loaded)")
     }
     /// Displays a stored copy as it was written; merging belongs to reads that arrive from the link.
     private func applyStored(_ history: ConversationSnapshot, live: PreviewSnapshot?) {
@@ -267,6 +272,8 @@ final class ConversationModel {
         await refreshQuestions()
     }
     private func readLatest(_ request: UUID) async {
+        let started = ContinuousClock.now
+        defer { diagLog(.debug, category: "open", "read landed after \(ContinuousClock.now - started) messages=\(messages.count)") }
         do {
             do { try await restorePendingSend() }
             catch { if refreshReads.isCurrent(request) { logFailure("refresh.recovery", error, shown: true); mutationWarning = ErrorPresentation().message(error) } }
