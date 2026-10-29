@@ -180,3 +180,40 @@ import CmuxRemoteCore
         #expect(try await reader.history(path: path, agent: "claude", beforeSeq: nil, limit: 50).backgroundTasks?.isEmpty == true)
     }
 }
+
+/// An async subagent ends when its notice names only the task id the launch reported.
+@Suite struct BackgroundTaskAsyncNoticeTests {
+    private func row(_ object: [String: Any]) -> String {
+        String(decoding: try! JSONSerialization.data(withJSONObject: object), as: UTF8.self)
+    }
+    /// Claude Code starts every subagent asynchronously: the call carries no flag and only the launch result
+    /// says so. Its completion notice names the agent id, not the tool call.
+    @Test func aNoticeNamingOnlyTheTaskIdEndsAnAsyncAgent() {
+        let launch = row(["type": "assistant", "timestamp": "2026-10-28T16:09:37.000Z", "message": ["content": [
+            ["type": "tool_use", "id": "toolu_A", "name": "Agent", "input": ["description": "Sidebar lag", "prompt": "x"]]]]])
+        let launched = row(["type": "user", "message": ["content": [
+            ["type": "tool_result", "tool_use_id": "toolu_A",
+             "content": [["type": "text", "text": "Async agent launched successfully. agentId: add65fec072db760e (internal ID)"]]]]]])
+        let notice = row(["type": "queue-operation", "operation": "enqueue", "timestamp": "2026-10-28T23:07:03.000Z",
+                          "content": "<task-notification>\n<task-id>add65fec072db760e</task-id>\n<status>completed</status>\n</task-notification>"])
+        let tracker = BackgroundTaskTracker()
+        #expect(tracker.running(in: [launch, launched], at: Date()).map(\.id) == ["toolu_A"])
+        #expect(tracker.running(in: [launch, launched, notice], at: Date()).isEmpty)
+    }
+    /// One notice can end several agents at once.
+    @Test func oneNoticeEndsEveryTaskIdItNames() {
+        func launched(_ index: Int, _ agent: String) -> [String] {
+            let call = row(["type": "assistant", "message": ["content": [
+                ["type": "tool_use", "id": "toolu_\(index)", "name": "Agent", "input": ["description": "d", "prompt": "x"]]]]])
+            let text = "Async agent launched successfully. agentId: \(agent) (internal ID)"
+            let result = row(["type": "user", "message": ["content": [
+                ["type": "tool_result", "tool_use_id": "toolu_\(index)", "content": [["type": "text", "text": text]]]]]])
+            return [call, result]
+        }
+        let notice = row(["type": "queue-operation", "operation": "enqueue", "timestamp": "2026-10-28T23:07:03.000Z",
+                          "content": "<task-notification>\n<task-id>aaa111</task-id>\n<task-id>bbb222</task-id>\n</task-notification>"])
+        let rows = launched(1, "aaa111") + launched(2, "bbb222")
+        #expect(BackgroundTaskTracker().running(in: rows, at: Date()).count == 2)
+        #expect(BackgroundTaskTracker().running(in: rows + [notice], at: Date()).isEmpty)
+    }
+}

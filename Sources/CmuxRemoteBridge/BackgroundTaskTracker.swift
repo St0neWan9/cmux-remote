@@ -109,9 +109,11 @@ struct BackgroundTaskTracker {
             // A completion notice names the tool call it finishes. A failure ends it only until the agent
             // retries, so it is kept apart rather than dropped.
             for notice in Self.notices(in: value) {
-                if let launch = state.launched.removeValue(forKey: notice.id) {
-                    if notice.failed { state.failed[notice.id] = Settled(launch: launch, at: stamp) }
-                    else { state.failed[notice.id] = nil; state.taskIDByToolUse[notice.id] = nil }
+                // A notice may name the tool call or only the task id the launch reported; both end the same task.
+                let key = state.launched[notice.id] != nil ? notice.id : state.toolUseByTaskID[notice.id]
+                if let key, let launch = state.launched.removeValue(forKey: key) {
+                    if notice.failed { state.failed[key] = Settled(launch: launch, at: stamp) }
+                    else { state.failed[key] = nil; state.taskIDByToolUse[key] = nil }
                 } else if !notice.failed {
                     state.failed[notice.id] = nil
                 }
@@ -174,7 +176,10 @@ struct BackgroundTaskTracker {
         Self.noticeTexts(in: value).flatMap { text -> [(id: String, failed: Bool)] in
             guard text.contains("<task-notification>") else { return [] }
             let failed = text.contains("<status>failed</status>")
+            // A notice names the tool call when it has one. Notice that only names the task ids are still
+            // paired: the launch result printed the same id, so it resolves through the task-id map.
             return Self.matches(#"<tool-use-id>([^<]+)</tool-use-id>"#, in: text).map { (id: $0, failed: failed) }
+                + Self.matches(#"<task-id>([^<]+)</task-id>"#, in: text).map { (id: $0, failed: failed) }
         }
     }
     /// Every string on one record that could carry a completion notice.
