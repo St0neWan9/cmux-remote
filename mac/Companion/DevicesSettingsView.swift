@@ -22,16 +22,24 @@ struct DevicesSettingsView: View {
                     if let request = selectedRequest {
                         details(clientID: request.clientID, workspaces: [], capabilities: request.scope.capabilities)
                         ForEach(liveWorkspaces(request), id: \.self) { workspace in
-                            Toggle(workspaceName(workspace), isOn: Binding(get: { !(excluded[request.requestID] ?? []).contains(workspace) },
-                                set: { allowed in if allowed { excluded[request.requestID, default: []].remove(workspace) } else { excluded[request.requestID, default: []].insert(workspace) } }))
-                                .toggleStyle(.checkbox).lineLimit(1).disabled(model.busy)
+                            // The whole row is the control: a checkbox-style toggle only answers a click on its own
+                            // mark and text, which left most of a wide row dead.
+                            Toggle(isOn: Binding(get: { !(excluded[request.requestID] ?? []).contains(workspace) },
+                                set: { allowed in if allowed { excluded[request.requestID, default: []].remove(workspace) } else { excluded[request.requestID, default: []].insert(workspace) } })) {
+                                Text(workspaceName(workspace)).lineLimit(1)
+                                    .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                            }
+                            .toggleStyle(.checkbox).disabled(model.busy)
                         }
                         MacPreferenceNote(text: String(localized: "mac.device.narrowHint", bundle: .interface))
                         let asksToStart = request.scope.capabilities.contains(.conversationStart)
                         if asksToStart {
-                            Toggle(String(localized: "mac.device.allowStart", bundle: .interface), isOn: Binding(get: { !withheldStart.contains(request.requestID) },
-                                set: { allowed in if allowed { withheldStart.remove(request.requestID) } else { withheldStart.insert(request.requestID) } }))
-                                .toggleStyle(.checkbox).disabled(model.busy)
+                            Toggle(isOn: Binding(get: { !withheldStart.contains(request.requestID) },
+                                set: { allowed in if allowed { withheldStart.remove(request.requestID) } else { withheldStart.insert(request.requestID) } })) {
+                                Text(String(localized: "mac.device.allowStart", bundle: .interface))
+                                    .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                            }
+                            .toggleStyle(.checkbox).disabled(model.busy)
                         }
                         let allowed = liveWorkspaces(request).filter { !(excluded[request.requestID] ?? []).contains($0) }
                         HStack(spacing: 8) {
