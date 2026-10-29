@@ -21,7 +21,7 @@ struct DevicesSettingsView: View {
                     deviceTable(pendingItems, selection: selection($pendingID, in: pendingItems))
                     if let request = selectedRequest {
                         details(clientID: request.clientID, workspaces: [], capabilities: request.scope.capabilities)
-                        ForEach(request.scope.workspaces, id: \.self) { workspace in
+                        ForEach(liveWorkspaces(request), id: \.self) { workspace in
                             Toggle(workspaceName(workspace), isOn: Binding(get: { !(excluded[request.requestID] ?? []).contains(workspace) },
                                 set: { allowed in if allowed { excluded[request.requestID, default: []].remove(workspace) } else { excluded[request.requestID, default: []].insert(workspace) } }))
                                 .toggleStyle(.checkbox).lineLimit(1).disabled(model.busy)
@@ -33,7 +33,7 @@ struct DevicesSettingsView: View {
                                 set: { allowed in if allowed { withheldStart.remove(request.requestID) } else { withheldStart.insert(request.requestID) } }))
                                 .toggleStyle(.checkbox).disabled(model.busy)
                         }
-                        let allowed = request.scope.workspaces.filter { !(excluded[request.requestID] ?? []).contains($0) }
+                        let allowed = liveWorkspaces(request).filter { !(excluded[request.requestID] ?? []).contains($0) }
                         HStack(spacing: 8) {
                             Button(String(localized: "mac.device.deny", bundle: .interface), role: .destructive) { Task { await model.deny(request) } }.fixedSize()
                             Button(String(localized: "mac.device.approve", bundle: .interface)) {
@@ -104,6 +104,12 @@ struct DevicesSettingsView: View {
     private var selectedClient: JSONValue? {
         let id = selection($clientID, in: clientItems).wrappedValue
         return model.clients.first { $0["id"].string == id }
+    }
+    /// The workspaces a pending request names that still exist. A closed one is neither shown nor granted: the
+    /// request was written when the Mac had a workspace list the owner cannot see any more.
+    private func liveWorkspaces(_ request: EnrollmentRequest) -> [String] {
+        let known = Set(model.workspaces.compactMap { $0["id"].string?.lowercased() })
+        return request.scope.workspaces.filter { known.contains($0.lowercased()) }
     }
     private func workspaceName(_ id: String) -> String {
         model.workspaces.first { $0["id"].string?.lowercased() == id.lowercased() }?["title"].string ?? id
