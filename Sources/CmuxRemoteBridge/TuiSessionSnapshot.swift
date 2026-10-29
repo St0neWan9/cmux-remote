@@ -25,6 +25,9 @@ struct TuiSessionSnapshot: Sendable {
     let bindings: [Binding]
     let surfaces: Set<String>
     /// Each terminal's own title, which an agent may use for its activity (Claude Code marks idle with `✳`).
+    /// Workspaces with at least one terminal left. Listed to the phone, but not used to resolve a resume: a
+    /// conversation whose terminal died can still be reopened in its workspace.
+    let occupiedWorkspaces: [JSONValue]
     let terminalTitles: [String: String]
     /// Each terminal tab's own identity, so a rename can name the tab the conversation runs in.
     let tabIDs: [String: String]
@@ -92,6 +95,11 @@ struct TuiSessionSnapshot: Sendable {
         surfaces = Set(terminals.keys.map { identity.uuid(machine: machineID, session: sessionID, resource: $0) })
         terminalTitles = terminals.compactMapValues { $0["title"].string }
         self.tabIDs = tabIDs; self.tabPanes = tabPanes; self.tabScreens = tabScreens
+        let occupied = Set(memberships.values.flatMap { $0 })
+        self.occupiedWorkspaces = arrays["workspaces"]!.filter { occupied.contains($0["id"].string ?? "") }.map { row in
+            .object(["id": .string(identity.uuid(machine: machineID, session: sessionID, resource: row["id"].string ?? "")), "title": row["name"], "backend": .string("cmux-tui"),
+                     "directories": .array((folders[row["id"].string ?? ""] ?? []).map(JSONValue.string))])
+        }
         runningTerminals = Set(terminals.compactMap { id, row in
             row["running"].bool == true && row["lifecycle"].string == "running" ? identity.uuid(machine: machineID, session: sessionID, resource: id) : nil
         })
