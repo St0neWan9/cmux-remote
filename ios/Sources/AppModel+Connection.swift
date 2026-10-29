@@ -43,8 +43,12 @@ extension AppModel {
 
     /// Runs while the app is in the foreground: follows each link, redials when the network returns, and retries a lost Mac.
     func superviseConnections(network: NetworkPathMonitor = NetworkPathMonitor()) async {
-        if let backgroundedAt, Date().timeIntervalSince(backgroundedAt) > 20 {
-            // iOS suspends sockets in the background; a link from before is unlikely to still be alive.
+        if let backgroundedAt {
+            // iOS tears the socket down within a couple of seconds of the app leaving the foreground (the bridge
+            // log shows the channel closing two seconds after the page's subscriptions are cancelled), so a link
+            // from before is gone however short the absence was. Redialing on return costs about two seconds; the
+            // alternative is a link that still looks connected and a request that waits out its twenty second
+            // deadline before the phone admits it is not.
             diagLog(.info, category: "link", "redial all: returned after \(Int(Date().timeIntervalSince(backgroundedAt)))s in background")
             self.backgroundedAt = nil
             await reconnect()
