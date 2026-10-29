@@ -197,6 +197,7 @@ struct SessionListView: View {
         awaiting = nil; startNotice = String(localized: "start.opened")
     }
     private func openConversation(_ hosted: HostedSession) {
+        diagLog(.info, category: "open", "tapped \(hosted.session.id.prefix(24)) state=\(hosted.session.state)")
         guard let link = model.link(for: hosted.hostID) else { return }
         selectedConversation = model.conversation(session: hosted.session, client: link.client)
         selectedHostName = hosted.hostName
