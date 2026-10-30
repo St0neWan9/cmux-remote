@@ -60,13 +60,83 @@ public actor SessionService {
             content = BackgroundTaskContent(taskID: taskID, tool: tool, summary: running?.summary ?? "", kind: .agent,
                                             running: running != nil, snapshot: conversation)
         case .output:
-            let page = try Self.outputPage(location.path, offset: offset, limit: limit)
+            let page = location.format == .workflowJournal
+                ? Self.textPage(try Self.workflowText(location.path), offset: offset, limit: limit)
+                : try Self.outputPage(location.path, offset: offset, limit: limit)
             content = BackgroundTaskContent(taskID: taskID, tool: tool, summary: running?.summary ?? "", kind: .output,
                                             running: running != nil, command: taskLocator.launchCommand(transcript: path, toolUseID: taskID),
                                             text: page.text, offset: offset, nextOffset: page.next, totalBytes: page.total)
         }
         try await recheck(record, capability: .conversationRead, access: access)
         return content
+    }
+    /// A Workflow's journal, written for a reader: its steps by phase, each one's outcome, and the result it
+    /// produced. The phone receives this as the task's text, paged like a command's output.
+    static func workflowText(_ path: String) throws -> String {
+        let attributes = try FileManager.default.attributesOfItem(atPath: path)
+        guard let size = (attributes[.size] as? NSNumber)?.intValue, size <= 268_435_456,
+              let content = try? String(contentsOfFile: path, encoding: .utf8) else {
+            throw BridgeError("task_unavailable", "This workflow's journal is too large to read.", status: 413)
+        }
+        let limit = 524_288
+        var steps: [(label: String, phase: String, result: String?)] = []
+        var order: [String] = []
+        var index: [String: Int] = [:]
+        for line in content.split(separator: "\n") {
+            guard let data = line.data(using: .utf8),
+                  let row = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let type = row["type"] as? String else { continue }
+            switch type {
+            case "started":
+                guard let key = row["key"] as? String else { continue }
+                let label = (row["label"] as? String) ?? (row["agentId"] as? String) ?? "step"
+                let phase = (row["phase"] as? String) ?? ""
+                if index[key] == nil { index[key] = steps.count; order.append(key); steps.append((label, phase, nil)) }
+                else { steps[index[key]!] = (label, phase, steps[index[key]!].result) }
+            case "result":
+                guard let key = row["key"] as? String else { continue }
+                // A step's result is prose for some workflows and a structured finding list for others; both are
+                // shown, the second as indented JSON rather than as nothing.
+                let result = (row["result"] as? String)
+                    ?? (row["result"]).flatMap { value -> String? in
+                        guard JSONSerialization.isValidJSONObject(value),
+                              let data = try? JSONSerialization.data(withJSONObject: value, options: [.prettyPrinted, .sortedKeys]) else { return nil }
+                        return String(decoding: data, as: UTF8.self)
+                    }
+                if let position = index[key] { steps[position] = (steps[position].label, steps[position].phase, result) }
+                else { index[key] = steps.count; order.append(key); steps.append((row["label"] as? String ?? "step", row["phase"] as? String ?? "", result)) }
+            default: continue
+            }
+            if steps.count >= 512 { break }
+        }
+        guard !steps.isEmpty else { return "This workflow recorded no steps.\n" }
+        let finished = steps.filter { $0.result != nil }.count
+        var text = "Workflow run — \(steps.count) steps, \(finished) finished\n"
+        var phase = ""
+        for step in steps {
+            if step.phase != phase { phase = step.phase; if !phase.isEmpty { text += "\n== \(phase) ==\n" } }
+            text += "\n· \(step.label)\n"
+            if let result = step.result {
+                let trimmed = result.trimmingCharacters(in: .whitespacesAndNewlines)
+                let bounded = trimmed.count > 2_000 ? String(trimmed.prefix(2_000)) + "\n… (truncated)" : trimmed
+                text += bounded.split(separator: "\n", omittingEmptySubsequences: false).map { "  " + $0 }.joined(separator: "\n") + "\n"
+            } else {
+                text += "  (no result recorded)\n"
+            }
+            if text.utf8.count >= limit { text += "\n… (truncated)\n"; break }
+        }
+        return text
+    }
+    /// A page of generated text, sliced the way a command's output is: on a character boundary, with the offset of
+    /// the next page when there is one.
+    static func textPage(_ text: String, offset: Int, limit: Int) -> (text: String, next: Int?, total: Int) {
+        let bytes = Data(text.utf8), total = bytes.count
+        guard offset <= total else { return ("", nil, total) }
+        let count = min(max(limit, 1), 262_144)
+        let slice = Data(bytes[offset..<min(offset + count, total)])
+        let trimmed = trimmedToCharacterBoundary(slice)
+        let next = offset + trimmed.count < total ? offset + trimmed.count : nil
+        return (String(decoding: trimmed, as: UTF8.self), next, total)
     }
     /// A page of a task's output, ending on a character boundary so the next page can continue from `next`.
     static func outputPage(_ path: String, offset: Int, limit: Int) throws -> (text: String, next: Int?, total: Int) {
