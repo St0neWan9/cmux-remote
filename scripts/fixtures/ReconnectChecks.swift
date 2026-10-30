@@ -53,11 +53,12 @@ enum ReconnectChecks {
         let busyFull = await busy.wait()
         check(!busyFull && busy.step(states: ["studio": .disconnected], waited: busyFull) == .redialDropped(["studio"]), "A drop seen during a dial waited a full pause")
 
-        // The default pauses double from 2s to 256s and then stay at 256s.
+        // The default pauses double from 2s to 32s and then stay at 32s: a lost Mac is noticed within half a
+        // minute while the app is open, since these retries only run in the foreground.
         let doubling = ReconnectSchedule()
         var seen: [Duration] = []
         for _ in 0..<10 { seen.append(doubling.pause); _ = doubling.step(states: ["studio": .disconnected], waited: true) }
-        check(seen == [2, 4, 8, 16, 32, 64, 128, 256, 256, 256].map { .seconds($0) }, "The retry pauses did not double up to 256s and hold there: \(seen)")
+        check(seen == [2, 4, 8, 16, 32, 32, 32, 32, 32, 32].map { .seconds($0) }, "The retry pauses did not double up to 32s and hold there: \(seen)")
 
         // A Mac that stays down is never given up on, but only the first retries are shown.
         let endless = ReconnectSchedule(pauses: [.milliseconds(20)], visibleAttempts: 2)
