@@ -78,10 +78,12 @@ struct ActivityGroupView: View {
                                 }, lazy: true)
                         .padding(.horizontal, 14).padding(.vertical, 12)
                 }
-                .navigationDestination(isPresented: Binding(get: { sheetImage != nil }, set: { if !$0 { sheetImage = nil } })) {
+                // A cover rather than a push: pushing inside the sheet slides the page underneath it, which shows
+                // as the operations page jumping up and settling back when the image closes.
+                .fullScreenCover(isPresented: Binding(get: { sheetImage != nil }, set: { if !$0 { sheetImage = nil } })) {
                     if let reference = sheetImage, let client { HistoricalImageView(reference: reference, sessionID: sessionID, client: client) }
                 }
-                .navigationDestination(isPresented: Binding(get: { sheetDetail != nil }, set: { if !$0 { sheetDetail = nil } })) {
+                .fullScreenCover(isPresented: Binding(get: { sheetDetail != nil }, set: { if !$0 { sheetDetail = nil } })) {
                     if let reference = sheetDetail, let client { ToolDetailView(reference: reference, sessionID: sessionID, client: client) }
                 }
                 .navigationTitle(String.localizedStringWithFormat(String(localized: "chat.activity_count"), item.operationCount))
