@@ -3,9 +3,9 @@ import CmuxRemoteClient
 
 /// Paces automatic redials of lost Macs: at once when a working link drops, then after growing pauses.
 ///
-/// The pause doubles from 2 seconds up to 256 and then stays there, so a Mac that is off for the day is still
-/// found when it comes back, at the cost of one dial every few minutes. After the first few retries the
-/// schedule turns quiet: the pages stop showing the dial, since a bar that keeps turning reads as broken.
+/// The pause doubles from 2 seconds up to 32 and then stays there, so a Mac that comes back is noticed within
+/// half a minute while the app is open. After the first few retries the schedule turns quiet: the pages stop
+/// showing the dial, since a bar that keeps turning reads as broken.
 ///
 /// Only a link that was connected and then reported down wakes the retry early: that is the network taking it,
 /// since closing a Mac's link reports nothing and a link kept for an in-flight write never goes down. A dial that
@@ -27,7 +27,9 @@ final class ReconnectSchedule {
     /// Macs whose working link dropped since the last step, in the order they dropped.
     private var dropped: [String] = []
     private var nap: Task<Void, Never>?
-    init(pauses: [Duration] = [2, 4, 8, 16, 32, 64, 128, 256].map { .seconds($0) }, visibleAttempts: Int = 3) {
+    /// A lost Mac is retried every half minute at most: these retries only run while the app is open, and waiting
+    /// minutes to notice the Mac is back is what "it never connects" feels like.
+    init(pauses: [Duration] = [2, 4, 8, 16, 32].map { .seconds($0) }, visibleAttempts: Int = 3) {
         precondition(!pauses.isEmpty, "A schedule needs at least one pause")
         precondition(visibleAttempts >= 0)
         self.pauses = pauses
