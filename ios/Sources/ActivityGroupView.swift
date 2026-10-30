@@ -1,5 +1,6 @@
 import SwiftUI
 import CmuxRemoteCore
+import CmuxRemoteClient
 
 /// Details stay accessible behind one quiet summary instead of filling the conversation with cards.
 struct ActivityGroupView: View {
@@ -9,6 +10,11 @@ struct ActivityGroupView: View {
     var images: [ConversationImageReference] = []
     var openImage: ((ConversationImageReference) -> Void)?
     var openDetail: ((String, String) -> Void)?
+    /// The conversation an image or a tool page belongs to. This group's own sheet presents them itself: a page
+    /// pushed by the conversation behind it opens underneath the sheet that asked for it.
+    var sessionID = ""
+    var client: RemoteClient?
+    var generation: String?
     /// Whether this group is the newest item in the conversation. The newest group opens on its own so its
     /// work can be followed as it happens, and closes once the next message arrives.
     var isLatest = false
@@ -17,6 +23,8 @@ struct ActivityGroupView: View {
     /// Groups past this many operations draw only their newest slice here; the rest is read on their own page.
     static let inlineLimit = ActivityGroupPolicy.inlineLimit
     @State private var showingAll = false
+    @State private var sheetImage: ConversationImageReference?
+    @State private var sheetDetail: ToolDetailReference?
     /// The row this group belongs to, so expanding it keeps its place in the timeline.
     @Environment(\.holdPlace) private var holdPlace
     /// The group stays open while it is the newest, so a running Agent stays readable, but a long one draws only
@@ -61,8 +69,20 @@ struct ActivityGroupView: View {
             NavigationStack {
                 ScrollView {
                     MessageRows(messages: item.messages, projectRoot: projectRoot, openFile: openFile, images: images,
-                                openImage: openImage, openDetail: openDetail, lazy: true)
+                                openImage: { reference in
+                                    if let client, !sessionID.isEmpty { sheetImage = reference } else { openImage?(reference) }
+                                },
+                                openDetail: { messageID, field in
+                                    if let client, let generation { sheetDetail = ToolDetailReference(messageID: messageID, generation: generation, initialField: field) }
+                                    else { openDetail?(messageID, field) }
+                                }, lazy: true)
                         .padding(.horizontal, 14).padding(.vertical, 12)
+                }
+                .navigationDestination(isPresented: Binding(get: { sheetImage != nil }, set: { if !$0 { sheetImage = nil } })) {
+                    if let reference = sheetImage, let client { HistoricalImageView(reference: reference, sessionID: sessionID, client: client) }
+                }
+                .navigationDestination(isPresented: Binding(get: { sheetDetail != nil }, set: { if !$0 { sheetDetail = nil } })) {
+                    if let reference = sheetDetail, let client { ToolDetailView(reference: reference, sessionID: sessionID, client: client) }
                 }
                 .navigationTitle(String.localizedStringWithFormat(String(localized: "chat.activity_count"), item.operationCount))
                 .navigationBarTitleDisplayMode(.inline)

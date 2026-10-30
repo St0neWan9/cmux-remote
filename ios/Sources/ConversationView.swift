@@ -270,7 +270,7 @@ struct ConversationView: View {
             } else if let response = firstResponse[item.id], let seconds = response.durationSeconds {
                 ResponseRunLabel(seconds: seconds, recorded: response.recordedDuration)
             }
-            if item.isActivity { ActivityGroupView(item: item, projectRoot: model.session.cwd, openFile: model.client.allows(.projectRead) ? { selectedFile = $0; showProject = true } : nil, images: images, openImage: { selectedImage = $0 }, openDetail: openToolDetail, isLatest: item.id == model.timelineItems.last?.id) }
+            if item.isActivity { ActivityGroupView(item: item, projectRoot: model.session.cwd, openFile: model.client.allows(.projectRead) ? { selectedFile = $0; showProject = true } : nil, images: images, openImage: { selectedImage = $0 }, openDetail: openToolDetail, sessionID: model.session.id, client: model.client, generation: model.historyGeneration, isLatest: item.id == model.timelineItems.last?.id) }
             else {
                 let prompt = item.first.kind.questionPrompt
                 MessageRow(message: item.first, projectRoot: model.session.cwd, openFile: model.client.allows(.projectRead) ? { selectedFile = $0; showProject = true } : nil, images: images, openImage: { selectedImage = $0 }, openDetail: openToolDetail,
