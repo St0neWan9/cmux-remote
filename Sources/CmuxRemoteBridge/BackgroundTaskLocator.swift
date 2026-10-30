@@ -17,8 +17,15 @@ public struct BackgroundTaskLocator: Sendable {
     }
     private let runtimeIDs = RuntimeIDs()
     public struct Location: Sendable, Equatable {
+        /// What the file holds: a command's raw output, or a Workflow's own journal, which is rendered for the
+        /// phone instead of being shown as the JSON lines it is stored as.
+        public enum Format: Sendable, Equatable { case raw, workflowJournal }
         public let kind: BackgroundTaskContent.Kind
         public let path: String
+        public var format: Format = .raw
+        public init(kind: BackgroundTaskContent.Kind, path: String, format: Format = .raw) {
+            self.kind = kind; self.path = path; self.format = format
+        }
     }
     /// The agent's own task directory root, `/tmp/claude-<uid>`.
     private let temporaryRoot: String
@@ -33,6 +40,10 @@ public struct BackgroundTaskLocator: Sendable {
         guard Self.isValid(taskID) else { return nil }
         let session = URL(fileURLWithPath: transcript).deletingPathExtension()
         if let agent = agentTranscript(session: session, taskID: taskID) { return Location(kind: .agent, path: agent) }
+        // A Workflow names a transcript directory, and its own `.output` file stays empty: the run is in the journal.
+        if let journal = workflowJournal(transcript: transcript, toolUseID: taskID) {
+            return Location(kind: .output, path: journal, format: .workflowJournal)
+        }
         if let output = outputFile(transcript: transcript, taskID: taskID) { return Location(kind: .output, path: output) }
         return nil
     }
@@ -74,6 +85,31 @@ public struct BackgroundTaskLocator: Sendable {
             let resolved = file.resolvingSymlinksInPath()
             guard resolved.path.hasPrefix(root) else { continue }
             return resolved.path
+        }
+        return nil
+    }
+    /// `<session>/workflows` holds every run of the workflows session; the launch result names this call's own
+    /// directory, and the journal inside it is what the run actually did.
+    private func workflowJournal(transcript: String, toolUseID: String) -> String? {
+        let key = transcript + "\u{0}wf\u{0}" + toolUseID
+        if let cached = runtimeIDs.get(key) { return cached }
+        guard let handle = try? FileHandle(forReadingFrom: URL(fileURLWithPath: transcript)) else { return nil }
+        defer { try? handle.close() }
+        var pending = Data()
+        while let chunk = try? handle.read(upToCount: 1_048_576), !chunk.isEmpty {
+            pending.append(chunk)
+            while let end = pending.lastIndex(of: 10) {
+                let line = pending[pending.startIndex...end]
+                pending.removeSubrange(pending.startIndex...end)
+                guard let text = String(data: line, encoding: .utf8), text.contains(toolUseID),
+                      let marker = text.range(of: "Transcript dir: ") else { continue }
+                let raw = text[marker.upperBound...].prefix { !$0.isWhitespace && $0 != "\\" && $0 != "\"" }
+                guard !raw.isEmpty else { continue }
+                let journal = URL(fileURLWithPath: String(raw)).appendingPathComponent("journal.jsonl")
+                guard FileManager.default.fileExists(atPath: journal.path) else { continue }
+                runtimeIDs.set(key, journal.path)
+                return journal.path
+            }
         }
         return nil
     }

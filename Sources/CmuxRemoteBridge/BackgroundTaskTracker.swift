@@ -101,9 +101,18 @@ struct BackgroundTaskTracker {
                 state.launched[toolUseID] = candidate
             }
             for (toolUseID, text) in Self.toolResults(in: value) where state.launched[toolUseID] != nil {
-                if let taskID = Self.matches(#"(?:with ID: |Monitor started \(task |agentId: )([A-Za-z0-9_-]+)"#, in: text).first {
+                if let taskID = Self.matches(#"(?:with ID: |Task ID: |Monitor started \(task |agentId: )([A-Za-z0-9_-]+)"#, in: text).first {
                     state.toolUseByTaskID[taskID] = toolUseID
                     state.taskIDByToolUse[toolUseID] = taskID
+                }
+                // A Workflow's launch result names the run in a line of its own; the call's own input is a script,
+                // which reads as nothing like the work it started.
+                if var launch = state.launched[toolUseID], let range = text.range(of: "Summary: ") {
+                    let line = text[range.upperBound...].prefix { $0 != "\n" }.trimmingCharacters(in: .whitespaces)
+                    if !line.isEmpty {
+                        launch = Launch(task: BackgroundAgentTask(id: launch.task.id, tool: launch.task.tool, summary: Self.shorten(line)), deadline: launch.deadline)
+                        state.launched[toolUseID] = launch
+                    }
                 }
             }
             // A completion notice names the tool call it finishes. A failure ends it only until the agent
@@ -152,6 +161,9 @@ struct BackgroundTaskTracker {
         if line.contains("task-notification") || line.contains("run_in_background") || line.contains("\"TaskStop\"") || line.contains("\"Agent\"") { return true }
         // A launch result reports the task id that a later `TaskStop` names.
         if line.contains("running in background with ID") || line.contains("Monitor started (task") || line.contains("agentId:") { return true }
+        // A Workflow's launch result says "Workflow launched in background. Task ID: …"; the row names no tool, so
+        // the signal has to be read from the sentence itself.
+        if line.contains("launched in background") || line.contains("Task ID:") { return true }
         return alwaysDetached.contains { line.contains("\"" + $0 + "\"") }
     }
     /// Every `tool_use` block on one transcript record.
