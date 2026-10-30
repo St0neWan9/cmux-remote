@@ -185,7 +185,9 @@ actor LinkClientConnection {
         let relayed = relayDial(try RelayOrigin(relay.origin).socketURL(hostID: host.id, role: "client"), ["X-Cmux-Relay-Permit": try JSONEncoder().encode(relay.admission).base64EncodedString(), "X-Cmux-Relay-Join": try JSONEncoder().encode(join).base64EncodedString()])
         let started = ContinuousClock.now
         do {
-            let ready = try await prepare(relayed, handshake: handshake, relayed: true, deadline: .seconds(15))
+            // A relay path that has not authenticated in ten seconds is not going to: waiting fifteen makes every
+            // attempt feel like the app has stopped rather than failed.
+            let ready = try await prepare(relayed, handshake: handshake, relayed: true, deadline: .seconds(10))
             race?.claim(.relay)
             trace("dial relay ok \(TraceFormat().milliseconds(since: started))ms relayed=true")
             return ready
