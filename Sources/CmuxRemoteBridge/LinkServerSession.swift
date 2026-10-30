@@ -21,11 +21,21 @@ actor LinkServerSession {
     init(router: BridgeRouter, authority: ConnectionAuthority, send: @escaping @Sendable (Data) async throws -> Void, terminate: @escaping @Sendable () -> Void, expectedClientID: String? = nil) {
         self.expectedClientID = expectedClientID; self.router = router; self.authority = authority; writer = LinkPacketWriter(send: send, terminate: terminate)
     }
+    /// How long a channel may stay unauthenticated. The phone's own dial gives the relay ten seconds to
+    /// authenticate, so a shorter deadline here drops exactly the dials that are slow but would have made it:
+    /// the log shows channels closed five seconds in, with no client named, right after the relay reconnected.
+    static let handshakeWindow: Duration = .seconds(12)
     func start() {
         guard handshakeDeadline == nil else { return }
         handshakeDeadline = Task { [weak self] in
-            do { try await Task.sleep(for: .seconds(5)); await self?.close() } catch {}
+            do { try await Task.sleep(for: Self.handshakeWindow) } catch { return }
+            await self?.expireHandshake()
         }
+    }
+    private func expireHandshake() async {
+        guard handshakeDeadline != nil, clientID == nil else { return }
+        BridgeLog.shared.warning("link", "link handshake timed out after \(Self.handshakeWindow.components.seconds)s; closing the channel")
+        await close()
     }
     func receive(_ data: Data) async {
         guard !closed else { return }
