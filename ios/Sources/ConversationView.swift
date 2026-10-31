@@ -54,8 +54,6 @@ struct ConversationView: View {
     @FocusState private var composerFocused: Bool
     /// This Mac's link, shown above the conversation while it is not up.
     @State private var linkState: LinkState?
-    /// Whether the marker above the first loaded message is within reach of the top of the page.
-    @State private var topNear = false
     /// When another page of earlier messages may load. Scrolling past the top fires a geometry change for every
     /// layout pass, and a prepended page changes the layout again: without a pause the loader chained page after
     /// page, each one re-laying the whole list and scrolling, and a long conversation simply froze.
@@ -194,10 +192,16 @@ struct ConversationView: View {
     }
     /// The message list. Separate from `body` so the page stays type-checkable.
     @ViewBuilder private func timeline(bottom: CGFloat, tailFirst: Bool, reachedTop: @escaping () -> Void) -> some View {
-        // Lookups are built once per update instead of searched again by every row.
-        let firstResponse = Dictionary(model.responses.map { ($0.firstMessageID, $0) }, uniquingKeysWith: { _, latest in latest })
-        let lastResponse = Dictionary(model.responses.map { ($0.lastMessageID, $0) }, uniquingKeysWith: { _, latest in latest })
-        let imagesByMessage = Dictionary(grouping: model.images, by: \.messageID)
+        // Lookups are built once per change, not once per body evaluation: a scroll re-evaluates this page many
+        // times a second, and rebuilding three dictionaries over every message each time was the cost of reading
+        // back through a long conversation.
+        let index = TimelineIndexCache.shared.index(key: model.timelineIndexKey) {
+            TimelineIndexCache.Index(
+                firstResponse: Dictionary(model.responses.map { ($0.firstMessageID, $0) }, uniquingKeysWith: { _, latest in latest }),
+                lastResponse: Dictionary(model.responses.map { ($0.lastMessageID, $0) }, uniquingKeysWith: { _, latest in latest }),
+                imagesByMessage: Dictionary(grouping: model.images, by: \.messageID))
+        }
+        let firstResponse = index.firstResponse, lastResponse = index.lastResponse, imagesByMessage = index.imagesByMessage
         let runningSince = model.runningSince
         // The live label belongs at the top of the reply in progress; before the first reply it has its own row.
         let activeAnchor: String? = runningSince == nil ? nil : model.responses.last.flatMap { $0.completed ? nil : $0.firstMessageID }
@@ -214,11 +218,9 @@ struct ConversationView: View {
                     .frame(maxWidth: .infinity).frame(height: 32).padding(.top, 12)
                     // Position, not appearance: a lazy row stays alive offscreen, so its appearance fires only once.
                     .onGeometryChange(for: Bool.self) { $0.frame(in: .named("chatTimeline")).minY > -240 } action: { near in
-                        topNear = near
+                        // No state is written here: the page must not re-evaluate on every scroll frame.
                         if near && !atLatest { reachedTop() }
                     }
-                    // A lazy row can be dropped far offscreen without reporting its last position.
-                    .onDisappear { topNear = false }
             }
             else if model.clipped { Text(String(localized: "chat.clipped")).font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: .infinity).padding(.top, 12).accessibilityIdentifier("chat.clipped") }
             if model.messages.isEmpty && model.error == nil && !showsInitialLoading {
