@@ -432,7 +432,10 @@ final class ConversationModel {
             defer { if olderReads.revision == request { loadingOlder = false } }
             do {
                 let page: ConversationSnapshot
-                if let stored = await store?.page(scope: client.operationRecoveryScope, sessionID: session.id, beforeSeq: seq, limit: 40) {
+                if let stored = await store?.page(scope: client.operationRecoveryScope, sessionID: session.id, beforeSeq: seq, limit: 40),
+                   stored.generation == sourceGeneration {
+                    // A page stored under another generation belongs to another seq space; using it here would put
+                    // its messages in the wrong place, so it is ignored and read again.
                     page = stored
                 } else if let archive, let next = try? await archive.older(limit: 40) {
                     page = next.page

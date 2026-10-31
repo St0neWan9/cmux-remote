@@ -51,7 +51,7 @@ public actor TranscriptReader {
     private let now: @Sendable () -> Date
     public init(windowLimit: Int = 33_554_432, windowStep: Int = 8_388_608, now: @escaping @Sendable () -> Date = { Date() },
                 generationStore: TranscriptGenerationStore = TranscriptGenerationStore(directory: nil),
-                chunkBytes: Int = 8_388_608) {
+                chunkBytes: Int = 2_097_152) {
         self.windowLimit = max(1, windowLimit); self.windowStep = max(1, min(windowStep, windowLimit)); self.now = now
         self.generationStore = generationStore; self.archiveChunkBytes = max(1, chunkBytes)
     }
