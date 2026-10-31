@@ -89,6 +89,8 @@ final class ConversationModel {
     private let fullReadInterval: TimeInterval = 60
     /// The last read of this conversation, shown on open while the fresh one is on its way.
     private let cache: ConversationCache?
+    /// The conversation kept across openings; nil in fixtures that supply their own readers.
+    private let store: ConversationStore?
     /// Reads the requests waiting for the agent, of which this conversation's questions are the ones it owns.
     private let readFeed: @Sendable () async throws -> [JSONValue]
     /// Answers one of those requests.
@@ -138,7 +140,7 @@ final class ConversationModel {
          readModels: (@Sendable () async throws -> ModelChoiceList)? = nil,
          postModel: (@Sendable (ModelSwitchRequest) async throws -> MutationReceipt)? = nil,
          renameSession: (@Sendable (SessionRenameRequest) async throws -> MutationReceipt)? = nil,
-         cache: ConversationCache? = nil, modelCache: ModelChoiceCache? = nil) {
+         cache: ConversationCache? = nil, store: ConversationStore? = nil, modelCache: ModelChoiceCache? = nil) {
         self.session = session; self.client = client; self.modelCache = modelCache; speech = SpeechDraftModel(input: speechInput ?? UnavailableSpeechInput())
         let id = session.id
         let recovery = PendingSendStore(); let scope = client.operationRecoveryScope
@@ -165,14 +167,23 @@ final class ConversationModel {
         self.readModels = readModels ?? { try await client.get("/v1/sessions/\(id)/models", as: ModelChoiceList.self) }
         self.postModel = postModel ?? { try await client.post("/v1/sessions/\(id)/model", body: $0, as: MutationReceipt.self) }
         self.renameSession = renameSession ?? { try await client.post("/v1/sessions/\(id)/title", body: $0, as: MutationReceipt.self) }
-        self.cache = cache
+        self.cache = cache; self.store = store
     }
     /// Shows what was read last, so opening a conversation never starts blank.
     ///
     /// This displays stored content rather than deciding anything: the refresh that follows replaces it
     /// whether or not the conversation changed, and a stored generation the Bridge has replaced is ignored.
     func restoreStored() async {
-        guard messages.isEmpty, generation == nil, let cache else { return }
+        guard messages.isEmpty, generation == nil else { return }
+        // A stored conversation is shown whole: every page read so far, not just the newest one.
+        if let store, let stored = await store.restore(scope: client.operationRecoveryScope, sessionID: session.id) {
+            guard readsEnabled, messages.isEmpty, generation == nil else { return }
+            generation = stored.generation; hasMore = stored.hasMore
+            applyStored(stored, live: nil)
+            diagLog(.info, category: "open", "restored from store messages=\(messages.count)")
+            return
+        }
+        guard let cache else { return }
         let started = ContinuousClock.now
         guard let entry = await cache.load(scope: client.operationRecoveryScope, sessionID: session.id) else { return }
         let loaded = ContinuousClock.now
@@ -203,9 +214,10 @@ final class ConversationModel {
     }
     /// Stores the read that just landed, so the next open of this conversation is immediate.
     private func store(_ history: ConversationSnapshot, live: PreviewSnapshot?) {
+        let scope = client.operationRecoveryScope, id = session.id
+        if let store { Task { await store.save(history, scope: scope, sessionID: id, complete: !history.hasMore) } }
         guard let cache else { return }
         let entry = ConversationCache.Entry(snapshot: history, preview: live, storedAt: Date())
-        let scope = client.operationRecoveryScope, id = session.id
         Task { await cache.save(entry, scope: scope, sessionID: id) }
     }
     func updateSession(_ current: SessionDescriptor) {
@@ -378,6 +390,8 @@ final class ConversationModel {
                 messages.insert(contentsOf: page.messages.filter { !existing.contains($0.id) }, at: 0)
                 let imageIDs = Set(images.map(\.id)); images += (page.images ?? []).filter { !imageIDs.contains($0.id) }
                 timelineItems = ConversationTimeline().items(from: messages); hasMore = page.hasMore
+                // Each earlier page joins the stored copy, so reading back through it later never asks the Mac again.
+                if let store { Task { await store.save(page, scope: client.operationRecoveryScope, sessionID: session.id, complete: !page.hasMore) } }
             } catch {
                 guard olderReads.isCurrent(request), generation == sourceGeneration else { return }
                 let shown = !ErrorPresentation().isConnectivity(error)
