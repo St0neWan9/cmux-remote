@@ -97,12 +97,12 @@ struct DevicesSettingsView: View {
     }
     private var pendingItems: [MacTableItem] {
         model.pending.map { MacTableItem(id: $0.requestID, title: $0.clientName, detail: String($0.clientID.uppercased().prefix(12)),
-                                         symbol: $0.clientKind == "iphone" ? "iphone" : "desktopcomputer") }
+                                         symbol: deviceSymbol($0.clientKind)) }
     }
     private var clientItems: [MacTableItem] {
         model.clients.compactMap { client in
             client["id"].string.map { MacTableItem(id: $0, title: client["name"].string ?? $0, detail: String($0.uppercased().prefix(12)),
-                                                   symbol: client["kind"].string == "iphone" ? "iphone" : "desktopcomputer") }
+                                                   symbol: deviceSymbol(client["kind"].string)) }
         }
     }
     private var selectedRequest: EnrollmentRequest? {
@@ -122,4 +122,9 @@ struct DevicesSettingsView: View {
     private func workspaceName(_ id: String) -> String {
         model.workspaces.first { $0["id"].string?.lowercased() == id.lowercased() }?["title"].string ?? id
     }
+}
+
+/// A phone-shaped row for either mobile client; the Mac companion stays a desktop.
+private func deviceSymbol(_ kind: String?) -> String {
+    kind == "iphone" || kind == "android" ? "iphone" : "desktopcomputer"
 }

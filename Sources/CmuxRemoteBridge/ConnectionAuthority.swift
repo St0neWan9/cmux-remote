@@ -201,7 +201,7 @@ public actor ConnectionAuthority {
         let request = signed.value
         guard request.hostID == host.id, try crypto.identityID(publicKey: request.clientPublicKey) == request.clientID,
               UUID(uuidString: request.requestID) != nil, UUID(uuidString: request.nonce) != nil, UUID(uuidString: request.windowID) != nil,
-              ["iphone", "mac"].contains(request.clientKind), !request.clientName.isEmpty, request.clientName.utf8.count <= 128,
+              ["iphone", "mac", "android"].contains(request.clientKind), !request.clientName.isEmpty, request.clientName.utf8.count <= 128,
               !request.clientName.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }),
               allowExpired || (request.expiresAt > now() && request.expiresAt <= now() + 600) else { throw BridgeError("invalid_enrollment", "The device enrollment request is invalid.") }
         try request.scope.validate(); try crypto.verify(signed, domain: "enrollment-request", publicKey: request.clientPublicKey)
