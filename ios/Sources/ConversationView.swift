@@ -315,7 +315,10 @@ struct ConversationView: View {
     /// `pull` is the reader asking with the pull gesture: that gesture answers with its own spinner, so it must do
     /// work even when an automatic page loaded a moment ago.
     private func loadOlder(_ proxy: ScrollViewProxy, pull: Bool = false) async {
-        guard model.hasMore, !model.loadingOlder, pull || Date() >= nextPageAllowed, let anchor = model.timelineItems.first?.id else { return }
+        // A person asking is not filtered by what the page believes: a stale `hasMore` is exactly what made the pull
+        // do nothing, and asking the chain again costs one request that answers "no more" honestly.
+        guard (pull || model.hasMore), !model.loadingOlder, pull || Date() >= nextPageAllowed,
+              let anchor = model.timelineItems.first?.id else { return }
         nextPageAllowed = Date().addingTimeInterval(0.8)
         await model.older()
         // A page that brings nothing new is not the end of the record: the loader keeps its pause, and the reader
