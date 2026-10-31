@@ -9,13 +9,16 @@ import XCTest
 final class MobileRealPullUITests: XCTestCase {
     func testPullingDownReachesTheFirstMessageOfARealConversation() throws {
         let environment = ProcessInfo.processInfo.environment
-        guard let pairingPath = environment["CMUX_REMOTE_TEST_PAIRING_PATH"], !pairingPath.isEmpty,
-              let sessionID = environment["CMUX_REMOTE_TEST_SESSION"], !sessionID.isEmpty,
+        guard let sessionID = environment["CMUX_REMOTE_TEST_SESSION"], !sessionID.isEmpty,
               let firstMessage = environment["CMUX_REMOTE_TEST_FIRST_MESSAGE"], !firstMessage.isEmpty else {
-            throw XCTSkip("Supply a real Bridge pairing, a session id and that session's first message.")
+            throw XCTSkip("Supply a session id and that session's first message.")
         }
         let app = XCUIApplication(bundleIdentifier: "cmux-remote.mobile")
-        app.launchEnvironment["CMUX_REMOTE_TEST_PAIRING_PATH"] = pairingPath
+        // Without a pairing file the app uses the enrollment it already holds, so the test can run against the
+        // installed Bridge on this Mac instead of an isolated one.
+        if let pairingPath = environment["CMUX_REMOTE_TEST_PAIRING_PATH"], !pairingPath.isEmpty {
+            app.launchEnvironment["CMUX_REMOTE_TEST_PAIRING_PATH"] = pairingPath
+        }
         app.launchArguments = ["-AppleLanguages", "(zh-Hans)"]
         app.launch()
         let session = app.buttons.matching(NSPredicate(format: "identifier ENDSWITH %@", sessionID)).firstMatch
@@ -52,12 +55,15 @@ final class MobileRealPullUITests: XCTestCase {
     }
     func testStressSwipingStaysResponsive() throws {
         let environment = ProcessInfo.processInfo.environment
-        guard let pairingPath = environment["CMUX_REMOTE_TEST_PAIRING_PATH"], !pairingPath.isEmpty,
-              let sessionID = environment["CMUX_REMOTE_TEST_SESSION"], !sessionID.isEmpty else {
-            throw XCTSkip("Supply a real Bridge pairing and session id.")
+        guard let sessionID = environment["CMUX_REMOTE_TEST_SESSION"], !sessionID.isEmpty else {
+            throw XCTSkip("Supply a session id.")
         }
         let app = XCUIApplication(bundleIdentifier: "cmux-remote.mobile")
-        app.launchEnvironment["CMUX_REMOTE_TEST_PAIRING_PATH"] = pairingPath
+        // Without a pairing file the app uses the enrollment it already holds, so the test can run against the
+        // installed Bridge on this Mac instead of an isolated one.
+        if let pairingPath = environment["CMUX_REMOTE_TEST_PAIRING_PATH"], !pairingPath.isEmpty {
+            app.launchEnvironment["CMUX_REMOTE_TEST_PAIRING_PATH"] = pairingPath
+        }
         app.launchArguments = ["-AppleLanguages", "(zh-Hans)"]
         app.launch()
         let session = app.buttons.matching(NSPredicate(format: "identifier ENDSWITH %@", sessionID)).firstMatch
