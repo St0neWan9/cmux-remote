@@ -409,7 +409,14 @@ struct ConversationView: View {
             // A card opened at the newest message would otherwise be carried off by the next one to arrive.
             .environment(\.holdPlace) { scrollTrace.toggled("atLatest=\(atLatest) latestVisible=\(latestVisible)"); atLatest = false; holdingPlace = true }
             .scrollDismissesKeyboard(.interactively)
-            .refreshable { await pullToRefresh(proxy) }
+            // The pull is read from the scroll itself rather than from the system's refresh control: that control
+            // showed its own spinner beside the timeline's, and it only arms in states this page does not always
+            // sit in. Overscrolling past the top now loads one earlier page with the same indicator as every other
+            // load.
+            .onScrollGeometryChange(for: Bool.self) { geometry in geometry.contentOffset.y + geometry.contentInsets.top < -56 } action: { _, pulled in
+                guard pulled else { return }
+                Task { await loadOlder(proxy, pull: true) }
+            }
             // Offered only while newest content is out of sight: a page that rests at its end, by hand or after a
             // card closed, has nowhere to go back to. A pinned prompt follows its reply, so the button appears
             // once that reply runs under the composer.
