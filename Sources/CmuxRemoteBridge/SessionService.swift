@@ -385,7 +385,7 @@ public actor SessionService {
         return result
     }
 
-    /// A page of the complete transcript, from the newest record or from an opaque archive cursor.
+    /// A byte-offset-paged window of the transcript, from the newest record or from an opaque archive cursor.
     public func archive(id: String, tail: Int?, cursor: String?, limit: Int, discovered: Bool = false, access: SessionAccess? = nil) async throws -> ConversationArchivePage {
         let record = try await authorizedRecord(id, capability: .conversationRead, discovered: discovered, access: access)
         guard let path = record.transcript else { throw BridgeError("history_unavailable", "No readable conversation record is available.", status: 404) }

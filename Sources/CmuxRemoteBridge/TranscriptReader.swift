@@ -25,23 +25,6 @@ public actor TranscriptReader {
         /// The newest records, so a tool call and its result pair across a chunk edge.
         let tailLines: [String]
     }
-    /// One whole-file read: every record from the beginning, with absolute sequence numbers.
-    /// Only two are held at once, so an old conversation opened from the archive cannot evict the
-    /// window records used by ordinary history.
-    private struct ArchiveObservation {
-        let inode: String
-        let size: Int
-        let modified: Date?
-        let generation: String
-        let messages: [ChatMessage]
-        let images: [TranscriptImageRecord]
-        let presentation: TranscriptResponseReader.Result
-        let agentModel: AgentModelState?
-        let trackerState: BackgroundTaskTracker.State
-    }
-    private var archiveObservations: [String: ArchiveObservation] = [:]
-    private var archiveOrder: [String: Int] = [:]
-    private var archiveSequence = 0
     private var observations: [String: Observation] = [:]
     /// Last-read order per path; an eviction takes the lowest, which is the least recently read.
     private var observationOrder: [String: Int] = [:]
@@ -49,16 +32,14 @@ public actor TranscriptReader {
     /// Long conversations are read from a bounded tail; the window start moves in whole steps so sequence numbers stay stable while the file grows.
     private let windowLimit: Int
     private let windowStep: Int
-    /// The archive read's byte and message bounds. Exceeding either refuses the archive; ordinary
-    /// history keeps its own smaller window and is unaffected.
-    private let completeLimit: Int
-    private let completeMessageLimit: Int
+    /// The archive reads one bounded byte window ending at the requested offset instead of the whole
+    /// record, so a large transcript costs a chunk rather than minutes.
+    private let archiveChunkBytes: Int
     /// A stable generation per transcript path, so an archive cursor survives a Bridge restart.
     private let generationStore: TranscriptGenerationStore
     private static let archivePageCountLimit = 200
     private static let archivePageByteLimit = 1_048_576
-    private static let archiveReadChunk = 1_048_576
-    private static let archiveObservationCapacity = 2
+    private static let archiveChunkCeiling = 67_108_864
     /// Detached calls per transcript. Tasks outlive the turn that started them, so they are kept beside the
     /// messages; keyed by path, because one reader serves every conversation and an unchanged record is
     /// answered from this cache.
@@ -70,9 +51,9 @@ public actor TranscriptReader {
     private let now: @Sendable () -> Date
     public init(windowLimit: Int = 33_554_432, windowStep: Int = 8_388_608, now: @escaping @Sendable () -> Date = { Date() },
                 generationStore: TranscriptGenerationStore = TranscriptGenerationStore(directory: nil),
-                completeLimit: Int = 67_108_864, completeMessageLimit: Int = 40_000) {
+                chunkBytes: Int = 8_388_608) {
         self.windowLimit = max(1, windowLimit); self.windowStep = max(1, min(windowStep, windowLimit)); self.now = now
-        self.generationStore = generationStore; self.completeLimit = max(1, completeLimit); self.completeMessageLimit = max(1, completeMessageLimit)
+        self.generationStore = generationStore; self.archiveChunkBytes = max(1, chunkBytes)
     }
 
     /// A cheap identity of the record a read of this path would answer from, or nil when unprovable.
@@ -326,12 +307,6 @@ public actor TranscriptReader {
     public func toolText(path: String, agent: String, messageID: String, generation: String,
                          field: String, offset: Int, contentID: String?, limit: Int) async throws -> ToolTextPage {
         try Task.checkCancellation()
-        // An archive page names its own stable generation. Its tool records may be far older than
-        // anything the bounded history window still holds, so they resolve from a complete read.
-        if generation != "current", let archived = try await archiveObservation(path: path, agent: agent, matching: generation) {
-            return try await toolText(archived: archived, path: path, agent: agent, messageID: messageID, generation: generation,
-                                      field: field, offset: offset, contentID: contentID, limit: limit)
-        }
         let snapshot = try history(path: path, agent: agent, beforeSeq: nil, limit: 1)
         let selectedGeneration = generation == "current" && offset == 0 && contentID == nil ? snapshot.generation : generation
         guard snapshot.generation == selectedGeneration else { throw BridgeError("stale_detail", "The conversation record changed. Reload this detail.", status: 409) }
@@ -369,66 +344,30 @@ public actor TranscriptReader {
                             text: pageText, offset: offset, nextOffset: next < total ? next : nil, totalCharacters: total)
     }
 
-    private func toolText(archived observation: ArchiveObservation, path: String, agent: String, messageID: String, generation: String,
-                          field: String, offset: Int, contentID: String?, limit: Int) async throws -> ToolTextPage {
-        guard observation.messages.contains(where: { $0.id == messageID }) else {
-            throw BridgeError("detail_not_found", "This tool record is unavailable.", status: 404)
-        }
-        let message = try await completeMessage(path: path, agent: agent, messageID: messageID)
-        let text: String
-        switch (message.kind, field) {
-        case (.toolUse(let tool), "input"): text = tool.inputDetail ?? ""
-        case (.toolUse(let tool), "output"): text = tool.output ?? ""
-        case (.terminal(let tool), "input"): text = tool.command
-        case (.terminal(let tool), "output"): text = tool.output ?? ""
-        case (.fileEdit(let tool), "diff"): text = tool.unifiedDiff ?? ""
-        default: throw BridgeError("invalid_input", "Select a supported field of a tool record.", status: 422)
-        }
-        guard await generationIsCurrent(path: path, generation: observation.generation) else {
-            throw BridgeError("stale_detail", "The conversation record changed during this read.", status: 409)
-        }
-        let digest = IdentityCryptography().digest(Data(text.utf8))
-        guard contentID == nil || contentID == digest else {
-            throw BridgeError("stale_detail", "The tool output changed. Reload this detail.", status: 409)
-        }
-        try Task.checkCancellation()
-        let total = text.unicodeScalars.count
-        guard offset >= 0, offset <= total else { throw BridgeError("invalid_input", "The text page offset is invalid.", status: 422) }
-        let pageText = String(String.UnicodeScalarView(text.unicodeScalars.dropFirst(offset).prefix(min(16_384, max(1, limit)))))
-        let next = offset + pageText.unicodeScalars.count
-        return ToolTextPage(messageID: messageID, generation: observation.generation, field: field, contentID: digest,
-                            text: pageText, offset: offset, nextOffset: next < total ? next : nil, totalCharacters: total)
-    }
-
     func image(path: String, agent: String, referenceID: String, generation: String) async throws -> TranscriptImageRecord {
-        // An archive reference names the complete read's generation; the bounded window may no
-        // longer contain the message, so resolve it from the observation that produced the page.
-        if let archived = try await archiveObservation(path: path, agent: agent, matching: generation) {
-            guard let record = archived.images.first(where: { $0.reference(generation: generation).id == referenceID }) else {
-                throw BridgeError("image_unavailable", "This recorded image is unavailable.", status: 404)
-            }
-            guard await generationIsCurrent(path: path, generation: generation) else {
-                throw BridgeError("stale_detail", "The image record changed. Reload the conversation.", status: 409)
-            }
-            return record
-        }
         let current = try history(path: path, agent: agent, beforeSeq: nil, limit: 1)
         guard current.generation == generation else { throw BridgeError("stale_detail", "The image record changed. Reload the conversation.", status: 409) }
         guard let record = observations[path]?.images.first(where: { $0.reference(generation: generation).id == referenceID }) else { throw BridgeError("image_unavailable", "This recorded image is unavailable.", status: 404) }
         return record
     }
 
-    // MARK: - Complete archive
+    // MARK: - Paged archive
 
     private struct ArchiveMetadata {
         let inode: String
         let creationDate: Date?
         let size: Int
-        let modified: Date?
     }
     private struct ArchiveCursor: Codable {
         let g: String
         let s: Int
+    }
+    /// The complete lines of one bounded read, with the file byte offset of each line.
+    private struct ArchiveChunk {
+        let lines: [String]
+        let lineOffsets: [Int]
+        /// Where the first complete line of the chunk begins, used when the chunk holds no messages.
+        let firstLineOffset: Int
     }
     private func archiveMetadata(_ path: String) throws -> ArchiveMetadata {
         do {
@@ -437,205 +376,205 @@ public actor TranscriptReader {
                 throw BridgeError("history_unavailable", "The conversation record size is unavailable.", status: 404)
             }
             return ArchiveMetadata(inode: "\(attributes[.systemFileNumber] ?? "unknown")",
-                                   creationDate: attributes[.creationDate] as? Date,
-                                   size: size, modified: attributes[.modificationDate] as? Date)
+                                   creationDate: attributes[.creationDate] as? Date, size: size)
         } catch let error as BridgeError { throw error }
         catch { throw BridgeError("history_unavailable", "No readable conversation record is available.", status: 404) }
     }
-    /// The newest `tail` messages, or the next older page named by an opaque cursor.
+    /// The newest `tail` messages, or the page before the byte offset named by an opaque cursor.
     ///
-    /// The page carries at most 200 messages and about 1 MiB of encoded messages. Equal-sequence
-    /// groups are never split, so `before_seq` can always continue without dropping a message.
+    /// Only `[end - chunkBytes, end)` is read and parsed. Sequence numbers are the file byte offset of
+    /// the line that produced each message, so they stay stable and monotonic without walking the
+    /// record from its first byte. A page carries at most 200 messages and about 1 MiB of encoded
+    /// messages; a line's messages are never split.
     public func archive(path: String, agent: String, tail: Int?, cursor: String?, limit: Int,
                         reportsBackgroundTasks: Bool = true) async throws -> ConversationArchivePage {
         try Task.checkCancellation()
+        guard archiveChunkBytes <= Self.archiveChunkCeiling else { throw archiveTooLarge() }
         let metadata = try archiveMetadata(path)
         let generation = await generationStore.generation(for: path, inode: metadata.inode,
                                                           creationDate: metadata.creationDate, size: metadata.size)
-        let beforeSeq: Int?
+        let end: Int
         let count: Int
         if let cursor {
-            // Refuse a cursor from another generation before paying for a complete read.
             let payload = try decodeArchiveCursor(cursor)
             guard payload.g == generation else {
                 throw BridgeError("history_cursor_stale", "This archive cursor belongs to a different conversation record. Reload the archive.", status: 409)
             }
-            beforeSeq = payload.s
+            // A cursor from this generation can only name a byte inside the record it described.
+            end = min(payload.s, metadata.size)
             count = min(max(limit, 1), Self.archivePageCountLimit)
         } else {
-            beforeSeq = nil
-            count = min(max(tail ?? 100, 1), Self.archivePageCountLimit)
+            end = metadata.size
+            count = min(max(tail ?? limit, 1), Self.archivePageCountLimit)
         }
-        let observation = try await completeObservation(path: path, agent: agent, metadata: metadata, generation: generation)
-        return archivePage(observation, beforeSeq: beforeSeq, count: count, generation: generation,
-                           reportsBackgroundTasks: reportsBackgroundTasks)
+        let start = max(0, end - archiveChunkBytes)
+        let chunk = try readArchiveChunk(path: path, start: start, end: end)
+        try Task.checkCancellation()
+        return try archivePage(chunk: chunk, chunkStart: start, count: count, generation: generation,
+                               agent: agent, newest: cursor == nil, reportsBackgroundTasks: reportsBackgroundTasks)
     }
-    /// The complete observation for an archive generation, rebuilt when it is not cached.
-    /// Returns nil when the requested generation is not this path's stable generation.
-    private func archiveObservation(path: String, agent: String, matching generation: String) async throws -> ArchiveObservation? {
-        // Do not create a generation for an ordinary history request that merely names one.
-        guard await generationStore.cachedGeneration(for: path) == generation,
-              let metadata = try? archiveMetadata(path) else { return nil }
-        // Re-evaluate the identity so a replacement or truncation since the page was read is caught.
-        guard await generationStore.generation(for: path, inode: metadata.inode, creationDate: metadata.creationDate,
-                                               size: metadata.size) == generation else { return nil }
-        let observation = try await completeObservation(path: path, agent: agent, metadata: metadata, generation: generation)
-        return observation.generation == generation ? observation : nil
-    }
-    private func generationIsCurrent(path: String, generation: String) async -> Bool {
-        guard let metadata = try? archiveMetadata(path) else { return false }
-        return await generationStore.generation(for: path, inode: metadata.inode, creationDate: metadata.creationDate,
-                                                size: metadata.size) == generation
-    }
-    private func completeObservation(path: String, agent: String, metadata: ArchiveMetadata, generation: String) async throws -> ArchiveObservation {
-        if let cached = archiveObservations[path], cached.inode == metadata.inode, cached.size == metadata.size,
-           cached.modified == metadata.modified, cached.generation == generation {
-            touchArchive(path)
-            return cached
-        }
-        let observation = try await readCompleteObservation(path: path, agent: agent, metadata: metadata, generation: generation)
-        storeArchive(observation, for: path)
-        return observation
-    }
-    private func touchArchive(_ path: String) {
-        archiveSequence += 1; archiveOrder[path] = archiveSequence
-    }
-    private func storeArchive(_ observation: ArchiveObservation, for path: String) {
-        if archiveObservations[path] == nil, archiveObservations.count >= Self.archiveObservationCapacity,
-           let oldest = archiveOrder.min(by: { $0.value < $1.value })?.key {
-            archiveObservations[oldest] = nil; archiveOrder[oldest] = nil
-        }
-        archiveObservations[path] = observation
-        touchArchive(path)
-    }
-    /// Walks the record from its first byte, feeding the same incremental parsers ordinary history
-    /// uses. Sequence numbers are absolute line indexes, so they do not move with the history window.
-    private func readCompleteObservation(path: String, agent: String, metadata: ArchiveMetadata, generation: String) async throws -> ArchiveObservation {
-        guard metadata.size <= completeLimit else { throw archiveTooLarge() }
+    /// One bounded read. Cancellation is checked before and during the read, so a request abandoned
+    /// while a large chunk is in flight releases the record immediately.
+    private func readArchiveChunk(path: String, start: Int, end: Int) throws -> Data {
+        guard end > start else { return Data() }
+        try Task.checkCancellation()
         let handle: FileHandle
         do { handle = try FileHandle(forReadingFrom: URL(fileURLWithPath: path)) }
         catch { throw BridgeError("history_unavailable", "No readable conversation record is available.", status: 404) }
         defer { try? handle.close() }
-        var remainder = Data()
-        var bytesRead = 0
-        var lineIndex = 0
-        var parserState = ChatTranscriptParseState()
-        var tracker = BackgroundTaskTracker.State()
-        var responseState = TranscriptResponseReader.State()
-        var messages: [ChatMessage] = []
-        var positions: [String: Int] = [:]
-        var images: [TranscriptImageRecord] = []
-        var imageIDs = Set<String>()
-        var agentModel: AgentModelState?
-        var carryLines: [String] = []
-        while true {
+        try handle.seek(toOffset: UInt64(start))
+        let total = end - start
+        var data = Data()
+        while data.count < total {
             try Task.checkCancellation()
-            guard let chunk = try handle.read(upToCount: Self.archiveReadChunk), !chunk.isEmpty else { break }
-            bytesRead += chunk.count
-            guard bytesRead <= completeLimit else { throw archiveTooLarge() }
-            remainder.append(chunk)
-            guard let newline = remainder.lastIndex(of: 10) else { continue }
-            let complete = Data(remainder[...newline])
-            remainder = Data(remainder[remainder.index(after: newline)...])
-            let decoded = String(decoding: complete, as: UTF8.self)
-                .split(separator: "\n", omittingEmptySubsequences: false).dropLast().map(String.init)
-            let raw = decoded
-            agentModel = TranscriptModelReader().read(lines: raw, agent: agent) ?? agentModel
-            let compaction = agent == "claude" ? ClaudeCompactionSummary().replace(raw, startingSeq: lineIndex) : .init(lines: raw, markers: [])
-            let lines = agent == "claude" ? ClaudeTaskNoticeRewriter().normalize(ClaudeQueuedPromptNormalizer().normalize(compaction.lines)) : raw
-            let result = agent == "claude"
-                ? ClaudeTranscriptParser().parse(lines: lines, startingSeq: lineIndex, state: parserState)
-                : CodexTranscriptParser().parse(lines: lines, startingSeq: lineIndex, state: parserState)
-            parserState = result.state
-            for update in result.updatedMessages {
-                if let index = positions[update.id] { messages[index] = update }
-            }
-            let newStart = messages.count
-            for message in result.messages where positions[message.id] == nil { messages.append(message) }
-            // A tool call and its result can sit on either side of a chunk edge, so the image index
-            // sees the same bounded tail of raw records that an appended history read uses.
-            let context = Array(carryLines.suffix(64))
-            let combined = context + lines
-            let contextStart = lineIndex - context.count
-            let contextMessages = messages.filter { $0.seq >= contextStart }
-            let imageIndex = try TranscriptImageIndex().read(lines: combined, messages: contextMessages, agent: agent, startingSeq: contextStart)
-            for record in imageIndex.records {
-                let id = record.reference(generation: "deduplicate").id
-                if imageIDs.insert(id).inserted { images.append(record) }
-            }
-            for message in imageIndex.supplementalMessages + compaction.markers where positions[message.id] == nil {
-                messages.append(message)
-            }
-            // Only the records added by this chunk can be out of order; earlier messages keep their
-            // positions, so sorting the suffix does not invalidate the identity index.
-            messages.replaceSubrange(newStart..., with: messages[newStart...].sorted { $0.seq < $1.seq })
-            for index in newStart..<messages.count { positions[messages[index].id] = index }
-            TranscriptResponseReader().consume(lines: lines, startingSeq: lineIndex, messages: messages.filter { $0.seq >= lineIndex },
-                                               agent: agent, into: &responseState)
-            BackgroundTaskTracker().consume(raw, into: &tracker)
-            lineIndex += decoded.count
-            carryLines = Array(raw.suffix(64))
-            if images.count > 512 { images = Array(images.prefix(512)) }
-            guard messages.count <= completeMessageLimit else { throw archiveTooLarge() }
+            guard let part = try handle.read(upToCount: min(1_048_576, total - data.count)), !part.isEmpty else { break }
+            data.append(part)
         }
-        // A trailing line without its newline is not committed, exactly as in ordinary history.
-        return ArchiveObservation(inode: metadata.inode, size: metadata.size, modified: metadata.modified,
-                                  generation: generation, messages: messages, images: images,
-                                  presentation: TranscriptResponseReader().snapshot(responseState),
-                                  agentModel: agentModel, trackerState: tracker)
+        return data
     }
-    private func archiveTooLarge() -> BridgeError {
-        BridgeError("history_too_large", "The conversation record exceeds the complete archive limit.", status: 413)
-    }
-    private func archivePage(_ observation: ArchiveObservation, beforeSeq: Int?, count: Int, generation: String,
-                             reportsBackgroundTasks: Bool) -> ConversationArchivePage {
-        let eligible = observation.messages.filter { beforeSeq == nil || $0.seq < beforeSeq! }
-        guard !eligible.isEmpty else {
-            let snapshot = ConversationSnapshot(messages: [], hasMore: false, generation: generation, clipped: false)
-            return ConversationArchivePage(snapshot: snapshot, nextCursor: nil, complete: true)
+    /// Splits a chunk into its complete newline-terminated lines. When the chunk starts after byte
+    /// zero its first line is the tail of a record cut by the chunk edge and is dropped; when it
+    /// starts at zero the first record is kept.
+    private func archiveChunkLines(_ chunk: Data, chunkStart: Int) -> ArchiveChunk? {
+        let contentStart: Data.Index
+        if chunkStart > 0 {
+            guard let firstBreak = chunk.firstIndex(of: 10) else { return nil }
+            contentStart = chunk.index(after: firstBreak)
+        } else {
+            contentStart = chunk.startIndex
         }
-        var start = max(0, eligible.count - count)
-        while start > 0, eligible[start - 1].seq == eligible[start].seq { start -= 1 }
+        guard contentStart < chunk.endIndex,
+              let lastBreak = chunk[contentStart...].lastIndex(of: 10) else { return nil }
+        let complete = chunk[contentStart...lastBreak]
+        var offsets: [Int] = []
+        var lineStart = complete.startIndex
+        for index in complete.indices where complete[index] == 10 {
+            offsets.append(chunkStart + chunk.distance(from: chunk.startIndex, to: lineStart))
+            lineStart = complete.index(after: index)
+        }
+        let lines = String(decoding: complete, as: UTF8.self)
+            .split(separator: "\n", omittingEmptySubsequences: false).dropLast().map(String.init)
+        guard lines.count == offsets.count, let first = offsets.first else { return nil }
+        return ArchiveChunk(lines: lines, lineOffsets: offsets, firstLineOffset: first)
+    }
+    /// Parses the chunk with the same readers ordinary history uses, then rewrites every sequence
+    /// number from the chunk's line index to that line's file byte offset.
+    private func archivePage(chunk: Data, chunkStart: Int, count: Int, generation: String, agent: String,
+                             newest: Bool, reportsBackgroundTasks: Bool) throws -> ConversationArchivePage {
+        guard let chunk = archiveChunkLines(chunk, chunkStart: chunkStart) else {
+            // No complete record in this chunk. Continue from its first complete-line boundary, or
+            // from the chunk start when the whole chunk was one cut record.
+            let offset = chunkStart > 0 ? chunkStart : 0
+            let complete = offset == 0
+            let snapshot = ConversationSnapshot(messages: [], hasMore: !complete, generation: generation, clipped: false)
+            return ConversationArchivePage(snapshot: snapshot,
+                                           nextCursor: complete ? nil : encodeArchiveCursor(generation: generation, offset: offset),
+                                           complete: complete)
+        }
+        let raw = chunk.lines
+        let compaction = agent == "claude" ? ClaudeCompactionSummary().replace(raw) : ClaudeCompactionSummary.Result(lines: raw, markers: [])
+        let lines = agent == "claude" ? ClaudeTaskNoticeRewriter().normalize(ClaudeQueuedPromptNormalizer().normalize(compaction.lines)) : raw
+        let agentModel = TranscriptModelReader().read(lines: raw, agent: agent)
+        let result = agent == "claude"
+            ? ClaudeTranscriptParser().parse(lines: lines, startingSeq: 0)
+            : CodexTranscriptParser().parse(lines: lines, startingSeq: 0)
+        // A record may repeat an id as it develops; one index by id beats a scan per update.
+        var positions: [String: Int] = [:]
+        var localMessages = result.messages
+        for (index, message) in localMessages.enumerated() where positions[message.id] == nil { positions[message.id] = index }
+        for update in result.updatedMessages {
+            if let index = positions[update.id] { localMessages[index] = update }
+        }
+        let imageIndex = try TranscriptImageIndex().read(lines: lines, messages: localMessages, agent: agent)
+        localMessages.append(contentsOf: imageIndex.supplementalMessages + compaction.markers)
+        localMessages.sort { $0.seq < $1.seq }
+        var responseState = TranscriptResponseReader.State()
+        TranscriptResponseReader().consume(lines: lines, startingSeq: 0, messages: localMessages, agent: agent, into: &responseState)
+        let presentation = remapped(TranscriptResponseReader().snapshot(responseState), offsets: chunk.lineOffsets)
+        let messages = localMessages.map { remapped($0, offsets: chunk.lineOffsets) }.sorted { $0.seq < $1.seq }
+        var tracker = BackgroundTaskTracker.State()
+        BackgroundTaskTracker().consume(raw, into: &tracker)
+        let tasks = reportsBackgroundTasks
+            ? tracker.launched.values.filter { $0.isRunning(at: now()) }.map(\.task).sorted { $0.id < $1.id }
+            : []
+        return archivePage(messages: messages, images: imageIndex.records, presentation: presentation,
+                           chunkStart: chunkStart, firstLineOffset: chunk.firstLineOffset, count: count,
+                           generation: generation, backgroundTasks: tasks, agentModel: agentModel, newest: newest)
+    }
+    /// Rewrites a line index or a line's sequence number to its file byte offset.
+    private func offset(_ seq: Int, in offsets: [Int]) -> Int {
+        guard seq >= 0, seq < offsets.count else { return seq }
+        return offsets[seq]
+    }
+    private func remapped(_ message: ChatMessage, offsets: [Int]) -> ChatMessage {
+        guard message.seq >= 0, message.seq < offsets.count else { return message }
+        return ChatMessage(id: message.id, seq: offsets[message.seq], role: message.role,
+                           timestamp: message.timestamp, kind: message.kind)
+    }
+    private func remapped(_ result: TranscriptResponseReader.Result, offsets: [Int]) -> TranscriptResponseReader.Result {
+        var result = result
+        result.responses = result.responses.map { response in
+            ConversationResponse(firstMessageID: response.firstMessageID, lastMessageID: response.lastMessageID,
+                                 startedAt: response.startedAt, completedAt: response.completedAt,
+                                 durationSeconds: response.durationSeconds, recordedDuration: response.recordedDuration,
+                                 completed: response.completed,
+                                 firstSeq: offset(response.firstSeq, in: offsets),
+                                 lastSeq: offset(response.lastSeq, in: offsets))
+        }
+        return result
+    }
+    private func archivePage(messages: [ChatMessage], images: [TranscriptImageRecord],
+                             presentation: TranscriptResponseReader.Result, chunkStart: Int, firstLineOffset: Int,
+                             count: Int, generation: String, backgroundTasks: [BackgroundAgentTask],
+                             agentModel: AgentModelState?, newest: Bool) -> ConversationArchivePage {
+        guard !messages.isEmpty else {
+            // Nothing to show, but records before this chunk may still exist.
+            let complete = chunkStart == 0
+            let snapshot = ConversationSnapshot(messages: [], hasMore: !complete, generation: generation, clipped: false)
+            return ConversationArchivePage(snapshot: snapshot,
+                                           nextCursor: complete ? nil : encodeArchiveCursor(generation: generation, offset: firstLineOffset),
+                                           complete: complete)
+        }
+        var start = max(0, messages.count - count)
+        while start > 0, messages[start - 1].seq == messages[start].seq { start -= 1 }
         // Walk from the newest record backwards until the byte budget would be crossed. The newest
         // record is always included, even when it alone exceeds the budget.
         let encoder = JSONEncoder()
-        var chosen = eligible.count
+        var chosen = messages.count
         var bytes = 0
-        var index = eligible.count - 1
+        var index = messages.count - 1
         while index >= start {
-            let size = (try? encoder.encode(eligible[index]))?.count ?? 0
-            if chosen != eligible.count, bytes + size > Self.archivePageByteLimit { break }
+            let size = (try? encoder.encode(messages[index]))?.count ?? 0
+            if chosen != messages.count, bytes + size > Self.archivePageByteLimit { break }
             bytes += size
             chosen = index
             index -= 1
         }
-        // A whole line's messages share one seq; splitting them would make before_seq skip records.
-        while chosen > 0, eligible[chosen - 1].seq == eligible[chosen].seq { chosen -= 1 }
-        let pageMessages = Array(eligible[chosen...])
+        // A whole line's messages share one seq; splitting them would make the cursor skip a record.
+        while chosen > 0, messages[chosen - 1].seq == messages[chosen].seq { chosen -= 1 }
+        let pageMessages = Array(messages[chosen...])
         let ids = Set(pageMessages.map(\.id))
-        let complete = chosen == 0
-        let next = complete ? nil : encodeArchiveCursor(generation: generation, beforeSeq: eligible[chosen].seq)
-        let newest = beforeSeq == nil
-        let tasks = reportsBackgroundTasks
-            ? observation.trackerState.launched.values.filter { $0.isRunning(at: now()) }.map(\.task).sorted { $0.id < $1.id }
-            : []
+        // The cursor names the first returned line, so a page that reaches byte zero is the last one.
+        let firstOffset = pageMessages.first?.seq ?? firstLineOffset
+        let complete = firstOffset == 0
+        let next = complete ? nil : encodeArchiveCursor(generation: generation, offset: firstOffset)
         let snapshot = ConversationSnapshot(
             messages: pageMessages,
             hasMore: !complete,
             generation: generation,
             clipped: false,
-            responses: observation.presentation.responses.filter { ids.contains($0.firstMessageID) || ids.contains($0.lastMessageID) },
-            recordedRunSeconds: observation.presentation.recordedRunSeconds,
-            recordedTurnCount: observation.presentation.recordedTurnCount,
-            currentTurnStartedAt: observation.presentation.currentTurnStartedAt,
-            currentTurnCompleted: observation.presentation.currentTurnCompleted,
-            images: observation.images.filter { ids.contains($0.messageID) }.map { $0.reference(generation: generation) },
-            backgroundTasks: newest ? tasks : nil,
-            agentModel: newest ? observation.agentModel : nil)
+            responses: presentation.responses.filter { ids.contains($0.firstMessageID) || ids.contains($0.lastMessageID) },
+            recordedRunSeconds: presentation.recordedRunSeconds,
+            recordedTurnCount: presentation.recordedTurnCount,
+            currentTurnStartedAt: presentation.currentTurnStartedAt,
+            currentTurnCompleted: presentation.currentTurnCompleted,
+            images: images.filter { ids.contains($0.messageID) }.map { $0.reference(generation: generation) },
+            backgroundTasks: newest ? backgroundTasks : nil,
+            agentModel: newest ? agentModel : nil)
         return ConversationArchivePage(snapshot: snapshot, nextCursor: next, complete: complete)
     }
-    private func encodeArchiveCursor(generation: String, beforeSeq: Int) -> String {
-        let data = (try? JSONEncoder().encode(ArchiveCursor(g: generation, s: beforeSeq))) ?? Data()
+    private func encodeArchiveCursor(generation: String, offset: Int) -> String {
+        let data = (try? JSONEncoder().encode(ArchiveCursor(g: generation, s: offset))) ?? Data()
         return data.base64EncodedString().replacingOccurrences(of: "+", with: "-")
             .replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
     }
@@ -649,44 +588,9 @@ public actor TranscriptReader {
               !payload.g.isEmpty, payload.g.utf8.count <= 128, payload.s >= 0 else { throw invalid }
         return payload
     }
-    /// Re-parses the complete record with the larger explicit detail budget and keeps only the
-    /// requested message, so an archive-surfaced tool record opens even when its line is far
-    /// outside the history window.
-    private func completeMessage(path: String, agent: String, messageID: String) async throws -> ChatMessage {
-        let metadata = try archiveMetadata(path)
-        guard metadata.size <= completeLimit else { throw archiveTooLarge() }
-        let handle: FileHandle
-        do { handle = try FileHandle(forReadingFrom: URL(fileURLWithPath: path)) }
-        catch { throw BridgeError("history_unavailable", "No readable conversation record is available.", status: 404) }
-        defer { try? handle.close() }
-        var remainder = Data()
-        var bytesRead = 0
-        var lineIndex = 0
-        var parserState = ChatTranscriptParseState()
-        var found: ChatMessage?
-        while true {
-            try Task.checkCancellation()
-            guard let chunk = try handle.read(upToCount: Self.archiveReadChunk), !chunk.isEmpty else { break }
-            bytesRead += chunk.count
-            guard bytesRead <= completeLimit else { throw archiveTooLarge() }
-            remainder.append(chunk)
-            guard let newline = remainder.lastIndex(of: 10) else { continue }
-            let complete = Data(remainder[...newline])
-            remainder = Data(remainder[remainder.index(after: newline)...])
-            let raw = String(decoding: complete, as: UTF8.self)
-                .split(separator: "\n", omittingEmptySubsequences: false).dropLast().map(String.init)
-            let lines = agent == "claude"
-                ? ClaudeTaskNoticeRewriter().normalize(ClaudeQueuedPromptNormalizer().normalize(ClaudeCompactionSummary().replace(raw, startingSeq: lineIndex).lines))
-                : raw
-            let result = agent == "claude"
-                ? ClaudeTranscriptParser(maxBodyCharacters: 33_554_432, maxInputDetailCharacters: 33_554_432).parse(lines: lines, startingSeq: lineIndex, state: parserState)
-                : CodexTranscriptParser(maxBodyCharacters: 33_554_432, maxInputDetailCharacters: 33_554_432).parse(lines: lines, startingSeq: lineIndex, state: parserState)
-            parserState = result.state
-            for message in result.messages + result.updatedMessages where message.id == messageID { found = message }
-            lineIndex += raw.count
-        }
-        guard let found else { throw BridgeError("detail_not_found", "This tool record is unavailable.", status: 404) }
-        return found
+    /// The only archive failure left: a configured chunk that is larger than the supported bound.
+    private func archiveTooLarge() -> BridgeError {
+        BridgeError("history_too_large", "The archive chunk exceeds the supported size.", status: 413)
     }
 
     private func page(_ messages: [ChatMessage], images: [TranscriptImageRecord], presentation: TranscriptResponseReader.Result, beforeSeq: Int?, limit: Int, generation: UUID, clipped: Bool, backgroundTasks: [BackgroundAgentTask], agentModel: AgentModelState? = nil) -> ConversationSnapshot {
