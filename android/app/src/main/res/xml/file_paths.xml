@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Only files this app wrote for one share live here; the transcript cache is not exposed. -->
+<paths>
+    <cache-path name="shared" path="share/" />
+</paths>
