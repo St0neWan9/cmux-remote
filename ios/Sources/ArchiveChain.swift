@@ -22,14 +22,26 @@ actor ArchiveChain {
 
     /// The newest page. The first call starts the chain; later calls show new messages without moving the place
     /// the reader paged to.
-    func newest(limit: Int) async throws -> (page: ConversationSnapshot, hasMore: Bool) {
+    ///
+    /// The page's own cursor comes back with it: a burst that produced more than one page since the last read
+    /// leaves a hole below it, and that hole is read from this cursor without touching the reader's place.
+    func newest(limit: Int) async throws -> (page: ConversationSnapshot, cursor: String?, hasMore: Bool) {
         let page = try await read(nil, limit)
         if !started || generation != page.snapshot.generation {
             started = true
             generation = page.snapshot.generation
             cursor = page.nextCursor
         }
-        return (page.snapshot, cursor != nil)
+        return (page.snapshot, page.nextCursor, cursor != nil)
+    }
+    /// One page ending at a cursor this chain handed out, leaving the reader's own place untouched.
+    func page(from cursor: String, limit: Int) async throws -> ConversationArchivePage {
+        let page = try await read(cursor, limit)
+        if generation != page.snapshot.generation {
+            started = false; self.cursor = nil; generation = nil
+            throw BridgeError("history_cursor_stale", "This archive cursor belongs to a different conversation record. Reload the archive.", status: 409)
+        }
+        return page
     }
     /// The next older page, or nil once the start of the transcript is stored.
     func older(limit: Int) async throws -> (page: ConversationSnapshot, hasMore: Bool)? {
