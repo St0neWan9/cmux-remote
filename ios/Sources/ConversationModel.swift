@@ -427,7 +427,10 @@ final class ConversationModel {
         var reanchor: UUID?
         await olderReads.run { [self] request in
             loadingOlder = true
-            defer { if olderReads.revision == request { loadingOlder = false } }
+            // The flag answers "is a page in flight", so it clears however this read ends. It used to clear only
+            // when this request was still the newest one, and a superseded read then left it set for good: every
+            // later page — automatic, pulled or tapped — returned at the guard and the reader looked dead.
+            defer { loadingOlder = false }
             do {
                 let page: ConversationSnapshot
                 if let stored = await store?.page(scope: client.operationRecoveryScope, sessionID: session.id, beforeSeq: seq, limit: 40),
