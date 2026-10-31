@@ -12,7 +12,7 @@ public actor SessionService {
     private let transcriptRoots: [URL]
     private let files: ProjectFilePolicy
     private let commandLine = AgentCommandLine()
-    private let reader = TranscriptReader()
+    private let reader: TranscriptReader
     private var records: [String: Record] = [:]
     private var transcriptTails: [String: (size: Int, cwd: String?, lastMessage: Date?, title: String?)] = [:]
     /// Least recently used, so a burst of newly seen transcripts leaves the conversations still open in place.
@@ -32,10 +32,11 @@ public actor SessionService {
     private let claudeConfirmation = ClaudeModelConfirmation()
 
     public init(cmux: any CmuxControlling, home: URL, transcriptRoots: [URL], mutations: MutationLedger? = nil, journal: MutationJournal? = nil, aliases: SessionAliasStore? = nil,
-                taskLocator: BackgroundTaskLocator = BackgroundTaskLocator()) {
+                taskLocator: BackgroundTaskLocator = BackgroundTaskLocator(), reader: TranscriptReader = TranscriptReader()) {
         self.cmux = cmux; self.transcriptRoots = transcriptRoots.map { $0.resolvingSymlinksInPath().standardizedFileURL }
         self.files = ProjectFilePolicy(home: home); self.modelCatalog = ModelChoiceCatalog(home: home); self.mutations = mutations ?? MutationLedger(); self.journal = journal; self.aliases = aliases
         self.taskLocator = taskLocator
+        self.reader = reader
     }
 
 
@@ -380,6 +381,16 @@ public actor SessionService {
         let result = try await reader.history(path: path, agent: agent, beforeSeq: beforeSeq, limit: limit,
                                              allowsUncreatedTranscript: record.descriptor.writable,
                                              reportsBackgroundTasks: record.descriptor.writable)
+        try await recheck(record, capability: .conversationRead, access: access)
+        return result
+    }
+
+    /// A page of the complete transcript, from the newest record or from an opaque archive cursor.
+    public func archive(id: String, tail: Int?, cursor: String?, limit: Int, discovered: Bool = false, access: SessionAccess? = nil) async throws -> ConversationArchivePage {
+        let record = try await authorizedRecord(id, capability: .conversationRead, discovered: discovered, access: access)
+        guard let path = record.transcript else { throw BridgeError("history_unavailable", "No readable conversation record is available.", status: 404) }
+        let result = try await reader.archive(path: path, agent: record.descriptor.agent, tail: tail, cursor: cursor, limit: limit,
+                                              reportsBackgroundTasks: record.descriptor.writable)
         try await recheck(record, capability: .conversationRead, access: access)
         return result
     }

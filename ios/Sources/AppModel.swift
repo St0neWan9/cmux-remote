@@ -54,6 +54,8 @@ final class AppModel {
     private let store: PairingStore
     /// Conversations read before, kept on disk so reopening one is immediate.
     private let conversations = ConversationCache()
+    /// Every page a conversation was read with, kept on the phone so reading back never asks the Mac again.
+    let conversationStore = ConversationStore()
     private let makeSpeechInput: @MainActor () -> any SpeechInputServing
     private let pendingSends: PendingSendStore
     private let identityKey: @MainActor () throws -> Data
@@ -438,7 +440,7 @@ final class AppModel {
         let model = ConversationModel(session: session, client: client, speechInput: makeSpeechInput(),
             loadRecovery: { try await store.load(scope: scope, sessionID: id) },
             saveRecovery: { try await store.save($0, scope: scope, sessionID: id) },
-            cache: conversations, modelCache: modelChoices)
+            cache: conversations, store: conversationStore, modelCache: modelChoices)
         conversationModels[key] = model
         return model
     }
