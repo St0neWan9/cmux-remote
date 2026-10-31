@@ -16,7 +16,8 @@ struct ClaudeCompactionSummary: Sendable {
             let id = object["uuid"] as? String ?? "compaction-\(seq)"
             let stamp = (object["timestamp"] as? String).flatMap { try? Date($0, strategy: Date.ISO8601FormatStyle(includingFractionalSeconds: true)) }
             // A neutral record keeps the line without a user turn the parsers or turn timing would count.
-            output[seq] = #"{"type":"compact-summary"}"#
+            // Index the chunk by its own offset; `seq` is absolute when this is an appended or archive chunk.
+            output[offset] = #"{"type":"compact-summary"}"#
             markers.append(ChatMessage(id: id, seq: seq, role: .system, timestamp: stamp ?? Date(timeIntervalSince1970: 0),
                                        kind: .status(ChatStatusTransition(event: .contextCompacted))))
         }

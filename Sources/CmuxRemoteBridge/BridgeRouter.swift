@@ -167,7 +167,7 @@ public struct BridgeRouter: Sendable {
                 data = try encode(await service.backgroundTask(id: id, taskID: taskID, offset: query["offset"].flatMap(Int.init) ?? 0,
                                                                limit: query["limit"].flatMap(Int.init) ?? 65_536, beforeSeq: query["before_seq"].flatMap(Int.init),
                                                                discovered: client != nil, access: access))
-            } else if path.count == 4, path[0...1] == ["v1", "sessions"] {
+            } else if path.count == 4, path[0...1] == ["v1", "sessions"], path[3] != "archive" {
                 let id = path[2]
                 let capability: ClientCapability = method == "POST" ? .conversationControl : (["changes", "diff", "file"].contains(path[3]) ? .projectRead : .conversationRead)
                 if method == "POST" {
@@ -206,6 +206,17 @@ public struct BridgeRouter: Sendable {
                     data = try encode(await service.resume(id: id, request: JSONDecoder().decode(ResumeRequest.self, from: body), access: access))
                 default: throw BridgeError("not_found", "This resource is not available.", status: 404)
                 }
+            } else if method == "GET", path.count == 4, path[0...1] == ["v1", "sessions"], path[3] == "archive" {
+                // The complete archive authorizes exactly like history: the id is resolved against a
+                // fresh discovery, then the session's workspace must carry conversationRead.
+                let id = path[2]
+                if let client {
+                    let sessions = try await service.sessions()
+                    guard let session = sessions.first(where: { $0.id == id }), let workspace = session.workspaceID else { throw BridgeError("scope_denied", "This session is outside this device's approved workspaces.", status: 403) }
+                    try await require(client, .conversationRead, workspace: workspace)
+                }
+                data = try encode(await service.archive(id: id, tail: query["tail"].flatMap(Int.init), cursor: query["cursor"],
+                                                        limit: query["limit"].flatMap(Int.init) ?? 100, discovered: client != nil, access: access))
             } else if method == "POST", path.count == 4, path[0...1] == ["v1", "feed"], path[3] == "reply" {
                 // Stored receipts authorize their original scope inside the service;
                 // fresh decisions still require a currently pending, scoped target.
