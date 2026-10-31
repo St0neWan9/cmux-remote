@@ -407,11 +407,25 @@ public actor TranscriptReader {
             end = metadata.size
             count = min(max(tail ?? limit, 1), Self.archivePageCountLimit)
         }
-        let start = max(0, end - archiveChunkBytes)
-        let chunk = try readArchiveChunk(path: path, start: start, end: end)
-        try Task.checkCancellation()
-        return try archivePage(chunk: chunk, chunkStart: start, count: count, generation: generation,
-                               agent: agent, newest: cursor == nil, reportsBackgroundTasks: reportsBackgroundTasks)
+        // A chunk can hold nothing a page can use -- records the parser ignores, or a stretch of one very long
+        // line. Returning an empty page would end the reader's paging for good, so the window keeps moving back
+        // until it finds messages or reaches the start of the record.
+        var windowEnd = end
+        for attempt in 0..<8 {
+            let start = max(0, windowEnd - archiveChunkBytes)
+            let chunk = try readArchiveChunk(path: path, start: start, end: windowEnd)
+            try Task.checkCancellation()
+            let page = try archivePage(chunk: chunk, chunkStart: start, count: count, generation: generation,
+                                       agent: agent, newest: cursor == nil && attempt == 0, reportsBackgroundTasks: reportsBackgroundTasks)
+            if !page.snapshot.messages.isEmpty || start == 0 { return page }
+            windowEnd = start
+        }
+        // Eight empty chunks in a row is not a page; hand the reader the offset reached so its next request keeps
+        // moving instead of being told the record ended.
+        let finished = windowEnd == 0
+        return ConversationArchivePage(snapshot: ConversationSnapshot(messages: [], hasMore: !finished, generation: generation, clipped: false),
+                                       nextCursor: finished ? nil : encodeArchiveCursor(generation: generation, offset: windowEnd),
+                                       complete: finished)
     }
     /// One bounded read. Cancellation is checked before and during the read, so a request abandoned
     /// while a large chunk is in flight releases the record immediately.

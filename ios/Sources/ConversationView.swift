@@ -315,6 +315,8 @@ struct ConversationView: View {
         guard model.hasMore, !model.loadingOlder, pull || Date() >= nextPageAllowed, let anchor = model.timelineItems.first?.id else { return }
         nextPageAllowed = Date().addingTimeInterval(0.8)
         await model.older()
+        // A page that brings nothing new is not the end of the record: the loader keeps its pause, and the reader
+        // scrolling again asks for the next one. Only `hasMore == false` ends the paging.
         guard model.timelineItems.first?.id != anchor else { return }
         // A scroll in the same update as the insertion is overridden by its layout; restore once the rows exist.
         try? await Task.sleep(for: .milliseconds(50))
