@@ -10,6 +10,8 @@ Version 2 uses a device-signed `Authorization: CmuxV2` proof and approved worksp
 | GET /v1/workspaces | workspace.list | cmux workspaces |
 | GET /v1/sessions | cmux-bound chat.sessions.dump / agent hooks, enriched by vault.sessions | cmux sessions only; external history excluded; known ended sessions read-only |
 | GET /v1/sessions/:id/history?before_seq=&limit= | local transcript, pinned upstream parser | messages, has_more, generation, clipped |
+| GET /v1/sessions/:id/archive?tail= | complete local transcript, absolute records | newest archive page, next_cursor, complete |
+| GET /v1/sessions/:id/archive?cursor=&limit= | complete local transcript, absolute records | next older archive page, next_cursor, complete |
 | GET /v1/sessions/:id/tool-detail?message_id=&generation=&field=&offset=&content_id= | complete transcript tool field | bounded revision-bound text page |
 | GET /v1/sessions/:id/tasks/:task_id?offset=&limit= | the agent's own task record for a detached call | subagent conversation, or paged command output |
 | GET /v1/sessions/:id/preview | surface.read_text + prose extractor | replaceable preview, availability |
@@ -24,6 +26,8 @@ Version 2 uses a device-signed `Authorization: CmuxV2` proof and approved worksp
 | GET /v1/sessions/:id/diff?path= | local Git, no external diff/textconv | bounded unified diff |
 | GET /v1/sessions/:id/file?path= | constrained local project file | bounded text and relative path |
 | GET /v1/operations/:operation_id | owner-only persisted operation journal | current device's scoped accepted/unknown status |
+
+`GET /v2/sessions/:id/archive` reads the whole transcript rather than the newest 32 MiB history window. Without a cursor, `tail` selects the newest messages (default 100, maximum 200); with `cursor`, `limit` selects the next older page, and a page is bounded to 200 messages and about 1 MiB. `next_cursor` is absent and `complete` is true only when the page reaches the first record. Archive messages carry absolute record sequence numbers, and their `generation` is the path's stable generation: it survives Bridge restarts and window movement, and changes only when the record is replaced, truncated, or shrinks. A cursor from a different generation answers `history_cursor_stale` (409), and a record over 256 MiB or 20,000 messages answers `history_too_large` (413). Tool-detail and image references issued by an archive page resolve from the same complete generation.
 
 No generic cmux RPC proxy, shell execution endpoint, arbitrary absolute-path fetch or desktop focus endpoint is exposed. Starting a conversation (below) types only a fixed agent command chosen from an enum.
 
