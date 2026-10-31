@@ -216,8 +216,13 @@ struct ConversationView: View {
         LazyVStack(alignment: .leading, spacing: 6) {
             if model.hasMore {
                 // Reaching the top while reading back pages in the earlier messages; the page opens at the latest.
-                Group { if model.loadingOlder { ProgressView() } else { Color.clear } }
-                    .frame(maxWidth: .infinity).frame(height: 32).padding(.top, 12)
+                // It is also a button: the geometry trigger needs the marker to move, so a page already resting at
+                // the top would otherwise wait for a scroll it cannot make.
+                Group {
+                    if model.loadingOlder { ProgressView() }
+                    else { Button(String(localized: "chat.load_earlier")) { reachedTop() }.buttonStyle(.plain).font(.footnote) }
+                }
+                .frame(maxWidth: .infinity).frame(height: 32).padding(.top, 12)
                     // Position, not appearance: a lazy row stays alive offscreen, so its appearance fires only once.
                     .onGeometryChange(for: Bool.self) { $0.frame(in: .named("chatTimeline")).minY > -240 } action: { near in
                         // No state is written here: the page must not re-evaluate on every scroll frame.

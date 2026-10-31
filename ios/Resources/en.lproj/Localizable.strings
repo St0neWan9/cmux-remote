@@ -78,6 +78,7 @@
 "chat.follow_up" = "Follow up";
 "chat.empty" = "Start a conversation";
 "chat.latest" = "Jump to latest";
+"chat.load_earlier" = "Load earlier messages";
 "chat.working" = "Working";
 "chat.back" = "Back to conversations";
 "chat.refresh" = "Refresh conversation";
