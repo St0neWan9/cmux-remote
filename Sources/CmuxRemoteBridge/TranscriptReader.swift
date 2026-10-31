@@ -70,7 +70,7 @@ public actor TranscriptReader {
     private let now: @Sendable () -> Date
     public init(windowLimit: Int = 33_554_432, windowStep: Int = 8_388_608, now: @escaping @Sendable () -> Date = { Date() },
                 generationStore: TranscriptGenerationStore = TranscriptGenerationStore(directory: nil),
-                completeLimit: Int = 268_435_456, completeMessageLimit: Int = 20_000) {
+                completeLimit: Int = 268_435_456, completeMessageLimit: Int = 60_000) {
         self.windowLimit = max(1, windowLimit); self.windowStep = max(1, min(windowStep, windowLimit)); self.now = now
         self.generationStore = generationStore; self.completeLimit = max(1, completeLimit); self.completeMessageLimit = max(1, completeMessageLimit)
     }
