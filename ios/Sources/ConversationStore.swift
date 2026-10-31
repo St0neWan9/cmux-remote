@@ -21,7 +21,6 @@ actor ConversationStore {
     }
     private let directory: URL
     let limits: Limits
-    private var handle: OpaquePointer?
     init(directory: URL? = nil, limits: Limits = Limits()) {
         self.directory = directory ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Conversations", isDirectory: true)
         self.limits = limits
@@ -111,15 +110,18 @@ actor ConversationStore {
     // MARK: - Files and schema
 
     private func file() -> URL { directory.appendingPathComponent("conversations.sqlite") }
+    /// A connection of this call's own, which the caller closes when it is done with it.
+    ///
+    /// It used to be cached and handed out to every caller, while each caller closed it on the way out. The
+    /// second call then ran on a freed connection: SQLite spun in its own mutex and the page froze, and the
+    /// store crashed the app with an invalid address the first time a page was written after a read.
     func open() -> OpaquePointer? {
-        if let handle { return handle }
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         var value: OpaquePointer?
         let url = file()
         guard sqlite3_open_v2(url.path, &value, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX, nil) == SQLITE_OK, let value else {
             sqlite3_close(value); try? FileManager.default.removeItem(at: url); return nil
         }
-        handle = value
         execute(value, "PRAGMA journal_mode = WAL")
         execute(value, "PRAGMA synchronous = NORMAL")
         // Tables are created on every open: an older or corrupt file then fails loudly at the first statement
