@@ -91,6 +91,9 @@ final class ConversationModel {
     private let cache: ConversationCache?
     /// The conversation kept across openings; nil in fixtures that supply their own readers.
     private let store: ConversationStore?
+    /// Reads the whole transcript instead of the Bridge's window, once the Bridge offers it.
+    /// Cleared when the Bridge answers 404: the session then keeps the windowed route for good.
+    private var archive: ArchiveChain?
     /// Walks the rest of the conversation into the store once the page is open, so reading back never waits on
     /// the Mac again. Bounded, cancellable, and never touches what the page shows.
     private var backfill: Task<Void, Never>?
@@ -143,7 +146,7 @@ final class ConversationModel {
          readModels: (@Sendable () async throws -> ModelChoiceList)? = nil,
          postModel: (@Sendable (ModelSwitchRequest) async throws -> MutationReceipt)? = nil,
          renameSession: (@Sendable (SessionRenameRequest) async throws -> MutationReceipt)? = nil,
-         cache: ConversationCache? = nil, store: ConversationStore? = nil, modelCache: ModelChoiceCache? = nil) {
+         cache: ConversationCache? = nil, store: ConversationStore? = nil, archive: ArchiveChain? = nil, modelCache: ModelChoiceCache? = nil) {
         self.session = session; self.client = client; self.modelCache = modelCache; speech = SpeechDraftModel(input: speechInput ?? UnavailableSpeechInput())
         let id = session.id
         let recovery = PendingSendStore(); let scope = client.operationRecoveryScope
@@ -170,7 +173,7 @@ final class ConversationModel {
         self.readModels = readModels ?? { try await client.get("/v1/sessions/\(id)/models", as: ModelChoiceList.self) }
         self.postModel = postModel ?? { try await client.post("/v1/sessions/\(id)/model", body: $0, as: MutationReceipt.self) }
         self.renameSession = renameSession ?? { try await client.post("/v1/sessions/\(id)/title", body: $0, as: MutationReceipt.self) }
-        self.cache = cache; self.store = store
+        self.cache = cache; self.store = store; self.archive = archive
     }
     /// Shows what was read last, so opening a conversation never starts blank.
     ///
@@ -303,19 +306,27 @@ final class ConversationModel {
             // Sixty-four pages of the reader's own size covers a conversation of a few thousand messages; anything
             // longer is filled the next time it is opened rather than held in one long background run.
             while !Task.isCancelled, pages < 64 {
-                guard let page = try? await read(before) else { break }
-                let older = page.messages.filter { $0.seq < before }
-                guard let next = older.first?.seq else { break }
-                await store.save(page, scope: scope, sessionID: id, complete: !page.hasMore)
-                before = next
+                let page: ConversationSnapshot, more: Bool
+                if let chain = await self?.archiveChain {
+                    guard let next = try? await chain.older(limit: 100) else { break }
+                    page = next.page; more = next.hasMore
+                } else {
+                    guard let legacy = try? await read(before) else { break }
+                    page = legacy; more = legacy.hasMore
+                }
+                guard let next = page.messages.filter({ $0.seq < before }).first?.seq ?? page.messages.first.map({ _ in before }) else { break }
+                await store.save(page, scope: scope, sessionID: id, complete: !more)
+                before = min(before, next)
                 pages += 1
-                if !page.hasMore { break }
+                if !more { break }
                 if self?.readsEnabled == false { break }
             }
             await MainActor.run { self?.backfill = nil }
         }
     }
     func stopBackfill() { backfill?.cancel(); backfill = nil }
+    /// The archive chain, readable from the fill's detached task.
+    var archiveChain: ArchiveChain? { archive }
     func suspendReads() { readsEnabled = false; refreshReads.suspend(); olderReads.suspend(); loadingOlder = false; stopBackfill() }
     func resumeReads() { readsEnabled = true }
     func refresh() async {
@@ -336,7 +347,9 @@ final class ConversationModel {
             let readSessions = readSessions, readHistory = readHistory, readPreview = readPreview, tailLimit = tailLimit
             async let descriptorsRead = readSessions()
             let readPage: @Sendable () async throws -> ConversationSnapshot
-            if let tail { readPage = { try await tail(tailLimit) } } else { readPage = { try await readHistory(nil) } }
+            if let archive { readPage = { try await archive.newest(limit: tailLimit).page } }
+            else if let tail { readPage = { try await tail(tailLimit) } }
+            else { readPage = { try await readHistory(nil) } }
             async let historyRead = readPage()
             async let liveRead = try? readPreview()
             let descriptors = try await descriptorsRead
@@ -344,8 +357,15 @@ final class ConversationModel {
             guard let current = descriptors.first(where: { $0.id == session.id }) else { throw BridgeError("read_only", "The cmux session is no longer available.", status: 404) }
             // Whether the conversation can be written or reopened does not wait for the history, which may be large.
             updateSession(current)
-            var history = try await historyRead
-            var full = tail == nil
+            var history: ConversationSnapshot
+            do { history = try await historyRead }
+            catch let error as BridgeError where error.status == 404 && archive != nil {
+                // An older Bridge has no archive route: keep this conversation on the windowed one.
+                diagLog(.info, category: "open", "archive unavailable; using the windowed history")
+                archive = nil
+                history = try await readHistory(nil)
+            }
+            var full = tail == nil || archive != nil
             // A tail that does not reach the messages on screen would leave a gap, and one from a replaced
             // transcript has nothing to join: both read the full page instead.
             if !full, history.generation != generation || history.messages.first.map({ oldest in !messages.contains { $0.id == oldest.id } }) == true {
@@ -408,7 +428,16 @@ final class ConversationModel {
             loadingOlder = true
             defer { if olderReads.revision == request { loadingOlder = false } }
             do {
-                let page = try await readHistory(seq)
+                let page: ConversationSnapshot
+                if let stored = await store?.page(scope: client.operationRecoveryScope, sessionID: session.id, beforeSeq: seq, limit: 40) {
+                    page = stored
+                } else if let archive, let next = try await archive.older(limit: 40) {
+                    page = next.page
+                } else if archive != nil {
+                    page = ConversationSnapshot(messages: [], hasMore: false, generation: sourceGeneration, clipped: false)
+                } else {
+                    page = try await readHistory(seq)
+                }
                 guard olderReads.isCurrent(request), generation == sourceGeneration else { return }
                 guard page.generation == sourceGeneration else { reanchor = request; return }
                 let responseIDs = Set(responses.map(\.firstMessageID))
