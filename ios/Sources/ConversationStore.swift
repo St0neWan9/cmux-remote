@@ -14,10 +14,10 @@ import CmuxAgentChat
 actor ConversationStore {
     /// What the phone is willing to spend on stored conversations.
     struct Limits: Sendable {
-        var databaseBytes = 268_435_456
-        var conversationBytes = 67_108_864
+        var databaseBytes = 536_870_912
+        var conversationBytes = 134_217_728
         var conversations = 24
-        var messagesPerConversation = 20_000
+        var messagesPerConversation = 60_000
     }
     private let directory: URL
     let limits: Limits
