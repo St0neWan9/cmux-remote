@@ -302,8 +302,10 @@ struct ConversationView: View {
         selectedToolDetail = ToolDetailReference(messageID: messageID, generation: generation, initialField: field)
     }
     /// Pages in earlier messages and keeps the message that was on top where it was.
-    private func loadOlder(_ proxy: ScrollViewProxy) async {
-        guard model.hasMore, !model.loadingOlder, Date() >= nextPageAllowed, let anchor = model.timelineItems.first?.id else { return }
+    /// `pull` is the reader asking with the pull gesture: that gesture answers with its own spinner, so it must do
+    /// work even when an automatic page loaded a moment ago.
+    private func loadOlder(_ proxy: ScrollViewProxy, pull: Bool = false) async {
+        guard model.hasMore, !model.loadingOlder, pull || Date() >= nextPageAllowed, let anchor = model.timelineItems.first?.id else { return }
         nextPageAllowed = Date().addingTimeInterval(0.8)
         await model.older()
         guard model.timelineItems.first?.id != anchor else { return }
@@ -317,7 +319,7 @@ struct ConversationView: View {
     /// A pull reads earlier messages while there are any, otherwise the latest; it redials only a link that is down.
     private func pullToRefresh(_ proxy: ScrollViewProxy) async {
         if linkState != nil && linkState != .connected { await reconnect(); return }
-        if model.hasMore { await loadOlder(proxy) } else { await model.refresh() }
+        if model.hasMore { await loadOlder(proxy, pull: true) } else { await model.refresh() }
     }
     /// Scrolls to the newest message, then again while the freshly inserted rows finish measuring.
     ///
