@@ -116,6 +116,14 @@ final class ConversationModel {
     var clipped = false
     private var generation: String?
     var historyGeneration: String? { generation }
+    /// Everything the timeline's id lookups depend on. It changes when a message, a reply or an image appears or
+    /// the conversation is replaced, and not when the page merely re-evaluates, which is what makes caching them safe.
+    var timelineIndexKey: String {
+        let last = responses.last
+        return [generation ?? "-", String(timelineItems.count), String(responses.count), String(images.count),
+                timelineItems.first?.id ?? "-", timelineItems.last?.id ?? "-",
+                last?.lastMessageID ?? "-", last?.completed == true ? "1" : "0"].joined(separator: ":")
+    }
     init(session: SessionDescriptor, client: RemoteClient, speechInput: (any SpeechInputServing)? = nil,
          loadRecovery: (@Sendable () async throws -> SendRequest?)? = nil,
          saveRecovery: (@Sendable (SendRequest?) async throws -> Void)? = nil,
