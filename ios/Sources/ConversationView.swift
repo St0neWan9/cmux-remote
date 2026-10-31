@@ -56,6 +56,10 @@ struct ConversationView: View {
     @State private var linkState: LinkState?
     /// Whether the marker above the first loaded message is within reach of the top of the page.
     @State private var topNear = false
+    /// When another page of earlier messages may load. Scrolling past the top fires a geometry change for every
+    /// layout pass, and a prepended page changes the layout again: without a pause the loader chained page after
+    /// page, each one re-laying the whole list and scrolling, and a long conversation simply froze.
+    @State private var nextPageAllowed = Date.distantPast
     private let hostName: String
     init(model: ConversationModel, hostName: String = "") {
         _model = State(initialValue: model); self.hostName = hostName
@@ -297,15 +301,16 @@ struct ConversationView: View {
     }
     /// Pages in earlier messages and keeps the message that was on top where it was.
     private func loadOlder(_ proxy: ScrollViewProxy) async {
-        guard model.hasMore, !model.loadingOlder, let anchor = model.timelineItems.first?.id else { return }
+        guard model.hasMore, !model.loadingOlder, Date() >= nextPageAllowed, let anchor = model.timelineItems.first?.id else { return }
+        nextPageAllowed = Date().addingTimeInterval(0.8)
         await model.older()
         guard model.timelineItems.first?.id != anchor else { return }
         // A scroll in the same update as the insertion is overridden by its layout; restore once the rows exist.
         try? await Task.sleep(for: .milliseconds(50))
         scrollTrace.note("scroll older-page"); proxy.scrollTo(anchor, anchor: .top)
-        // Still at the top after restoring: the reader wants more, and a marker that never left would not fire again.
-        try? await Task.sleep(for: .milliseconds(300))
-        if topNear && !atLatest { await loadOlder(proxy) }
+        // The next page waits for the reader to reach the top again: chaining here fired while the list was still
+        // laying out, and a long conversation froze.
+        diagLog(.info, category: "open", "older page loaded messages=\(model.messages.count) items=\(model.timelineItems.count)")
     }
     /// A pull reads earlier messages while there are any, otherwise the latest; it redials only a link that is down.
     private func pullToRefresh(_ proxy: ScrollViewProxy) async {
