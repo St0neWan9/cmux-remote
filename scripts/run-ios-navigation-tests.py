@@ -16,6 +16,8 @@ parser.add_argument('--env', action='append', default=[], metavar='KEY=VALUE',
                     help='Extra test-process environment, for example the id of a real session to open.')
 parser.add_argument('--only-testing', action='append', default=[], metavar='TARGET/TEST',
                     help='Run only these tests, so a real-backend run does not drag in every fixture test.')
+parser.add_argument('--configuration', choices=['Debug', 'Release'], default='Debug',
+                    help='Build configuration; Release measures what an installed app costs.')
 args = parser.parse_args()
 extra = {}
 for item in args.env:
@@ -30,7 +32,7 @@ if not device or not device['name'].startswith('cmux-remote-') or device['state'
 root = Path(__file__).resolve().parents[1]
 derived = root / '.build/ios-navigation-tests'
 command = ['xcodebuild', '-project', 'ios/CmuxRemote.xcodeproj', '-scheme', 'CmuxRemote',
-           '-configuration', 'Debug', '-destination', f'platform=iOS Simulator,id={args.device},arch={args.arch}',
+           '-configuration', args.configuration, '-destination', f'platform=iOS Simulator,id={args.device},arch={args.arch}',
            '-derivedDataPath', str(derived), '-parallel-testing-enabled', 'NO', 'ONLY_ACTIVE_ARCH=YES',
            f'ARCHS={args.arch}', 'CODE_SIGNING_ALLOWED=NO']
 subprocess.run(command + ['build-for-testing'], cwd=root, check=True)

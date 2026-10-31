@@ -39,6 +39,9 @@ public actor TranscriptReader {
     private let generationStore: TranscriptGenerationStore
     private static let archivePageCountLimit = 200
     private static let archivePageByteLimit = 1_048_576
+    /// What the newest page parses, however large a chunk an earlier page may read. Small enough to answer a
+    /// refresh in a fraction of a second even for a long record, large enough to carry the newest messages.
+    private static let tailWindowBytes = 524_288
     private static let archiveChunkCeiling = 67_108_864
     /// Detached calls per transcript. Tasks outlive the turn that started them, so they are kept beside the
     /// messages; keyed by path, because one reader serves every conversation and an unchanged record is
@@ -407,12 +410,18 @@ public actor TranscriptReader {
             end = metadata.size
             count = min(max(tail ?? limit, 1), Self.archivePageCountLimit)
         }
+        // The newest page is read again for every change while a turn runs, so it parses a small window: the newest
+        // records of any transcript fit in a few hundred kilobytes, and parsing the whole chunk for each refresh
+        // kept the Mac busy for a second or more per read, which is what the reader felt as a page that would not
+        // move. A page further back is read once, when the reader asks for it, so it keeps the larger window and
+        // the messages that come with it.
+        let window = cursor == nil ? min(archiveChunkBytes, Self.tailWindowBytes) : archiveChunkBytes
         // A chunk can hold nothing a page can use -- records the parser ignores, or a stretch of one very long
         // line. Returning an empty page would end the reader's paging for good, so the window keeps moving back
         // until it finds messages or reaches the start of the record.
         var windowEnd = end
         for attempt in 0..<8 {
-            let start = max(0, windowEnd - archiveChunkBytes)
+            let start = max(0, windowEnd - window)
             let chunk = try readArchiveChunk(path: path, start: start, end: windowEnd)
             try Task.checkCancellation()
             let page = try archivePage(chunk: chunk, chunkStart: start, count: count, generation: generation,
