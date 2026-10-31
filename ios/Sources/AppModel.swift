@@ -437,10 +437,17 @@ final class AppModel {
         if let existing = conversationModels[key] { existing.updateSession(session); return existing }
         if conversationModels.count >= 32 { conversationModels = conversationModels.filter { $0.value.busy || $0.value.pendingSend != nil } }
         let store = pendingSends; let scope = client.operationRecoveryScope; let id = session.id
+        // The archive route reads the whole transcript; a Bridge without it answers 404 and the conversation
+        // keeps the windowed history.
+        let archive = ArchiveChain { cursor, limit in
+            try await client.get("/v1/sessions/\(id)/archive",
+                                 query: cursor.map { ["cursor": $0, "limit": String(limit)] } ?? ["tail": String(limit)],
+                                 as: ConversationArchivePage.self)
+        }
         let model = ConversationModel(session: session, client: client, speechInput: makeSpeechInput(),
             loadRecovery: { try await store.load(scope: scope, sessionID: id) },
             saveRecovery: { try await store.save($0, scope: scope, sessionID: id) },
-            cache: conversations, store: conversationStore, modelCache: modelChoices)
+            cache: conversations, store: conversationStore, archive: archive, modelCache: modelChoices)
         conversationModels[key] = model
         return model
     }
