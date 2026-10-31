@@ -94,8 +94,6 @@ final class ConversationModel {
     /// Reads the whole transcript instead of the Bridge's window, once the Bridge offers it.
     /// Cleared when the Bridge answers 404: the session then keeps the windowed route for good.
     private var archive: ArchiveChain?
-    /// Whether the archive chain returned its last page, so a further scroll does not ask again.
-    private var archiveExhausted = false
     /// Walks the rest of the conversation into the store once the page is open, so reading back never waits on
     /// the Mac again. Bounded, cancellable, and never touches what the page shows.
     private var backfill: Task<Void, Never>?
@@ -439,8 +437,7 @@ final class ConversationModel {
                     page = stored
                 } else if let archive, let next = try? await archive.older(limit: 40) {
                     page = next.page
-                    archiveExhausted = !next.hasMore
-                } else if archive != nil && !archiveExhausted {
+                } else if archive != nil {
                     page = ConversationSnapshot(messages: [], hasMore: false, generation: sourceGeneration, clipped: false)
                 } else {
                     page = try await readHistory(seq)
