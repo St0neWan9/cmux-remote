@@ -78,6 +78,7 @@
 "chat.follow_up" = "跟进";
 "chat.empty" = "开始对话";
 "chat.latest" = "跳到最新消息";
+"chat.load_earlier" = "加载更早的消息";
 "chat.working" = "正在运行";
 "chat.back" = "返回对话列表";
 "chat.refresh" = "刷新对话";
