@@ -147,7 +147,12 @@ final class ConversationModel {
         self.sendRequest = sendRequest ?? { try await client.post("/v1/sessions/\(id)/send", body: $0, as: MutationReceipt.self) }
         self.getOperation = getOperation ?? { try await client.get("/v1/operations/\($0.uuidString)", as: OperationStatus.self) }
         self.readSessions = readSessions ?? { try await client.get("/v1/sessions", as: [SessionDescriptor].self) }
-        self.readHistory = readHistory ?? { before in try await client.get("/v1/sessions/\(id)/history", query: before.map { ["before_seq": String($0)] } ?? [:], as: ConversationSnapshot.self) }
+        // An earlier page is read smaller than the page the conversation opens with: each one is laid out whole
+        // when it is prepended, and the visible stretch of a scroll is a fraction of a hundred messages.
+        self.readHistory = readHistory ?? { before in
+            try await client.get("/v1/sessions/\(id)/history",
+                                 query: before.map { ["before_seq": String($0), "limit": "40"] } ?? [:], as: ConversationSnapshot.self)
+        }
         self.readPreview = readPreview ?? { try await client.get("/v1/sessions/\(id)/preview", as: PreviewSnapshot.self) }
         // A substituted history reader is used as given, so its reads are not split behind its back.
         if let readTail { self.readTail = readTail }
