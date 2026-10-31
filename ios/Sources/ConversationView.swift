@@ -58,6 +58,9 @@ struct ConversationView: View {
     /// layout pass, and a prepended page changes the layout again: without a pause the loader chained page after
     /// page, each one re-laying the whole list and scrolling, and a long conversation simply froze.
     @State private var nextPageAllowed = Date.distantPast
+    /// Set while the pull gesture's own refresh control is on screen, so the timeline does not draw a second spinner
+    /// for the same load.
+    @State private var pulling = false
     private let hostName: String
     init(model: ConversationModel, hostName: String = "") {
         _model = State(initialValue: model); self.hostName = hostName
@@ -219,7 +222,7 @@ struct ConversationView: View {
                 // It is also a button: the geometry trigger needs the marker to move, so a page already resting at
                 // the top would otherwise wait for a scroll it cannot make.
                 Group {
-                    if model.loadingOlder { ProgressView() }
+                    if model.loadingOlder && !pulling { ProgressView() }
                     else { Button(String(localized: "chat.load_earlier")) { reachedTop() }.buttonStyle(.plain).font(.footnote) }
                 }
                 .frame(maxWidth: .infinity).frame(height: 32).padding(.top, 12)
@@ -328,6 +331,10 @@ struct ConversationView: View {
     /// A pull reads earlier messages while there are any, otherwise the latest; it redials only a link that is down.
     private func pullToRefresh(_ proxy: ScrollViewProxy) async {
         if linkState != nil && linkState != .connected { await reconnect(); return }
+        // The pull is the same load as the automatic one; only its indicator belongs to the system, so the row's
+        // own spinner stays out of the way while it is on screen.
+        pulling = true
+        defer { pulling = false }
         if model.hasMore { await loadOlder(proxy, pull: true) } else { await model.refresh() }
     }
     /// Scrolls to the newest message, then again while the freshly inserted rows finish measuring.
