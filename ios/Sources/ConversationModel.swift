@@ -450,7 +450,8 @@ final class ConversationModel {
                 let responseIDs = Set(responses.map(\.firstMessageID))
                 responses.insert(contentsOf: (page.responses ?? []).filter { !responseIDs.contains($0.firstMessageID) }, at: 0)
                 let existing = Set(messages.map(\.id))
-                messages.insert(contentsOf: page.messages.filter { !existing.contains($0.id) }, at: 0)
+                let arriving = page.messages.filter { !existing.contains($0.id) }
+                messages.insert(contentsOf: arriving, at: 0)
                 let imageIDs = Set(images.map(\.id)); images += (page.images ?? []).filter { !imageIDs.contains($0.id) }
                 timelineItems = ConversationTimeline().items(from: messages); hasMore = page.hasMore
                 // Each earlier page joins the stored copy, so reading back through it later never asks the Mac again.
