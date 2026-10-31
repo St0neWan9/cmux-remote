@@ -82,6 +82,8 @@ struct ConversationView: View {
             .background(Color.white.opacity(0.95))
         }
         .task { for await state in model.client.linkStates() { linkState = state } }
+        // The first page lands, then the rest of the conversation is filled into the store in the background.
+        .onChange(of: model.historyGeneration) { _, _ in model.startBackfill() }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: 12) {
                 SpeechDraftStrip(model: model.speech, useText: model.useSpeechDraft)

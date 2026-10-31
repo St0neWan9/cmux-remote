@@ -91,6 +91,9 @@ final class ConversationModel {
     private let cache: ConversationCache?
     /// The conversation kept across openings; nil in fixtures that supply their own readers.
     private let store: ConversationStore?
+    /// Walks the rest of the conversation into the store once the page is open, so reading back never waits on
+    /// the Mac again. Bounded, cancellable, and never touches what the page shows.
+    private var backfill: Task<Void, Never>?
     /// Reads the requests waiting for the agent, of which this conversation's questions are the ones it owns.
     private let readFeed: @Sendable () async throws -> [JSONValue]
     /// Answers one of those requests.
@@ -289,7 +292,31 @@ final class ConversationModel {
         guard !observing, !busy, !Task.isCancelled else { return }
         await refreshReads.run { [self] request in await readLatest(request) }
     }
-    func suspendReads() { readsEnabled = false; refreshReads.suspend(); olderReads.suspend(); loadingOlder = false }
+    /// Fills the stored copy from the page the reader is on back to the start of the transcript. It only writes to
+    /// the store: the visible conversation is unchanged, and the work stops when the page goes away.
+    func startBackfill() {
+        guard let store, backfill == nil, hasMore, let first = messages.first?.seq else { return }
+        let scope = client.operationRecoveryScope, id = session.id, read = readHistory
+        backfill = Task { [weak self] in
+            var before = first
+            var pages = 0
+            // Sixty-four pages of the reader's own size covers a conversation of a few thousand messages; anything
+            // longer is filled the next time it is opened rather than held in one long background run.
+            while !Task.isCancelled, pages < 64 {
+                guard let page = try? await read(before) else { break }
+                let older = page.messages.filter { $0.seq < before }
+                guard let next = older.first?.seq else { break }
+                await store.save(page, scope: scope, sessionID: id, complete: !page.hasMore)
+                before = next
+                pages += 1
+                if !page.hasMore { break }
+                if self?.readsEnabled == false { break }
+            }
+            await MainActor.run { self?.backfill = nil }
+        }
+    }
+    func stopBackfill() { backfill?.cancel(); backfill = nil }
+    func suspendReads() { readsEnabled = false; refreshReads.suspend(); olderReads.suspend(); loadingOlder = false; stopBackfill() }
     func resumeReads() { readsEnabled = true }
     func refresh() async {
         guard readsEnabled, !Task.isCancelled else { return }
