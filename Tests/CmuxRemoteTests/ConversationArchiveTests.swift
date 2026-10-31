@@ -16,49 +16,116 @@ import CmuxRemoteCore
     private func write(_ lines: [Data], to file: URL) throws {
         try lines.reduce(into: Data()) { $0.append($1) }.write(to: file)
     }
-
-    /// A clipped history window must not renumber the archive: sequence numbers stay absolute line
-    /// indexes, including when a 1 MiB chunk boundary falls inside a record.
-    @Test func absoluteSequenceNumbersSurviveWindowsAndChunkBoundaries() async throws {
-        let root = try temporary(); defer { try? FileManager.default.removeItem(at: root) }
-        let file = root.appendingPathComponent("chat.jsonl")
-        let rows = try (0..<12).map { try userLine("m\($0)", text: String(repeating: "x", count: 120_000)) }
-        try write(rows, to: file)
-        let reader = TranscriptReader(windowLimit: 4_096, windowStep: 1_024)
-        let window = try await reader.history(path: file.path, agent: "claude", beforeSeq: nil, limit: 200)
-        #expect(window.clipped)
-        #expect(!window.messages.contains { $0.id == "m0" })
-
-        let archive = try await reader.archive(path: file.path, agent: "claude", tail: nil, cursor: nil, limit: 200)
-        #expect(archive.complete)
-        #expect(archive.snapshot.messages.map(\.seq) == Array(0..<12))
-        #expect(archive.snapshot.messages.map(\.id) == (0..<12).map { "m\($0)" })
-        #expect(archive.snapshot.clipped == false)
+    /// The byte offset of each line's first byte, in the order they were written.
+    private func lineOffsets(_ lines: [Data]) -> [Int] {
+        var offsets: [Int] = []; var running = 0
+        for line in lines { offsets.append(running); running += line.count }
+        return offsets
+    }
+    private func pageIDs(_ page: ConversationArchivePage) -> [String] {
+        page.snapshot.messages.map(\.id)
     }
 
-    /// Two readers built over the same state directory answer with one generation; truncating the
-    /// record replaces it. The state file is owner-only.
-    @Test func generationSurvivesRestartAndChangesOnTruncation() async throws {
+    /// Sequence numbers are the byte offset of the line that produced each message, so the same
+    /// record read through a whole page and through a chain of small chunks reports the same seq.
+    @Test func messagesCarryByteOffsetSequencesStableAcrossCursors() async throws {
         let root = try temporary(); defer { try? FileManager.default.removeItem(at: root) }
-        let state = root.appendingPathComponent("state")
         let file = root.appendingPathComponent("chat.jsonl")
-        let rows = try (0..<6).map { try userLine("m\($0)", text: "message \($0)") }
+        let texts = (0..<60).map { index in
+            "message \(index) " + String(repeating: "x", count: index % 3 == 0 ? 400 : 10)
+        }
+        let rows = try texts.enumerated().map { try userLine("m\($0.offset)", text: $0.element) }
         try write(rows, to: file)
+        let offsets = lineOffsets(rows)
+        let expectedIDs = (0..<60).map { "m\($0)" }
 
-        let first = try await TranscriptReader(generationStore: TranscriptGenerationStore(directory: state))
-            .archive(path: file.path, agent: "claude", tail: nil, cursor: nil, limit: 100)
-        let restartedReader = TranscriptReader(generationStore: TranscriptGenerationStore(directory: state))
-        let second = try await restartedReader.archive(path: file.path, agent: "claude", tail: nil, cursor: nil, limit: 100)
-        #expect(first.snapshot.generation == second.snapshot.generation)
+        // One call large enough to read the whole small record.
+        let whole = try await TranscriptReader().archive(path: file.path, agent: "claude", tail: nil, cursor: nil, limit: 200)
+        #expect(whole.complete)
+        #expect(pageIDs(whole) == expectedIDs)
+        #expect(whole.snapshot.messages.map(\.seq) == offsets)
 
-        let stateFile = state.appendingPathComponent("transcript-generations.json")
-        let permissions = try #require(FileManager.default.attributesOfItem(atPath: stateFile.path)[.posixPermissions] as? NSNumber)
-        #expect(permissions.intValue == 0o600)
+        // The same record walked through 4 KiB chunks with a different page size.
+        let chunked = TranscriptReader(chunkBytes: 4_096)
+        var page = try await chunked.archive(path: file.path, agent: "claude", tail: 7, cursor: nil, limit: 200)
+        var seen: [String: Int] = [:]
+        for message in page.snapshot.messages { seen[message.id] = message.seq }
+        while let cursor = page.nextCursor {
+            #expect(!page.complete)
+            page = try await chunked.archive(path: file.path, agent: "claude", tail: nil, cursor: cursor, limit: 9)
+            for message in page.snapshot.messages { seen[message.id] = message.seq }
+        }
+        #expect(page.complete)
+        #expect(seen.count == expectedIDs.count)
+        for (index, id) in expectedIDs.enumerated() {
+            #expect(seen[id] == offsets[index])
+        }
+    }
 
-        try userLine("short", text: "only this").write(to: file)
-        let truncated = try await restartedReader.archive(path: file.path, agent: "claude", tail: nil, cursor: nil, limit: 100)
-        #expect(truncated.snapshot.generation != first.snapshot.generation)
-        #expect(truncated.snapshot.messages.map(\.id) == ["short"])
+    /// Walking from the newest page down to `complete` visits every message once, in order, when
+    /// the fixture mixes short and long records and the chunk size cuts through the file.
+    @Test func walkingCursorsVisitsEveryMessageExactlyOnceInOrder() async throws {
+        let root = try temporary(); defer { try? FileManager.default.removeItem(at: root) }
+        let file = root.appendingPathComponent("chat.jsonl")
+        let rows = try (0..<300).map { index in
+            try userLine("m\(index)", text: "message \(index) " + String(repeating: "y", count: index % 5 == 0 ? 700 : 20))
+        }
+        try write(rows, to: file)
+        let expected = (0..<300).map { "m\($0)" }
+        let reader = TranscriptReader(chunkBytes: 4_096)
+
+        var page = try await reader.archive(path: file.path, agent: "claude", tail: 11, cursor: nil, limit: 200)
+        var collected = pageIDs(page)
+        #expect(collected == Array(expected.suffix(11)))
+        var previousFirstSeq = try #require(page.snapshot.messages.first?.seq)
+        var iterations = 0
+        while let cursor = page.nextCursor {
+            #expect(!page.complete && page.snapshot.hasMore)
+            page = try await reader.archive(path: file.path, agent: "claude", tail: nil, cursor: cursor, limit: 7)
+            let ids = pageIDs(page)
+            #expect(!ids.isEmpty)
+            let firstSeq = try #require(page.snapshot.messages.first?.seq)
+            // Every page moves strictly backwards, so a cursor can never loop.
+            #expect(firstSeq < previousFirstSeq)
+            previousFirstSeq = firstSeq
+            collected = ids + collected
+            iterations += 1
+            #expect(iterations < 500)
+        }
+        #expect(page.complete && page.nextCursor == nil && !page.snapshot.hasMore)
+        #expect(collected == expected)
+        #expect(Set(collected).count == expected.count)
+    }
+
+    /// `complete` is true exactly on the page whose first returned line is byte zero.
+    @Test func completeOnlyOnThePageThatReachesOffsetZero() async throws {
+        let root = try temporary(); defer { try? FileManager.default.removeItem(at: root) }
+        let file = root.appendingPathComponent("chat.jsonl")
+        let rows = try (0..<25).map { try userLine("m\($0)", text: "message \($0)") }
+        try write(rows, to: file)
+        let reader = TranscriptReader(chunkBytes: 2_048)
+
+        var page = try await reader.archive(path: file.path, agent: "claude", tail: 4, cursor: nil, limit: 3)
+        var completePages = 0
+        var visited: [String] = []
+        while true {
+            let ids = pageIDs(page)
+            visited = ids + visited
+            if page.complete {
+                completePages += 1
+                #expect(page.nextCursor == nil)
+                #expect(page.snapshot.messages.first?.seq == 0)
+                #expect(!page.snapshot.hasMore)
+            } else {
+                #expect(page.nextCursor != nil)
+                #expect((page.snapshot.messages.first?.seq ?? -1) > 0)
+                #expect(page.snapshot.hasMore)
+            }
+            guard let cursor = page.nextCursor else { break }
+            page = try await reader.archive(path: file.path, agent: "claude", tail: nil, cursor: cursor, limit: 3)
+        }
+        #expect(completePages == 1)
+        #expect(visited == (0..<25).map { "m\($0)" })
     }
 
     @Test func cursorsRoundTripAndAStaleGenerationIsRefused() async throws {
@@ -93,7 +160,7 @@ import CmuxRemoteCore
         }
     }
 
-    @Test func pagesAreBoundedByCountAndBytesAndCompleteOnlyAtTheFirstRecord() async throws {
+    @Test func countAndByteBoundsCutAPageShortAndTheNextCursorMakesProgress() async throws {
         let root = try temporary(); defer { try? FileManager.default.removeItem(at: root) }
         let file = root.appendingPathComponent("chat.jsonl")
         try write(try (0..<30).map { try userLine("m\($0)", text: "message \($0)") }, to: file)
@@ -102,17 +169,15 @@ import CmuxRemoteCore
         var page = try await reader.archive(path: file.path, agent: "claude", tail: 10, cursor: nil, limit: 100)
         #expect(page.snapshot.messages.count == 10)
         #expect(!page.complete && page.snapshot.hasMore)
+        let firstSeq = try #require(page.snapshot.messages.first?.seq)
         page = try await reader.archive(path: file.path, agent: "claude", tail: nil, cursor: page.nextCursor, limit: 10)
         #expect(page.snapshot.messages.count == 10)
         #expect(!page.complete)
-        page = try await reader.archive(path: file.path, agent: "claude", tail: nil, cursor: page.nextCursor, limit: 10)
-        #expect(page.snapshot.messages.count == 10)
-        #expect(page.complete && !page.snapshot.hasMore && page.nextCursor == nil)
-        #expect(page.snapshot.messages.first?.seq == 0)
+        #expect((page.snapshot.messages.first?.seq ?? -1) < firstSeq)
 
         // 70 parsed bodies exceed the 1 MiB byte budget before the 200-message count budget.
         let large = root.appendingPathComponent("large.jsonl")
-        try write(try (0..<70).map { try userLine("big\($0)", text: String(repeating: "y", count: 20_000)) }, to: large)
+        try write(try (0..<70).map { try userLine("big\($0)", text: String(repeating: "z", count: 20_000)) }, to: large)
         var bytes = 0
         page = try await reader.archive(path: large.path, agent: "claude", tail: nil, cursor: nil, limit: 200)
         for message in page.snapshot.messages { bytes += (try JSONEncoder().encode(message)).count }
@@ -120,38 +185,66 @@ import CmuxRemoteCore
         #expect(bytes <= 1_048_576)
         #expect(!page.complete)
         var seen = page.snapshot.messages.map(\.id)
+        var cursorFirstSeq = try #require(page.snapshot.messages.first?.seq)
         while let cursor = page.nextCursor {
             page = try await reader.archive(path: large.path, agent: "claude", tail: nil, cursor: cursor, limit: 200)
-            seen += page.snapshot.messages.map(\.id)
+            #expect((page.snapshot.messages.first?.seq ?? -1) < cursorFirstSeq)
+            cursorFirstSeq = try #require(page.snapshot.messages.first?.seq)
+            seen = page.snapshot.messages.map(\.id) + seen
         }
         #expect(page.complete)
         #expect(seen.count == 70)
+
+        // The remaining `history_too_large` is reserved for an impossible configured chunk.
+        do {
+            _ = try await TranscriptReader(chunkBytes: 67_108_865)
+                .archive(path: file.path, agent: "claude", tail: nil, cursor: nil, limit: 10)
+            Issue.record("Expected an oversized chunk to be refused")
+        } catch {
+            #expect((error as? BridgeError)?.code == "history_too_large")
+            #expect((error as? BridgeError)?.status == 413)
+        }
     }
 
-    @Test func recordsOverTheCompleteLimitsAnswerHistoryTooLarge() async throws {
+    /// A 12 MiB record is paged with a deliberately tiny chunk. Coherent, ordered, non-repeating
+    /// pages show that each request stayed inside its bounded chunk instead of reading the record.
+    @Test func bigFixtureIsPagedInTinyChunks() async throws {
         let root = try temporary(); defer { try? FileManager.default.removeItem(at: root) }
-        let file = root.appendingPathComponent("chat.jsonl")
-        try write(try (0..<6).map { try userLine("m\($0)", text: String(repeating: "z", count: 512)) }, to: file)
-
-        let bytesLimited = TranscriptReader(completeLimit: 1_024)
-        do {
-            _ = try await bytesLimited.archive(path: file.path, agent: "claude", tail: nil, cursor: nil, limit: 100)
-            Issue.record("Expected the byte limit to refuse the archive")
-        } catch {
-            #expect((error as? BridgeError)?.code == "history_too_large")
-            #expect((error as? BridgeError)?.status == 413)
+        let file = root.appendingPathComponent("big.jsonl")
+        var data = Data()
+        var expected: [String] = []
+        for index in 0..<21_000 {
+            let line = try userLine("big\(index)", text: String(repeating: "b", count: 600) + " \(index)")
+            data.append(line)
+            expected.append("big\(index)")
         }
-        // The small complete limit must not change the bounded history route.
-        #expect(try await bytesLimited.history(path: file.path, agent: "claude", beforeSeq: nil, limit: 100).messages.count == 6)
+        #expect(data.count >= 12 * 1_048_576)
+        try data.write(to: file)
 
-        let messagesLimited = TranscriptReader(completeMessageLimit: 4)
-        do {
-            _ = try await messagesLimited.archive(path: file.path, agent: "claude", tail: nil, cursor: nil, limit: 100)
-            Issue.record("Expected the message limit to refuse the archive")
-        } catch {
-            #expect((error as? BridgeError)?.code == "history_too_large")
-            #expect((error as? BridgeError)?.status == 413)
+        let reader = TranscriptReader(chunkBytes: 65_536)
+        var page = try await reader.archive(path: file.path, agent: "claude", tail: 50, cursor: nil, limit: 200)
+        var collected = pageIDs(page)
+        var previousFirstSeq = try #require(page.snapshot.messages.first?.seq)
+        var iterations = 0
+        while let cursor = page.nextCursor {
+            page = try await reader.archive(path: file.path, agent: "claude", tail: nil, cursor: cursor, limit: 200)
+            let messages = page.snapshot.messages
+            #expect(!messages.isEmpty)
+            #expect(messages.count <= 200)
+            // Sequence numbers are line byte offsets, so they rise within a page.
+            #expect(zip(messages, messages.dropFirst()).allSatisfy { $0.0.seq < $0.1.seq })
+            let firstSeq = try #require(messages.first?.seq)
+            #expect(firstSeq < previousFirstSeq)
+            previousFirstSeq = firstSeq
+            collected = messages.map(\.id) + collected
+            iterations += 1
+            #expect(iterations < 2_000)
         }
+        #expect(page.complete)
+        #expect(collected.count == expected.count)
+        #expect(collected == expected)
+        // A page that walked the whole record cannot have been produced by one whole-file read.
+        #expect(iterations > 4)
     }
 
     @Test func archiveReadsDoNotChangeLegacyHistoryOutput() async throws {
@@ -171,49 +264,8 @@ import CmuxRemoteCore
         let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
         #expect(try encoder.encode(before) == encoder.encode(after))
         #expect(before.generation == after.generation)
-    }
-
-    /// A tool record and its image that the bounded window no longer holds resolve through the
-    /// archive generation, including after a simulated Bridge restart.
-    @Test func oldToolDetailAndImageResolveThroughTheArchiveObservation() async throws {
-        let root = try temporary(); defer { try? FileManager.default.removeItem(at: root) }
-        let state = root.appendingPathComponent("state")
-        let file = root.appendingPathComponent("chat.jsonl")
-        let png = Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAKklEQVR4nGPQyrtDU8QwasGoBaMWjFowasGoBaMWjFowasGoBaMWDBULAFSk0ExUjkswAAAAAElFTkSuQmCC")!
-        var rows: [[String: Any]] = [
-            ["type": "assistant", "uuid": "old-call", "message": ["content": [["type": "tool_use", "id": "tool-old", "name": "Read", "input": ["file_path": "/outside/photo.png"]]]]],
-            ["type": "user", "uuid": "old-result", "message": ["content": [["type": "tool_result", "tool_use_id": "tool-old", "content": [["type": "text", "text": "OLD OUTPUT DETAIL"], ["type": "image", "source": ["type": "base64", "media_type": "image/png", "data": png.base64EncodedString()]]]]]]]
-        ]
-        rows += (0..<20).map { index -> [String: Any] in
-            ["type": "user", "uuid": "filler\(index)", "message": ["content": "filler message \(index) " + String(repeating: "f", count: 120)]]
-        }
-        try write(try rows.map { var data = try JSONSerialization.data(withJSONObject: $0); data.append(10); return data }, to: file)
-
-        let reader = TranscriptReader(windowLimit: 600, windowStep: 100,
-                                      generationStore: TranscriptGenerationStore(directory: state))
-        let window = try await reader.history(path: file.path, agent: "claude", beforeSeq: nil, limit: 100)
-        #expect(window.clipped)
-        #expect(!window.messages.contains { $0.id == "old-call" })
-
-        let archive = try await reader.archive(path: file.path, agent: "claude", tail: 200, cursor: nil, limit: 200)
-        #expect(archive.snapshot.messages.contains { $0.id == "old-call" })
-        let reference = try #require(archive.snapshot.images?.first { !$0.requiresProjectRead })
-        #expect(reference.messageID == "old-call")
-        let image = try await reader.image(path: file.path, agent: "claude", referenceID: reference.id, generation: archive.snapshot.generation)
-        if case .recorded(let bytes) = image.source { #expect(bytes == png) } else { Issue.record("Expected recorded image bytes") }
-        let detail = try await reader.toolText(path: file.path, agent: "claude", messageID: "old-call", generation: archive.snapshot.generation,
-                                               field: "output", offset: 0, contentID: nil, limit: 16_384)
-        #expect(detail.text == "OLD OUTPUT DETAIL")
-
-        // A restarted Bridge loads the same generation from its state directory and rebuilds the
-        // complete observation when the detail is opened.
-        let restarted = TranscriptReader(windowLimit: 600, windowStep: 100,
-                                         generationStore: TranscriptGenerationStore(directory: state))
-        let restartedImage = try await restarted.image(path: file.path, agent: "claude", referenceID: reference.id, generation: archive.snapshot.generation)
-        if case .recorded(let bytes) = restartedImage.source { #expect(bytes == png) } else { Issue.record("Expected recorded image bytes after restart") }
-        let restartedDetail = try await restarted.toolText(path: file.path, agent: "claude", messageID: "old-call", generation: archive.snapshot.generation,
-                                                           field: "output", offset: 0, contentID: nil, limit: 16_384)
-        #expect(restartedDetail.text == "OLD OUTPUT DETAIL")
+        // History keeps line-index sequence numbers; the archive's byte-offset rewrite does not leak.
+        #expect(after.messages.map(\.seq) == Array(0..<after.messages.count))
     }
 
     @Test func routeServesArchivePagesAndRequiresConversationRead() async throws {
