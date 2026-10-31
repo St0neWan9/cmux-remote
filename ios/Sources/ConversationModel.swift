@@ -94,6 +94,8 @@ final class ConversationModel {
     /// Reads the whole transcript instead of the Bridge's window, once the Bridge offers it.
     /// Cleared when the Bridge answers 404: the session then keeps the windowed route for good.
     private var archive: ArchiveChain?
+    /// Whether the archive chain returned its last page, so a further scroll does not ask again.
+    private var archiveExhausted = false
     /// Walks the rest of the conversation into the store once the page is open, so reading back never waits on
     /// the Mac again. Bounded, cancellable, and never touches what the page shows.
     private var backfill: Task<Void, Never>?
@@ -359,9 +361,10 @@ final class ConversationModel {
             updateSession(current)
             var history: ConversationSnapshot
             do { history = try await historyRead }
-            catch let error as BridgeError where error.status == 404 && archive != nil {
-                // An older Bridge has no archive route: keep this conversation on the windowed one.
-                diagLog(.info, category: "open", "archive unavailable; using the windowed history")
+            catch let error as BridgeError where (error.status == 404 || error.status == 413) && archive != nil {
+                // No route (an older Bridge) or a transcript past the archive's bound: this conversation keeps the
+                // windowed history, which still shows what the Bridge's window can reach.
+                diagLog(.info, category: "open", "archive unavailable code=\(error.code); using the windowed history")
                 archive = nil
                 history = try await readHistory(nil)
             }
@@ -431,9 +434,10 @@ final class ConversationModel {
                 let page: ConversationSnapshot
                 if let stored = await store?.page(scope: client.operationRecoveryScope, sessionID: session.id, beforeSeq: seq, limit: 40) {
                     page = stored
-                } else if let archive, let next = try await archive.older(limit: 40) {
+                } else if let archive, let next = try? await archive.older(limit: 40) {
                     page = next.page
-                } else if archive != nil {
+                    archiveExhausted = !next.hasMore
+                } else if archive != nil && !archiveExhausted {
                     page = ConversationSnapshot(messages: [], hasMore: false, generation: sourceGeneration, clipped: false)
                 } else {
                     page = try await readHistory(seq)
