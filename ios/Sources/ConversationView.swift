@@ -259,8 +259,14 @@ struct ConversationView: View {
         }
         // The rows' own height, measured on a stack that holds no filler: a value that cannot depend on
         // what it sizes. (Measuring the same stack the filler lives in made the difference always zero.)
+        //
+        // Clamped at the page height, because above it the filler is zero and the number is never read again.
+        // A lazy stack's estimate of its own height drifts by a point or two as rows are measured, and every
+        // write re-evaluated this page and re-laid the whole stack: a long conversation then never went idle,
+        // and the reader saw it as a freeze. Only a page shorter than the screen still needs to be followed.
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
-            if abs(height - timelineContentHeight) > 0.5 { timelineContentHeight = height }
+            let value = min(height, bottom)
+            if abs(value - timelineContentHeight) > 0.5 { timelineContentHeight = value }
         }
 
         // The whole difference between the page and its content; above the rows when the end is showing.
