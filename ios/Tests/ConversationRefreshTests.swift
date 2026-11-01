@@ -37,7 +37,8 @@ final class ConversationRefreshTests: XCTestCase {
         func increment() { lock.lock(); count += 1; lock.unlock() }
         var value: Int { lock.lock(); defer { lock.unlock() }; return count }
     }
-    private func makeModel(_ archive: Archive, listings: Listing = Listing(), previews: Listing = Listing()) throws -> ConversationModel {
+    private func makeModel(_ archive: Archive, listings: Listing = Listing(), previews: Listing = Listing(),
+                           store: ConversationStore? = nil) throws -> ConversationModel {
         let pairing = try PairingConfiguration(host: "127.0.0.1", port: 1, token: String(repeating: "a", count: 64),
                                                certificateSHA256: String(repeating: "b", count: 64))
         let descriptor = descriptor
@@ -45,7 +46,7 @@ final class ConversationRefreshTests: XCTestCase {
                                  loadRecovery: { nil }, saveRecovery: { _ in },
                                  readSessions: { listings.increment(); return [descriptor] },
                                  readPreview: { previews.increment(); return PreviewSnapshot(text: nil, available: false) },
-                                 readFeed: { [] },
+                                 readFeed: { [] }, store: store,
                                  archive: ArchiveChain { cursor, _ in
                                      guard let page = archive.page(cursor) else {
                                          throw BridgeError("history_unavailable", "No such page in this test.", status: 404)
@@ -75,6 +76,21 @@ final class ConversationRefreshTests: XCTestCase {
         archive.replace([nil: page([300, 400, 500], cursor: "c1"), "c1": page([100, 200], cursor: nil)])
         await model.refresh()
         XCTAssertEqual(model.messages.map(\.seq), [100, 200, 300, 400, 500])
+    }
+    func testAStoredCopyIsShownEvenBeforeThePreviousVisitsHoldIsLifted() async throws {
+        // Coming back to a page runs the restore before the visit re-enables reads; the stored copy is not a read.
+        let archive = Archive([nil: page([300], cursor: nil)])
+        let model = try makeModel(archive)
+        let scope = model.client.operationRecoveryScope
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let store = ConversationStore(directory: directory)
+        await store.save(ConversationSnapshot(messages: [message(100), message(200)], hasMore: true,
+                                               generation: generation, clipped: false),
+                         scope: scope, sessionID: descriptor.id, complete: false)
+        let stored = try makeModel(archive, store: store)
+        stored.suspendReads()
+        await stored.restoreStored()
+        XCTAssertEqual(stored.messages.map(\.seq), [100, 200], "A suspended page threw its stored copy away")
     }
     func testTheTranscriptIsShownWhileTheSessionListIsStillReading() async throws {
         // The Mac's session list is every conversation it holds and can take seconds; the page is one transcript.
