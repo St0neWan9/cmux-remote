@@ -3,6 +3,8 @@ package com.cmuxremote.mobile.ui
 import android.content.Context
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -33,13 +35,16 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.ArrowUpward
+import androidx.compose.material.icons.rounded.ChatBubbleOutline
 import androidx.compose.material.icons.rounded.Book
 import androidx.compose.material.icons.rounded.ChevronLeft
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.Stop
+import androidx.compose.material.icons.rounded.WifiOff
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -58,8 +63,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -96,68 +106,100 @@ fun ConversationScreen(
     onQuote: ((String) -> Unit)? = null,
     onSelectText: ((String) -> Unit)? = null,
     busy: Boolean = false,
+    feedBusy: Boolean = false,
+    /** The Mac granted conversationControl; writing is refused without it. */
+    canControl: Boolean = true,
+    /** The Mac this conversation lives on, shown in the subtitle. */
+    hostName: String? = null,
     onOpenProject: (() -> Unit)? = null,
     onOpenTiming: (() -> Unit)? = null,
     onOpenImage: ((com.cmuxremote.mobile.data.ImageReference) -> Unit)? = null,
     onAnswerQuestion: ((String, List<String>) -> Unit)? = null,
     onOpenDetail: ((String, String) -> Unit)? = null,
     onOpenReference: ((String) -> Unit)? = null,
+    /** Opens the whole group, not just its newest slice. */
+    onOpenGroup: ((List<ChatMessage>) -> Unit)? = null,
     onOpenTask: ((com.cmuxremote.mobile.data.BackgroundTaskInfo) -> Unit)? = null,
     onLoadOlder: ((Boolean) -> Unit)? = null,
     onRefreshConversation: (() -> Unit)? = null,
     pendingImages: List<Pair<String, String>> = emptyList(),
+    /** Images still being compressed. */
+    imagePreparing: Int = 0,
+    imageError: String? = null,
     onRemoveImage: (Int) -> Unit = {},
     onPickImages: (() -> Unit)? = null,
     dictating: Boolean = false,
     onToggleVoice: (() -> Unit)? = null,
     voiceError: String? = null,
+    /** The dictation's own draft and controls. */
+    speechDraft: String? = null,
+    speechListening: Boolean = false,
+    onFinishVoice: (() -> Unit)? = null,
+    onUseSpeech: (() -> Unit)? = null,
+    onCancelSpeech: (() -> Unit)? = null,
     onForceStop: (() -> Unit)? = null,
     pendingSend: Boolean = false,
     onCheckPending: (() -> Unit)? = null,
     onAcknowledgePending: (() -> Unit)? = null,
     offline: Boolean = false,
+    /** A redial is in flight, as opposed to a proven failure. */
+    connecting: Boolean = false,
     onRetryConnection: (() -> Unit)? = null,
     onPickImageFile: (() -> Unit)? = null,
     onOpenFeed: (() -> Unit)? = null,
 ) {
     var renaming by remember { mutableStateOf(false) }
+    var previewImage by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
     Column(modifier.fillMaxSize().background(MobileDesign.Canvas)) {
         ConversationHeader(
             title = state.session.title,
-            subtitle = subtitle(state.session, state.agentModel, LocalContext.current),
+            subtitle = subtitle(state.session, state.agentModel, hostName, LocalContext.current),
             onBack = onBack,
             models = models,
             currentModel = state.agentModel,
-            canSwitchModel = state.session.writable && !state.session.working,
+            canSwitchModel = canControl && state.session.writable && !state.session.working,
             onSwitchModel = onSwitchModel,
-            onRename = { renaming = true },
+            onRename = if (canControl && state.session.writable) {
+                { renaming = true }
+            } else {
+                null
+            },
             onOpenProject = onOpenProject,
+            onOpenFeed = onOpenFeed,
             onOpenTiming = onOpenTiming,
-            onForceStop = onForceStop?.takeIf { state.session.working },
+            onRefresh = onRefreshConversation,
+            onForceStop = onForceStop?.takeIf { state.session.working && canControl },
             onSoftStop = if (state.session.working) onStop else null,
         )
-        if (offline) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(MaterialTheme.colorScheme.errorContainer)
-                    .padding(horizontal = 16.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Text(
-                    text = stringResource(R.string.chat_connection_lost),
-                    color = MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.labelMedium,
-                    modifier = Modifier.weight(1f),
-                )
-                if (onRetryConnection != null) {
-                    Text(
-                        text = stringResource(R.string.common_retry),
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.labelMedium,
-                        modifier = Modifier.clickable(onClick = onRetryConnection).padding(vertical = 4.dp),
-                    )
+        // A white capsule floats over the page, as on the iPhone; the failed state
+        // keeps a retry, the connecting state explains the wait.
+        if (connecting || offline) {
+            Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)) {
+                Row(
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .clip(RoundedCornerShape(50))
+                        .background(MobileDesign.Canvas)
+                        .border(androidx.compose.foundation.BorderStroke(0.5.dp, MobileDesign.Line), RoundedCornerShape(50))
+                        .padding(horizontal = 14.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    if (connecting) {
+                        WorkingIndicator(size = 14.dp)
+                        Text(stringResource(R.string.chat_reconnecting), color = MobileDesign.Muted, style = MaterialTheme.typography.labelMedium)
+                    } else {
+                        Icon(Icons.Rounded.WifiOff, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(15.dp))
+                        Text(stringResource(R.string.chat_connection_lost), color = MobileDesign.Muted, style = MaterialTheme.typography.labelMedium)
+                        if (onRetryConnection != null) {
+                            Text(
+                                text = stringResource(R.string.common_retry),
+                                color = MobileDesign.Accent,
+                                style = MaterialTheme.typography.labelMedium,
+                                modifier = Modifier.clickable(onClick = onRetryConnection).padding(vertical = 2.dp),
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -169,12 +211,14 @@ fun ConversationScreen(
             onAnswerQuestion = onAnswerQuestion,
             onOpenDetail = onOpenDetail,
             onOpenReference = onOpenReference,
+            onOpenGroup = onOpenGroup,
             onLoadOlder = onLoadOlder,
             onRefreshConversation = onRefreshConversation,
             onCopyText = onCopyText,
             onShareText = onShareText,
             onQuote = onQuote,
             onSelectText = onSelectText,
+            feedBusy = feedBusy,
         )
         if (state.backgroundTasks.isNotEmpty() && onOpenTask != null) {
             BackgroundTasksRow(
@@ -190,24 +234,43 @@ fun ConversationScreen(
         if (state.session.resumable && !state.session.writable && onResume != null) {
             ResumeBanner(onResume = onResume, busy = busy)
         }
+        if (imagePreparing > 0) {
+            Text(
+                stringResource(R.string.chat_preparing_image),
+                color = MobileDesign.Muted,
+                style = MaterialTheme.typography.labelMedium,
+                modifier = Modifier.padding(horizontal = 14.dp),
+            )
+        }
+        if (imageError != null) {
+            Text(
+                imageError,
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.labelMedium,
+                modifier = Modifier.padding(horizontal = 14.dp),
+            )
+        }
         if (pendingImages.isNotEmpty()) {
             Row(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 6.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 pendingImages.forEachIndexed { index, (name, base64) ->
+                    val bitmap = remember(base64) {
+                        runCatching {
+                            val bytes = android.util.Base64.decode(base64, android.util.Base64.DEFAULT)
+                            android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                        }.getOrNull()
+                    }
                     Box(
                         modifier = Modifier
-                            .size(56.dp)
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(MobileDesign.Soft),
+                            .size(76.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(MobileDesign.Soft)
+                            .then(
+                                if (bitmap != null) Modifier.clickable { previewImage = bitmap } else Modifier,
+                            ),
                     ) {
-                        val bitmap = remember(base64) {
-                            runCatching {
-                                val bytes = android.util.Base64.decode(base64, android.util.Base64.DEFAULT)
-                                android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-                            }.getOrNull()
-                        }
                         if (bitmap != null) {
                             androidx.compose.foundation.Image(
                                 bitmap = bitmap.asImageBitmap(),
@@ -246,16 +309,28 @@ fun ConversationScreen(
                 modifier = Modifier.padding(horizontal = 14.dp),
             )
         }
+        if (speechDraft != null || speechListening) {
+            SpeechDraftStrip(
+                text = speechDraft.orEmpty(),
+                listening = speechListening,
+                onFinish = onFinishVoice,
+                onUse = onUseSpeech,
+                onCancel = onCancelSpeech,
+            )
+        }
         ComposerArea(
             draft = state.draft,
             onDraftChange = onDraft,
             onSend = onSend,
             onStop = onStop,
             working = state.session.working,
-            canSend = state.session.writable,
+            canSend = canControl && state.session.writable,
             sending = state.sending,
-            hasBackgroundTasks = state.messages.any { it.kind == "tool_use" && it.status == "running" },
-            error = if (offline) null else state.error,
+            hasBackgroundTasks = state.backgroundTasks.any { it.running },
+            // The timeline carries the error row; a second copy under the composer
+            // made every failure appear twice.
+            error = null,
+            hasImages = pendingImages.isNotEmpty(),
             onPickImages = onPickImages,
             onPickImageFile = onPickImageFile,
             onOpenProject = onOpenProject,
@@ -264,6 +339,22 @@ fun ConversationScreen(
             onToggleVoice = onToggleVoice,
             voiceError = voiceError,
         )
+    }
+    // A prepared image can be inspected before it is sent.
+    previewImage?.let { bitmap ->
+        androidx.compose.ui.window.Dialog(onDismissRequest = { previewImage = null }) {
+            Box(
+                modifier = Modifier.fillMaxSize().clickable { previewImage = null },
+                contentAlignment = Alignment.Center,
+            ) {
+                androidx.compose.foundation.Image(
+                    bitmap = bitmap.asImageBitmap(),
+                    contentDescription = null,
+                    contentScale = androidx.compose.ui.layout.ContentScale.Fit,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        }
     }
     if (renaming) {
         RenameDialog(
@@ -296,11 +387,12 @@ fun ConversationScreen(
     }
 }
 
-private fun subtitle(session: SessionDescriptor, agentModel: String?, context: Context): String =
+private fun subtitle(session: SessionDescriptor, agentModel: String?, hostName: String?, context: Context): String =
     listOf(
         session.agent.replaceFirstChar { it.uppercase() },
         agentModel ?: "",
-        session.workspaceID?.take(8) ?: "",
+        // The iPhone names the Mac, not an opaque workspace id.
+        hostName ?: "",
         stateLabel(session, context),
     )
         .filter { it.isNotEmpty() }
@@ -325,19 +417,30 @@ fun ConversationHeader(
     onSwitchModel: (ModelOption) -> Unit = {},
     onRename: (() -> Unit)? = null,
     onOpenProject: (() -> Unit)? = null,
+    onOpenFeed: (() -> Unit)? = null,
     onOpenTiming: (() -> Unit)? = null,
+    onRefresh: (() -> Unit)? = null,
     onForceStop: (() -> Unit)? = null,
     onSoftStop: (() -> Unit)? = null,
 ) {
     var confirmForceStop by remember { mutableStateOf(false) }
     Row(
-        modifier = modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+        modifier = modifier
+            .fillMaxWidth()
+            // A frosted approximation: a near-white gradient with the page showing
+            // through, since Compose has no system glass material.
+            .background(
+                Brush.verticalGradient(
+                    listOf(MobileDesign.Canvas.copy(alpha = 0.98f), MobileDesign.Canvas.copy(alpha = 0.88f)),
+                ),
+            )
+            .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         if (onBack != null) {
             Box(
-                modifier = Modifier.size(36.dp).clip(CircleShape).clickable(onClick = onBack),
+                modifier = Modifier.size(44.dp).shadow(3.dp, CircleShape).background(MobileDesign.Canvas, CircleShape).border(0.5.dp, MobileDesign.Line, CircleShape).clip(CircleShape).clickable(onClick = onBack).testTag("chat.back"),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(Icons.Rounded.ChevronLeft, contentDescription = stringResource(R.string.common_back), tint = MobileDesign.Ink, modifier = Modifier.size(22.dp))
@@ -358,7 +461,15 @@ fun ConversationHeader(
                 Icons.Rounded.MoreVert,
                 contentDescription = stringResource(R.string.common_more),
                 tint = MobileDesign.Muted,
-                modifier = Modifier.size(20.dp).clickable { open = true },
+                modifier = Modifier
+                    .size(44.dp)
+                    .shadow(3.dp, CircleShape)
+                    .background(MobileDesign.Canvas, CircleShape)
+                    .border(0.5.dp, MobileDesign.Line, CircleShape)
+                    .clip(CircleShape)
+                    .clickable { open = true }
+                    .padding(11.dp)
+                    .testTag("chat.more"),
             )
             DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
                 if (onRename != null) {
@@ -367,8 +478,14 @@ fun ConversationHeader(
                 if (onOpenProject != null) {
                     DropdownMenuItem(text = { Text(stringResource(R.string.chat_project_changes)) }, onClick = { open = false; onOpenProject() })
                 }
+                if (onOpenFeed != null) {
+                    DropdownMenuItem(text = { Text(stringResource(R.string.sessions_pending)) }, onClick = { open = false; onOpenFeed() })
+                }
                 if (onOpenTiming != null) {
                     DropdownMenuItem(text = { Text(stringResource(R.string.chat_run_time)) }, onClick = { open = false; onOpenTiming() })
+                }
+                if (onRefresh != null) {
+                    DropdownMenuItem(text = { Text(stringResource(R.string.common_refresh)) }, onClick = { open = false; onRefresh() })
                 }
                 if (onSoftStop != null) {
                     DropdownMenuItem(text = { Text(stringResource(R.string.chat_stop)) }, onClick = { open = false; onSoftStop() })
@@ -401,7 +518,7 @@ fun ConversationHeader(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun ConversationTimeline(
     state: ConversationUi,
@@ -412,6 +529,8 @@ fun ConversationTimeline(
     onAnswerQuestion: ((String, List<String>) -> Unit)? = null,
     onOpenDetail: ((String, String) -> Unit)? = null,
     onOpenReference: ((String) -> Unit)? = null,
+    /** Opens the whole group, not just its newest slice. */
+    onOpenGroup: ((List<ChatMessage>) -> Unit)? = null,
     onOpenTask: ((com.cmuxremote.mobile.data.BackgroundTaskInfo) -> Unit)? = null,
     /** `true` is the reader's own pull; it bypasses the page's belief that nothing is left. */
     onLoadOlder: ((Boolean) -> Unit)? = null,
@@ -421,6 +540,8 @@ fun ConversationTimeline(
     onShareText: ((String) -> Unit)? = null,
     onQuote: ((String) -> Unit)? = null,
     onSelectText: ((String) -> Unit)? = null,
+    /** A Feed reply is in flight; every question form must stay disabled. */
+    feedBusy: Boolean = false,
 ) {
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
@@ -430,18 +551,42 @@ fun ConversationTimeline(
         last.index >= layout.totalItemsCount - 1 && last.offset + last.size <= layout.viewportEndOffset + 8
     } }
     val previousCount = remember { intArrayOf(0) }
+    val previousText = remember { intArrayOf(0) }
     val previousGeneration = remember { arrayOfNulls<String>(1) }
-    LaunchedEffect(state.messages.size, state.generation) {
+    // The last message's text grows while the agent streams; the size alone never
+    // changes then, so it must be part of what re-triggers the follow scroll.
+    val streaming = (state.messages.lastOrNull()?.text?.length ?: 0) + (state.preview?.length ?: 0)
+    LaunchedEffect(state.messages.size, streaming, state.generation) {
         val firstLayout = previousCount[0] == 0
         val grew = state.messages.size > previousCount[0]
+        val textGrew = streaming > previousText[0]
         // A replaced transcript is a different list; a reader who was at the
         // latest message is taken to the new latest one.
         val replaced = state.generation != previousGeneration[0]
-        if (state.messages.isNotEmpty() && (firstLayout || (grew && atLatest) || (replaced && atLatest))) {
-            listState.scrollToItem(state.messages.size - 1)
+        if (state.messages.isNotEmpty() &&
+            (firstLayout || ((grew || textGrew) && atLatest) || (replaced && atLatest))
+        ) {
+            // The list includes the older-page row, images and the running footer;
+            // the message index is not the last item index.
+            androidx.compose.runtime.withFrameNanos { }
+            val lastItem = listState.layoutInfo.totalItemsCount - 1
+            if (lastItem >= 0) listState.scrollToItem(lastItem)
         }
         previousCount[0] = state.messages.size
+        previousText[0] = streaming
         previousGeneration[0] = state.generation
+    }
+    // Prepending an earlier page must keep the row the reader was looking at in
+    // place; scrolling by the raw item count jumps to a different message.
+    var previousFirst by remember { mutableStateOf<String?>(null) }
+    val currentFirst = state.messages.firstOrNull()?.id
+    LaunchedEffect(currentFirst) {
+        val anchor = previousFirst
+        if (anchor != null && anchor != currentFirst) {
+            val index = timelineEntries(state.messages).indexOfFirst { it.key == anchor }
+            if (index >= 0) listState.scrollToItem(index)
+        }
+        previousFirst = currentFirst
     }
     val firstVisible = listState.firstVisibleItemIndex
     // The generation is part of the key: a read that replaced the page while the
@@ -449,12 +594,30 @@ fun ConversationTimeline(
     LaunchedEffect(firstVisible, state.generation, state.hasMore) {
         if (firstVisible <= 1 && state.hasMore && !state.loadingOlder) onLoadOlder?.invoke(false)
     }
+    // Expanding a card changes the height above the reader's position. Capture the
+    // first visible row and restore it after the new layout lands.
+    val holdPlace: () -> Unit = {
+        val index = listState.firstVisibleItemIndex
+        val offset = listState.firstVisibleItemScrollOffset
+        scope.launch {
+            androidx.compose.runtime.withFrameNanos { }
+            androidx.compose.runtime.withFrameNanos { }
+            runCatching { listState.scrollToItem(index, offset) }
+        }
+    }
     // The pull is the reader asking, not the system's refresh control: the page's
     // own top row carries the spinner, so this container draws no second one.
     val pull: () -> Unit = {
         if (state.hasMore) onLoadOlder?.invoke(true) else onRefreshConversation?.invoke()
     }
-    Box(modifier.fillMaxWidth()) {
+    val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+    Box(
+        modifier
+            .fillMaxWidth()
+            // A tap on blank timeline space puts the keyboard away; a row's own tap
+            // is consumed by that row first.
+            .pointerInput(Unit) { detectTapGestures { keyboard?.hide() } },
+    ) {
     PullToRefreshBox(
         isRefreshing = state.loadingOlder,
         onRefresh = pull,
@@ -464,19 +627,56 @@ fun ConversationTimeline(
     LazyColumn(
         state = listState,
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        contentPadding = PaddingValues(horizontal = 18.dp, vertical = 12.dp),
+        // A short conversation sits at the bottom, next to the composer, as on the
+        // iPhone; a long one scrolls normally.
+        verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.Bottom),
     ) {
+        // A prompt that is still being sent stays pinned at the top, so the reply
+        // that grows underneath it never pushes it out of view.
+        if (state.outgoing != null) {
+            stickyHeader(key = "pinned-outgoing") {
+                Column(
+                    Modifier.fillMaxWidth().background(MobileDesign.Canvas),
+                    horizontalAlignment = Alignment.End,
+                ) {
+                    UserBubble(displayedPrompt(state.outgoing))
+                    Text(
+                        text = when {
+                            state.outgoingFailed -> stringResource(R.string.chat_outgoing_failed)
+                            state.outgoingUnconfirmed -> stringResource(R.string.chat_outgoing_unconfirmed)
+                            state.sending -> stringResource(R.string.chat_outgoing_sending)
+                            else -> stringResource(R.string.chat_outgoing_sent)
+                        },
+                        color = if (state.outgoingFailed) MaterialTheme.colorScheme.error else MobileDesign.Muted,
+                        style = MaterialTheme.typography.labelMedium,
+                        modifier = Modifier.padding(top = 4.dp, end = 6.dp),
+                    )
+                }
+            }
+        }
         if (state.loading && state.messages.isEmpty()) {
             item {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+                Column(
+                    Modifier.fillMaxWidth().padding(top = 48.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
                     WorkingIndicator()
+                    Text(stringResource(R.string.chat_loading), color = MobileDesign.Muted, style = MaterialTheme.typography.labelMedium)
                 }
             }
         }
         if (!state.loading && state.messages.isEmpty() && state.error == null) {
             item {
-                Text(stringResource(R.string.chat_no_messages), color = MobileDesign.Muted, style = MaterialTheme.typography.bodyMedium)
+                Column(
+                    Modifier.fillMaxWidth().padding(top = 48.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Icon(Icons.Rounded.ChatBubbleOutline, contentDescription = null, tint = MobileDesign.Muted, modifier = Modifier.size(28.dp))
+                    Text(stringResource(R.string.chat_start_conversation), color = MobileDesign.Muted, style = MaterialTheme.typography.bodyMedium)
+                }
             }
         }
         if (state.hasMore) {
@@ -497,86 +697,122 @@ fun ConversationTimeline(
         }
         items(timelineEntries(state.messages), key = { it.key }) { entry ->
             when (entry) {
-                is TimelineEntry.Single -> when {
-                    entry.message.kind == "prose" && entry.message.role == "user" ->
-                        UserBubble(entry.message.text, onCopyText, onSelectText)
-                    // Markdown text is already selectable in place; a second long-press
-                    // menu on top of the platform's selection menu would fight it.
-                    entry.message.kind == "prose" || entry.message.kind == "thought" ->
-                        MarkdownText(entry.message.text)
-                    entry.message.kind == "question" -> QuestionCard(
-                        entry.message.prompt ?: entry.message.text,
-                        entry.message.options,
-                        entry.message.selectedOption,
-                        onAnswer = onAnswerQuestion?.let { answer ->
-                            { labels -> answer(entry.message.id, labels) }
-                        },
+                is TimelineEntry.Single -> Column(
+                    modifier = Modifier.testTag("message." + entry.message.id),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    // The reply being written carries the same timer as the composer row.
+                    val lastReply = state.messages.lastOrNull { it.kind == "prose" && it.role != "user" }
+                    if (state.session.working && state.turnStartedAt != null && entry.message.id == lastReply?.id) {
+                        LiveRunLabel(since = state.turnStartedAt, compacting = state.compacting)
+                        HorizontalDivider(color = androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.1f), thickness = 0.5.dp)
+                    }
+                    when {
+                        entry.message.kind == "prose" && entry.message.role == "user" ->
+                            UserBubble(displayedPrompt(entry.message.text), onCopyText, onSelectText)
+                        // Markdown text is already selectable in place; a second long-press
+                        // menu on top of the platform's selection menu would fight it.
+                        entry.message.kind == "prose" || entry.message.kind == "thought" ->
+                            MarkdownText(entry.message.text)
+                        entry.message.kind == "question" -> {
+                            val prompt = entry.message.prompt ?: entry.message.text
+                            val request = state.feed.firstOrNull { item ->
+                                item.pending && item.questions.any { it.prompt == prompt }
+                            }
+                            if (request != null) {
+                                // A request can carry several questions; the card collects
+                                // one answer per question, exactly as the Feed page does.
+                                QuestionFormCard(
+                                    questions = request.questions.map { question ->
+                                        FeedQuestionForm(
+                                            header = question.header,
+                                            prompt = question.prompt,
+                                            options = question.optionDetails
+                                                .ifEmpty {
+                                                    question.options.mapIndexed { index, label ->
+                                                        com.cmuxremote.mobile.data.FeedOption(index.toString(), label, null)
+                                                    }
+                                                }
+                                                .map { FeedQuestionOption(it.id, it.label, it.description) },
+                                            multiSelect = question.multiSelect,
+                                            allowCustom = question.allowCustom,
+                                            allowSkip = question.allowSkip,
+                                        )
+                                    },
+                                    busy = feedBusy,
+                                    answered = null,
+                                    tag = "chat.question." + entry.message.id,
+                                    onSubmit = { labels -> onAnswerQuestion?.invoke(entry.message.id, labels) },
+                                )
+                            } else {
+                                QuestionCard(
+                                    prompt,
+                                    entry.message.options,
+                                    entry.message.selectedOption,
+                                    onAnswer = onAnswerQuestion?.let { answer ->
+                                        { labels -> answer(entry.message.id, labels) }
+                                    },
+                                )
+                            }
+                        }
+                        else -> MessageRow(entry.message)
+                    }
+                    // Images belong to the message that produced them, not to the
+                    // bottom of the transcript.
+                    MessageImages(
+                        references = state.images.filter { it.messageID == entry.message.id },
+                        onOpenImage = onOpenImage,
                     )
-                    else -> MessageRow(entry.message)
+                    // Every completed reply carries its own duration and actions,
+                    // not only the last one on the page.
+                    if (entry.message.kind == "prose" && entry.message.role != "user") {
+                        val response = state.responses.lastOrNull { it.lastMessageID == entry.message.id }
+                        if (response != null && !state.session.working) {
+                            if (response.durationSeconds != null) {
+                                ResponseRunLabel(
+                                    seconds = response.durationSeconds,
+                                    recorded = response.recordedDuration,
+                                )
+                            }
+                            if (onQuote != null) {
+                                ResponseFooter(
+                                    completedAt = response.completedAt,
+                                    onCopy = { onCopyText?.invoke(entry.message.text) },
+                                    onShare = { onShareText?.invoke(entry.message.text) },
+                                    onQuote = { onQuote?.invoke(entry.message.text) },
+                                    onSelectText = { onSelectText?.invoke(entry.message.text) },
+                                )
+                            }
+                        }
+                    }
                 }
                 is TimelineEntry.Group -> {
-                    val models = entry.rows.map { message: ChatMessage ->
-                        ToolRowModel(
-                            id = message.id,
-                            kind = message.kind,
-                            title = message.filePath ?: message.toolName ?: message.command
-                                ?: message.text.ifBlank { stringResource(R.string.chat_operation) },
-                            status = message.status,
-                            input = message.inputDetail,
-                            output = message.output,
-                            diff = message.diff,
-                            canOpenDetail = message.kind == "tool_use" || message.kind == "file_edit",
-                            references = message.references,
-                            meta = terminalMeta(message.exitCode, message.durationSeconds),
-                        )
-                    }
+                    val models = toolRowModels(entry.rows)
                     ActivityGroupCard(
                         rows = models,
                         isLatest = entry.isLatest,
-                        onOpenFull = { onOpenDetail?.invoke(entry.rows.last().id, "output") },
+                        onOpenFull = { onOpenGroup?.invoke(entry.rows) },
                         onOpenDetail = { row ->
                             onOpenDetail?.invoke(row.id, if (row.kind == "file_edit") "diff" else "output")
                         },
                         onOpenReference = onOpenReference,
+                        onHoldPlace = holdPlace,
                     )
                 }
             }
         }
-        if (state.outgoing != null) {
-            item(key = "outgoing") {
-                Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
-                    UserBubble(state.outgoing)
-                    Text(
-                        text = when {
-                            state.outgoingFailed -> stringResource(R.string.chat_outgoing_failed)
-                            state.sending -> stringResource(R.string.chat_outgoing_sending)
-                            else -> stringResource(R.string.chat_outgoing_sent)
-                        },
-                        color = if (state.outgoingFailed) MaterialTheme.colorScheme.error else MobileDesign.Muted,
-                        style = MaterialTheme.typography.labelMedium,
-                        modifier = Modifier.padding(top = 4.dp, end = 6.dp),
-                    )
-                }
-            }
+        val knownMessages = state.messages.map { it.id }.toSet()
+        val looseImages = state.images.filter { it.messageID !in knownMessages }
+        if (looseImages.isNotEmpty()) {
+            item(key = "loose-images") { MessageImages(looseImages, onOpenImage) }
         }
-        if (state.images.isNotEmpty() && onOpenImage != null) {
-            item {
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    state.images.forEach { reference ->
-                        Text(
-                            text = stringResource(
-                                R.string.chat_view_image,
-                                reference.name.ifBlank { stringResource(R.string.chat_image_record) },
-                            ),
-                            color = MobileDesign.Accent,
-                            style = MaterialTheme.typography.labelMedium,
-                            modifier = Modifier
-                                .background(MobileDesign.AccentSoft, RoundedCornerShape(50))
-                                .clickable { onOpenImage(reference) }
-                                .padding(horizontal = 12.dp, vertical = 8.dp),
-                        )
-                    }
-                }
+        if (state.clipped) {
+            item(key = "clipped") {
+                Text(
+                    stringResource(R.string.chat_history_clipped),
+                    color = MobileDesign.Muted,
+                    style = MaterialTheme.typography.labelMedium,
+                )
             }
         }
         if (state.preview != null) {
@@ -587,42 +823,24 @@ fun ConversationTimeline(
                 }
             }
         }
-        // A finished reply carries the iPhone's footer: its duration, then copy,
-        // share, quote and select text.
-        val lastProse = state.messages.lastOrNull { it.kind == "prose" && it.role != "user" }
-        val lastResponse = lastProse?.let { prose ->
-            state.responses.lastOrNull { it.lastMessageID == prose.id }
-        }
-        if (lastProse != null && !state.session.working) {
-            item {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    if (lastResponse?.durationSeconds != null) {
-                        ResponseRunLabel(
-                            seconds = lastResponse.durationSeconds,
-                            recorded = lastResponse.recordedDuration,
-                        )
-                    }
-                    if (onQuote != null) {
-                        ResponseFooter(
-                            completedAt = lastResponse?.completedAt,
-                            onCopy = { onCopyText?.invoke(lastProse.text) },
-                            onShare = { onShareText?.invoke(lastProse.text) },
-                            onQuote = { onQuote?.invoke(lastProse.text) },
-                            onSelectText = { onSelectText?.invoke(lastProse.text) },
-                        )
-                    }
-                }
-            }
-        }
         if (state.session.working) {
             item {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     WorkingIndicator()
                     if (state.turnStartedAt != null) {
-                        LiveRunLabel(since = state.turnStartedAt, compacting = false)
+                        LiveRunLabel(since = state.turnStartedAt, compacting = state.compacting)
                     } else {
                         Text(stringResource(R.string.common_working), color = MobileDesign.Muted, style = MaterialTheme.typography.labelMedium)
                     }
+                    if (state.stopRequested) {
+                        Text(stringResource(R.string.chat_stop_requested), color = MobileDesign.Muted, style = MaterialTheme.typography.labelMedium)
+                    }
+                    Spacer(Modifier.weight(1f))
+                    Text(
+                        text = state.session.agent.replaceFirstChar { it.uppercase() },
+                        color = MobileDesign.Muted,
+                        style = MaterialTheme.typography.labelMedium,
+                    )
                 }
             }
         }
@@ -635,15 +853,29 @@ fun ConversationTimeline(
     }
     }
     if (!atLatest && state.messages.isNotEmpty()) {
-        FloatingActionButton(
-            onClick = { scope.launch { listState.animateScrollToItem((state.messages.size - 1).coerceAtLeast(0)) } },
-            modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
-            containerColor = MobileDesign.Canvas,
-            contentColor = MobileDesign.Ink,
-            shape = CircleShape,
-            elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 3.dp),
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(16.dp)
+                .size(44.dp)
+                .shadow(3.dp, CircleShape)
+                .background(MobileDesign.Canvas, CircleShape)
+                .border(0.5.dp, MobileDesign.Line, CircleShape)
+                .clickable {
+                    com.cmuxremote.mobile.data.Diagnostics.log(
+                        com.cmuxremote.mobile.data.Diagnostics.Level.Debug,
+                        "scroll",
+                        "jump to latest",
+                    )
+                    scope.launch {
+                        val last = listState.layoutInfo.totalItemsCount - 1
+                        if (last >= 0) listState.animateScrollToItem(last)
+                    }
+                }
+                .testTag("chat.latest"),
+            contentAlignment = Alignment.Center,
         ) {
-            Text("↓", fontSize = 22.sp, color = MobileDesign.Ink)
+            Text("↓", fontSize = 20.sp, color = MobileDesign.Ink)
         }
     }
     }
@@ -777,11 +1009,11 @@ private fun LongPressText(
 
 /** "退出码 0 · 1.2s", only for the fields the transcript actually recorded. */
 @Composable
-private fun terminalMeta(exitCode: Int?, durationSeconds: Double?): String? {
+internal fun terminalMeta(exitCode: Int?, durationSeconds: Double?): String? {
     val parts = buildList {
         exitCode?.let { add(stringResource(R.string.chat_exit_code, it)) }
         durationSeconds?.let {
-            add(stringResource(R.string.chat_elapsed, String.format(java.util.Locale.US, "%.1fs", it)))
+            add(stringResource(R.string.chat_elapsed, String.format(java.util.Locale.getDefault(), "%.1fs", it)))
         }
     }
     return parts.takeIf { it.isNotEmpty() }?.joinToString(" · ")
@@ -878,10 +1110,11 @@ private fun QuestionCard(
     selected: String?,
     onAnswer: ((List<String>) -> Unit)? = null,
 ) {
-    Column(
-        Modifier.fillMaxWidth().background(MobileDesign.Soft, RoundedCornerShape(14.dp)).padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
+    com.cmuxremote.mobile.ui.components.FloatingSurface(
+        modifier = Modifier.fillMaxWidth(),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
     ) {
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(prompt.ifBlank { stringResource(R.string.chat_agent_question) }, color = MobileDesign.Ink, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
         options.forEach { option ->
             Text(
@@ -898,6 +1131,10 @@ private fun QuestionCard(
         }
         if (selected == null && options.isEmpty()) {
             Text(stringResource(R.string.chat_answer_in_pending), color = MobileDesign.Muted, style = MaterialTheme.typography.labelMedium)
+        } else if (selected == null && onAnswer == null) {
+            // The request expired or was answered elsewhere; the card is now a record.
+            Text(stringResource(R.string.chat_question_unavailable), color = MobileDesign.Muted, style = MaterialTheme.typography.labelMedium)
+        }
         }
     }
 }
@@ -914,6 +1151,8 @@ fun ComposerArea(
     hasBackgroundTasks: Boolean,
     error: String?,
     modifier: Modifier = Modifier,
+    /** A prepared image counts as a draft even when the text is empty. */
+    hasImages: Boolean = false,
     onPickImages: (() -> Unit)? = null,
     onPickImageFile: (() -> Unit)? = null,
     onOpenProject: (() -> Unit)? = null,
@@ -922,8 +1161,16 @@ fun ComposerArea(
     onToggleVoice: (() -> Unit)? = null,
     voiceError: String? = null,
 ) {
+    var focused by remember { mutableStateOf(false) }
     Column(
-        modifier = modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
+        modifier = modifier
+            .fillMaxWidth()
+            .background(
+                Brush.verticalGradient(
+                    listOf(MobileDesign.Canvas.copy(alpha = 0.88f), MobileDesign.Canvas.copy(alpha = 0.98f)),
+                ),
+            )
+            .padding(horizontal = 14.dp, vertical = 10.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         if (hasBackgroundTasks) {
@@ -941,19 +1188,29 @@ fun ComposerArea(
             return@Column
         }
         Row(
-            modifier = Modifier.fillMaxWidth().background(MobileDesign.Canvas, CircleShape).padding(horizontal = 10.dp, vertical = 8.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .shadow(6.dp, CircleShape, clip = false)
+                .background(MobileDesign.Canvas, CircleShape)
+                .border(0.5.dp, MobileDesign.Line, CircleShape)
+                .padding(horizontal = 10.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Box {
                 var actions by remember { mutableStateOf(false) }
                 val hasActions = onPickImages != null || onPickImageFile != null || onOpenProject != null || onOpenFeed != null
-                Icon(
-                    Icons.Rounded.Add,
-                    contentDescription = stringResource(R.string.chat_add_attachment),
-                    tint = if (hasActions) MobileDesign.Ink else MobileDesign.Muted,
-                    modifier = Modifier.size(20.dp).clickable(enabled = hasActions) { actions = true },
-                )
+                Box(
+                    modifier = Modifier.size(40.dp).clickable(enabled = hasActions) { actions = true },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.Rounded.Add,
+                        contentDescription = stringResource(R.string.chat_add_attachment),
+                        tint = if (hasActions) MobileDesign.Ink else MobileDesign.Muted,
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
                 DropdownMenu(expanded = actions, onDismissRequest = { actions = false }) {
                     if (onPickImages != null) {
                         DropdownMenuItem(
@@ -984,10 +1241,13 @@ fun ComposerArea(
             BasicTextField(
                 value = draft,
                 onValueChange = onDraftChange,
-                modifier = Modifier.weight(1f),
+                modifier = Modifier
+                    .weight(1f)
+                    .testTag("chat.composer")
+                    .onFocusChanged { focused = it.isFocused },
                 textStyle = TextStyle(color = MobileDesign.Ink, fontSize = 15.sp),
                 cursorBrush = SolidColor(MobileDesign.Accent),
-                maxLines = 4,
+                maxLines = if (focused) 8 else 4,
                 decorationBox = { inner ->
                     Box {
                         if (draft.isEmpty()) Text(stringResource(R.string.chat_input_placeholder), color = MobileDesign.Muted, fontSize = 15.sp)
@@ -995,6 +1255,10 @@ fun ComposerArea(
                     }
                 },
             )
+            Box(
+                modifier = Modifier.size(40.dp).clickable(enabled = onToggleVoice != null) { onToggleVoice?.invoke() },
+                contentAlignment = Alignment.Center,
+            ) {
             Icon(
                 Icons.Rounded.Mic,
                 contentDescription = if (dictating) stringResource(R.string.chat_end_dictation)
@@ -1004,23 +1268,26 @@ fun ComposerArea(
                     onToggleVoice != null -> MobileDesign.Ink
                     else -> MobileDesign.Muted
                 },
-                modifier = Modifier.size(20.dp).clickable(enabled = onToggleVoice != null) { onToggleVoice?.invoke() },
+                modifier = Modifier.size(20.dp),
             )
+            }
             if (working && draft.isBlank()) {
                 Box(
-                    modifier = Modifier.size(34.dp).clip(CircleShape).background(MobileDesign.Accent).clickable(onClick = onStop),
+                    modifier = Modifier.size(40.dp).clip(CircleShape).background(MobileDesign.Accent).clickable(onClick = onStop).testTag("chat.stop"),
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(Icons.Rounded.Stop, contentDescription = stringResource(R.string.chat_stop), tint = MobileDesign.Canvas, modifier = Modifier.size(16.dp))
                 }
             } else {
-                val enabled = draft.isNotBlank() && !sending
+                // A prepared image is a draft of its own; text is optional.
+                val enabled = (draft.isNotBlank() || hasImages) && !sending
                 Box(
                     modifier = Modifier
-                        .size(34.dp)
+                        .size(40.dp)
                         .clip(CircleShape)
                         .background(if (enabled) MobileDesign.Accent else MaterialTheme.colorScheme.surfaceVariant)
-                        .clickable(enabled = enabled, onClick = onSend),
+                        .clickable(enabled = enabled, onClick = onSend)
+                        .testTag("chat.send"),
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
@@ -1037,6 +1304,84 @@ fun ComposerArea(
         }
         if (voiceError != null) {
             Text(voiceError, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelMedium)
+        }
+    }
+}
+
+/**
+ * The recorded prompt without the `<pasted_content>` wrapper the terminal adds
+ * around a long paste. The reader's own bubble should show what they typed.
+ */
+internal fun displayedPrompt(text: String): String {
+    if (!text.contains("<pasted_content")) return text
+    val opening = Regex("""<pasted_content id="[^"<>\n]{0,64}">\n?""")
+    val closing = Regex("""\n?</pasted_content(?: id="[^"<>\n]{0,64}")?>""")
+    val unwrapped = text.replace(opening, "").replace(closing, "")
+    // Only a wrapped prompt is trimmed, so an ordinary message keeps its spacing.
+    return if (unwrapped == text) text else unwrapped.trim()
+}
+
+/** Recorded images under the message that carried them. */
+@Composable
+private fun MessageImages(
+    references: List<com.cmuxremote.mobile.data.ImageReference>,
+    onOpenImage: ((com.cmuxremote.mobile.data.ImageReference) -> Unit)?,
+) {
+    if (references.isEmpty() || onOpenImage == null) return
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        references.forEach { reference ->
+            Text(
+                text = stringResource(
+                    R.string.chat_view_image,
+                    reference.name.ifBlank { stringResource(R.string.chat_image_record) },
+                ),
+                color = MobileDesign.Accent,
+                style = MaterialTheme.typography.labelMedium,
+                modifier = Modifier
+                    .background(MobileDesign.AccentSoft, RoundedCornerShape(50))
+                    .clickable { onOpenImage(reference) }
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+            )
+        }
+    }
+}
+
+/** Dictation has its own draft: finishing, cancelling and using are explicit. */
+@Composable
+private fun SpeechDraftStrip(
+    text: String,
+    listening: Boolean,
+    onFinish: (() -> Unit)?,
+    onUse: (() -> Unit)?,
+    onCancel: (() -> Unit)?,
+) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 14.dp, vertical = 4.dp)
+            .background(MobileDesign.Soft, RoundedCornerShape(14.dp))
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (listening) WorkingIndicator(size = 12.dp)
+            Text(
+                text = stringResource(if (listening) R.string.chat_speech_listening else R.string.chat_speech_draft),
+                color = MobileDesign.Muted,
+                style = MaterialTheme.typography.labelMedium,
+                modifier = Modifier.weight(1f),
+            )
+            if (onCancel != null) {
+                Text(stringResource(R.string.common_cancel), color = MobileDesign.Muted, style = MaterialTheme.typography.labelMedium, modifier = Modifier.clickable { onCancel() }.padding(4.dp))
+            }
+            if (listening && onFinish != null) {
+                Text(stringResource(R.string.chat_speech_finish), color = MobileDesign.Accent, style = MaterialTheme.typography.labelMedium, modifier = Modifier.clickable { onFinish() }.padding(4.dp))
+            } else if (!listening && onUse != null && text.isNotBlank()) {
+                Text(stringResource(R.string.chat_speech_use), color = MobileDesign.Accent, style = MaterialTheme.typography.labelMedium, modifier = Modifier.clickable { onUse() }.padding(4.dp))
+            }
+        }
+        if (text.isNotBlank()) {
+            Text(text, color = MobileDesign.Ink, style = MaterialTheme.typography.bodyMedium)
         }
     }
 }

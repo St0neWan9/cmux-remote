@@ -45,6 +45,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -103,6 +104,7 @@ private fun capabilityLabel(raw: String): String = when (raw) {
     else -> raw
 }
 
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun ConnectionDetailScreen(
     info: ConnectionInfo,
@@ -120,6 +122,7 @@ fun ConnectionDetailScreen(
     Column(
         modifier
             .fillMaxSize()
+            .testTag("connection.page")
             .background(MobileDesign.Canvas)
             .windowInsetsPadding(WindowInsets.safeDrawing),
     ) {
@@ -129,7 +132,7 @@ fun ConnectionDetailScreen(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Box(
-                modifier = Modifier.size(36.dp).clip(CircleShape).clickable(onClick = onBack),
+                modifier = Modifier.size(44.dp).clip(CircleShape).clickable(onClick = onBack),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
@@ -147,10 +150,14 @@ fun ConnectionDetailScreen(
             )
         }
 
+        androidx.compose.material3.pulltorefresh.PullToRefreshBox(
+            isRefreshing = loading,
+            onRefresh = onRefresh,
+            modifier = Modifier.weight(1f).fillMaxWidth(),
+        ) {
         Column(
             modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth()
+                .fillMaxSize()
                 .verticalScroll(rememberScrollState())
                 .padding(MobileDesign.PageInset),
             verticalArrangement = Arrangement.spacedBy(MobileDesign.SectionGap),
@@ -251,6 +258,7 @@ fun ConnectionDetailScreen(
                     style = MaterialTheme.typography.labelMedium,
                 )
             }
+        }
         }
     }
 

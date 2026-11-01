@@ -2,6 +2,8 @@ package com.cmuxremote.mobile.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,8 +17,15 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.AddCircle
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Notifications
+import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.Sort
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -35,7 +44,10 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
@@ -109,7 +121,7 @@ fun SessionTitleMenu(
     var open by remember { mutableStateOf(false) }
     Box(modifier) {
         Text(
-            text = "Cmux",
+            text = stringResource(R.string.sessions_title),
             color = MobileDesign.Ink,
             fontSize = 22.sp,
             modifier = Modifier
@@ -124,6 +136,8 @@ fun SessionTitleMenu(
                         else stringResource(R.string.sessions_sort_by_workspace),
                     )
                 },
+                leadingIcon = { Icon(Icons.Rounded.Sort, contentDescription = null, tint = MobileDesign.Muted) },
+                trailingIcon = { Icon(Icons.Rounded.Check, contentDescription = null, tint = MobileDesign.Accent) },
                 onClick = { onSort(!sortByTime); open = false },
             )
             DropdownMenuItem(
@@ -133,14 +147,31 @@ fun SessionTitleMenu(
                         else stringResource(R.string.sessions_pending),
                     )
                 },
+                leadingIcon = { Icon(Icons.Rounded.Notifications, contentDescription = null, tint = MobileDesign.Muted) },
                 onClick = { onFeed(); open = false },
             )
-            DropdownMenuItem(text = { Text(stringResource(R.string.common_refresh)) }, onClick = { onRefresh(); open = false })
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.common_refresh)) },
+                leadingIcon = { Icon(Icons.Rounded.Refresh, contentDescription = null, tint = MobileDesign.Muted) },
+                onClick = { onRefresh(); open = false },
+            )
             if (canStart) {
-                DropdownMenuItem(text = { Text(stringResource(R.string.sessions_new_session)) }, onClick = { onStart(); open = false })
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.sessions_new_session)) },
+                    leadingIcon = { Icon(Icons.Rounded.Add, contentDescription = null, tint = MobileDesign.Muted) },
+                    onClick = { onStart(); open = false },
+                )
             }
-            DropdownMenuItem(text = { Text(stringResource(R.string.sessions_add_mac)) }, onClick = { onAddMac(); open = false })
-            DropdownMenuItem(text = { Text(stringResource(R.string.sessions_connection_details)) }, onClick = { onConnection(); open = false })
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.sessions_add_mac)) },
+                leadingIcon = { Icon(Icons.Rounded.AddCircle, contentDescription = null, tint = MobileDesign.Muted) },
+                onClick = { onAddMac(); open = false },
+            )
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.sessions_connection_details)) },
+                leadingIcon = { Icon(Icons.Rounded.Settings, contentDescription = null, tint = MobileDesign.Muted) },
+                onClick = { onConnection(); open = false },
+            )
         }
     }
 }
@@ -152,28 +183,54 @@ fun MacTabs(
     selected: String?,
     onSelect: (String?) -> Unit,
     modifier: Modifier = Modifier,
+    /** Last known reachability per Mac; an unprobed Mac has no dot yet. */
+    reachable: Map<String, Boolean?> = emptyMap(),
 ) {
-    Row(modifier, horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(
+        modifier = modifier.horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
         if (hosts.size > 1) {
-            Capsule(text = stringResource(R.string.sessions_all_macs), selected = selected == null) { onSelect(null) }
+            // "All Macs" is a scope, not a Mac, so it carries no status dot.
+            Capsule(
+                text = stringResource(R.string.sessions_all_macs),
+                selected = selected == null,
+                dot = null,
+                tag = "sessions.host.all",
+            ) { onSelect(null) }
         }
         hosts.forEach { (id, name) ->
-            Capsule(text = name, selected = hosts.size == 1 || selected == id) { onSelect(id) }
+            Capsule(
+                text = name,
+                selected = hosts.size == 1 || selected == id,
+                dot = reachable[id],
+                tag = "sessions.host.$id",
+            ) { onSelect(id) }
         }
     }
 }
 
 @Composable
-private fun Capsule(text: String, selected: Boolean, onClick: () -> Unit) {
+private fun Capsule(text: String, selected: Boolean, dot: Boolean?, tag: String? = null, onClick: () -> Unit) {
     Row(
         modifier = Modifier
+            .then(if (tag != null) Modifier.testTag(tag) else Modifier)
             .background(if (selected) MobileDesign.Soft else MobileDesign.Canvas, CircleShape)
+            .semantics { this.selected = selected }
             .clickable(onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Box(Modifier.size(7.dp).background(MobileDesign.Good, CircleShape))
+        if (dot != null) {
+            Box(
+                Modifier.size(7.dp).background(
+                    if (dot) MobileDesign.Good else MaterialTheme.colorScheme.error,
+                    CircleShape,
+                ),
+            )
+        }
         Text(text, color = if (selected) MobileDesign.Ink else MobileDesign.Muted, style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }

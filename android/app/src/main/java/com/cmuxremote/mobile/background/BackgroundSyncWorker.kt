@@ -77,6 +77,11 @@ class BackgroundSyncWorker(context: Context, params: WorkerParameters) : Corouti
             true
         }
         if (completed != true) outOfBudget = true
+        com.cmuxremote.mobile.data.Diagnostics.log(
+            com.cmuxremote.mobile.data.Diagnostics.Level.Info,
+            "sync",
+            "background pass read $answered of ${connections.size} Macs in ${SystemClock.elapsedRealtime() - started} ms",
+        )
 
         return when {
             answered > 0 -> Result.success()
@@ -91,6 +96,18 @@ class BackgroundSyncWorker(context: Context, params: WorkerParameters) : Corouti
         val repository = BridgeRepository.open(connection)
         val sessions = repository.sessions()
         val pending = readPending(repository)
+        // Keep the newest conversations' text warm, as the iPhone's background pass
+        // does; the list alone made a notification tap open an empty page offline.
+        val store = com.cmuxremote.mobile.data.ConversationStore(applicationContext)
+        val scope = connection.host.id + ":" + connection.clientID
+        sessions
+            .sortedByDescending { it.updatedAt.orEmpty() }
+            .take(BACKGROUND_SESSIONS)
+            .forEach { session ->
+                runCatching { repository.history(session.id) }.onSuccess { snapshot ->
+                    runCatching { store.save(snapshot, scope, session.id, complete = !snapshot.hasMore) }
+                }
+            }
         HostRead(sessions, pending)
     } catch (cancelled: CancellationException) {
         throw cancelled
@@ -135,6 +152,8 @@ class BackgroundSyncWorker(context: Context, params: WorkerParameters) : Corouti
         private const val MAX_HOSTS = 4
         private const val PER_HOST_BUDGET_MS = 20_000L
         private const val TOTAL_BUDGET_MS = 60_000L
+        /** The iPhone's background pass keeps the newest twelve conversations. */
+        private const val BACKGROUND_SESSIONS = 12
 
         /** Schedules the periodic pass, keeping an already-enqueued schedule untouched. */
         fun schedule(context: Context) {

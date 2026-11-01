@@ -97,6 +97,11 @@ fun TaskDetailSheet(
     hasMore: Boolean = false,
     loadingMore: Boolean = false,
     onLoadMore: (() -> Unit)? = null,
+    /** An Agent task's own conversation. */
+    messages: List<com.cmuxremote.mobile.data.ChatMessage> = emptyList(),
+    command: String? = null,
+    totalBytes: Int? = null,
+    running: Boolean = false,
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss, containerColor = MobileDesign.Canvas) {
         Column(
@@ -128,6 +133,41 @@ fun TaskDetailSheet(
             if (loading) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
                     WorkingIndicator()
+                }
+            }
+            if (messages.isNotEmpty()) {
+                // An Agent task is a conversation; it uses the timeline's own rows
+                // instead of dumping a wall of raw text.
+                val rows = toolRowModels(messages)
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 460.dp)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    messages.forEachIndexed { index, message ->
+                        when {
+                            message.kind == "prose" && message.role == "user" ->
+                                Text(message.text, color = MobileDesign.Ink, style = MaterialTheme.typography.bodyMedium)
+                            message.kind == "prose" || message.kind == "thought" ->
+                                com.cmuxremote.mobile.ui.markdown.MarkdownText(message.text)
+                            message.kind in setOf("tool_use", "terminal", "file_edit") ->
+                                ToolDisclosureRow(row = rows[index], onOpenDetail = {})
+                            else -> Text(message.text, color = MobileDesign.Muted, style = MaterialTheme.typography.labelMedium)
+                        }
+                    }
+                }
+            } else if (command != null) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(stringResource(R.string.chat_background_command), color = MobileDesign.Muted, style = MaterialTheme.typography.labelMedium)
+                    Text(
+                        command,
+                        color = MobileDesign.Ink,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 12.sp,
+                        modifier = Modifier.fillMaxWidth().background(MobileDesign.Code, RoundedCornerShape(10.dp)).padding(10.dp),
+                    )
                 }
             }
             if (text != null && text.isNotEmpty()) {
@@ -178,6 +218,20 @@ fun TaskDetailSheet(
             }
             if (error != null) {
                 Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
+            }
+            if (running) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(7.dp),
+                ) {
+                    WorkingIndicator(size = 12.dp)
+                    Text(stringResource(R.string.chat_background_running), color = MobileDesign.Muted, style = MaterialTheme.typography.labelMedium)
+                    Spacer(Modifier.weight(1f))
+                    totalBytes?.takeIf { it > 0 }?.let { bytes ->
+                        Text(android.text.format.Formatter.formatShortFileSize(androidx.compose.ui.platform.LocalContext.current, bytes.toLong()), color = MobileDesign.Muted, style = MaterialTheme.typography.labelMedium)
+                    }
+                }
             }
             Box(
                 modifier = Modifier

@@ -287,7 +287,15 @@ data class AuthorizedConnection(
     val grant: EnrollmentGrant,
     /** The Bridge epoch the last read used; only routing state, not authority. */
     val epoch: String = "",
+    /**
+     * An explicitly chosen legacy `/v1` shared token. Its presence means this
+     * Mac has no per-device grant: every action uses the same bearer authority.
+     * Null for the normal signed v2 connection.
+     */
+    val legacyToken: String? = null,
 ) {
+    val isLegacy: Boolean get() = legacyToken != null
+
     fun toJson(): JsonObject = buildJsonObject {
         put("host", host.toJson())
         put("endpoint", endpoint.toJson())
@@ -296,6 +304,7 @@ data class AuthorizedConnection(
         put("scope", scope.toJson())
         put("grantSignature", JsonPrimitive(grantSignature))
         put("grant", grant.toJson())
+        legacyToken?.let { put("legacyToken", JsonPrimitive(it)) }
     }
 
     /** Re-checks everything that could have been tampered with on disk. */
@@ -303,6 +312,14 @@ data class AuthorizedConnection(
         host.validate()
         if (Identity.identityId(Identity.publicKeyBase64(privateKey)) != clientID) {
             throw ProtocolException("invalid_identity", "Saved host and device identities do not match.")
+        }
+        // A legacy pairing has shared bearer authority, not a per-device grant;
+        // only the locally generated identity above can be checked.
+        if (isLegacy) {
+            if (legacyToken!!.toByteArray().size < 32) {
+                throw ProtocolException("invalid_pairing", "The legacy token is too short.")
+            }
+            return
         }
         if (grant.clientID != clientID || grant.hostID != host.id) {
             throw ProtocolException("invalid_identity", "The saved grant belongs to another device.")
@@ -327,6 +344,7 @@ data class AuthorizedConnection(
             scope = ClientScope.from(json.objectValue("scope") ?: JsonObject(emptyMap())),
             grantSignature = json.requireString("grantSignature"),
             grant = EnrollmentGrant.from(json.objectValue("grant") ?: throw ProtocolException("invalid_identity", "The saved connection has no grant.")),
+            legacyToken = json.string("legacyToken"),
         )
     }
 }

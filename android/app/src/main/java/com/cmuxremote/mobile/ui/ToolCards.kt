@@ -1,6 +1,10 @@
 package com.cmuxremote.mobile.ui
 
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -19,6 +23,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Book
 import androidx.compose.material.icons.rounded.Build
+import androidx.compose.material.icons.rounded.Cancel
+import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.ChevronLeft
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Description
@@ -63,6 +69,10 @@ data class ToolRowModel(
     val references: List<String> = emptyList(),
     /** Exit code and duration of a terminal capture, when recorded. */
     val meta: String? = null,
+    /** When the tool finished; shown inside its open card. */
+    val completedAt: java.time.Instant? = null,
+    /** Which tool ran, for the read/search icon family. */
+    val toolName: String? = null,
 )
 
 /** A group longer than this draws only its newest slice; the whole turn opens on its own page. */
@@ -88,6 +98,8 @@ fun ActivityGroupCard(
     modifier: Modifier = Modifier,
     onOpenDetail: (ToolRowModel) -> Unit = {},
     onOpenReference: ((String) -> Unit)? = null,
+    /** Called before an expansion, so the page can hold the reader's position. */
+    onHoldPlace: (() -> Unit)? = null,
 ) {
     // null means "follow the newest group"; a tap records the reader's own choice.
     var choice by remember { mutableStateOf<Boolean?>(null) }
@@ -99,11 +111,14 @@ fun ActivityGroupCard(
     // A long group draws only its newest slice here; the full page is one tap away.
     val visibleRows = if (rows.size > InlineRowLimit) rows.takeLast(InlineRowLimit) else rows
 
-    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    Column(
+        modifier.fillMaxWidth().animateContentSize(animationSpec = androidx.compose.animation.core.tween(180, easing = androidx.compose.animation.core.FastOutSlowInEasing)),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable { choice = !expanded }
+                .clickable { onHoldPlace?.invoke(); choice = !expanded }
                 .padding(vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(9.dp),
@@ -133,6 +148,7 @@ fun ActivityGroupCard(
                     row = row,
                     onOpenDetail = { onOpenDetail(row) },
                     onOpenReference = onOpenReference,
+                    onHoldPlace = onHoldPlace,
                 )
             }
             if (rows.size > InlineRowLimit) {
@@ -152,19 +168,75 @@ fun ActivityGroupCard(
     }
 }
 
+/** Maps recorded tool messages to the rows both the inline group and its page draw. */
+@Composable
+fun toolRowModels(messages: List<com.cmuxremote.mobile.data.ChatMessage>): List<ToolRowModel> =
+    messages.map { message ->
+        ToolRowModel(
+            id = message.id,
+            kind = message.kind,
+            title = when (message.kind) {
+                "terminal" -> stringResource(R.string.tool_card_shell)
+                else -> message.filePath ?: message.toolName ?: message.command
+                    ?: message.text.ifBlank { stringResource(R.string.chat_operation) }
+            },
+            status = message.status,
+            input = if (message.kind == "terminal" && !message.command.isNullOrBlank()) {
+                "$ " + message.command
+            } else {
+                message.inputDetail
+            },
+            output = message.output,
+            diff = message.diff,
+            canOpenDetail = message.kind == "tool_use" || message.kind == "file_edit",
+            references = message.references,
+            meta = terminalMeta(message.exitCode, message.durationSeconds),
+            completedAt = message.completedAt,
+            toolName = message.toolName,
+        )
+    }
+
+/**
+ * The whole activity group on its own page. The inline card draws only the newest
+ * slice; this page keeps every operation in the same quiet disclosure rows.
+ */
+@Composable
+fun ActivityGroupPage(
+    rows: List<ToolRowModel>,
+    onOpenDetail: (ToolRowModel) -> Unit,
+    onOpenReference: ((String) -> Unit)? = null,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        rows.forEach { row ->
+            ToolDisclosureRow(
+                row = row,
+                onOpenDetail = { onOpenDetail(row) },
+                onOpenReference = onOpenReference,
+            )
+        }
+    }
+}
+
 /** A quiet tool row that opens a pale code card without disclosure indentation. */
 @Composable
-private fun ToolDisclosureRow(
+internal fun ToolDisclosureRow(
     row: ToolRowModel,
     onOpenDetail: () -> Unit,
     onOpenReference: ((String) -> Unit)? = null,
+    onHoldPlace: (() -> Unit)? = null,
 ) {
     var expanded by remember(row.id) { mutableStateOf(false) }
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    Column(Modifier.fillMaxWidth().animateContentSize(animationSpec = androidx.compose.animation.core.tween(180, easing = androidx.compose.animation.core.FastOutSlowInEasing)), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable { expanded = !expanded }
+                .clickable { onHoldPlace?.invoke(); expanded = !expanded }
                 .padding(vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(9.dp),
@@ -183,7 +255,7 @@ private fun ToolDisclosureRow(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
-            row.status?.let { status -> ToolStatusDot(status) }
+            row.status?.let { status -> ToolStatusLabel(status) }
             Icon(
                 if (expanded) Icons.Rounded.KeyboardArrowDown else Icons.Rounded.ChevronRight,
                 contentDescription = if (expanded) stringResource(R.string.common_collapse) else stringResource(R.string.common_expand),
@@ -197,8 +269,9 @@ private fun ToolDisclosureRow(
     }
 }
 
+/** Status is an icon and a word, not a colour a reader has to decode. */
 @Composable
-private fun ToolStatusDot(status: String) {
+private fun ToolStatusLabel(status: String) {
     val color = when (status) {
         "succeeded" -> MobileDesign.Good
         "failed" -> MaterialTheme.colorScheme.error
@@ -211,15 +284,21 @@ private fun ToolStatusDot(status: String) {
         "running" -> stringResource(R.string.common_working)
         else -> status
     }
-    Box(
-        Modifier
-            .size(7.dp)
-            .background(color, CircleShape)
-            .semantics { contentDescription = label },
-    )
+    if (status == "running") {
+        WorkingIndicator(size = 12.dp)
+    } else {
+        Icon(
+            if (status == "failed") Icons.Rounded.Cancel else Icons.Rounded.CheckCircle,
+            contentDescription = label,
+            tint = color,
+            modifier = Modifier.size(14.dp),
+        )
+    }
+    Text(label, color = color, style = MaterialTheme.typography.labelMedium, maxLines = 1)
 }
 
 /** The pale card a tool row opens: full-width code first, a quiet full-record action last. */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 private fun ToolCodeCard(
     row: ToolRowModel,
@@ -229,7 +308,8 @@ private fun ToolCodeCard(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(MobileDesign.Code, RoundedCornerShape(14.dp))
+            .background(MobileDesign.Soft, RoundedCornerShape(MobileDesign.CardRadius))
+            .border(0.5.dp, MobileDesign.Line, RoundedCornerShape(MobileDesign.CardRadius))
             .padding(CardInset),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
@@ -253,6 +333,13 @@ private fun ToolCodeCard(
                 style = MaterialTheme.typography.labelMedium,
             )
         }
+        row.completedAt?.let { at ->
+            Text(
+                text = stringResource(R.string.tool_card_completed_at, formatCompletedAt(at)),
+                color = MobileDesign.Muted,
+                style = MaterialTheme.typography.labelMedium,
+            )
+        }
         if (!hasBody) {
             Text(
                 text = stringResource(R.string.common_no_content),
@@ -261,8 +348,11 @@ private fun ToolCodeCard(
             )
         }
         if (onOpenReference != null && row.references.isNotEmpty()) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                row.references.take(4).forEach { path ->
+            androidx.compose.foundation.layout.FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                row.references.forEach { path ->
                     Text(
                         text = stringResource(R.string.chat_open_reference, path.substringAfterLast('/').ifBlank { path }),
                         color = MobileDesign.Accent,
@@ -336,7 +426,7 @@ fun ToolDetailScreen(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Box(
-                modifier = Modifier.size(36.dp).clip(CircleShape).clickable(onClick = onBack),
+                modifier = Modifier.size(44.dp).clip(CircleShape).clickable(onClick = onBack),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
@@ -494,4 +584,12 @@ private fun fieldLabel(field: String): String = when (field) {
     "output" -> stringResource(R.string.common_output)
     "diff" -> stringResource(R.string.common_diff)
     else -> field
+}
+
+/** Today shows only the time; another day keeps the date, both in the system locale. */
+private fun formatCompletedAt(at: java.time.Instant): String {
+    val zone = java.time.ZoneId.systemDefault()
+    val time = at.atZone(zone)
+    val pattern = if (time.toLocalDate() == java.time.LocalDate.now(zone)) "HH:mm" else "MM-dd HH:mm"
+    return time.format(java.time.format.DateTimeFormatter.ofPattern(pattern, java.util.Locale.getDefault()))
 }

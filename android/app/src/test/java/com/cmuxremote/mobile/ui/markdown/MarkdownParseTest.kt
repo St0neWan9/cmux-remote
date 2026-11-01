@@ -39,6 +39,14 @@ class MarkdownParseTest {
     }
 
     @Test
+    fun tableDelimitersKeepTheirColumnAlignment() {
+        assertEquals(
+            listOf("start", "center", "end"),
+            markdownTableAlignmentsForTest("| a | b | c |\n| --- | :---: | ---: |\n| 1 | 2 | 3 |"),
+        )
+    }
+
+    @Test
     fun adjacentProseLinesFormOneParagraph() {
         assertEquals(listOf("p"), kinds("first line\nsecond line"))
     }
