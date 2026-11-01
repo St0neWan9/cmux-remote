@@ -70,7 +70,7 @@ class LinkClient(
      * A LAN identity or certificate failure is not a reason to try the relay: the
      * saved pin is the trust anchor, so a mismatch must fail closed.
      */
-    suspend fun connect() {
+    suspend fun connect(enrollment: Boolean = false) {
         val lan = Request.Builder()
             .url("wss://${endpoint.host}:${endpoint.port}/v3/link")
             .header("Sec-WebSocket-Protocol", "cmux-remote.v3")
@@ -92,15 +92,16 @@ class LinkClient(
             if (error.code == "host_changed" || error.code == "invalid_certificate") throw error
         }
         val relay = endpoint.relay ?: throw ProtocolException("link_failed", "The Mac cannot be reached.", 502)
-        relay.validate(host.id, Identity.publicKeyBase64(privateKey))
+        // An enrollment permit names no device yet; the link's own join signature binds this one.
+        relay.validate(host.id, if (enrollment) null else Identity.publicKeyBase64(privateKey))
         relay.verify(host.publicKey)
         dial(relayRequest(relay), systemClient(), relayed = true)
         dialedViaRelay = true
     }
 
     /** Dials the relay only, for a Mac whose LAN address is unreachable. */
-    suspend fun connectForcedRelay(relay: RelayEndpoint) {
-        relay.validate(host.id, Identity.publicKeyBase64(privateKey))
+    suspend fun connectForcedRelay(relay: RelayEndpoint, enrollment: Boolean = false) {
+        relay.validate(host.id, if (enrollment) null else Identity.publicKeyBase64(privateKey))
         relay.verify(host.publicKey)
         dial(relayRequest(relay), systemClient(), relayed = true)
         dialedViaRelay = true
@@ -289,9 +290,18 @@ class LinkClient(
                     val index = frame.int("index") ?: 0
                     val status = frame.int("status") ?: 200
                     if (status != 200) {
-                        val message = frame.string("data")?.let { String(Base64.getDecoder().decode(it), Charsets.UTF_8) }
+                        val body = frame.string("data")?.let { String(Base64.getDecoder().decode(it), Charsets.UTF_8) }
+                        // Keep the Bridge's stable code: enrollment needs to tell a refused
+                        // code from a lost link, and every caller localizes by code.
+                        val error = runCatching {
+                            (Json.parse(body ?: "") as? JsonObject)?.objectValue("error")
+                        }.getOrNull()
                         item.done.completeExceptionally(
-                            ProtocolException("connection_failed", message ?: "The Bridge refused this request.", status),
+                            ProtocolException(
+                                error?.string("code") ?: "connection_failed",
+                                error?.string("message") ?: body ?: "The Bridge refused this request.",
+                                status,
+                            ),
                         )
                         return
                     }

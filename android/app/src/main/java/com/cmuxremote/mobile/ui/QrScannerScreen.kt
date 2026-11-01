@@ -173,7 +173,7 @@ private fun CameraPreview(
                 ResolutionSelector.Builder()
                     .setResolutionStrategy(
                         ResolutionStrategy(
-                            Size(1280, 720),
+                            Size(1920, 1080),
                             ResolutionStrategy.FALLBACK_RULE_CLOSEST_LOWER_THEN_HIGHER,
                         ),
                     )
@@ -186,6 +186,17 @@ private fun CameraPreview(
     var torchOn by remember { mutableStateOf(false) }
     var hasFlash by remember { mutableStateOf(false) }
     var reticle by remember { mutableStateOf<Offset?>(null) }
+    var zoomRatio by remember { mutableStateOf(1f) }
+    var maxZoom by remember { mutableStateOf(1f) }
+
+    /** Digital zoom helps a code that is readable but too far away for the sensor. */
+    fun zoomBy(delta: Float) {
+        val current = camera ?: return
+        val next = (zoomRatio + delta).coerceIn(1f, maxZoom.coerceAtLeast(1f))
+        if (next == zoomRatio) return
+        zoomRatio = next
+        current.cameraControl.setZoomRatio(next)
+    }
 
     // A tap focuses and meters at that point, and leaves a short-lived frame where it landed.
     val focusAt: (Offset) -> Unit = { point ->
@@ -241,6 +252,26 @@ private fun CameraPreview(
                 style = MaterialTheme.typography.labelMedium,
                 textAlign = TextAlign.Center,
             )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Surface(shape = CircleShape, color = Color.Black.copy(alpha = 0.45f)) {
+                    TextButton(onClick = { zoomBy(-0.5f) }, enabled = zoomRatio > 1f) {
+                        Text("−", color = if (zoomRatio > 1f) Color.White else Color.White.copy(alpha = 0.4f))
+                    }
+                }
+                Text(
+                    text = String.format(java.util.Locale.US, "%.1f×", zoomRatio),
+                    color = Color.White,
+                    style = MaterialTheme.typography.labelMedium,
+                )
+                Surface(shape = CircleShape, color = Color.Black.copy(alpha = 0.45f)) {
+                    TextButton(onClick = { zoomBy(0.5f) }, enabled = zoomRatio < maxZoom) {
+                        Text("+", color = if (zoomRatio < maxZoom) Color.White else Color.White.copy(alpha = 0.4f))
+                    }
+                }
+            }
             if (hasFlash) {
                 Surface(
                     shape = CircleShape,
@@ -314,6 +345,8 @@ private fun CameraPreview(
             }
             camera = bound
             hasFlash = bound.cameraInfo.hasFlashUnit()
+            maxZoom = bound.cameraInfo.zoomState.value?.maxZoomRatio ?: 1f
+            zoomRatio = 1f
             // Focus the middle of the frame once the preview has a size, so the first seconds
             // are not spent on a blurry close-up.
             previewView.post {

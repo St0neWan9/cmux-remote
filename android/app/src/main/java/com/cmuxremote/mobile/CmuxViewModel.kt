@@ -19,6 +19,7 @@ import com.cmuxremote.mobile.ui.ModelOption
 import com.cmuxremote.mobile.ui.StartRoot
 import com.cmuxremote.mobile.ui.StartWorkspace
 import com.cmuxremote.mobile.protocol.AuthorizedConnection
+import com.cmuxremote.mobile.protocol.EnrollmentBootstrap
 import com.cmuxremote.mobile.protocol.EnrollmentStatus
 import com.cmuxremote.mobile.protocol.ProtocolException
 import com.cmuxremote.mobile.protocol.string
@@ -378,6 +379,19 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
         val name: String get() = connection.host.name
     }
 
+    /** Relay origins the reader added; kept across launches, never carrying a credential. */
+    private val relayPrefs = application.getSharedPreferences("cmux-relay", android.content.Context.MODE_PRIVATE)
+    private val _relayOrigins = MutableStateFlow(
+        relayPrefs.getString("origins", "").orEmpty().split("\n").filter { it.isNotBlank() },
+    )
+    val relayOrigins: StateFlow<List<String>> = _relayOrigins.asStateFlow()
+    private val _relayHosts = MutableStateFlow<List<EnrollmentBootstrap>>(emptyList())
+    val relayHosts: StateFlow<List<EnrollmentBootstrap>> = _relayHosts.asStateFlow()
+    private val _relayLoading = MutableStateFlow(false)
+    val relayLoading: StateFlow<Boolean> = _relayLoading.asStateFlow()
+    private val _relayError = MutableStateFlow<String?>(null)
+    val relayError: StateFlow<String?> = _relayError.asStateFlow()
+
     /** The Macs advertising themselves on this network while a pairing page is open. */
     private val discovery = com.cmuxremote.mobile.bridge.BridgeDiscovery(application)
     private val _discovered = MutableStateFlow<List<com.cmuxremote.mobile.bridge.DiscoveredBridge>>(emptyList())
@@ -395,6 +409,85 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
     /** Macs already paired here, so a nearby list can mark them instead of offering them. */
     fun approvedHostIDs(): Set<String> = hosts.map { it.id }.toSet()
 
+    /** Adds one canonical relay origin and refreshes what it lists. */
+    fun addRelayOrigin(text: String) {
+        val canonical = try {
+            com.cmuxremote.mobile.bridge.RelayEndpoint.canonicalOrigin(text.trim())
+        } catch (error: ProtocolException) {
+            _relayError.value = error.userMessage()
+            return
+        }
+        if (_relayOrigins.value.contains(canonical)) {
+            refreshRelayDirectory()
+            return
+        }
+        _relayOrigins.value = _relayOrigins.value + canonical
+        saveRelayOrigins()
+        refreshRelayDirectory()
+    }
+
+    fun removeRelayOrigin(origin: String) {
+        _relayOrigins.value = _relayOrigins.value.filterNot { it == origin }
+        _relayHosts.value = _relayHosts.value.filterNot { it.endpoint.relay?.origin == origin }
+        saveRelayOrigins()
+    }
+
+    private fun saveRelayOrigins() {
+        relayPrefs.edit().putString("origins", _relayOrigins.value.joinToString("\n")).apply()
+    }
+
+    private fun rememberRelayOrigin(origin: String?) {
+        val value = origin?.takeIf { it.isNotBlank() } ?: return
+        if (_relayOrigins.value.contains(value)) return
+        _relayOrigins.value = _relayOrigins.value + value
+        saveRelayOrigins()
+    }
+
+    /** Reads every saved relay's directory; each entry is verified before it is listed. */
+    fun refreshRelayDirectory() {
+        val origins = _relayOrigins.value
+        if (origins.isEmpty()) {
+            _relayHosts.value = emptyList()
+            _relayError.value = null
+            _relayLoading.value = false
+            return
+        }
+        relayRefresh?.cancel()
+        relayRefresh = viewModelScope.launch {
+            _relayLoading.value = true
+            _relayError.value = null
+            var failure: String? = null
+            val found = LinkedHashMap<String, EnrollmentBootstrap>()
+            for (origin in origins) {
+                val result = runCatching { com.cmuxremote.mobile.bridge.RelayDirectory.hosts(origin) }
+                result.onFailure { failure = it.userMessage() }
+                result.getOrDefault(emptyList()).forEach { entry ->
+                    val existing = found[entry.host.id]
+                    if (existing == null || existing.expiresAt <= entry.expiresAt) found[entry.host.id] = entry
+                }
+            }
+            _relayHosts.value = found.values.sortedBy { it.host.name.lowercase() }
+            _relayError.value = if (_relayHosts.value.isEmpty()) failure else null
+            _relayLoading.value = false
+        }
+    }
+
+    /** Pairs with a Mac listed by one of the saved relays; the owner still approves it. */
+    fun pairListed(bootstrap: EnrollmentBootstrap) {
+        beginPairing {
+            var enrollment = Enrollment.fromBootstrap(bootstrap, store.privateKey())
+            val status = try {
+                enrollment.submit()
+            } catch (error: ProtocolException) {
+                if (error.code != "invalid_enrollment") throw error
+                enrollment.close()
+                enrollment = Enrollment.fromBootstrap(bootstrap, store.privateKey(), clientKind = "iphone")
+                enrollment.submit()
+            }
+            enrollment to status
+        }
+    }
+
     private val hosts = mutableListOf<HostRuntime>()
     private var repository: BridgeRepository? = null
     private var poll: Job? = null
@@ -407,6 +500,7 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
     private var backfill: Job? = null
     /** Automatic earlier-page loads wait this long; a pull does not. */
     private var nextOlderAt = 0L
+    private var relayRefresh: Job? = null
     /** A burst of live notifications writes the stored copy at most this often. */
     private val lastStoredAt = mutableMapOf<String, Long>()
 
@@ -422,6 +516,7 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
         }
         hosts.clear()
         saved.forEach { connection ->
+            rememberRelayOrigin(connection.endpoint.relay?.origin)
             runCatching { BridgeRepository.open(connection) }.onSuccess { hosts += HostRuntime(connection, it) }
         }
         // A build before scoped caches keyed by host alone; those copies are dropped.
@@ -451,6 +546,7 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
                     "enrollment",
                     "Bridge does not accept the android kind; retrying as iphone",
                 )
+                enrollment.close()
                 enrollment = Enrollment.begin(code, store.privateKey(), clientKind = "iphone")
                 enrollment.submit()
             }
@@ -566,12 +662,14 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
             "enrollment",
             "approved by ${connection.host.name}; ${connection.scope.capabilities.size} capabilities",
         )
+        rememberRelayOrigin(connection.endpoint.relay?.origin)
         _pairing.value = null
         _addingDevice.value = false
         connect(connection)
     }
 
     private fun connect(connection: AuthorizedConnection) {
+        rememberRelayOrigin(connection.endpoint.relay?.origin)
         _connection.value = connection
         _reachable.value = true
         _probed.value = true
@@ -1647,6 +1745,7 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
                 "host_changed" -> R.string.error_host_changed
                 "invalid_certificate" -> R.string.error_invalid_certificate
                 "connection_failed", "link_failed", "discovery_failed" -> R.string.error_connection
+                "relay_unavailable" -> R.string.error_relay_unavailable
                 "timeout" -> R.string.error_timeout
                 "response_too_large" -> R.string.error_response_too_large
                 "operation_not_found" -> R.string.error_operation_not_found
