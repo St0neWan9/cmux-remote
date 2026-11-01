@@ -21,6 +21,7 @@ import com.cmuxremote.mobile.ui.StartRoot
 import com.cmuxremote.mobile.ui.StartWorkspace
 import com.cmuxremote.mobile.protocol.AuthorizedConnection
 import com.cmuxremote.mobile.protocol.EnrollmentBootstrap
+import com.cmuxremote.mobile.protocol.Identity
 import com.cmuxremote.mobile.protocol.EnrollmentStatus
 import com.cmuxremote.mobile.protocol.ProtocolException
 import com.cmuxremote.mobile.protocol.string
@@ -702,9 +703,16 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun finish(enrollment: PendingEnrollment, status: EnrollmentStatus) {
         val grant = enrollment.grant(status)
+        // The enrollment window's relay permit is not valid for an approved device.
+        // The Bridge returns a permit bound to this client key in the status; keep that
+        // one, or none, when saving the connection.
+        val approvedRelay = status.relay?.also { relay ->
+            relay.validate(enrollment.bootstrap.host.id, Identity.publicKeyBase64(store.privateKey()))
+            relay.verify(enrollment.bootstrap.host.publicKey)
+        }
         val connection = AuthorizedConnection(
             host = enrollment.bootstrap.host,
-            endpoint = enrollment.bootstrap.endpoint,
+            endpoint = enrollment.bootstrap.endpoint.copy(relay = approvedRelay),
             privateKey = store.privateKey(),
             clientID = enrollment.request.clientID,
             scope = grant.scope,
@@ -723,6 +731,8 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
             "approved by ${connection.host.name}; ${connection.scope.capabilities.size} capabilities",
         )
         rememberRelayOrigin(connection.endpoint.relay?.origin)
+        // The enrollment link used the window's permit; the connection opens its own.
+        enrollment.close()
         _pairing.value = null
         _addingDevice.value = false
         connect(connection)
