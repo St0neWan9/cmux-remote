@@ -76,6 +76,7 @@
 | 后台补页（对应 iOS `startBackfill`） | 打开未读到底的会话时，最多 64 页地向前补齐缓存，页面关闭即取消；下次打开继续 |
 | 写入节流 | 运行中的实时通知最多每 2 秒写一次 SQLite，避免把整页消息反复写盘 |
 | 后台任务记录缓存（对应 iOS `BackgroundTaskCache`） | `data/BackgroundTaskCache.kt`：按 host + 设备身份 + session + task 保存最后一页；16 条 / 单条 4 MiB；读取算一次使用，LRU 淘汰；打开先显示缓存，读取后替换；移除 Mac 一并清理 |
+| 下拉刷新（对应 iOS 最新逻辑） | 对话页下拉由页面自身处理：有更早页就取更早页，否则重读最新页；读者主动下拉不受 `hasMore` 陈旧值限制，也不受自动加载 0.8s 间隔限制；只显示一个加载指示；自动加载仍有间隔；在途标记无论读取怎样结束都会清除；只有回答“没有更早”才结束分页 |
 
 验证：`android/` 单元测试 82 项通过（新增 `DiscoveryTxtTest` 8 项、`BridgeDecodeTest` 7 项、`ConversationMergeTest` 5 项、`BackgroundTaskCacheTest` 6 项）；任务专用 AVD 上人工确认
 配对、双栏、连接详情、诊断日志、Feed 全事件、添加 Mac 覆盖层与返回、图片分享 chooser、长按菜单、选文页、时间页。
