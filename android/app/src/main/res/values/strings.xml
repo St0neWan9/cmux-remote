@@ -60,6 +60,10 @@
     <string name="error_outcome_unknown">操作结果未知，请到 Mac 上确认后再决定是否重做。</string>
     <string name="error_invalid_enrollment">这台 Mac 不接受这次登记请求。</string>
     <string name="error_enrollment_pending">这台 Mac 还没有批准这台设备。</string>
+    <string name="error_enrollment_closed">Mac 上的配对窗口已刷新或关闭。请在 Mac 重新打开「添加设备」，然后在 5 分钟内扫码；期间不要刷新或重开该页面。</string>
+    <string name="error_enrollment_expired">配对窗口已过期，请在 Mac 上重新生成二维码。</string>
+    <string name="error_request_expired">这次申请已过期或已被清理，请重新扫码申请。</string>
+    <string name="error_invalid_pairing">这不是当前版本的有效配对码，请在 Mac 上重新打开「添加设备」。</string>
     <string name="error_invalid_response">Mac 返回了无法识别的响应。</string>
     <string name="error_invalid_image">这张图片不符合上传要求。</string>
 
@@ -86,6 +90,7 @@
     <string name="pair_retry_saved">已经配过对？重试已保存的连接</string>
     <string name="pair_awaiting_owner">等待 %1$s 批准</string>
     <string name="pair_awaiting_owner_note">在 Mac 上打开 Cmux Remote → 设备，核对并批准这个请求。</string>
+    <string name="pair_awaiting_missing_hint">如果 Mac 的待批准列表里没有这台设备：在 Mac 上重新打开「添加设备」并立刻扫码；不要刷新或重开该页面，也不要重启 Mac 端。</string>
     <string name="pair_failed_title">无法连接</string>
     <string name="pair_scan_title">扫描二维码</string>
     <string name="pair_scan_guide">把 Mac 上的配对二维码放进框内</string>
