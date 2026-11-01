@@ -217,7 +217,8 @@ fun PairingScreen(
                 value = relayDraft,
                 onValueChange = { relayDraft = it.trim() },
                 modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("https://relay.example.com", color = MobileDesign.Muted) },
+                // The owner's relay is the usual one; any canonical origin is accepted.
+                placeholder = { Text("https://relay.trentaml.com", color = MobileDesign.Muted) },
                 label = { Text(stringResource(R.string.pair_relay_address), color = MobileDesign.Muted) },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Done),
                 singleLine = true,
