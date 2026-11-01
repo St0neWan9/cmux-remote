@@ -62,6 +62,8 @@ import CmuxRemoteCore
         // The card in the conversation finds this request by its own prompts, the transcript's exact words.
         let matched = ConversationQuestions().pending(items, agent: record.agent, sessionID: record.id)
         #expect(Set(matched.keys) == ["用哪个方案?", "改动范围?"])
+        // The terminal holds the whole conversation above the menu; the Feed list shows the question, not that page.
+        #expect(items.first?["body"].string == nil)
         let first = try #require(matched["用哪个方案?"])
         #expect(first.isFirst && first.questions.count == 2)
         #expect(first.questions[1]["multi_select"].bool == true)

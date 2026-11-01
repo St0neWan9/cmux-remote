@@ -42,9 +42,13 @@ struct TuiPendingDecision: Sendable {
                             "available_modes": .array([.string("once"), .string("deny")])])
         case .question where ask != nil:
             // The Agent's own questions, with the prompts its conversation card shows, so the card can answer them.
+            //
+            // No body: the terminal holds the whole conversation above the menu, and sending the screen made the
+            // Feed list show pages of that conversation before the question. The questions carry everything the
+            // reader needs — prompt, options and their descriptions.
             return .object(["request_id": .string(id), "kind": .string(kind.rawValue), "status": .string("pending"), "source": .string(binding.provider),
                             "workspace_id": .string(binding.workspaceID), "workstream_id": .string(workstream), "title": .string(binding.title),
-                            "body": .string(screenText), "questions": .array(ask?.formQuestions ?? [])])
+                            "questions": .array(ask?.formQuestions ?? [])])
         case .question:
             // One question whose options are the dialog's own choices; the phone reuses its question form.
             let options: [JSONValue] = choices.map { .object(["id": .string($0.key), "label": .string($0.label)]) }
@@ -52,9 +56,13 @@ struct TuiPendingDecision: Sendable {
             // send the Agent nothing while it waits, so both are withheld from the form.
             let question: JSONValue = .object(["id": .string("continue"), "prompt": .string("终端正在等待你的选择"), "multi_select": .bool(false),
                                                "allow_custom": .bool(false), "allow_skip": .bool(false), "options": .array(options)])
+            // Only the dialog's own last lines: the terminal above it is the conversation the reader is already
+            // reading, not something to repeat here.
+            let dialog = screenText.components(separatedBy: .newlines).map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }.suffix(6).joined(separator: "\n")
             return .object(["request_id": .string(id), "kind": .string(kind.rawValue), "status": .string("pending"), "source": .string(binding.provider),
                             "workspace_id": .string(binding.workspaceID), "workstream_id": .string(workstream), "title": .string(binding.title),
-                            "body": .string(screenText), "questions": .array([question])])
+                            "body": .string(dialog), "questions": .array([question])])
         }
     }
 }
