@@ -74,6 +74,11 @@
     <string name="pair_awaiting_owner_note">在 Mac 上打开 Cmux Remote → 设备，核对并批准这个请求。</string>
     <string name="pair_failed_title">无法连接</string>
     <string name="pair_scan_title">扫描二维码</string>
+    <string name="pair_scan_guide">把 Mac 上的配对二维码放进框内</string>
+    <string name="pair_scan_focus_hint">点按画面可对焦；太近或太远时调整一下距离</string>
+    <string name="pair_scan_torch">补光灯</string>
+    <string name="pair_scan_torch_on">打开补光灯</string>
+    <string name="pair_scan_torch_off">关闭补光灯</string>
     <string name="pair_nearby">附近的 Mac</string>
     <string name="pair_searching">正在查找…</string>
     <string name="pair_trust_host">连接这台 Mac？</string>

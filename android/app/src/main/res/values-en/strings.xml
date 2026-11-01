@@ -74,6 +74,11 @@
     <string name="pair_awaiting_owner_note">Open Cmux Remote → Devices on your Mac, then verify and approve this request.</string>
     <string name="pair_failed_title">Can\'t connect</string>
     <string name="pair_scan_title">Scan QR code</string>
+    <string name="pair_scan_guide">Put the pairing code from your Mac inside the frame</string>
+    <string name="pair_scan_focus_hint">Tap the preview to focus; move closer or farther if it will not read</string>
+    <string name="pair_scan_torch">Light</string>
+    <string name="pair_scan_torch_on">Turn on the light</string>
+    <string name="pair_scan_torch_off">Turn off the light</string>
     <string name="pair_nearby">Nearby Macs</string>
     <string name="pair_searching">Searching…</string>
     <string name="pair_trust_host">Connect to this Mac?</string>
