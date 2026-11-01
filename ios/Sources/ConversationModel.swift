@@ -341,8 +341,11 @@ final class ConversationModel {
     func resumeReads() { readsEnabled = true }
     func refresh() async {
         guard readsEnabled, !Task.isCancelled else { return }
+        // The questions are read beside the page, not after it: the page waits for the Mac's session list, and a
+        // card that could not be answered until that finished sat unanswerable for seconds after it appeared.
+        async let questions: Void = refreshQuestions()
         await refreshReads.run { [self] request in await readLatest(request) }
-        await refreshQuestions()
+        await questions
     }
     private func readLatest(_ request: UUID, hidden: Bool = false) async {
         let started = ContinuousClock.now
@@ -376,14 +379,10 @@ final class ConversationModel {
             else { readHole = nil }
             async let historyRead = readPage()
             async let liveRead: PreviewSnapshot? = hidden ? nil : try? readPreview()
-            let descriptors = try await descriptorsRead
-            guard refreshReads.isCurrent(request) else { return }
-            if let current = descriptors.first(where: { $0.id == session.id }) {
-                // Whether the conversation can be written or reopened does not wait for the history, which may be large.
-                updateSession(current)
-            } else if readsListing {
-                throw BridgeError("read_only", "The cmux session is no longer available.", status: 404)
-            }
+            // The transcript comes first: it is one page of one conversation, while the session list is every
+            // conversation on the Mac. Waiting for the list left the page blank for as long as that read takes
+            // (seconds on a Mac with fifty of them) although the page itself was already in hand. The list only
+            // decides whether the conversation can be written or reopened, and that lands with the next read.
             var history: ConversationSnapshot
             var historyCursor: String?
             do {
@@ -448,6 +447,15 @@ final class ConversationModel {
                 if message.role == .agent, case .prose(let value) = message.kind { return value.text }; return nil
             }.first
             preview = live?.text == committed ? nil : live?.text; compacting = live?.compacting ?? false; error = mutationWarning
+            // The Mac's session list decides what may be written or reopened, not what the page shows, so it is
+            // waited for here — after the reader already has the conversation.
+            let descriptors = try await descriptorsRead
+            guard refreshReads.isCurrent(request) else { return }
+            if let current = descriptors.first(where: { $0.id == session.id }) {
+                updateSession(current)
+            } else if readsListing {
+                throw BridgeError("read_only", "The cmux session is no longer available.", status: 404)
+            }
             // A tail holds only the newest messages; the stored copy keeps the last full page.
             if full { store(history, live: live) }
         } catch {
