@@ -14,9 +14,8 @@ final class QRScannerController: UIViewController, @preconcurrency AVCaptureMeta
     private var device: AVCaptureDevice?
     private var consumed = false
     private var stopped = false
-    /// Everything below sits over the preview: the dimmed surround, the frame, its brackets and the hint.
+    /// Everything below sits over the preview: the dimmed surround, its brackets and the hint.
     private let dim = CAShapeLayer()
-    private let frame = CAShapeLayer()
     private let brackets = CAShapeLayer()
     private let hint = UILabel()
     private let reticle = UIView()
@@ -54,9 +53,6 @@ final class QRScannerController: UIViewController, @preconcurrency AVCaptureMeta
         dim.fillColor = UIColor.black.withAlphaComponent(0.45).cgColor
         dim.fillRule = .evenOdd
         view.layer.addSublayer(dim)
-        frame.strokeColor = UIColor.white.cgColor; frame.fillColor = UIColor.clear.cgColor
-        frame.lineWidth = 2.5; frame.lineCap = .round
-        view.layer.addSublayer(frame)
         brackets.strokeColor = UIColor.white.cgColor; brackets.fillColor = UIColor.clear.cgColor
         brackets.lineWidth = 4; brackets.lineCap = .round
         view.layer.addSublayer(brackets)
@@ -88,7 +84,6 @@ final class QRScannerController: UIViewController, @preconcurrency AVCaptureMeta
         let path = UIBezierPath(rect: view.bounds)
         path.append(UIBezierPath(roundedRect: hole, cornerRadius: 22))
         dim.path = path.cgPath
-        frame.path = UIBezierPath(roundedRect: hole, cornerRadius: 22).cgPath
         // Four corner brackets drawn by hand: a rounded rect's own corners are too soft to read as a viewfinder.
         let corner: CGFloat = 42, inset: CGFloat = 0
         let bracketsPath = UIBezierPath()
@@ -141,7 +136,6 @@ final class QRScannerController: UIViewController, @preconcurrency AVCaptureMeta
         consumed = true
         UINotificationFeedbackGenerator().notificationOccurred(.success)
         // The reader sees what the camera saw before the page goes away; the code is handed on a moment later.
-        frame.strokeColor = UIColor.systemGreen.cgColor
         brackets.strokeColor = UIColor.systemGreen.cgColor
         hint.text = String(localized: "pair.camera_detected")
         Task { [weak self] in
