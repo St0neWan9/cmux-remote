@@ -18,6 +18,8 @@ struct ConversationView: View {
     @State private var initialScroll: Task<Void, Never>?
     /// Retries the opening jump: a row's height is known only after it lays out.
     @State private var settleTask: Task<Void, Never>?
+    /// Re-asserts the page's end after content grew, while the lazy stack measures the rows it gained.
+    @State private var followTask: Task<Void, Never>?
     /// The reader opened or closed a card: the page stays where it is until they scroll or ask for the latest.
     @State private var holdingPlace = false
     /// A prompt this phone just sent, held at the top of the page until the reader scrolls or asks for the latest.
@@ -361,6 +363,26 @@ struct ConversationView: View {
             }
         }
     }
+    /// Keeps the page at its end after content grew, for a moment.
+    ///
+    /// One scroll resolves against the heights a lazy stack has estimated, and a tall row it has not built yet
+    /// makes that estimate too large: the page then rests past the content in blank space, and the drag a reader
+    /// tries first turns following off, so nothing brings it back but the latest button. Asking again as the rows
+    /// measure lands where the page really ends.
+    private func follow(_ proxy: ScrollViewProxy) {
+        guard atLatest, pinnedSent == nil else { return }
+        scrollTrace.note("scroll follow"); scrollToNewest(proxy)
+        followTask?.cancel()
+        followTask = Task { @MainActor in
+            for _ in 0..<3 {
+                try? await Task.sleep(for: .milliseconds(90))
+                // Nothing to correct once the end is in sight; the ask was only for the layout that had not
+                // measured the page's new rows yet.
+                guard !Task.isCancelled, atLatest, !userScrolling, !latestVisible, pinnedSent == nil else { return }
+                scrollTrace.note("scroll follow again"); scrollToNewest(proxy)
+            }
+        }
+    }
     /// Scrolls to the newest message.
     ///
     /// Anchoring the newest row itself puts its last line just above the composer, but leaves the page's own
@@ -443,10 +465,10 @@ struct ConversationView: View {
             }
             .onChange(of: model.timelineItems.last?.id) { _, _ in
                 if !initiallyScrolled && !model.messages.isEmpty { settleAtBottom(proxy); initiallyScrolled = true }
-                else if atLatest { scrollTrace.note("scroll new-item"); scrollToNewest(proxy) }
+                else if atLatest { scrollTrace.note("scroll new-item"); follow(proxy) }
             }
-            .onChange(of: model.latestMessageText) { _, _ in if atLatest { scrollTrace.note("scroll new-text"); scrollToNewest(proxy) } }
-            .onChange(of: model.preview) { _, _ in if atLatest { scrollTrace.note("scroll preview"); scrollToNewest(proxy) } }
+            .onChange(of: model.latestMessageText) { _, _ in if atLatest { scrollTrace.note("scroll new-text"); follow(proxy) } }
+            .onChange(of: model.preview) { _, _ in if atLatest { scrollTrace.note("scroll preview"); follow(proxy) } }
             // Opening a cached conversation re-enters with its follow state; start from the last message.
             .onAppear {
                 diagLog(.info, category: "open", "page appeared messages=\(model.messages.count)")
@@ -463,7 +485,7 @@ struct ConversationView: View {
                     initiallyScrolled = true; settleAtBottom(proxy, retries: 6)
                 }
             }
-            .onDisappear { settleTask?.cancel(); settleTask = nil; initialScroll?.cancel(); initialScroll = nil }
+            .onDisappear { settleTask?.cancel(); settleTask = nil; followTask?.cancel(); followTask = nil; initialScroll?.cancel(); initialScroll = nil }
             // A prompt this phone sent lands with the page's newest row at the top and the reply taking the
             // room below it, which is where the reader looks next. Following resumes when they scroll down.
             .onChange(of: model.jumpToLatest) { _, _ in pinSentPrompt(proxy) }
