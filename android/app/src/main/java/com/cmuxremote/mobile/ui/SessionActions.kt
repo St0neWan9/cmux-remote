@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -48,6 +49,8 @@ fun ModelMenu(
     modifier: Modifier = Modifier,
 ) {
     var expanded by remember(enabled) { mutableStateOf(false) }
+    var custom by remember { mutableStateOf(false) }
+    var customText by remember { mutableStateOf("") }
     Box(modifier) {
         Row(
             modifier = Modifier
@@ -85,7 +88,44 @@ fun ModelMenu(
                     },
                 )
             }
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.common_custom_model), color = MobileDesign.Ink, style = MaterialTheme.typography.bodyMedium) },
+                onClick = {
+                    expanded = false
+                    customText = ""
+                    custom = true
+                },
+            )
         }
+    }
+    if (custom) {
+        AlertDialog(
+            onDismissRequest = { custom = false },
+            title = { Text(stringResource(R.string.common_custom_model), color = MobileDesign.Ink) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(stringResource(R.string.common_custom_model_hint), color = MobileDesign.Muted, style = MaterialTheme.typography.bodyMedium)
+                    OutlinedTextField(
+                        value = customText,
+                        onValueChange = { customText = it },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = customText.isNotBlank(),
+                    onClick = {
+                        custom = false
+                        onPick(ModelOption(customText.trim(), customText.trim()))
+                    },
+                ) { Text(stringResource(R.string.common_use_model)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { custom = false }) { Text(stringResource(R.string.common_cancel), color = MobileDesign.Muted) }
+            },
+        )
     }
 }
 

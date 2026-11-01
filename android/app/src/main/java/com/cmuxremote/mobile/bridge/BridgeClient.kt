@@ -27,6 +27,8 @@ class BridgeClient(
     private val host: com.cmuxremote.mobile.protocol.HostIdentity,
     private val privateKey: ByteArray,
     private val clientID: String,
+    /** An explicitly chosen legacy `/v1` shared token; null for signed v2. */
+    private val legacyToken: String? = null,
 ) {
     private var epoch: String? = null
     /** Set when the Bridge is reachable only through its relay. */
@@ -44,6 +46,7 @@ class BridgeClient(
 
     /** The runtime epoch this client is currently signing under. */
     suspend fun currentEpoch(): String {
+        if (legacyToken != null) return ""
         epoch?.let { return it }
         return announcement().epoch
     }
@@ -64,6 +67,7 @@ class BridgeClient(
 
     /** Performs an authorized `GET`/`POST` and returns the decoded JSON body. */
     suspend fun call(method: String, path: String, query: Map<String, String> = emptyMap(), body: ByteArray? = null): kotlinx.serialization.json.JsonElement {
+        if (legacyToken != null) return legacyCall(method, path, query, body)
         val started = System.nanoTime()
         try {
             val cached = epoch ?: run { announcement(); epoch!! }
@@ -114,6 +118,10 @@ class BridgeClient(
 
     /** Fetches a bounded binary resource such as a recorded image preview. */
     suspend fun bytes(path: String, query: Map<String, String>, limit: Int): ByteArray {
+        if (legacyToken != null) {
+            val uri = uri(path, query).replaceFirst("/v2/", "/v1/")
+            return exchange("GET", uri, "Bearer $legacyToken", null, limit)
+        }
         val started = System.nanoTime()
         return try {
             val currentEpoch = epoch ?: run { announcement(); epoch!! }
@@ -134,6 +142,29 @@ class BridgeClient(
             data
         } catch (error: ProtocolException) {
             Diagnostics.log(Diagnostics.Level.Warning, "request", "GET ${route(path)} failed: ${error.code} ${elapsedMillis(started)}ms")
+            throw error
+        }
+    }
+
+    /**
+     * The legacy shared-token transport: `/v1` paths with a bearer token, no
+     * per-request proof and no epoch. It is only reached by an explicitly saved
+     * legacy pairing.
+     */
+    private suspend fun legacyCall(
+        method: String,
+        path: String,
+        query: Map<String, String>,
+        body: ByteArray?,
+    ): kotlinx.serialization.json.JsonElement {
+        val started = System.nanoTime()
+        val uri = uri(path, query).replaceFirst("/v2/", "/v1/")
+        return try {
+            val data = exchange(method, uri, "Bearer $legacyToken", body)
+            Diagnostics.log(Diagnostics.Level.Debug, "request", "$method ${route(path)} ${elapsedMillis(started)}ms (legacy)")
+            Json.parse(String(data, Charsets.UTF_8))
+        } catch (error: ProtocolException) {
+            Diagnostics.log(Diagnostics.Level.Warning, "request", "$method ${route(path)} failed: ${error.code} ${elapsedMillis(started)}ms (legacy)")
             throw error
         }
     }

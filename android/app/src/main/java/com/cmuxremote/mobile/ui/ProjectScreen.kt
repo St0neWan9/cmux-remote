@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
@@ -28,6 +29,7 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ChevronLeft
+import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -42,6 +44,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
@@ -70,8 +73,14 @@ fun ProjectScreen(
     modifier: Modifier = Modifier,
     onOpenPath: ((String) -> Unit)? = null,
     onRefresh: (() -> Unit)? = null,
+    /** `changes`, `diff` or `file`; the page keeps the reader's choice on refresh. */
+    mode: String = "changes",
+    inputPath: String = "",
+    onPathChange: (String) -> Unit = {},
+    onOpenPathInput: () -> Unit = {},
+    onShowChanges: () -> Unit = {},
+    onShowDiff: () -> Unit = {},
 ) {
-    var pathField by remember { mutableStateOf("") }
     val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
     val context = androidx.compose.ui.platform.LocalContext.current
     Column(
@@ -110,6 +119,38 @@ fun ProjectScreen(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = MobileDesign.PageInset, vertical = 4.dp),
             )
         }
+        // A relative path can be read directly; the three resources mirror the
+        // iPhone page and never pretend a whole-tree diff is one file.
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = MobileDesign.PageInset, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            OutlinedTextField(
+                value = inputPath,
+                onValueChange = onPathChange,
+                modifier = Modifier.weight(1f).testTag("project.path"),
+                singleLine = true,
+                textStyle = MaterialTheme.typography.labelMedium.copy(fontFamily = FontFamily.Monospace),
+                placeholder = { Text(stringResource(R.string.project_path_placeholder), color = MobileDesign.Muted, style = MaterialTheme.typography.labelMedium) },
+                shape = RoundedCornerShape(14.dp),
+            )
+            Text(
+                text = stringResource(R.string.project_read_file),
+                color = MobileDesign.Accent,
+                style = MaterialTheme.typography.labelMedium,
+                modifier = Modifier.clip(CircleShape).clickable(onClick = onOpenPathInput).padding(horizontal = 8.dp, vertical = 8.dp),
+            )
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = MobileDesign.PageInset, vertical = 2.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            ModeChoice(stringResource(R.string.project_read_file_short), mode == "file", "project.mode.file", onOpenPathInput)
+            ModeChoice(stringResource(R.string.project_diff), mode == "diff", "project.mode.diff", onShowDiff)
+            ModeChoice(stringResource(R.string.project_changed_files), mode == "changes", "project.mode.changes", onShowChanges)
+        }
         BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
             // Mirrors PaneLayoutPolicy: a phone in landscape stays on the shorter side.
             val compact = minOf(maxWidth, maxHeight).value < PaneLayoutPolicy.COMPACT_MAX_DP
@@ -123,6 +164,7 @@ fun ProjectScreen(
                     selectedPath = selectedPath,
                     text = text,
                     loading = loading,
+                    mode = mode,
                     onSelect = onSelect,
                 )
             } else {
@@ -131,6 +173,7 @@ fun ProjectScreen(
                     selectedPath = selectedPath,
                     text = text,
                     loading = loading,
+                    mode = mode,
                     onSelect = onSelect,
                 )
             }
@@ -153,7 +196,7 @@ private fun ProjectHeader(
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         Box(
-            modifier = Modifier.size(36.dp).clip(CircleShape).clickable(onClick = onBack),
+            modifier = Modifier.size(44.dp).clip(CircleShape).clickable(onClick = onBack),
             contentAlignment = Alignment.Center,
         ) {
             Icon(Icons.Rounded.ChevronLeft, contentDescription = stringResource(R.string.common_back), tint = MobileDesign.Ink, modifier = Modifier.size(22.dp))
@@ -170,6 +213,22 @@ private fun ProjectHeader(
         if (onShare != null) HeaderAction(stringResource(R.string.common_share), onShare)
         if (onRefresh != null) HeaderAction(stringResource(R.string.common_refresh), onRefresh)
     }
+}
+
+@Composable
+private fun ModeChoice(label: String, selected: Boolean, tag: String, onClick: () -> Unit) {
+    Text(
+        text = label,
+        color = if (selected) MobileDesign.Canvas else MobileDesign.Muted,
+        style = MaterialTheme.typography.labelMedium,
+        maxLines = 1,
+        modifier = Modifier
+            .testTag(tag)
+            .clip(CircleShape)
+            .background(if (selected) MobileDesign.Ink else MobileDesign.Soft)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+    )
 }
 
 @Composable
@@ -192,40 +251,42 @@ private fun CompactProjectBody(
     selectedPath: String?,
     text: ProjectText?,
     loading: Boolean,
+    mode: String,
     onSelect: (String) -> Unit,
 ) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-        if (changes.isEmpty()) {
-            if (!loading) {
-                Text(
-                    stringResource(R.string.project_empty),
-                    color = MobileDesign.Muted,
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = MobileDesign.PageInset, vertical = 12.dp),
-                )
-            }
-        } else {
-            Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
-                changes.forEach { change ->
-                    ChangeRow(
-                        change = change,
-                        selected = change.path == selectedPath,
-                        onClick = { onSelect(change.path) },
+        if (mode == "changes") {
+            if (changes.isEmpty()) {
+                if (!loading) {
+                    Text(
+                        stringResource(R.string.project_empty),
+                        color = MobileDesign.Muted,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = MobileDesign.PageInset, vertical = 12.dp),
                     )
+                }
+            } else {
+                Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
+                    changes.forEach { change ->
+                        ChangeRow(
+                            change = change,
+                            selected = change.path == selectedPath,
+                            onClick = { onSelect(change.path) },
+                        )
+                    }
                 }
             }
         }
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .padding(horizontal = MobileDesign.PageInset, vertical = 12.dp)
-                .height(1.dp)
-                .background(MobileDesign.Line),
-        )
         when {
             loading -> Box(Modifier.fillMaxWidth().padding(vertical = 24.dp), contentAlignment = Alignment.Center) {
                 WorkingIndicator()
             }
+            text != null && text.text.isEmpty() -> Text(
+                stringResource(R.string.project_no_content),
+                color = MobileDesign.Muted,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.padding(horizontal = MobileDesign.PageInset, vertical = 12.dp),
+            )
             text != null -> ProjectTextBlock(
                 text = text,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = MobileDesign.PageInset, vertical = 12.dp),
@@ -241,6 +302,7 @@ private fun WideProjectBody(
     selectedPath: String?,
     text: ProjectText?,
     loading: Boolean,
+    mode: String,
     onSelect: (String) -> Unit,
 ) {
     Row(Modifier.fillMaxSize()) {
@@ -276,6 +338,12 @@ private fun WideProjectBody(
                 loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     WorkingIndicator()
                 }
+                text != null && text.text.isEmpty() -> Text(
+                    stringResource(R.string.project_no_content),
+                    color = MobileDesign.Muted,
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(horizontal = MobileDesign.PageInset, vertical = 12.dp),
+                )
                 text != null -> Column(
                     Modifier
                         .fillMaxSize()
@@ -294,6 +362,8 @@ private fun ChangeRow(change: ProjectChange, selected: Boolean, onClick: () -> U
     Row(
         modifier = modifier
             .fillMaxWidth()
+            .testTag("project.change." + change.path)
+            .heightIn(min = MobileDesign.Control)
             .clip(RoundedCornerShape(10.dp))
             .background(if (selected) MobileDesign.AccentSoft else Color.Transparent)
             .clickable(onClick = onClick)
@@ -314,13 +384,30 @@ private fun ChangeRow(change: ProjectChange, selected: Boolean, onClick: () -> U
                 .background(MobileDesign.Code)
                 .padding(horizontal = 5.dp, vertical = 3.dp),
         )
-        Text(
-            text = change.path,
-            color = if (selected) MobileDesign.Accent else MobileDesign.Ink,
-            style = MaterialTheme.typography.bodyMedium,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = change.path,
+                color = if (selected) MobileDesign.Accent else MobileDesign.Ink,
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            // A rename or copy keeps the path it came from.
+            change.oldPath?.let { old ->
+                Text(
+                    text = old + " → " + change.path,
+                    color = MobileDesign.Muted,
+                    style = MaterialTheme.typography.labelMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        Icon(
+            Icons.Rounded.ChevronRight,
+            contentDescription = null,
+            tint = MobileDesign.Muted,
+            modifier = Modifier.size(16.dp),
         )
     }
 }

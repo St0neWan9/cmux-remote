@@ -13,6 +13,11 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         val model: CmuxViewModel by viewModels()
+        // A return to the foreground redials every Mac; leaving pauses the slow poll.
+        lifecycle.addObserver(object : androidx.lifecycle.DefaultLifecycleObserver {
+            override fun onStart(owner: androidx.lifecycle.LifecycleOwner) = model.onForeground()
+            override fun onStop(owner: androidx.lifecycle.LifecycleOwner) = model.onBackground()
+        })
         if (BuildConfig.DEBUG && intent?.getBooleanExtra("force_relay", false) == true) model.forceRelay = true
         // Debug-only test hook: a UI test can hand over the enrollment code the
         // Mac printed, instead of typing a long URL into the field.

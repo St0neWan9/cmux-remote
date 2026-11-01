@@ -20,6 +20,9 @@ installed cmux.
 - **Pairing** — scan or paste the Mac's expiring `cmux-remote://enroll` code
   (or the signed enrollment JSON the Mac's "import" action copies); the app
   requests access and waits for the owner to approve that exact request.
+  An explicitly chosen legacy `/v1` shared-token Mac can also be added from
+  Advanced settings or its `cmux-remote://pair?v=1` code; it carries shared
+  authority and requires `--legacy` on the Mac.
 - **Nearby Macs** — NSD browses `_cmux-remote._tcp` while a pairing page is
   open, verifies each advertised identity against the signed bootstrap, and
   asks before trusting a found Mac. An already-paired Mac is marked, not offered.
@@ -87,7 +90,7 @@ installed cmux.
 
 ## Not implemented yet
 
-- Revocation notices in the UI, relay directory / relay-origin management.
+- Revocation notices in the UI.
 - Physical foldable testing; real `FoldingFeature` posture tests on hardware.
 - Deep links, notifications, TTS and haptics are intentionally out of scope.
 

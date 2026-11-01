@@ -2,30 +2,33 @@ package com.cmuxremote.mobile.data
 
 import android.content.Context
 import com.cmuxremote.mobile.protocol.AuthorizedConnection
-import com.cmuxremote.mobile.protocol.Identity
 import com.cmuxremote.mobile.protocol.Json
 import com.cmuxremote.mobile.security.KeyVault
 import java.io.File
 
 /**
- * The paired Mac and this device's identity, kept in app-private storage.
+ * The paired Macs and this device's identity, kept in app-private storage.
  *
- * The private key never leaves the app's data directory and is never logged. A
- * file that fails its own signature check is discarded rather than trusted.
+ * The saved grants contain each Mac's private key, so the list is sealed by a
+ * non-exportable Keystore key before it reaches the filesystem. A file that
+ * cannot be opened is discarded rather than trusted; a plaintext file written by
+ * an earlier build is read once and rewritten sealed.
  */
 class ConnectionStore(private val context: Context) {
     private val vault = KeyVault(context)
     private val file: File
         get() = File(File(context.filesDir, "connection"), "paired.json")
 
+    private val listFile: File
+        get() = File(File(context.filesDir, "connection"), "connections.json")
+
     private val keyFile: File
         get() = File(File(context.filesDir, "connection"), "identity.key")
 
     /** Every approved Mac, in the order they were added. */
     fun loadAll(): List<AuthorizedConnection> {
-        val listFile = File(File(context.filesDir, "connection"), "connections.json")
         val saved = runCatching {
-            val text = listFile.readText()
+            val text = readSealed(listFile) ?: return emptyList()
             val array = Json.parse(text) as? kotlinx.serialization.json.JsonArray ?: return emptyList()
             array.mapNotNull { entry ->
                 (entry as? kotlinx.serialization.json.JsonObject)?.let(AuthorizedConnection::from)?.also { it.validate() }
@@ -48,44 +51,31 @@ class ConnectionStore(private val context: Context) {
     fun removeHost(hostID: String) {
         val remaining = loadAll().filterNot { it.host.id == hostID }
         if (remaining.isEmpty()) {
-            File(File(context.filesDir, "connection"), "connections.json").delete()
+            listFile.delete()
         } else {
             saveList(remaining)
         }
     }
 
     private fun saveList(connections: List<AuthorizedConnection>) {
-        val directory = File(context.filesDir, "connection").apply { mkdirs() }
-        val file = File(directory, "connections.json")
-        file.writeText(Json.text(kotlinx.serialization.json.JsonArray(connections.map { it.toJson() })))
-        file.setReadable(false, false); file.setReadable(true, true)
+        writeSealed(listFile, Json.text(kotlinx.serialization.json.JsonArray(connections.map { it.toJson() })))
     }
 
-    fun load(): AuthorizedConnection? {
-        val saved = runCatching {
-            val text = file.readText()
-            val connection = AuthorizedConnection.from(Json.parse(text) as? kotlinx.serialization.json.JsonObject ?: return null)
-            connection.validate()
-            connection
-        }.getOrNull() ?: return null
-        return saved
-    }
+    fun load(): AuthorizedConnection? = runCatching {
+        val text = readSealed(file) ?: return null
+        val connection = AuthorizedConnection.from(Json.parse(text) as? kotlinx.serialization.json.JsonObject ?: return null)
+        connection.validate()
+        connection
+    }.getOrNull()
 
     fun save(connection: AuthorizedConnection) {
         connection.validate()
-        val directory = file.parentFile ?: return
-        directory.mkdirs()
-        directory.setReadable(false, false)
-        directory.setExecutable(false, false)
-        directory.setReadable(true, true)
-        directory.setExecutable(true, true)
-        file.writeText(Json.text(connection.toJson()))
-        file.setReadable(false, false)
-        file.setReadable(true, true)
+        writeSealed(file, Json.text(connection.toJson()))
     }
 
     fun clear() {
         file.delete()
+        listFile.delete()
     }
 
     /**
@@ -111,7 +101,40 @@ class ConnectionStore(private val context: Context) {
     fun clearIdentity() {
         keyFile.delete()
         vault.reset()
+        vault.resetSealed()
         clear()
     }
 
+    /** Reads a sealed file, accepting an unsealed one written before this build. */
+    private fun readSealed(target: File): String? {
+        val bytes = runCatching { target.readBytes() }.getOrNull() ?: return null
+        if (bytes.isEmpty()) return null
+        if (!bytes.startsWith(MAGIC)) return String(bytes, Charsets.UTF_8)
+        // The magic is not authentication: a Keystore invalidation makes this throw,
+        // which the caller turns into "no saved Macs" instead of trusting bytes.
+        val plain = vault.openSealed(bytes.copyOfRange(MAGIC.size, bytes.size))
+        return String(plain, Charsets.UTF_8)
+    }
+
+    private fun writeSealed(target: File, text: String) {
+        val directory = target.parentFile ?: return
+        directory.mkdirs()
+        directory.setReadable(false, false)
+        directory.setExecutable(false, false)
+        directory.setReadable(true, true)
+        directory.setExecutable(true, true)
+        target.writeBytes(MAGIC + vault.seal(text.toByteArray(Charsets.UTF_8)))
+        target.setReadable(false, false)
+        target.setWritable(false, false)
+        target.setReadable(true, true)
+        target.setWritable(true, true)
+    }
+
+    private fun ByteArray.startsWith(prefix: ByteArray): Boolean =
+        size >= prefix.size && prefix.indices.all { this[it] == prefix[it] }
+
+    private companion object {
+        /** Bumped only if the envelope layout changes. */
+        val MAGIC = "CMUXENC1".toByteArray(Charsets.US_ASCII)
+    }
 }

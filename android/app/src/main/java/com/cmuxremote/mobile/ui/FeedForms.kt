@@ -40,6 +40,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
@@ -51,6 +52,7 @@ import com.cmuxremote.mobile.ui.theme.MobileDesign
 data class FeedQuestionOption(val id: String?, val label: String, val description: String?)
 
 data class FeedQuestionForm(
+    val header: String? = null,
     val prompt: String,
     val options: List<FeedQuestionOption>,
     val multiSelect: Boolean,
@@ -83,6 +85,8 @@ fun QuestionFormCard(
     answered: List<String>?,
     onSubmit: (List<String>) -> Unit,
     modifier: Modifier = Modifier,
+    /** Stable prefix for UI tests, e.g. `feed.question.<request>`. */
+    tag: String = "feed.question",
 ) {
     val drafts = remember(questions) { mutableStateMapOf<Int, QuestionAnswer>() }
     val record = answered
@@ -91,10 +95,11 @@ fun QuestionFormCard(
     } else {
         questions.indices.mapNotNull { index -> drafts[index]?.label(questions[index]) }
     }
-    // A request that cannot be skipped needs one answer per question before it can be sent.
-    val missingRequired = record == null && questions.indices.any { index ->
-        !questions[index].allowSkip && drafts[index]?.label(questions[index]) == null
-    }
+    // The request can only be skipped when every question allows it; only then
+    // is every question required.
+    val missingRequired = record == null &&
+        questions.all { !it.allowSkip } &&
+        questions.indices.count { drafts[it]?.label(questions[it]) != null } < questions.size
     // A prompt with no options is answered by the submit itself; anything else needs a choice.
     val answersNothing = answers.isEmpty() && questions.any { it.options.isNotEmpty() }
 
@@ -113,6 +118,7 @@ fun QuestionFormCard(
                         selected = selected,
                         customText = custom.orEmpty(),
                         readOnly = true,
+                        tag = tag + "." + index,
                         onChoose = {},
                         onCustom = {},
                     )
@@ -127,6 +133,7 @@ fun QuestionFormCard(
                         selected = draft?.selected.orEmpty(),
                         customText = draft?.custom.orEmpty(),
                         readOnly = false,
+                        tag = tag + "." + index,
                         onChoose = { optionIndex ->
                             val current = drafts[index] ?: QuestionAnswer()
                             drafts[index] = if (question.multiSelect) {
@@ -162,6 +169,7 @@ fun QuestionFormCard(
                 ) {
                     Button(
                         onClick = { onSubmit(answers) },
+                        modifier = Modifier.testTag(tag + ".submit"),
                         enabled = !busy && !missingRequired && !answersNothing,
                         shape = CircleShape,
                         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
@@ -175,6 +183,7 @@ fun QuestionFormCard(
                     if (questions.any { it.allowSkip }) {
                         OutlinedButton(
                             onClick = { onSubmit(emptyList()) },
+                            modifier = Modifier.testTag(tag + ".skip"),
                             enabled = !busy,
                             shape = CircleShape,
                             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
@@ -196,9 +205,13 @@ fun PermissionDecisionCard(
     busy: Boolean,
     onDecide: (mode: String) -> Unit,
     modifier: Modifier = Modifier,
+    /** Only modes the Mac says it can deliver; an unavailable mode never becomes a button. */
+    allowedModes: List<String> = listOf("once", "always", "all", "bypass", "deny"),
 ) {
     var expanded by remember { mutableStateOf(false) }
     var confirming by remember { mutableStateOf<String?>(null) }
+    val primary = allowedModes.firstOrNull { it == "once" || it == "manual" }
+    val wider = allowedModes.filter { it in PermissionWiderModes }
 
     FloatingSurface(modifier = modifier.fillMaxWidth()) {
         Text(title, color = MobileDesign.Ink, style = MaterialTheme.typography.titleMedium)
@@ -218,30 +231,34 @@ fun PermissionDecisionCard(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Button(
-                onClick = { onDecide("once") },
-                enabled = !busy,
-                shape = CircleShape,
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MobileDesign.Accent,
-                    contentColor = MobileDesign.Canvas,
-                ),
-                modifier = Modifier.weight(1f),
-            ) {
-                Text(stringResource(R.string.feed_allow_once), maxLines = 1)
+            if (primary != null) {
+                Button(
+                    onClick = { onDecide(primary) },
+                    enabled = !busy,
+                    shape = CircleShape,
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MobileDesign.Accent,
+                        contentColor = MobileDesign.Canvas,
+                    ),
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text(permissionModeLabel(primary), maxLines = 1)
+                }
             }
-            OutlinedButton(
-                onClick = { onDecide("deny") },
-                enabled = !busy,
-                shape = CircleShape,
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
-                modifier = Modifier.weight(1f),
-            ) {
-                Text(stringResource(R.string.feed_deny), color = if (busy) MobileDesign.Muted else MobileDesign.Ink, maxLines = 1)
+            if ("deny" in allowedModes) {
+                OutlinedButton(
+                    onClick = { onDecide("deny") },
+                    enabled = !busy,
+                    shape = CircleShape,
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text(stringResource(R.string.feed_deny), color = if (busy) MobileDesign.Muted else MobileDesign.Ink, maxLines = 1)
+                }
             }
         }
-        if (PermissionWiderModes.isNotEmpty()) {
+        if (wider.isNotEmpty()) {
             Spacer(Modifier.height(4.dp))
             Box {
                 TextButton(
@@ -262,7 +279,7 @@ fun PermissionDecisionCard(
                     )
                 }
                 DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                    PermissionWiderModes.forEach { mode ->
+                    wider.forEach { mode ->
                         DropdownMenuItem(
                             text = {
                                 Text(
@@ -319,11 +336,17 @@ fun PlanDecisionCard(
     busy: Boolean,
     onDecide: (mode: String, feedback: String?) -> Unit,
     modifier: Modifier = Modifier,
+    /** Only modes the Mac says it can deliver. */
+    allowedModes: List<String> = listOf("ultraplan", "bypassPermissions", "autoAccept", "manual", "deny"),
 ) {
     var feedback by remember { mutableStateOf("") }
+    var expanded by remember { mutableStateOf(false) }
+    var confirming by remember { mutableStateOf<String?>(null) }
     val send: (String) -> Unit = { mode ->
         onDecide(mode, feedback.trim().takeIf { it.isNotEmpty() })
     }
+    val primary = allowedModes.firstOrNull { it == "manual" } ?: allowedModes.firstOrNull()
+    val wider = allowedModes.filter { it !in setOf(primary, "deny") }
 
     FloatingSurface(modifier = modifier.fillMaxWidth()) {
         Text(title, color = MobileDesign.Ink, style = MaterialTheme.typography.titleMedium)
@@ -350,61 +373,74 @@ fun PlanDecisionCard(
             shape = RoundedCornerShape(14.dp),
         )
         Spacer(Modifier.height(12.dp))
-        Button(
-            onClick = { send("bypassPermissions") },
-            enabled = !busy,
-            shape = CircleShape,
-            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = MobileDesign.Accent,
-                contentColor = MobileDesign.Canvas,
-            ),
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text(stringResource(R.string.feed_execute_plan), maxLines = 1)
-        }
-        Spacer(Modifier.height(8.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(
-                onClick = { send("autoAccept") },
-                enabled = !busy,
-                shape = CircleShape,
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
-                modifier = Modifier.weight(1f),
-            ) {
-                Text(stringResource(R.string.feed_auto_accept), color = if (busy) MobileDesign.Muted else MobileDesign.Ink, maxLines = 1)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (primary != null) {
+                Button(
+                    onClick = { send(primary) },
+                    enabled = !busy,
+                    shape = CircleShape,
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MobileDesign.Accent,
+                        contentColor = MobileDesign.Canvas,
+                    ),
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text(modeLabel(primary), maxLines = 1)
+                }
             }
-            OutlinedButton(
-                onClick = { send("manual") },
-                enabled = !busy,
-                shape = CircleShape,
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
-                modifier = Modifier.weight(1f),
-            ) {
-                Text(stringResource(R.string.feed_continue_after_edit), color = if (busy) MobileDesign.Muted else MobileDesign.Ink, maxLines = 1)
+            if ("deny" in allowedModes) {
+                OutlinedButton(
+                    onClick = { send("deny") },
+                    enabled = !busy,
+                    shape = CircleShape,
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text(stringResource(R.string.feed_deny), color = if (busy) MobileDesign.Muted else MobileDesign.Ink, maxLines = 1)
+                }
             }
         }
-        Spacer(Modifier.height(8.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(
-                onClick = { send("ultraplan") },
-                enabled = !busy,
-                shape = CircleShape,
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
-                modifier = Modifier.weight(1f),
-            ) {
-                Text(stringResource(R.string.feed_deep_plan), color = if (busy) MobileDesign.Muted else MobileDesign.Ink, maxLines = 1)
-            }
-            OutlinedButton(
-                onClick = { send("deny") },
-                enabled = !busy,
-                shape = CircleShape,
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
-                modifier = Modifier.weight(1f),
-            ) {
-                Text(stringResource(R.string.feed_deny), color = if (busy) MobileDesign.Muted else MobileDesign.Ink, maxLines = 1)
+        if (wider.isNotEmpty()) {
+            Spacer(Modifier.height(4.dp))
+            Box {
+                TextButton(
+                    onClick = { expanded = true },
+                    enabled = !busy,
+                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 4.dp),
+                ) {
+                    Text(stringResource(R.string.feed_more_decisions), color = MobileDesign.Muted, style = MaterialTheme.typography.labelMedium)
+                    Icon(Icons.Rounded.ArrowDropDown, contentDescription = null, tint = MobileDesign.Muted, modifier = Modifier.size(16.dp))
+                }
+                DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                    wider.forEach { mode ->
+                        DropdownMenuItem(
+                            text = { Text(modeLabel(mode), color = MobileDesign.Ink, style = MaterialTheme.typography.bodyMedium) },
+                            onClick = { expanded = false; confirming = mode },
+                        )
+                    }
+                }
             }
         }
+    }
+
+    val mode = confirming
+    if (mode != null) {
+        AlertDialog(
+            onDismissRequest = { confirming = null },
+            title = { Text(stringResource(R.string.feed_confirm_decision), color = MobileDesign.Ink) },
+            text = { Text(modeExplanation(mode), color = MobileDesign.Ink, style = MaterialTheme.typography.bodyMedium) },
+            confirmButton = {
+                TextButton(onClick = { confirming = null; send(mode) }) {
+                    Text(stringResource(R.string.feed_use_decision))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirming = null }) {
+                    Text(stringResource(R.string.common_cancel), color = MobileDesign.Muted)
+                }
+            },
+        )
     }
 }
 
@@ -415,17 +451,22 @@ private fun QuestionBlock(
     selected: Set<Int>,
     customText: String,
     readOnly: Boolean,
+    tag: String = "feed.question",
     onChoose: (Int) -> Unit,
     onCustom: (String) -> Unit,
 ) {
     val enabled = !busy && !readOnly
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        question.header?.takeIf { it.isNotBlank() }?.let {
+            Text(it, color = MobileDesign.Muted, style = MaterialTheme.typography.labelMedium)
+        }
         Text(question.prompt, color = MobileDesign.Ink, style = MaterialTheme.typography.bodyLarge)
         question.options.forEachIndexed { optionIndex, option ->
             val isSelected = optionIndex in selected
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .testTag(tag + ".option." + optionIndex)
                     .clickable(enabled = enabled) { onChoose(optionIndex) }
                     .heightIn(min = MobileDesign.Control),
                 verticalAlignment = Alignment.CenterVertically,
@@ -478,7 +519,7 @@ private fun QuestionBlock(
                 value = customText,
                 onValueChange = onCustom,
                 enabled = !busy,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().testTag(tag + ".custom"),
                 placeholder = { Text(stringResource(R.string.feed_other_placeholder), color = MobileDesign.Muted) },
                 minLines = 1,
                 maxLines = 4,
@@ -503,17 +544,36 @@ private fun recordedSelection(question: FeedQuestionForm, answer: String?): Pair
 private val PermissionWiderModes: List<String> = listOf("always", "all", "bypass")
 
 @Composable
-private fun permissionModeLabel(mode: String): String = when (mode) {
+private fun permissionModeLabel(mode: String): String = modeLabel(mode)
+
+/** Fixed labels for every decision mode the Mac can ask for. */
+@Composable
+private fun modeLabel(mode: String): String = when (mode) {
+    "once" -> stringResource(R.string.feed_allow_once)
     "always" -> stringResource(R.string.feed_mode_always_label)
     "all" -> stringResource(R.string.feed_mode_all_label)
     "bypass" -> stringResource(R.string.feed_mode_bypass_label)
+    "deny" -> stringResource(R.string.feed_deny)
+    "manual" -> stringResource(R.string.feed_continue_after_edit)
+    "ultraplan" -> stringResource(R.string.feed_deep_plan)
+    "bypassPermissions" -> stringResource(R.string.feed_execute_plan)
+    "autoAccept" -> stringResource(R.string.feed_auto_accept)
     else -> mode
 }
 
 @Composable
-private fun permissionExplanation(mode: String): String = when (mode) {
+private fun permissionExplanation(mode: String): String = modeExplanation(mode)
+
+@Composable
+private fun modeExplanation(mode: String): String = when (mode) {
+    "once" -> stringResource(R.string.feed_mode_once_explanation)
     "always" -> stringResource(R.string.feed_mode_always_explanation)
     "all" -> stringResource(R.string.feed_mode_all_explanation)
     "bypass" -> stringResource(R.string.feed_mode_bypass_explanation)
+    "manual" -> stringResource(R.string.feed_mode_manual_explanation)
+    "ultraplan" -> stringResource(R.string.feed_mode_ultraplan_explanation)
+    "bypassPermissions" -> stringResource(R.string.feed_mode_bypass_permissions_explanation)
+    "autoAccept" -> stringResource(R.string.feed_mode_auto_accept_explanation)
+    "deny" -> stringResource(R.string.feed_mode_deny_explanation)
     else -> ""
 }
