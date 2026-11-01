@@ -189,7 +189,9 @@ final class ConversationModel {
         guard messages.isEmpty, generation == nil else { return }
         // A stored conversation is shown whole: every page read so far, not just the newest one.
         if let store, let stored = await store.restore(scope: client.operationRecoveryScope, sessionID: session.id) {
-            guard readsEnabled, messages.isEmpty, generation == nil else { return }
+            // Showing the stored copy is not a read: a page reopened while the previous visit's suspension is still
+            // in effect used to throw it away and sit blank until the first network read landed.
+            guard !Task.isCancelled, messages.isEmpty, generation == nil else { return }
             generation = stored.generation; hasMore = stored.hasMore
             applyStored(stored, live: nil)
             diagLog(.info, category: "open", "restored from store messages=\(messages.count)")
@@ -200,7 +202,7 @@ final class ConversationModel {
         guard let entry = await cache.load(scope: client.operationRecoveryScope, sessionID: session.id) else { return }
         let loaded = ContinuousClock.now
         // The read may have landed while the stored copy was being read; the fresh one wins.
-        guard readsEnabled, messages.isEmpty, generation == nil else { return }
+        guard !Task.isCancelled, messages.isEmpty, generation == nil else { return }
         generation = entry.snapshot.generation; hasMore = entry.snapshot.hasMore
         applyStored(entry.snapshot, live: entry.preview)
         // Opening a long conversation should be instant; when it is not, this says whether the stored copy or its
