@@ -52,6 +52,8 @@
 "pair.advanced" = "Advanced settings";
 "pair.cancel" = "Cancel";
 "pair.camera_unavailable" = "Camera access is unavailable. Allow camera access in Settings or use advanced pairing.";
+"pair.camera_hint" = "Point the camera at the QR code shown on the Mac. Tap to focus.";
+"pair.camera_detected" = "Code found";
 "feed.custom" = "Or type an answer";
 "feed.submit" = "Submit answers";
 "pair.connecting" = "Connecting…";

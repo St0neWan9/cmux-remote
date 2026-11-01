@@ -52,6 +52,8 @@
 "pair.advanced" = "高级设置";
 "pair.cancel" = "取消";
 "pair.camera_unavailable" = "相机不可用，请在设置中允许相机访问，或使用高级配对。";
+"pair.camera_hint" = "把 Mac 上显示的二维码放进取景框，轻点画面可对焦。";
+"pair.camera_detected" = "已识别";
 "feed.custom" = "也可以输入答案";
 "feed.submit" = "提交答案";
 "pair.connecting" = "正在连接…";
