@@ -32,7 +32,11 @@ class BridgeClient(
     /** Set when the Bridge is reachable only through its relay. */
     @Volatile private var link: LinkClient? = null
 
-    fun useLink(client: LinkClient) { link = client; epoch = null }
+    /** Uses [client] for reads; [epoch] is the one read over that link, when known. */
+    fun useLink(client: LinkClient, epoch: String? = null) {
+        link = client
+        this.epoch = epoch
+    }
 
     fun clearLink() { link = null; epoch = null }
 
