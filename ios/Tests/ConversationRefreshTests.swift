@@ -76,6 +76,28 @@ final class ConversationRefreshTests: XCTestCase {
         await model.refresh()
         XCTAssertEqual(model.messages.map(\.seq), [100, 200, 300, 400, 500])
     }
+    func testTheTranscriptIsShownWhileTheSessionListIsStillReading() async throws {
+        // The Mac's session list is every conversation it holds and can take seconds; the page is one transcript.
+        let archive = Archive([nil: page([100, 200], cursor: nil)])
+        let pairing = try PairingConfiguration(host: "127.0.0.1", port: 1, token: String(repeating: "a", count: 64),
+                                               certificateSHA256: String(repeating: "b", count: 64))
+        let descriptor = descriptor
+        let model = ConversationModel(session: descriptor, client: RemoteClient(pairing: pairing),
+                                      loadRecovery: { nil }, saveRecovery: { _ in },
+                                      readSessions: { await withCheckedContinuation { _ in } },
+                                      readPreview: { PreviewSnapshot(text: nil, available: false) },
+                                      readFeed: { [] },
+                                      archive: ArchiveChain { cursor, _ in
+                                          guard let page = archive.page(cursor) else {
+                                              throw BridgeError("history_unavailable", "No such page in this test.", status: 404)
+                                          }
+                                          return page
+                                      })
+        let reading = Task { await model.refresh() }
+        for _ in 0..<200 where model.messages.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
+        reading.cancel()
+        XCTAssertEqual(model.messages.map(\.seq), [100, 200], "The page waited for the Mac's whole session list")
+    }
     func testAHiddenConversationReadsOnlyItsTranscript() async throws {
         let archive = Archive([nil: page([100], cursor: nil)])
         let listings = Listing(), previews = Listing()
