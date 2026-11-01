@@ -177,7 +177,10 @@ class PendingEnrollment(
                 "enrollment",
                 "LAN unavailable; moving $verb onto the relay",
             )
-            relayLink().request("POST", "/v2/enrollment/$verb", null, body)
+            android.util.Log.i("cmux-enroll", "LAN failed for $verb (${error.javaClass.simpleName}); opening relay link")
+            val relayed = relayLink()
+            android.util.Log.i("cmux-enroll", "relay link open=${relayed.isOpen} relayed=${relayed.dialedViaRelay}")
+            relayed.request("POST", "/v2/enrollment/$verb", null, body)
         }
         parse(verb, data)
     }
@@ -214,7 +217,18 @@ class PendingEnrollment(
             agreementKey = com.cmuxremote.mobile.protocol.HpkeSession.generateKeyPair(),
             onEvent = {},
         )
-        client.connect(enrollment = true)
+        try {
+            // The direct HTTPS attempt already failed; dialing the LAN WebSocket first
+            // would only add another timeout before the relay that can actually answer.
+            client.connectForcedRelay(relay, enrollment = true)
+        } catch (error: Exception) {
+            client.close()
+            android.util.Log.w(
+                "cmux-enroll",
+                "relay connect failed: ${error.javaClass.name} code=${(error as? ProtocolException)?.code} message=${error.message}",
+            )
+            throw error
+        }
         if (!client.isOpen) {
             client.close()
             throw ProtocolException("link_failed", "The relay link did not open.", 502)

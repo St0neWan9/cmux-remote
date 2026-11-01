@@ -257,6 +257,7 @@ fun CmuxApp(viewModel: CmuxViewModel) {
                         onRemoveRelay = viewModel::removeRelayOrigin,
                         onRefreshRelay = viewModel::refreshRelayDirectory,
                         onPairListed = viewModel::pairListed,
+                        onResetIdentity = viewModel::resetIdentity,
                     )
                 }
             }
@@ -578,6 +579,7 @@ fun CmuxApp(viewModel: CmuxViewModel) {
                     onRemoveRelay = viewModel::removeRelayOrigin,
                     onRefreshRelay = viewModel::refreshRelayDirectory,
                     onPairListed = viewModel::pairListed,
+                    onResetIdentity = viewModel::resetIdentity,
                     onBack = { viewModel.setAddingDevice(false) },
                 )
             }
