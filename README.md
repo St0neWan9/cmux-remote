@@ -174,6 +174,9 @@ that setting.
 - [Connection v2](docs/CONNECTION-V2.md) — pairing, grants and signing
 - [cmux-tui daemon adapter](docs/CMUX-TUI-ADAPTER.md)
 - [WebSocket and Cloudflare relay](docs/WEBSOCKET-RELAY.md)
+- [Android and adaptive mobile plan](docs/ADAPTIVE-MOBILE-PLAN.md) — iPhone Duo, foldables, iPad two-pane and the Android client
+- [Android](android/README.md) — adaptive client for phones and foldables; pairing, conversations, send/stop and Feed
+- [iOS ↔ Android parity](docs/IOS-ANDROID-PARITY.md) — item-by-item feature comparison
 - [Mac release packaging](docs/MAC-RELEASE.md) · [TestFlight packaging](docs/TESTFLIGHT.md)
 - [Development and validation](docs/DEVELOPMENT.md)
 
