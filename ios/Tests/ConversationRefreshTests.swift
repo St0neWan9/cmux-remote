@@ -37,14 +37,14 @@ final class ConversationRefreshTests: XCTestCase {
         func increment() { lock.lock(); count += 1; lock.unlock() }
         var value: Int { lock.lock(); defer { lock.unlock() }; return count }
     }
-    private func makeModel(_ archive: Archive, listings: Listing = Listing()) throws -> ConversationModel {
+    private func makeModel(_ archive: Archive, listings: Listing = Listing(), previews: Listing = Listing()) throws -> ConversationModel {
         let pairing = try PairingConfiguration(host: "127.0.0.1", port: 1, token: String(repeating: "a", count: 64),
                                                certificateSHA256: String(repeating: "b", count: 64))
         let descriptor = descriptor
         return ConversationModel(session: descriptor, client: RemoteClient(pairing: pairing),
                                  loadRecovery: { nil }, saveRecovery: { _ in },
                                  readSessions: { listings.increment(); return [descriptor] },
-                                 readPreview: { PreviewSnapshot(text: nil, available: false) },
+                                 readPreview: { previews.increment(); return PreviewSnapshot(text: nil, available: false) },
                                  readFeed: { [] },
                                  archive: ArchiveChain { cursor, _ in
                                      guard let page = archive.page(cursor) else {
@@ -75,6 +75,19 @@ final class ConversationRefreshTests: XCTestCase {
         archive.replace([nil: page([300, 400, 500], cursor: "c1"), "c1": page([100, 200], cursor: nil)])
         await model.refresh()
         XCTAssertEqual(model.messages.map(\.seq), [100, 200, 300, 400, 500])
+    }
+    func testAHiddenConversationReadsOnlyItsTranscript() async throws {
+        let archive = Archive([nil: page([100], cursor: nil)])
+        let listings = Listing(), previews = Listing()
+        let model = try makeModel(archive, listings: listings, previews: previews)
+        await model.syncHidden()
+        XCTAssertEqual(model.messages.map(\.seq), [100], "The hidden conversation did not read its transcript")
+        XCTAssertEqual(listings.value, 0, "A hidden conversation read the Mac's whole session list")
+        XCTAssertEqual(previews.value, 0, "A hidden conversation read the live tail it does not draw")
+        // On screen it reads everything again.
+        await model.refresh()
+        XCTAssertEqual(listings.value, 1, "An on-screen conversation did not read its own row")
+        XCTAssertEqual(previews.value, 1, "An on-screen conversation did not read its live tail")
     }
     func testARefreshReadsTheSessionListOnlyOnceForItsBurst() async throws {
         let archive = Archive([nil: page([100], cursor: nil)])

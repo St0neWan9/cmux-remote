@@ -12,7 +12,7 @@ struct ErrorPresentation {
         return ["relay_unavailable", "connection_failed",
                 "bridge_offline", "bridge_starting", "bridge_replaced",
                 "invalid_proof", "replayed_request", "relay_configuration",
-                "capacity"].contains((error as? BridgeError)?.code ?? "")
+                "capacity", "link_busy"].contains((error as? BridgeError)?.code ?? "")
     }
     func message(_ error: any Error) -> String {
         if let network = error as? URLError {
