@@ -79,12 +79,14 @@ fun PairingScreen(
     onRemoveRelay: (String) -> Unit = {},
     onRefreshRelay: (() -> Unit)? = null,
     onPairListed: ((EnrollmentBootstrap) -> Unit)? = null,
+    onResetIdentity: (() -> Unit)? = null,
     onBack: (() -> Unit)? = null,
 ) {
     var relayDraft by remember { mutableStateOf("") }
     var advanced by remember { mutableStateOf(false) }
     var importText by remember { mutableStateOf("") }
     var trust by remember { mutableStateOf<TrustTarget?>(null) }
+    var confirmReset by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -118,6 +120,18 @@ fun PairingScreen(
             color = MobileDesign.Muted,
         )
 
+        if (state.busy) {
+            FloatingSurface(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    WorkingIndicator(size = 16.dp)
+                    Text(
+                        stringResource(R.string.pair_connecting),
+                        color = MobileDesign.Ink,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+            }
+        }
         if (onScan != null) {
             Button(
                 onClick = onScan,
@@ -217,8 +231,7 @@ fun PairingScreen(
                 value = relayDraft,
                 onValueChange = { relayDraft = it.trim() },
                 modifier = Modifier.fillMaxWidth(),
-                // The owner's relay is the usual one; any canonical origin is accepted.
-                placeholder = { Text("https://relay.trentaml.com", color = MobileDesign.Muted) },
+                placeholder = { Text("https://your-relay.workers.dev", color = MobileDesign.Muted) },
                 label = { Text(stringResource(R.string.pair_relay_address), color = MobileDesign.Muted) },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Done),
                 singleLine = true,
@@ -280,6 +293,18 @@ fun PairingScreen(
                 ) {
                     Text(stringResource(R.string.pair_import))
                 }
+                if (onResetIdentity != null) {
+                    Spacer(Modifier.height(14.dp))
+                    Text(
+                        stringResource(R.string.pair_reset_identity_note),
+                        color = MobileDesign.Muted,
+                        style = MaterialTheme.typography.labelMedium,
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    TextButton(onClick = { confirmReset = true }) {
+                        Text(stringResource(R.string.pair_reset_identity), color = MaterialTheme.colorScheme.error)
+                    }
+                }
             }
         }
 
@@ -292,6 +317,25 @@ fun PairingScreen(
         TextButton(onClick = onRetrySaved) {
             Text(stringResource(R.string.pair_retry_saved), color = MobileDesign.Muted)
         }
+    }
+
+    if (confirmReset && onResetIdentity != null) {
+        AlertDialog(
+            onDismissRequest = { confirmReset = false },
+            title = { Text(stringResource(R.string.pair_reset_identity_title), color = MobileDesign.Ink) },
+            text = { Text(stringResource(R.string.pair_reset_identity_note), color = MobileDesign.Muted) },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmReset = false
+                    onResetIdentity()
+                }) { Text(stringResource(R.string.pair_reset_identity), color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmReset = false }) {
+                    Text(stringResource(R.string.common_cancel), color = MobileDesign.Muted)
+                }
+            },
+        )
     }
 
     trust?.let { target ->

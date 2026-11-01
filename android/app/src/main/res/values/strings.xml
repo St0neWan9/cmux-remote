@@ -48,7 +48,7 @@
 
     <!-- Stable error codes -->
     <string name="error_unauthorized">这台设备在这台 Mac 上的授权不足或已失效。</string>
-    <string name="error_revoked">这台设备已被 Mac 撤销授权，请重新配对。</string>
+    <string name="error_revoked">这台设备的身份已被 Mac 撤销，中转会一直拒绝它。请重置本机身份后再配对（或在同一局域网内配对）。</string>
     <string name="error_invalid_proof">请求校验失败，正在重新连接。</string>
     <string name="error_host_changed">主机身份已变化，需要重新核对并配对。</string>
     <string name="error_invalid_certificate">证书与配对时保存的不一致，已停止连接。</string>
@@ -72,6 +72,7 @@
     <string name="pair_description">扫码、选择附近或中转上发现的 Mac；每台设备有自己的密钥，需要 Mac 主人批准。</string>
     <string name="pair_code_label">配对码</string>
     <string name="pair_requesting">正在请求…</string>
+    <string name="pair_connecting">正在连接 Mac…（局域网不通时会自动走中转，最长约 30 秒）</string>
     <string name="pair_request_access">请求访问</string>
     <string name="pair_scan">扫码</string>
     <string name="pair_scan_instructions">对准 Mac 上显示的二维码；扫不上时可以用下方的中转目录或高级导入。</string>
@@ -86,6 +87,9 @@
     <string name="pair_import_note">无法扫码时，可以粘贴配对链接，或 Mac 导出的登记 JSON。</string>
     <string name="pair_import_placeholder">cmux-remote://enroll… 或 {…}</string>
     <string name="pair_import">导入并申请</string>
+    <string name="pair_reset_identity">重置本机身份</string>
+    <string name="pair_reset_identity_title">重置本机身份？</string>
+    <string name="pair_reset_identity_note">会删除本机密钥、所有已配对的 Mac 和本地对话缓存；下次配对是一台新设备。仅在设备已被 Mac 撤销、且无法在同一局域网重新配对时使用。</string>
     <string name="pair_approved">已连接</string>
     <string name="pair_retry_saved">已经配过对？重试已保存的连接</string>
     <string name="pair_awaiting_owner">等待 %1$s 批准</string>
