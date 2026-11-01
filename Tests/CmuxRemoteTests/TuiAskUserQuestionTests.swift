@@ -79,6 +79,46 @@ import CmuxRemoteCore
         #expect(Set(effects.compactMap(\.2)).count == 5)
     }
 
+    /// Claude Code wraps a long question inside the menu's box, so its prompt is never one whole screen line.
+    /// Captured from a real run on this Mac; the menu is still that request's own menu.
+    private let wrappedQuestion = [
+        "☐ 对照哪个",
+        "",
+        "│ 我在所有分支里都没找到「iOS 下拉分页又优化了」对应的提交：RN 端的 MessageList.tsx 和 ChatView.tsx 最后一次动分页是 08-06 的",
+        "│ e6c3b650f「support paged mobile chat",
+        "│ history」，之后的改动都和分页无关。目前的情况是：RN（iOS/Android）的对话页顶部有「加载更早消息」按钮，按 before_seq 每次取 30",
+        "│ 轮，配合 80/40 的渲染窗口；鸿蒙的对话页只加载最近 30 轮，没有加载更早消息的功能，但 API 参数和翻译 key",
+        "│ 都已经有了。另外，活动页的历史分页两端都已实现。你说的是哪一个？",
+        "",
+        "❯ 1. 鸿蒙对话页补齐 RN 分页",
+        "     按 RN 现有逻辑（before_seq、30 轮一页、80/40 渲染窗口、prepend",
+        "     后保持阅读位置）给鸿蒙对话页加「加载更早消息」，harmony-native-src 和 harmony/entry 两份镜像同步改，并补结构测试",
+        "  2. 优化还没推到远端",
+        "     这次优化在别的机器或本地分支上，还没 push；请告诉我分支名或 commit，我拉下来再对照",
+        "  3. RN 改成下拉自动加载",
+        "     把 RN 的按钮改成滚到顶部或下拉时自动加载更早消息（现在测试明确禁止 onScrollToUpper），再同步到鸿蒙",
+        "  4. Type something.",
+        "───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────",
+        "  5. Chat about this",
+        "",
+        "Enter to select · ↑/↓ to navigate · Esc to cancel",
+    ].joined(separator: "\n")
+    private let wrappedPrompt = "我在所有分支里都没找到「iOS 下拉分页又优化了」对应的提交：RN 端的 MessageList.tsx 和 ChatView.tsx 最后一次动分页是 08-06 的 e6c3b650f「support paged mobile chat history」，之后的改动都和分页无关。目前的情况是：RN（iOS/Android）的对话页顶部有「加载更早消息」按钮，按 before_seq 每次取 30 轮，配合 80/40 的渲染窗口；鸿蒙的对话页只加载最近 30 轮，没有加载更早消息的功能，但 API 参数和翻译 key 都已经有了。另外，活动页的历史分页两端都已实现。你说的是哪一个？"
+
+    @Test func aMenuThatWrapsItsQuestionIsStillOffered() async throws {
+        let ask = [["question": wrappedPrompt, "header": "对照哪个", "multiSelect": false,
+                    "options": [["label": "鸿蒙对话页补齐 RN 分页"], ["label": "优化还没推到远端"], ["label": "RN 改成下拉自动加载"]]]]
+        let (source, backend, service, root) = try await setup(screen: wrappedQuestion, transcript: [call("toolu_long", ask)])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let record = try #require(try await service.sessions().first)
+        let items = try await service.feed()["items"].array ?? []
+        // The card in the conversation finds the request by the transcript's exact words.
+        let matched = ConversationQuestions().pending(items, agent: record.agent, sessionID: record.id)
+        let match = try #require(matched[wrappedPrompt], "A wrapped question was not offered for an answer")
+        _ = try await service.reply(requestID: match.requestID, body: ConversationQuestions().reply(requestID: match.requestID, selections: ["RN 改成下拉自动加载"]))
+        #expect(await source.effects.map { $0.1["keys"]?.array ?? [] } == [[.string("3")]])
+    }
+
     @Test func aSingleChoiceQuestionSubmitsWithItsNumberAlone() async throws {
         let ask = [["question": "要继续吗?", "header": "继续", "multiSelect": false, "options": [["label": "继续"], ["label": "停下"]]]]
         let (source, backend, _, root) = try await setup(screen: oneQuestion, transcript: [call("toolu_go", ask)])
