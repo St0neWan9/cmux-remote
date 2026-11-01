@@ -205,6 +205,8 @@ data class EnrollmentStatus(
     val state: String,
     val grant: EnrollmentGrant?,
     val grantSignature: String?,
+    /** The relay permit bound to this approved device, not the enrollment window's. */
+    val relay: com.cmuxremote.mobile.bridge.RelayEndpoint? = null,
 ) {
     companion object {
         fun from(json: JsonObject): EnrollmentStatus {
@@ -217,6 +219,7 @@ data class EnrollmentStatus(
                 state = json.string("state") ?: "unknown",
                 grant = grantJson?.objectValue("value")?.let(EnrollmentGrant::from),
                 grantSignature = grantJson?.string("signature"),
+                relay = com.cmuxremote.mobile.bridge.RelayEndpoint.from(json["relay"]),
             )
         }
     }
