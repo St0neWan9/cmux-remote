@@ -27,8 +27,6 @@ struct ConversationView: View {
     /// It starts as the outgoing bubble, which the transcript then replaces with the recorded message; the pin
     /// follows the text into that row so the page does not move when the swap happens.
     @State private var pinnedSent: PinnedPrompt?
-    /// The content height before the page's blank tail, which decides how much tail still fits.
-    @State private var timelineContentHeight: CGFloat = 0
     /// The scrolling page's own height: the filler is laid out in the scroll view's coordinates, not the
     /// screen's, so it must be the scroll view's height that fills it.
     @State private var scrollHeight: CGFloat = 0
@@ -213,16 +211,10 @@ struct ConversationView: View {
         // The live label belongs at the top of the reply in progress; before the first reply it has its own row.
         let activeAnchor: String? = runningSince == nil ? nil : model.responses.last.flatMap { $0.completed ? nil : $0.firstMessageID }
         VStack(spacing: 0) {
-        // The blank tail goes above the rows while the page shows its end: a conversation shorter than the
-        // page then rests against the composer. A prompt this phone sent takes the tail below itself instead,
-        // so the reply grows into the room under it; the total is the same either way, so the page does not move.
-        //
-        // Only once the rows have a height. Before the first layout pass the measured height is zero, and a filler
-        // of the whole page puts every row below the fold — where a lazy stack never lays out, so the height it
-        // would have measured never arrives. That is a blank page that stays blank, and dragging only reaches the
-        // filler. (Seen on a phone over the relay; the same page lays out instantly on a fast link.)
-        if tailFirst && !showsInitialLoading && timelineContentHeight > 0 { Color.clear.frame(height: max(0, bottom - timelineContentHeight)) }
-        // The rows' own height, measured where nothing else can stretch it.
+        // The page's own bottom anchor holds the last row against the composer when the conversation is shorter
+        // than the page. It used to be a blank filler sized from the rows' measured height, which is zero before
+        // the first layout pass: the filler then took the whole page, the rows fell below the fold where a lazy
+        // stack never lays out, and the page stayed blank for good. The system's anchor needs no measurement.
         LazyVStack(alignment: .leading, spacing: 6) {
             if model.hasMore {
                 // Reaching the top while reading back pages in the earlier messages; the page opens at the latest.
@@ -264,18 +256,6 @@ struct ConversationView: View {
 
             }
         }
-        // The rows' own height, measured on a stack that holds no filler: a value that cannot depend on
-        // what it sizes. (Measuring the same stack the filler lives in made the difference always zero.)
-        //
-        // Clamped at the page height, because above it the filler is zero and the number is never read again.
-        // A lazy stack's estimate of its own height drifts by a point or two as rows are measured, and every
-        // write re-evaluated this page and re-laid the whole stack: a long conversation then never went idle,
-        // and the reader saw it as a freeze. Only a page shorter than the screen still needs to be followed.
-        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
-            let value = min(height, bottom)
-            if abs(value - timelineContentHeight) > 0.5 { timelineContentHeight = value }
-        }
-
         // The whole difference between the page and its content; above the rows when the end is showing.
         // Below a pinned prompt it is the room left after the rows under that prompt, so its top can reach
         // the page's top; the reply then grows into that room without moving the prompt.
@@ -418,6 +398,7 @@ struct ConversationView: View {
             ScrollView {
                 timeline(bottom: scrollHeight, tailFirst: pinnedSent == nil) { Task { await loadOlder(proxy) } }
             }
+            .defaultScrollAnchor(.bottom)
             .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
                 if abs(height - scrollHeight) > 0.5 { scrollHeight = height }
             }
