@@ -9,7 +9,7 @@ struct MacPreferenceRow<Content: View>: View {
     var body: some View {
         GridRow(alignment: topAligned ? .top : .firstTextBaseline) {
             Text(title.isEmpty ? "" : String(format: String(localized: "mac.label", bundle: .interface), title)).lineLimit(1)
-                .padding(.top, topAligned ? 4 : 0).gridColumnAlignment(.trailing)
+                .padding(.top, topAligned ? design.labelTopPadding : 0).gridColumnAlignment(.trailing)
             VStack(alignment: .leading, spacing: design.rowSpacing, content: content)
                 .frame(width: design.controlWidth, alignment: .leading)
         }
