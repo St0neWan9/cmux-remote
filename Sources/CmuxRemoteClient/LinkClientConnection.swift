@@ -64,7 +64,9 @@ actor LinkClientConnection {
     func updateRelay(_ relay: RelayEndpoint?) { endpoint.relay = relay }
     func exchange(_ frame: LinkFrame) async throws -> LinkResourceResponse {
         try Task.checkCancellation(); try await connect(); try Task.checkCancellation()
-        guard pending.count < 8 else { throw BridgeError("too_large", "The concurrent request limit was reached.", status: 429) }
+        // Capacity, not input: a page that arrives while the link is saturated asks again, and the reader is not
+        // shown an error about what they typed.
+        guard pending.count < 8 else { throw BridgeError("link_busy", "The concurrent request limit was reached.", status: 429) }
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { done in
                 let deadline = Task { [weak self] in
@@ -81,7 +83,7 @@ actor LinkClientConnection {
         try Task.checkCancellation(); try await connect()
         // Matches the Bridge's own limit. Paths are shared on the phone, so this counts distinct paths: the session
         // list, each running agent's history, the open agent's preview and each Mac's pending items.
-        guard subscriptions.count < 16 else { throw BridgeError("too_large", "The subscription limit was reached.", status: 429) }
+        guard subscriptions.count < 16 else { throw BridgeError("link_busy", "The subscription limit was reached.", status: 429) }
         let stream = AsyncThrowingStream<LinkFrame, any Error>.makeStream(bufferingPolicy: .bufferingNewest(1))
         subscriptions[frame.id] = stream.continuation
         stream.continuation.onTermination = { [weak self] _ in Task { await self?.cancel(frame.id) } }

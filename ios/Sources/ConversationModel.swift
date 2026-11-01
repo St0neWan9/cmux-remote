@@ -297,9 +297,13 @@ final class ConversationModel {
         }
     }
     /// One read for a conversation not on screen; one that is on screen is kept current by its own observer.
+    ///
+    /// A hidden conversation only needs its transcript: its live tail is not drawn and its own row in the Mac's
+    /// session list is not shown, while the link carries a bounded number of requests at once. Followers each
+    /// asking three questions are what filled that bound, and a page that arrived while it was full failed.
     func syncHidden() async {
         guard !observing, !busy, !Task.isCancelled else { return }
-        await refreshReads.run { [self] request in await readLatest(request) }
+        await refreshReads.run { [self] request in await readLatest(request, hidden: true) }
     }
     /// Fills the stored copy from the page the reader is on back to the start of the transcript. It only writes to
     /// the store: the visible conversation is unchanged, and the work stops when the page goes away.
@@ -340,7 +344,7 @@ final class ConversationModel {
         await refreshReads.run { [self] request in await readLatest(request) }
         await refreshQuestions()
     }
-    private func readLatest(_ request: UUID) async {
+    private func readLatest(_ request: UUID, hidden: Bool = false) async {
         let started = ContinuousClock.now
         defer { diagLog(.debug, category: "open", "read landed after \(ContinuousClock.now - started) messages=\(messages.count)") }
         do {
@@ -354,7 +358,7 @@ final class ConversationModel {
             // The session list is a read of the whole Mac's sessions, and the page only needs its own row from it.
             // Reading it on every refresh made the Mac answer the same list again and again while a turn ran, so
             // it is read again only once this page's own row may have changed.
-            let readsListing = descriptorsReadAt.map { Date().timeIntervalSince($0) >= descriptorsInterval } ?? true
+            let readsListing = !hidden && (descriptorsReadAt.map { Date().timeIntervalSince($0) >= descriptorsInterval } ?? true)
             if readsListing { descriptorsReadAt = Date() }
             async let descriptorsRead: [SessionDescriptor] = readsListing ? readSessions() : []
             let chain = archive
@@ -371,7 +375,7 @@ final class ConversationModel {
             if let chain { readHole = { cursor, limit in try await chain.page(from: cursor, limit: limit) } }
             else { readHole = nil }
             async let historyRead = readPage()
-            async let liveRead = try? readPreview()
+            async let liveRead: PreviewSnapshot? = hidden ? nil : try? readPreview()
             let descriptors = try await descriptorsRead
             guard refreshReads.isCurrent(request) else { return }
             if let current = descriptors.first(where: { $0.id == session.id }) {
