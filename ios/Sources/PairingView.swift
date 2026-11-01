@@ -49,15 +49,26 @@ struct PairingView: View {
             }
             .task { await model.refreshRelayDirectory() }
             .navigationDestination(isPresented: $scanning) {
-                WhitePage(title: String(localized: "pair.scan")) {
+                // The camera is the page: a white header only pushes the preview down, and the reader aims at what
+                // fills the screen. The way back floats over it.
+                ZStack(alignment: .topLeading) {
                     QRScannerView { code in
                         scanning = false
                         do {
                             if code.hasPrefix("cmux-remote://enroll") { Task { await model.enrollQR(code) } }
                             else { let pairing = try PairingLinkCodec().decode(code); Task { await model.pair(pairing) } }
                         } catch { model.error = String(localized: "pair.invalid") }
-                    }.ignoresSafeArea(edges: .bottom)
+                    }.ignoresSafeArea()
+                    Button { scanning = false } label: { Image(systemName: "chevron.left") }
+                        .floatingIconButton()
+                        .accessibilityLabel(String(localized: "page.back"))
+                        .accessibilityIdentifier("page.back")
+                        .padding(.leading, MobileDesign.pageInset).padding(.top, 8)
                 }
+                .toolbar(.hidden, for: .navigationBar)
+                .background(InteractivePopInstaller())
+                .environment(\.colorScheme, .light)
+                .accessibilityAction(.escape) { scanning = false }
             }
         }
     }
