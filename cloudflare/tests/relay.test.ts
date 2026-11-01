@@ -41,7 +41,7 @@ async function fixture() {
   return { mf, host, phone, bridge, join };
 }
 
-test("real SQLite DO relays opaque bytes only to the selected phone and revokes admission", async () => {
+test("real SQLite DO relays opaque bytes only to the selected phone", async () => {
   const f = await fixture();
   try {
     assert.equal((await f.join()).status, 503);
@@ -62,7 +62,10 @@ test("real SQLite DO relays opaque bytes only to the selected phone and revokes 
     assert.deepEqual([...new Uint8Array(await secondDownstream)], [4, 5, 6]);
     const revocation = next(bridge); bridge.send(JSON.stringify({ kind: "registry", revoked: [f.phone.id] }));
     assert.equal(JSON.parse(await revocation).kind, "ready");
-    assert.equal((await f.join()).status, 401);
+    // The relay grants transport; the Bridge rejects a revoked device's reads. A
+    // revoked device must still be able to submit a fresh enrollment request.
+    const rejoined = await f.join(); assert.equal(rejoined.status, 101);
+    rejoined.webSocket!.accept(); rejoined.webSocket!.close();
     bridge.close(); phone.close(); secondPhone.close();
   } finally { await f.mf.dispose(); }
 });
