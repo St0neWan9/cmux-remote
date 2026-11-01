@@ -53,6 +53,7 @@
     <string name="error_host_changed">主机身份已变化，需要重新核对并配对。</string>
     <string name="error_invalid_certificate">证书与配对时保存的不一致，已停止连接。</string>
     <string name="error_connection">连不上这台 Mac。</string>
+    <string name="error_relay_unavailable">中转暂时不可用，检查地址或网络后再试。</string>
     <string name="error_timeout">请求超时，请稍后重试。</string>
     <string name="error_response_too_large">响应超出大小上限，已丢弃。</string>
     <string name="error_operation_not_found">Mac 上查不到这条操作的记录；查不到不代表没有执行。</string>
@@ -64,18 +65,31 @@
 
     <!-- Pairing -->
     <string name="pair_title">连接你的 Mac</string>
-    <string name="pair_description">在 Mac 的 Cmux Remote 里打开「添加设备」，把配对码粘贴到这里。每台设备有自己的密钥，需要 Mac 主人批准。</string>
+    <string name="pair_description">扫码、选择附近或中转上发现的 Mac；每台设备有自己的密钥，需要 Mac 主人批准。</string>
     <string name="pair_code_label">配对码</string>
     <string name="pair_requesting">正在请求…</string>
     <string name="pair_request_access">请求访问</string>
     <string name="pair_scan">扫码</string>
+    <string name="pair_scan_instructions">对准 Mac 上显示的二维码；扫不上时可以用下方的中转目录或高级导入。</string>
+    <string name="pair_relay">中转（Relay）</string>
+    <string name="pair_relay_hint">添加 Mac 的中转地址后，即使不在同一网络也能找到它。</string>
+    <string name="pair_relay_loading">正在读取中转目录…</string>
+    <string name="pair_relay_empty">这个中转上暂时没有在线的 Mac。</string>
+    <string name="pair_relay_remove">移除</string>
+    <string name="pair_relay_address">中转地址</string>
+    <string name="pair_relay_add">添加中转</string>
+    <string name="pair_advanced">高级</string>
+    <string name="pair_import_note">无法扫码时，可以粘贴配对链接，或 Mac 导出的登记 JSON。</string>
+    <string name="pair_import_placeholder">cmux-remote://enroll… 或 {…}</string>
+    <string name="pair_import">导入并申请</string>
+    <string name="pair_approved">已连接</string>
     <string name="pair_retry_saved">已经配过对？重试已保存的连接</string>
     <string name="pair_awaiting_owner">等待 %1$s 批准</string>
     <string name="pair_awaiting_owner_note">在 Mac 上打开 Cmux Remote → 设备，核对并批准这个请求。</string>
     <string name="pair_failed_title">无法连接</string>
     <string name="pair_scan_title">扫描二维码</string>
     <string name="pair_scan_guide">把 Mac 上的配对二维码放进框内</string>
-    <string name="pair_scan_focus_hint">点按画面可对焦；太近或太远时调整一下距离</string>
+    <string name="pair_scan_focus_hint">框只是参考，二维码完整出现在画面里就能识别；点按可对焦，远了可用 + 放大</string>
     <string name="pair_scan_torch">补光灯</string>
     <string name="pair_scan_torch_on">打开补光灯</string>
     <string name="pair_scan_torch_off">关闭补光灯</string>
