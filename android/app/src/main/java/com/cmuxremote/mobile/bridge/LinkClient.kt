@@ -141,7 +141,21 @@ class LinkClient(
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                val error = ProtocolException("link_failed", t.message ?: "The link was lost.", 502)
+                // A refused handshake carries the relay's stable code in its body.
+                val refused = runCatching { response?.body?.string() }.getOrNull()?.trim()?.take(200)
+                val code = when {
+                    // A revoked identity is refused by the relay before enrollment, so this
+                    // is not a lost link: the device identity itself must be replaced.
+                    refused == "revoked" -> "revoked"
+                    response?.code == 401 || response?.code == 403 -> "unauthorized"
+                    else -> "link_failed"
+                }
+                val error = ProtocolException(
+                    code,
+                    (t.message ?: "The link was lost.") +
+                        (response?.let { " (HTTP ${it.code}${refused?.let { body -> " $body" } ?: ""})" } ?: ""),
+                    response?.code ?: 502,
+                )
                 closed = true
                 if (!settled) {
                     settled = true

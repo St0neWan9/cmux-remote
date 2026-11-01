@@ -48,7 +48,7 @@
 
     <!-- Stable error codes -->
     <string name="error_unauthorized">This device\'s access to the Mac is missing or no longer valid.</string>
-    <string name="error_revoked">The Mac revoked this device. Pair it again.</string>
+    <string name="error_revoked">The Mac revoked this device\'s identity, and the relay keeps refusing it. Reset this phone\'s identity before pairing again, or pair on the same LAN.</string>
     <string name="error_invalid_proof">The request proof was refused; reconnecting.</string>
     <string name="error_host_changed">The host identity changed. Check it and pair again.</string>
     <string name="error_invalid_certificate">The certificate no longer matches the saved one; the connection was stopped.</string>
@@ -72,6 +72,7 @@
     <string name="pair_description">Scan the code, or pick a Mac found nearby or on a relay. Each device has its own key and needs the Mac owner\'s approval.</string>
     <string name="pair_code_label">Pairing code</string>
     <string name="pair_requesting">Requesting…</string>
+    <string name="pair_connecting">Connecting to the Mac… (falls back to the relay when the LAN cannot answer; up to about 30 seconds)</string>
     <string name="pair_request_access">Request access</string>
     <string name="pair_scan">Scan</string>
     <string name="pair_scan_instructions">Point the camera at the code on your Mac. If that will not read, use a relay below or paste it under Advanced.</string>
@@ -86,6 +87,9 @@
     <string name="pair_import_note">If scanning is not possible, paste a pairing link or the signed enrollment JSON the Mac exports.</string>
     <string name="pair_import_placeholder">cmux-remote://enroll… or {…}</string>
     <string name="pair_import">Import and request access</string>
+    <string name="pair_reset_identity">Reset this phone\'s identity</string>
+    <string name="pair_reset_identity_title">Reset this phone\'s identity?</string>
+    <string name="pair_reset_identity_note">This deletes the device key, every paired Mac and the local conversation cache; the next pairing is a new device. Use it only when the Mac already revoked this device and you cannot pair on the same LAN.</string>
     <string name="pair_approved">Paired</string>
     <string name="pair_retry_saved">Already paired? Retry the saved connection</string>
     <string name="pair_awaiting_owner">Waiting for %1$s to approve</string>

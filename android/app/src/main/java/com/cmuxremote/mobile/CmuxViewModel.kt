@@ -473,6 +473,39 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * Replaces this device's identity. A revoked identity can never join a relay
+     * again (the relay keeps the revoked list), so re-pairing from outside the
+     * LAN requires a new key. Every grant and local cache goes with the old one.
+     */
+    fun resetIdentity() {
+        poll?.cancel(); poll = null
+        pollLoop?.cancel(); pollLoop = null
+        liveRefresh?.cancel()
+        backfill?.cancel()
+        live?.stop(); live = null
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching { conversations.clearAll() }
+            runCatching { taskCache.clearAll() }
+        }
+        store.clearIdentity()
+        hosts.clear()
+        repository = null
+        _connection.value = null
+        _conversation.value = null
+        _selectedKey.value = null
+        _models.value = emptyList()
+        _pairing.value = null
+        _addingDevice.value = false
+        com.cmuxremote.mobile.background.BackgroundSync.cancel(getApplication())
+        com.cmuxremote.mobile.data.Diagnostics.log(
+            com.cmuxremote.mobile.data.Diagnostics.Level.Info,
+            "identity",
+            "device identity reset; pair again",
+        )
+        _shell.value = ShellState.Pairing()
+    }
+
     /** Pairs with a Mac listed by one of the saved relays; the owner still approves it. */
     fun pairListed(bootstrap: EnrollmentBootstrap) {
         beginPairing {

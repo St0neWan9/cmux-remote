@@ -91,6 +91,11 @@ class BackgroundTaskCache(private val directory: File) {
     /** How many tasks currently have a stored copy. */
     fun entryCount(): Int = synchronized(lock) { entries().size }
 
+    /** Drops every stored task record, for a deliberate identity reset. */
+    fun clearAll() = synchronized(lock) {
+        runCatching { directory.listFiles()?.forEach { it.delete() } }
+    }
+
     private fun encode(entry: Entry): String = buildJsonObject {
         put("tool", JsonPrimitive(entry.tool))
         put("summary", JsonPrimitive(entry.summary))
