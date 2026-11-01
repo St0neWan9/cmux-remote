@@ -94,7 +94,11 @@ class PendingEnrollment(
     val request: EnrollmentRequest,
     val signedRequest: com.cmuxremote.mobile.protocol.SignedJson,
     private val http: PinnedHttpClient,
+    private val privateKey: ByteArray,
 ) {
+    /** Set once the LAN path was refused and the enrollment moved onto the host's relay. */
+    private var link: com.cmuxremote.mobile.bridge.LinkClient? = null
+
     /** Sends the request once; later polls reuse the same signed request ID and nonce. */
     suspend fun submit(): EnrollmentStatus = exchange("request")
 
@@ -102,6 +106,12 @@ class PendingEnrollment(
 
     suspend fun cancel() {
         runCatching { exchange("cancel") }
+        close()
+    }
+
+    fun close() {
+        link?.close()
+        link = null
     }
 
     /** The grant, once the owner approved this exact request. */
@@ -148,38 +158,79 @@ class PendingEnrollment(
 
     private suspend fun exchange(verb: String): EnrollmentStatus = withContext(Dispatchers.IO) {
         val body = Json.bytes(signedRequest.toJson())
+        val data = try {
+            direct(verb, body)
+        } catch (error: Exception) {
+            // A relay-only Mac has no LAN address to answer on. Only a transport failure
+            // moves the same signed request onto the link; a semantic refusal stands.
+            val answered = error is ProtocolException &&
+                error.code !in setOf("connection_failed", "link_failed", "timeout")
+            if (answered || bootstrap.endpoint.relay == null) throw error
+            com.cmuxremote.mobile.data.Diagnostics.log(
+                com.cmuxremote.mobile.data.Diagnostics.Level.Info,
+                "enrollment",
+                "LAN unavailable; moving $verb onto the relay",
+            )
+            relayLink().request("POST", "/v2/enrollment/$verb", null, body)
+        }
+        parse(verb, data)
+    }
+
+    private fun direct(verb: String, body: ByteArray): ByteArray {
         val request = Request.Builder()
             .url(http.baseUrl + "/v2/enrollment/$verb")
             .post(body.toRequestBody("application/json".toMediaType()))
             .build()
-        http.newCall(request).execute().use { response ->
+        return http.newCall(request).execute().use { response ->
             val data = response.body?.bytes() ?: ByteArray(0)
             if (response.code != 200) {
-                val code = runCatching {
-                    (Json.parse(String(data, Charsets.UTF_8)) as? JsonObject)
-                        ?.objectValue("error")?.string("code")
-                }.getOrNull() ?: "enrollment_failed"
-                val message = runCatching {
-                    (Json.parse(String(data, Charsets.UTF_8)) as? JsonObject)
-                        ?.objectValue("error")?.string("message")
-                }.getOrNull() ?: "The Mac could not answer this request."
-                com.cmuxremote.mobile.data.Diagnostics.log(
-                    com.cmuxremote.mobile.data.Diagnostics.Level.Warning,
-                    "enrollment",
-                    "$verb rejected: $code (HTTP ${response.code})",
-                )
+                val error = runCatching {
+                    (Json.parse(String(data, Charsets.UTF_8)) as? JsonObject)?.objectValue("error")
+                }.getOrNull()
+                val code = error?.string("code") ?: "enrollment_failed"
+                val message = error?.string("message") ?: "The Mac could not answer this request."
                 throw ProtocolException(code, message, response.code)
             }
-            val signed = decodeSignedJson(String(data, Charsets.UTF_8))
-            Signer.verify(signed, "enrollment-status", bootstrap.host.publicKey)
-            val status = EnrollmentStatus.from(signed.value as? JsonObject ?: throw ProtocolException("invalid_response", "The status is not an object."))
-            com.cmuxremote.mobile.data.Diagnostics.log(
-                com.cmuxremote.mobile.data.Diagnostics.Level.Debug,
-                "enrollment",
-                "$verb -> ${status.state}",
-            )
-            status
+            data
         }
+    }
+
+    /** Opens (or reuses) the encrypted link and sends the signed enrollment request over it. */
+    private suspend fun relayLink(): com.cmuxremote.mobile.bridge.LinkClient {
+        link?.let { return it }
+        val relay = bootstrap.endpoint.relay
+            ?: throw ProtocolException("link_failed", "The Mac cannot be reached.", 502)
+        val client = com.cmuxremote.mobile.bridge.LinkClient(
+            host = bootstrap.host,
+            endpoint = bootstrap.endpoint,
+            privateKey = privateKey,
+            clientID = request.clientID,
+            agreementKey = com.cmuxremote.mobile.protocol.HpkeSession.generateKeyPair(),
+            onEvent = {},
+        )
+        client.connect(enrollment = true)
+        if (!client.isOpen) {
+            client.close()
+            throw ProtocolException("link_failed", "The relay link did not open.", 502)
+        }
+        relay.validate(bootstrap.host.id, null)
+        link = client
+        return client
+    }
+
+    private fun parse(verb: String, data: ByteArray): EnrollmentStatus {
+        if (data.isEmpty()) throw ProtocolException("invalid_response", "The Mac returned no status.")
+        val signed = decodeSignedJson(String(data, Charsets.UTF_8))
+        Signer.verify(signed, "enrollment-status", bootstrap.host.publicKey)
+        val status = EnrollmentStatus.from(
+            signed.value as? JsonObject ?: throw ProtocolException("invalid_response", "The status is not an object."),
+        )
+        com.cmuxremote.mobile.data.Diagnostics.log(
+            com.cmuxremote.mobile.data.Diagnostics.Level.Debug,
+            "enrollment",
+            "$verb -> ${status.state}",
+        )
+        return status
     }
 }
 
@@ -198,6 +249,25 @@ object Enrollment {
         now: Long = System.currentTimeMillis() / 1000,
     ): PendingEnrollment {
         val bootstrap = EnrollmentQr.bootstrap(code, now)
+        return pending(bootstrap, privateKey, clientName, clientKind)
+    }
+
+    /**
+     * Starts enrollment from a bootstrap a relay directory already returned and verified.
+     * No second fetch is made: the signed window and host identity were checked with the
+     * entry, and the same Mac still has to approve this device.
+     */
+    fun fromBootstrap(
+        bootstrap: EnrollmentBootstrap,
+        privateKey: ByteArray,
+        clientName: String = "cmux Android",
+        clientKind: String = "android",
+        now: Long = System.currentTimeMillis() / 1000,
+    ): PendingEnrollment {
+        bootstrap.validate(now)
+        if (bootstrap.workspaces.isEmpty()) {
+            throw ProtocolException("invalid_pairing", "No workspace was shared for this window.")
+        }
         return pending(bootstrap, privateKey, clientName, clientKind)
     }
 
@@ -265,7 +335,7 @@ object Enrollment {
             expiresAt = bootstrap.expiresAt,
         )
         val signed = Signer.sign(request.toJson(), "enrollment-request", privateKey)
-        return PendingEnrollment(bootstrap, request, signed, http)
+        return PendingEnrollment(bootstrap, request, signed, http, privateKey)
     }
 
     @Suppress("unused")

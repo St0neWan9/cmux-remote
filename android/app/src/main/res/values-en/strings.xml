@@ -53,6 +53,7 @@
     <string name="error_host_changed">The host identity changed. Check it and pair again.</string>
     <string name="error_invalid_certificate">The certificate no longer matches the saved one; the connection was stopped.</string>
     <string name="error_connection">This Mac cannot be reached.</string>
+    <string name="error_relay_unavailable">The relay is unavailable. Check the address or network and try again.</string>
     <string name="error_timeout">The request timed out. Try again.</string>
     <string name="error_response_too_large">The response exceeded the size limit and was discarded.</string>
     <string name="error_operation_not_found">The Mac has no record of this operation; no record does not mean it did not run.</string>
@@ -64,18 +65,31 @@
 
     <!-- Pairing -->
     <string name="pair_title">Connect your Mac</string>
-    <string name="pair_description">Open Add Device in Cmux Remote on your Mac and paste the pairing code here. Each device has its own key and needs the Mac owner\'s approval.</string>
+    <string name="pair_description">Scan the code, or pick a Mac found nearby or on a relay. Each device has its own key and needs the Mac owner\'s approval.</string>
     <string name="pair_code_label">Pairing code</string>
     <string name="pair_requesting">Requesting…</string>
     <string name="pair_request_access">Request access</string>
     <string name="pair_scan">Scan</string>
+    <string name="pair_scan_instructions">Point the camera at the code on your Mac. If that will not read, use a relay below or paste it under Advanced.</string>
+    <string name="pair_relay">Relay</string>
+    <string name="pair_relay_hint">Add your Mac\'s relay to find it even when it is not on this network.</string>
+    <string name="pair_relay_loading">Reading the relay directory…</string>
+    <string name="pair_relay_empty">No Mac is online on this relay right now.</string>
+    <string name="pair_relay_remove">Remove</string>
+    <string name="pair_relay_address">Relay address</string>
+    <string name="pair_relay_add">Add relay</string>
+    <string name="pair_advanced">Advanced</string>
+    <string name="pair_import_note">If scanning is not possible, paste a pairing link or the signed enrollment JSON the Mac exports.</string>
+    <string name="pair_import_placeholder">cmux-remote://enroll… or {…}</string>
+    <string name="pair_import">Import and request access</string>
+    <string name="pair_approved">Paired</string>
     <string name="pair_retry_saved">Already paired? Retry the saved connection</string>
     <string name="pair_awaiting_owner">Waiting for %1$s to approve</string>
     <string name="pair_awaiting_owner_note">Open Cmux Remote → Devices on your Mac, then verify and approve this request.</string>
     <string name="pair_failed_title">Can\'t connect</string>
     <string name="pair_scan_title">Scan QR code</string>
     <string name="pair_scan_guide">Put the pairing code from your Mac inside the frame</string>
-    <string name="pair_scan_focus_hint">Tap the preview to focus; move closer or farther if it will not read</string>
+    <string name="pair_scan_focus_hint">The frame is only a guide: any complete code in view can be read. Tap to focus, and use + to zoom in when it is far away</string>
     <string name="pair_scan_torch">Light</string>
     <string name="pair_scan_torch_on">Turn on the light</string>
     <string name="pair_scan_torch_off">Turn off the light</string>

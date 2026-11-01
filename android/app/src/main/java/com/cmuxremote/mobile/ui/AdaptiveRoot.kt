@@ -67,6 +67,10 @@ fun CmuxApp(viewModel: CmuxViewModel) {
     val pairing by viewModel.pairing.collectAsStateWithLifecycle()
     val addingDevice by viewModel.addingDevice.collectAsStateWithLifecycle()
     val discovered by viewModel.discovered.collectAsStateWithLifecycle()
+    val relayOrigins by viewModel.relayOrigins.collectAsStateWithLifecycle()
+    val relayHosts by viewModel.relayHosts.collectAsStateWithLifecycle()
+    val relayLoading by viewModel.relayLoading.collectAsStateWithLifecycle()
+    val relayError by viewModel.relayError.collectAsStateWithLifecycle()
     val reachable by viewModel.reachable.collectAsStateWithLifecycle()
     val probed by viewModel.probed.collectAsStateWithLifecycle()
     val pendingOperation by viewModel.pendingOperation.collectAsStateWithLifecycle()
@@ -132,7 +136,12 @@ fun CmuxApp(viewModel: CmuxViewModel) {
     // Nearby Macs are searched for only while a pairing page is on screen.
     val pairingVisible = shell is ShellState.Pairing || addingDevice
     LaunchedEffect(pairingVisible) {
-        if (pairingVisible) viewModel.startDiscovery() else viewModel.stopDiscovery()
+        if (pairingVisible) {
+            viewModel.startDiscovery()
+            viewModel.refreshRelayDirectory()
+        } else {
+            viewModel.stopDiscovery()
+        }
     }
 
     val conversationPane: @Composable (Modifier, (() -> Unit)?) -> Unit = { paneModifier, back ->
@@ -240,6 +249,14 @@ fun CmuxApp(viewModel: CmuxViewModel) {
                         discovered = discovered,
                         approvedHostIDs = viewModel.approvedHostIDs(),
                         onPairDiscovered = viewModel::pairDiscovered,
+                        relayOrigins = relayOrigins,
+                        relayHosts = relayHosts,
+                        relayLoading = relayLoading,
+                        relayError = relayError,
+                        onAddRelay = viewModel::addRelayOrigin,
+                        onRemoveRelay = viewModel::removeRelayOrigin,
+                        onRefreshRelay = viewModel::refreshRelayDirectory,
+                        onPairListed = viewModel::pairListed,
                     )
                 }
             }
@@ -553,6 +570,14 @@ fun CmuxApp(viewModel: CmuxViewModel) {
                     discovered = discovered,
                     approvedHostIDs = viewModel.approvedHostIDs(),
                     onPairDiscovered = viewModel::pairDiscovered,
+                    relayOrigins = relayOrigins,
+                    relayHosts = relayHosts,
+                    relayLoading = relayLoading,
+                    relayError = relayError,
+                    onAddRelay = viewModel::addRelayOrigin,
+                    onRemoveRelay = viewModel::removeRelayOrigin,
+                    onRefreshRelay = viewModel::refreshRelayDirectory,
+                    onPairListed = viewModel::pairListed,
                     onBack = { viewModel.setAddingDevice(false) },
                 )
             }

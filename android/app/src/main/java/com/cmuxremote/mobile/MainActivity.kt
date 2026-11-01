@@ -19,6 +19,8 @@ class MainActivity : ComponentActivity() {
         if (BuildConfig.DEBUG) {
             // A UI test can drive the "add another Mac" overlay, not only first use.
             if (intent?.getBooleanExtra("add_device", false) == true) model.setAddingDevice(true)
+            // Typing a URL through an IME is unreliable in a UI test; this seeds one relay.
+            intent?.getStringExtra("relay_origin")?.takeIf { it.isNotBlank() }?.let(model::addRelayOrigin)
             val direct = intent?.getStringExtra("enroll_code")?.takeIf { it.isNotBlank() }
             // A file survives shell quoting, which the `&` in a code does not.
             val fromFile = intent?.getStringExtra("enroll_file")?.let { path ->
