@@ -5,9 +5,32 @@ plugins {
     id("org.jetbrains.kotlin.plugin.serialization")
 }
 
+// Release signing reads a keystore outside the repository; the debug build never uses it.
+val releaseKeyStore = System.getenv("CMUX_ANDROID_KEYSTORE")?.let { file(it) }
+val releaseKeyPassword = System.getenv("CMUX_ANDROID_KEYSTORE_PASSWORD")
+
 android {
     namespace = "com.cmuxremote.mobile"
     compileSdk = 35
+
+    signingConfigs {
+        if (releaseKeyStore != null && releaseKeyPassword != null) {
+            create("release") {
+                storeFile = releaseKeyStore
+                storePassword = releaseKeyPassword
+                keyAlias = System.getenv("CMUX_ANDROID_KEY_ALIAS") ?: "cmux-remote"
+                keyPassword = System.getenv("CMUX_ANDROID_KEY_PASSWORD") ?: releaseKeyPassword
+            }
+        }
+    }
+
+    buildTypes {
+        getByName("release") {
+            signingConfig = signingConfigs.findByName("release")
+            isMinifyEnabled = false
+            isShrinkResources = false
+        }
+    }
 
     defaultConfig {
         applicationId = "com.cmuxremote.mobile"

@@ -159,3 +159,20 @@ emulator -avd cmux-remote-fold  -port 5558 -no-audio -no-boot-anim -gpu host -no
 The 7.6-inch fold AVD exposes a 1768×2208 @420dpi inner display (~673dp) and
 enters two-pane. `wm size 884x2208` simulates an outer/compact width, and
 `wm size 2399x1079` an ordinary phone in landscape; reset with `wm size reset`.
+
+## Release build
+
+The release APK is signed with a keystore kept outside the repository. Set:
+
+```sh
+export CMUX_ANDROID_KEYSTORE=/absolute/path/to/release.jks
+export CMUX_ANDROID_KEYSTORE_PASSWORD='…'   # never commit this
+export CMUX_ANDROID_KEY_ALIAS=cmux-remote
+export CMUX_ANDROID_KEY_PASSWORD="$CMUX_ANDROID_KEYSTORE_PASSWORD"
+./gradlew assembleRelease
+```
+
+The artifact is `app/build/outputs/apk/release/app-release.apk`. Without those
+variables the release build is unsigned, which is useful for a compile check
+but cannot be installed as an update. Keep the same keystore for every build
+that ships: Android treats a different key as a different app.
