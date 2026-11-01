@@ -21,6 +21,9 @@
     <string name="common_close_sidebar">Close sidebar</string>
     <string name="common_select_model">Select model</string>
     <string name="common_model">Model</string>
+    <string name="common_custom_model">Custom model…</string>
+    <string name="common_custom_model_hint">Enter a model identifier the agent on the Mac supports.</string>
+    <string name="common_use_model">Use this model</string>
     <string name="common_working">Running</string>
     <string name="common_resumable">Resumable</string>
     <string name="common_read_only">Read-only</string>
@@ -66,6 +69,32 @@
     <string name="error_invalid_pairing">That is not a current pairing code. Open Add Device on the Mac again.</string>
     <string name="error_invalid_response">The Mac returned a response this app cannot read.</string>
     <string name="error_invalid_image">That image does not meet the upload limits.</string>
+    <string name="error_identity">Identity verification failed. Pair again or check the Mac\'s identity.</string>
+    <string name="error_read_only">This conversation is read-only right now.</string>
+    <string name="error_input_busy">The Mac is waiting for input, so this action did not run.</string>
+    <string name="error_history">The conversation history could not be read; what was already loaded is kept.</string>
+    <string name="error_file">This file can\'t be read (it is missing or not permitted).</string>
+    <string name="error_input_value">The content is not acceptable (empty, too long or malformed).</string>
+    <string name="error_project">The project could not be read right now.</string>
+    <string name="error_task_unavailable">This background task could not be read right now.</string>
+    <string name="error_launch_unsupported">This Mac can\'t start a conversation here.</string>
+    <string name="error_prompt_required">This agent needs a first message.</string>
+    <string name="error_directory">The folder is missing or not permitted.</string>
+    <string name="error_invalid_model">That model is not available.</string>
+    <string name="error_model_unavailable">This Mac does not offer that model.</string>
+    <string name="error_model_switch_failed">The model switch did not complete.</string>
+    <string name="error_agent_busy">The agent is busy; try again shortly.</string>
+    <string name="error_invalid_endpoint">The relay address is not valid.</string>
+    <string name="error_bridge_offline">The Mac\'s Bridge is offline; reconnecting.</string>
+    <string name="error_request_missing">The Mac can\'t find this request; it may have expired or already been handled.</string>
+    <string name="error_operation_conflict">The same operation is already being handled. Check its result shortly.</string>
+    <string name="error_receipt">The operation record could not be saved or read; confirm the result on the Mac.</string>
+    <string name="error_image_unavailable">This image can\'t be read right now.</string>
+    <string name="error_image_load_failed">The image failed to load.</string>
+    <string name="error_speech_permission">Microphone or speech recognition permission is missing.</string>
+    <string name="error_speech_unavailable">Voice input is not available on this device right now.</string>
+    <string name="error_speech_too_long">Voice input timed out or was too long.</string>
+    <string name="error_unknown_code">[%1$s] Can\'t reach this Mac.</string>
 
     <!-- Pairing -->
     <string name="pair_title">Connect your Mac</string>
@@ -108,6 +137,10 @@
     <string name="pair_trust_instructions">Check the name and identity below, and only request access if this is your Mac:</string>
     <string name="pair_confirm_identity">That\'s it — request access</string>
     <string name="pair_camera_unavailable">Camera unavailable. Allow camera access in system settings.</string>
+    <string name="pair_enrollment_ended">This Mac ended the enrollment (denied, cancelled, expired or revoked). Start pairing again.</string>
+    <string name="pair_enrollment_window_closed">The approval window closed. Open Add Device on the Mac again and retry.</string>
+    <string name="pair_capacity">This phone already holds 16 Macs. Remove one before adding another.</string>
+    <string name="relay_limit">At most 8 relay addresses can be saved. Remove one first.</string>
 
     <!-- Session list -->
     <string name="sessions_workspaces">Workspaces</string>
@@ -122,9 +155,17 @@
     <string name="sessions_pending">Pending</string>
     <string name="sessions_new_session">New conversation</string>
     <string name="sessions_connection_details">Connection details</string>
+    <string name="sessions_title">Sessions</string>
     <string name="sessions_recent">Recent</string>
     <string name="sessions_no_sessions">No conversations yet.</string>
     <string name="sessions_no_matching">No matching conversations.</string>
+    <string name="sessions_other">Other sessions</string>
+    <string name="sessions_sort">Sort</string>
+    <string name="sessions_sort_workspace">By workspace</string>
+    <string name="sessions_sort_time">By time</string>
+    <string name="sessions_connection">Connection details</string>
+    <string name="sessions_no_permission">This Mac has not granted permission to read conversations.</string>
+    <string name="sessions_unreachable">Unreachable</string>
     <string name="sessions_filter_all">All</string>
     <string name="sessions_filter_working">Running</string>
     <string name="sessions_filter_pending">Pending</string>
@@ -141,12 +182,19 @@
     <string name="chat_project_changes">Project changes</string>
     <string name="chat_run_time">Run time</string>
     <string name="chat_no_messages">No messages yet.</string>
+    <string name="chat_loading">Loading conversation…</string>
+    <string name="chat_start_conversation">Start a conversation</string>
     <string name="chat_load_older">Pull up to load earlier messages</string>
     <string name="chat_operation">Operation</string>
+    <string name="tool_card_shell">Shell</string>
+    <string name="tool_card_completed_at">Completed %1$s</string>
+    <string name="tool_detail_stale">The conversation behind this record changed. Go back and open it again.</string>
+    <string name="tool_detail_missing">The Mac can no longer find this record.</string>
     <string name="chat_view_image">View image %1$s</string>
     <string name="chat_image_record">(record)</string>
     <string name="chat_live_preview">Live preview</string>
     <string name="chat_connection_lost">This Mac cannot be reached; what you see is already read.</string>
+    <string name="chat_reconnecting">Reconnecting…</string>
     <string name="chat_tool_call">Tool call</string>
     <string name="chat_command">Command</string>
     <string name="chat_file_change">File change</string>
@@ -156,7 +204,10 @@
     <string name="chat_unsupported_message">(Unsupported message)</string>
     <string name="chat_agent_question">Agent question</string>
     <string name="chat_answer_in_pending">Answer in Pending</string>
+    <string name="chat_question_unavailable">This question can no longer be answered here.</string>
     <string name="chat_background_tasks_running">Background tasks are running</string>
+    <string name="chat_background_command">Command</string>
+    <string name="chat_background_running">The task is still running</string>
     <string name="chat_read_only_notice">This conversation is read-only.</string>
     <string name="chat_add_image">Add image</string>
     <string name="chat_add_attachment">Add an attachment or open a page</string>
@@ -174,6 +225,11 @@
     <string name="chat_outgoing_sending">Sending…</string>
     <string name="chat_outgoing_sent">Delivered, waiting for the transcript</string>
     <string name="chat_outgoing_failed">Not delivered</string>
+    <string name="chat_outgoing_unconfirmed">Delivery not confirmed</string>
+    <string name="chat_outgoing_images">%1$d images</string>
+    <string name="chat_preparing_image">Preparing image…</string>
+    <string name="chat_images_limit">You can attach at most 4 images.</string>
+    <string name="chat_image_prepare_failed">This image could not be read or compressed.</string>
     <string name="chat_load_more">Load more</string>
     <string name="chat_pending_send_title">The last message\'s outcome is unknown</string>
     <string name="chat_pending_send_note">It may have been delivered. The app never resends automatically; check the receipt with the Mac, or look there yourself.</string>
@@ -207,6 +263,7 @@
     <string name="feed_needs_permission">Needs permission</string>
     <string name="feed_plan_confirmation">Plan approval</string>
     <string name="feed_event">Event</string>
+    <string name="feed_unsupported">This event has no supported reply action.</string>
     <string name="feed_status_pending">Awaiting decision</string>
     <string name="feed_status_expired">Expired</string>
     <string name="feed_status_resolved">Resolved</string>
@@ -214,7 +271,7 @@
     <string name="feed_no_questions">No questions to answer.</string>
     <string name="feed_unanswered">Unanswered</string>
     <string name="feed_submit_answer">Submit answers</string>
-    <string name="feed_skip_question">Skip question</string>
+    <string name="feed_skip_question">Skip questions</string>
     <string name="feed_allow_once">Allow once</string>
     <string name="feed_deny">Deny</string>
     <string name="feed_more_decisions">More decisions</string>
@@ -233,6 +290,12 @@
     <string name="feed_mode_always_explanation">Within what this agent supports, this tool will no longer ask for permission.</string>
     <string name="feed_mode_all_explanation">Within what this agent supports, allow all tools; later tool requests may no longer ask.</string>
     <string name="feed_mode_bypass_explanation">Within what this agent supports, skip later permission checks.</string>
+    <string name="feed_mode_once_explanation">Allow this one action only; later requests still ask.</string>
+    <string name="feed_mode_manual_explanation">Let you revise or confirm before the plan continues.</string>
+    <string name="feed_mode_ultraplan_explanation">Ask the agent for a deeper execution plan for you to confirm.</string>
+    <string name="feed_mode_bypass_permissions_explanation">Skip later permission checks for this plan and continue.</string>
+    <string name="feed_mode_auto_accept_explanation">Accept the plan\'s remaining steps without asking again.</string>
+    <string name="feed_mode_deny_explanation">Refuse this decision; the agent stops or takes another approach.</string>
     <string name="feed_needs_confirmation">Needs your confirmation</string>
     <string name="feed_changes">Changes</string>
     <string name="feed_no_changes">This conversation has no file changes yet.</string>
@@ -240,7 +303,16 @@
 
     <!-- Project changes -->
     <string name="project_empty">This conversation has no uncommitted changes.</string>
+    <string name="project_path_placeholder">Relative path, e.g. app/main.swift</string>
+    <string name="project_read_file">Read file</string>
+    <string name="project_read_file_short">File</string>
+    <string name="project_diff">Diff</string>
+    <string name="project_changed_files">Changed files</string>
+    <string name="project_no_content">No content to show.</string>
     <string name="project_truncated">Truncated</string>
+    <string name="chat_tool_failed">Tool failed</string>
+    <string name="chat_history_clipped">This conversation is long; earlier messages are not shown.</string>
+    <string name="chat_stop_requested">Stop request sent</string>
 
     <!-- Start session -->
     <string name="start_title">New conversation</string>
@@ -256,6 +328,17 @@
     <string name="start_starting">Starting…</string>
     <string name="start_start">Start</string>
     <string name="start_selected">Selected</string>
+    <string name="start_subfolders">Subfolders</string>
+    <string name="start_no_subfolders">No subfolders here.</string>
+    <string name="start_truncated">There are more subfolders than shown.</string>
+    <string name="start_up">Up one level</string>
+    <string name="start_refresh">Refresh folders</string>
+    <string name="start_waiting">The terminal is open; waiting for the conversation to appear…</string>
+    <string name="start_not_seen">The terminal opened; the conversation has not appeared yet. Refresh the list later.</string>
+    <string name="start_outcome_unknown">The result of this start is unknown. Check again, or open another terminal.</string>
+    <string name="start_folder_gone">This folder no longer exists. Go back and choose another.</string>
+    <string name="start_retry">Check again</string>
+    <string name="start_fresh">Open another terminal</string>
 
     <!-- Connection detail -->
     <string name="connection_title">Connection</string>
@@ -269,7 +352,7 @@
     <string name="connection_keystore_protected">Protected by the system Keystore</string>
     <string name="connection_keystore_plain">App-private file only</string>
     <string name="connection_remove_hint">This only removes this Mac from the phone. To revoke access, revoke this device on the Mac.</string>
-    <string name="connection_background_sync_note">While the app is in the background, the system wakes it periodically to sync conversations that are running or updated, so you see the latest content when you return. Wake-up timing is decided by the system and applies to all Macs.</string>
+    <string name="connection_background_sync_note">While the app is in the background, the system wakes it periodically to sync conversations that are running or updated (up to 12 conversations per pass), so you see the latest content when you return. Wake-up timing is decided by the system and applies to all Macs.</string>
     <string name="connection_endpoint">Endpoint</string>
     <string name="connection_protocol">Protocol</string>
     <string name="connection_host_identity">Host identity</string>
@@ -294,4 +377,21 @@
     <string name="diagnostics_title">Diagnostics</string>
     <string name="diagnostics_copy_report">Copy report</string>
     <string name="diagnostics_clear">Clear</string>
+    <string name="error_pairing_failed">Pairing failed.</string>
+    <string name="chat_image_not_confirmed">The image send was not confirmed.</string>
+    <string name="chat_outcome_unconfirmed_note">This message\'s outcome is still unconfirmed. Check it on the Mac first.</string>
+    <string name="chat_duration_seconds">%1$ds</string>
+    <string name="chat_duration_minutes">%1$dm %2$02ds</string>
+    <string name="chat_duration_hours">%1$dh %2$02dm</string>
+    <string name="chat_speech_listening">Listening…</string>
+    <string name="chat_speech_draft">Dictation</string>
+    <string name="chat_speech_finish">Finish</string>
+    <string name="chat_speech_use">Use</string>
+    <string name="pair_legacy_title">Legacy shared-token Mac</string>
+    <string name="pair_legacy_warning">This Mac must be started with --legacy. Its token authorizes every device equally and cannot be revoked per device; use it only when you accept that.</string>
+    <string name="pair_legacy_host">Host, e.g. 192.168.1.10</string>
+    <string name="pair_legacy_port">Port</string>
+    <string name="pair_legacy_token">Shared token</string>
+    <string name="pair_legacy_fingerprint">Certificate SHA-256 fingerprint</string>
+    <string name="pair_legacy_connect">Connect with the shared token</string>
 </resources>

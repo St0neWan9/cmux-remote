@@ -30,6 +30,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -42,6 +43,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -80,6 +82,8 @@ fun PairingScreen(
     onRefreshRelay: (() -> Unit)? = null,
     onPairListed: ((EnrollmentBootstrap) -> Unit)? = null,
     onResetIdentity: (() -> Unit)? = null,
+    /** Explicitly joins a legacy shared-token Mac. */
+    onPairLegacy: ((com.cmuxremote.mobile.data.LegacyPairing) -> Unit)? = null,
     onBack: (() -> Unit)? = null,
 ) {
     var relayDraft by remember { mutableStateOf("") }
@@ -87,10 +91,15 @@ fun PairingScreen(
     var importText by remember { mutableStateOf("") }
     var trust by remember { mutableStateOf<TrustTarget?>(null) }
     var confirmReset by remember { mutableStateOf(false) }
+    var legacyHost by remember { mutableStateOf("") }
+    var legacyPort by remember { mutableStateOf("") }
+    var legacyToken by remember { mutableStateOf("") }
+    var legacyFingerprint by remember { mutableStateOf("") }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .testTag("pair.page")
             .background(MobileDesign.Canvas)
             .verticalScroll(rememberScrollState())
             .padding(MobileDesign.PageInset),
@@ -99,7 +108,7 @@ fun PairingScreen(
         Spacer(Modifier.height(8.dp))
         if (onBack != null) {
             Box(
-                modifier = Modifier.size(36.dp).clip(CircleShape).clickable(onClick = onBack),
+                modifier = Modifier.size(44.dp).clip(CircleShape).clickable(onClick = onBack),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
@@ -293,6 +302,68 @@ fun PairingScreen(
                 ) {
                     Text(stringResource(R.string.pair_import))
                 }
+                if (onPairLegacy != null) {
+                    Spacer(Modifier.height(16.dp))
+                    Text(stringResource(R.string.pair_legacy_title), color = MobileDesign.Ink, style = MaterialTheme.typography.bodyMedium)
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        stringResource(R.string.pair_legacy_warning),
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.labelMedium,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = legacyHost,
+                        onValueChange = { legacyHost = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        placeholder = { Text(stringResource(R.string.pair_legacy_host), color = MobileDesign.Muted) },
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    OutlinedTextField(
+                        value = legacyPort,
+                        onValueChange = { value -> legacyPort = value.filter { it.isDigit() }.take(5) },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        placeholder = { Text(stringResource(R.string.pair_legacy_port), color = MobileDesign.Muted) },
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    OutlinedTextField(
+                        value = legacyToken,
+                        onValueChange = { legacyToken = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        placeholder = { Text(stringResource(R.string.pair_legacy_token), color = MobileDesign.Muted) },
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    OutlinedTextField(
+                        value = legacyFingerprint,
+                        onValueChange = { legacyFingerprint = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        placeholder = { Text(stringResource(R.string.pair_legacy_fingerprint), color = MobileDesign.Muted) },
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedButton(
+                        onClick = {
+                            onPairLegacy(
+                                com.cmuxremote.mobile.data.LegacyPairing(
+                                    host = legacyHost.trim(),
+                                    port = legacyPort.toIntOrNull() ?: 0,
+                                    token = legacyToken.trim(),
+                                    certificateSHA256 = legacyFingerprint.trim(),
+                                ),
+                            )
+                        },
+                        enabled = !state.busy && legacyHost.isNotBlank() && legacyToken.isNotBlank() &&
+                            legacyFingerprint.isNotBlank() && legacyPort.isNotBlank(),
+                        shape = CircleShape,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(stringResource(R.string.pair_legacy_connect), color = MobileDesign.Ink)
+                    }
+                }
                 if (onResetIdentity != null) {
                     Spacer(Modifier.height(14.dp))
                     Text(
@@ -408,8 +479,10 @@ private fun HostRow(
 fun AwaitingOwnerScreen(
     hostName: String,
     requestID: String,
+    clientID: String = "",
     onCancel: () -> Unit,
 ) {
+    var showDetails by remember { mutableStateOf(false) }
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -422,12 +495,24 @@ fun AwaitingOwnerScreen(
         FloatingSurface(contentPadding = PaddingValues(16.dp)) {
             Text(stringResource(R.string.pair_awaiting_owner_note), color = MobileDesign.Muted, style = MaterialTheme.typography.bodyMedium)
             Spacer(Modifier.height(10.dp))
+            // The owner matches the same client id prefix shown on the Mac.
             Text(
-                text = requestID.take(8).uppercase(),
+                text = (clientID.ifBlank { requestID }).take(12).uppercase(),
                 style = MaterialTheme.typography.titleMedium,
                 color = MobileDesign.Ink,
                 fontWeight = FontWeight.SemiBold,
+                fontFamily = FontFamily.Monospace,
+                modifier = Modifier.clickable { showDetails = !showDetails },
             )
+            if (showDetails) {
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    text = "request " + requestID + (if (clientID.isNotBlank()) "\nclient " + clientID else ""),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MobileDesign.Muted,
+                    fontFamily = FontFamily.Monospace,
+                )
+            }
             Spacer(Modifier.height(12.dp))
             Text(
                 text = stringResource(R.string.pair_awaiting_missing_hint),

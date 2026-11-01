@@ -14,4 +14,11 @@ data class SessionItem(
     val hostKey: String? = null,
     /** Last activity, for the time sort. */
     val updatedAt: java.time.Instant? = null,
+    /** Working directory, searchable like the iPhone list. */
+    val cwd: String? = null,
+    val writable: Boolean = false,
+    val working: Boolean = false,
+    val resumable: Boolean = false,
+    /** The Mac's display name, shown in a flat list that mixes Macs. */
+    val hostName: String? = null,
 )

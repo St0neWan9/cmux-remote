@@ -24,7 +24,9 @@ class ProjectReader(
     suspend fun file(sessionID: String, path: String): ProjectText = text(sessionID, "file", path)
 
     private suspend fun text(sessionID: String, resource: String, path: String): ProjectText {
-        val value = call("GET", "/v2/sessions/${segment(sessionID)}/$resource", mapOf("path" to path), null)
+        // An empty path means the whole repository's diff; sending it would scope to a file named "".
+        val query = if (path.isBlank()) emptyMap() else mapOf("path" to path)
+        val value = call("GET", "/v2/sessions/${segment(sessionID)}/$resource", query, null)
         val object_ = value.asObject() ?: throw ProtocolException("invalid_response", "The project text is not an object.")
         return ProjectText(
             path = object_.string("path") ?: path,
@@ -53,15 +55,26 @@ class ProjectReader(
                 if (!status.all { STATUS_CHARACTERS.contains(it) }) continue
                 val path = row.substring(3)
                 if (path.isEmpty()) continue
-                if (status.contains('R') || status.contains('C')) {
-                    if (index < entries.size) index += 1
+                // A rename/copy row is followed by its source path; the phone shows
+                // "old → new" rather than dropping where the file came from.
+                val source = if (status.contains('R') || status.contains('C')) {
+                    entries.getOrNull(index)?.also { index += 1 }
+                } else {
+                    null
                 }
-                result += ProjectChange(path = path, status = status, added = null, removed = null)
+                result += ProjectChange(path = path, status = status, added = null, removed = null, oldPath = source)
             }
             return result
         }
     }
 }
 
-data class ProjectChange(val path: String, val status: String, val added: Int?, val removed: Int?)
+data class ProjectChange(
+    val path: String,
+    val status: String,
+    val added: Int?,
+    val removed: Int?,
+    /** Source path for a rename or copy. */
+    val oldPath: String? = null,
+)
 data class ProjectText(val path: String, val text: String, val truncated: Boolean)

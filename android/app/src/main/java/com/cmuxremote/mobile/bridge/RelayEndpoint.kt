@@ -120,11 +120,10 @@ data class RelayEndpoint(
             }
             val defaultPort = uri.port == -1 || uri.port == 443
             val port = if (defaultPort) "" else ":${uri.port}"
-            val canonical = "https://${uri.host.lowercase()}$port"
-            if (canonical != value.removeSuffix("/")) {
-                throw ProtocolException("invalid_endpoint", "Use the canonical HTTPS relay origin.")
-            }
-            return canonical
+            // Normalize rather than reject: https is filled in by the caller's
+            // format, a trailing slash and an explicit :443 mean the same origin,
+            // and host names are case-insensitive.
+            return "https://${uri.host.lowercase()}$port"
         }
     }
 }

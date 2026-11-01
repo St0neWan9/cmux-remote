@@ -38,6 +38,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
@@ -60,7 +61,7 @@ import kotlinx.coroutines.delay
 
 private const val COPIED_HOLD_MILLIS = 2_000L
 
-private val TimeFormat = DateTimeFormatter.ofPattern("HH:mm:ss.SSS", Locale.US)
+private val TimeFormat = DateTimeFormatter.ofPattern("HH:mm:ss.SSS", java.util.Locale.getDefault())
 
 private val DebugColor = MobileDesign.Muted
 private val InfoColor = Color(0xFF2F6BFF)
@@ -89,6 +90,7 @@ fun DiagnosticLogScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
     Column(
         modifier
             .fillMaxSize()
+            .testTag("diagnostics.page")
             .background(MobileDesign.Canvas)
             .windowInsetsPadding(WindowInsets.safeDrawing),
     ) {
@@ -98,7 +100,7 @@ fun DiagnosticLogScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Box(
-                modifier = Modifier.size(36.dp).clickable(onClick = onBack),
+                modifier = Modifier.size(44.dp).clickable(onClick = onBack),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(Icons.Rounded.ChevronLeft, contentDescription = stringResource(R.string.common_back), tint = MobileDesign.Ink)
@@ -186,23 +188,33 @@ fun DiagnosticLogScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
 
 @Composable
 private fun EntryRow(entry: Diagnostics.Entry) {
-    val level = entry.level.name.uppercase(Locale.US)
-    val text = buildAnnotatedString {
+    val level = entry.level.name.uppercase(java.util.Locale.getDefault())
+    // Two lines as on the iPhone: level/time/category, then the message itself.
+    val header = buildAnnotatedString {
         withStyle(SpanStyle(color = MobileDesign.Muted)) { append("${clock(entry.atMillis)}  ") }
         withStyle(SpanStyle(color = levelColor(entry.level), fontWeight = FontWeight.SemiBold)) {
             append("$level  ")
         }
-        withStyle(SpanStyle(color = MobileDesign.Muted)) { append("${entry.category}  ") }
-        withStyle(SpanStyle(color = MobileDesign.Ink)) { append(entry.message) }
+        withStyle(SpanStyle(color = MobileDesign.Muted)) { append(entry.category) }
     }
     SelectionContainer {
-        Text(
-            text = text,
-            fontFamily = FontFamily.Monospace,
-            fontSize = 11.sp,
-            lineHeight = 16.sp,
-            modifier = Modifier.fillMaxWidth(),
-        )
+        Column {
+            Text(
+                text = header,
+                fontFamily = FontFamily.Monospace,
+                fontSize = 11.sp,
+                lineHeight = 16.sp,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Text(
+                text = entry.message,
+                color = MobileDesign.Ink,
+                fontFamily = FontFamily.Monospace,
+                fontSize = 11.sp,
+                lineHeight = 16.sp,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
     }
 }
 

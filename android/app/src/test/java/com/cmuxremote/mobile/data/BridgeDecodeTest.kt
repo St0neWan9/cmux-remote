@@ -35,13 +35,15 @@ class BridgeDecodeTest {
             """
             {"id":"m2","seq":8,"role":"agent","kind":{
               "type":"terminal","command":"swift build","summary":"Build",
-              "output":"built","exit_code":2,"duration_seconds":1.5,"is_running":false}}
+              "output":"built","exit_code":2,"duration_seconds":1.5,"is_running":false,
+              "completed_at":"2026-10-31T10:02:03Z"}}
             """.trimIndent(),
         )
         assertEquals("swift build", message!!.command)
         assertEquals("built", message.output)
         assertEquals(2, message.exitCode)
         assertEquals(1.5, message.durationSeconds!!, 0.0001)
+        assertEquals(java.time.Instant.parse("2026-10-31T10:02:03Z"), message.completedAt)
     }
 
     @Test

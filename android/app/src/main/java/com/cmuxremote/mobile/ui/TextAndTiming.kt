@@ -56,8 +56,13 @@ import kotlinx.coroutines.delay
 
 private const val COPIED_HOLD_MILLIS = 2_000L
 
-private val SameDayTime = DateTimeFormatter.ofPattern("HH:mm", Locale.US)
-private val OtherDayTime = DateTimeFormatter.ofPattern("MM-dd HH:mm", Locale.US)
+// The platform's localized short styles, so a date reads the way the reader's
+// locale writes it instead of a fixed 24-hour pattern.
+private val SameDayTime = DateTimeFormatter.ofLocalizedTime(java.time.format.FormatStyle.SHORT)
+private val OtherDayTime = DateTimeFormatter.ofLocalizedDateTime(
+    java.time.format.FormatStyle.SHORT,
+    java.time.format.FormatStyle.SHORT,
+)
 
 /** A message's text on its own page, where any part of it can be selected and copied. */
 @Composable
@@ -174,11 +179,21 @@ fun ResponseFooter(
     onSelectText: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    var copied by remember { mutableStateOf(false) }
+    androidx.compose.runtime.LaunchedEffect(copied) {
+        if (copied) {
+            kotlinx.coroutines.delay(2_000)
+            copied = false
+        }
+    }
     Row(
         modifier = modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        FooterAction(stringResource(R.string.common_copy), onCopy)
+        FooterAction(if (copied) stringResource(R.string.common_copied) else stringResource(R.string.common_copy)) {
+            onCopy()
+            copied = true
+        }
         FooterAction(stringResource(R.string.common_share), onShare)
         FooterAction(stringResource(R.string.common_quote), onQuote)
         FooterAction(stringResource(R.string.common_select_text), onSelectText)
@@ -252,7 +267,7 @@ private fun PageHeader(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Box(
-            modifier = Modifier.size(36.dp).clip(CircleShape).clickable(onClick = onBack),
+            modifier = Modifier.size(44.dp).clip(CircleShape).clickable(onClick = onBack),
             contentAlignment = Alignment.Center,
         ) {
             Icon(
@@ -288,16 +303,17 @@ private fun FooterAction(label: String, onClick: () -> Unit) {
 private fun runTimer(seconds: Int): String {
     val total = seconds.coerceAtLeast(0)
     if (total < 60) return "${total}s"
-    return String.format(Locale.US, "%dm %02ds", total / 60, total % 60)
+    return String.format(java.util.Locale.getDefault(), "%dm %02ds", total / 60, total % 60)
 }
 
-/** `3m 47s`, spelled as the transcript spells it. */
+/** `3m 47s`, with units the reader's language spells itself. */
+@Composable
 private fun compactDuration(seconds: Double): String {
     val total = seconds.coerceAtLeast(0.0).roundToInt()
     return when {
-        total < 60 -> "${total}s"
-        total < 3_600 -> String.format(Locale.US, "%dm %02ds", total / 60, total % 60)
-        else -> String.format(Locale.US, "%dh %02dm", total / 3_600, (total % 3_600) / 60)
+        total < 60 -> stringResource(R.string.chat_duration_seconds, total)
+        total < 3_600 -> stringResource(R.string.chat_duration_minutes, total / 60, total % 60)
+        else -> stringResource(R.string.chat_duration_hours, total / 3_600, (total % 3_600) / 60)
     }
 }
 

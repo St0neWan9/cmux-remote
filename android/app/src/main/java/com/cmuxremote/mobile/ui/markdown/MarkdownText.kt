@@ -21,6 +21,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.UriHandler
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
@@ -66,6 +68,18 @@ fun MarkdownText(
 /** Block kinds only, for a JVM test that asserts parsing without pulling in Compose rendering. */
 internal fun markdownBlocksForTest(text: String): List<String> = parseMarkdownBlocks(text).map { it.kind }
 
+/** Alignment names for the first table, so a parser test can see what the delimiters said. */
+internal fun markdownTableAlignmentsForTest(text: String): List<String> {
+    val table = parseMarkdownBlocks(text).filterIsInstance<MarkdownBlock.Table>().firstOrNull() ?: return emptyList()
+    return table.alignments.map {
+        when (it) {
+            androidx.compose.ui.text.style.TextAlign.Center -> "center"
+            androidx.compose.ui.text.style.TextAlign.End -> "end"
+            else -> "start"
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------------------------
 // Block model and parser
 // ---------------------------------------------------------------------------------------------
@@ -75,7 +89,13 @@ private sealed interface MarkdownBlock {
     data class Heading(val level: Int, val text: String) : MarkdownBlock
     data class Bullet(val text: String) : MarkdownBlock
     data class Ordered(val marker: String, val text: String) : MarkdownBlock
-    data class Table(val header: List<String>, val rows: List<List<String>>) : MarkdownBlock
+    data class Table(
+        val header: List<String>,
+        val rows: List<List<String>>,
+        /** Alignment from the delimiter row: start, center or end for each column. */
+        val alignments: List<androidx.compose.ui.text.style.TextAlign> =
+            List(header.size) { androidx.compose.ui.text.style.TextAlign.Start },
+    ) : MarkdownBlock
     data class Paragraph(val text: String) : MarkdownBlock
 }
 
@@ -161,7 +181,15 @@ private fun parseTableAt(lines: List<String>, start: Int): ParsedTable? {
         val cells = tableCells(lines[index]) ?: return@mapNotNull null
         List(header.size) { column -> cells.getOrElse(column) { "" } }
     }
-    return ParsedTable(MarkdownBlock.Table(header, rows), end)
+    val alignments = delimiter.map { cell ->
+        val rule = cell.trim()
+        when {
+            rule.startsWith(":") && rule.endsWith(":") -> androidx.compose.ui.text.style.TextAlign.Center
+            rule.endsWith(":") -> androidx.compose.ui.text.style.TextAlign.End
+            else -> androidx.compose.ui.text.style.TextAlign.Start
+        }
+    }
+    return ParsedTable(MarkdownBlock.Table(header, rows, alignments), end)
 }
 
 private fun isTableRow(line: String): Boolean = tableCells(line) != null
@@ -245,7 +273,7 @@ private fun structure(line: String): MarkdownBlock? {
 private fun MarkdownColumn(blocks: List<MarkdownBlock>, color: Color, modifier: Modifier) {
     Column(
         modifier = modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         blocks.forEach { block ->
             when (block) {
@@ -265,9 +293,8 @@ private fun MarkdownCodeBlock(code: String, color: Color) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .background(MobileDesign.Soft, RoundedCornerShape(12.dp))
-            .horizontalScroll(rememberScrollState())
-            .padding(horizontal = 12.dp, vertical = 10.dp),
+            .background(MobileDesign.Soft, RoundedCornerShape(14.dp))
+            .padding(horizontal = 14.dp, vertical = 12.dp),
     ) {
         Text(
             text = code,
@@ -295,7 +322,9 @@ private fun MarkdownHeading(block: MarkdownBlock.Heading, color: Color) {
         fontSize = size,
         lineHeight = (size.value + 6).sp,
         fontWeight = FontWeight.Bold,
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .semantics { heading() },
     )
 }
 
@@ -341,24 +370,55 @@ private fun MarkdownTableBlock(block: MarkdownBlock.Table, color: Color) {
 
     BoxWithConstraints(Modifier.fillMaxWidth()) {
         val available = if (maxWidth.value.isFinite()) maxWidth else 600.dp
-        // Every column gets the same share of the width until that share would be too narrow.
-        val scrollable = available / columns < 88.dp
-        val columnWidth = if (scrollable) 88.dp else available / columns
-        val totalWidth = columnWidth * columns
+        val measurer = androidx.compose.ui.text.rememberTextMeasurer()
+        val density = androidx.compose.ui.platform.LocalDensity.current
+        val cellStyle = androidx.compose.ui.text.TextStyle(fontSize = 14.sp, lineHeight = 20.sp)
+        val horizontalPadding = with(density) { 20.dp.toPx() }
+
+        // Natural width keeps a short column short instead of giving every column
+        // the same share; the minimum is the longest unbreakable word.
+        val natural = List(columns) { column ->
+            val cells = listOf(block.header[column]) + block.rows.map { it.getOrElse(column) { "" } }
+            cells.maxOfOrNull { cell ->
+                measurer.measure(androidx.compose.ui.text.AnnotatedString(cell), style = cellStyle, maxLines = 1, softWrap = false)
+                    .size.width.toFloat()
+            }?.plus(horizontalPadding) ?: horizontalPadding
+        }
+        val minimum = List(columns) { column ->
+            val cells = listOf(block.header[column]) + block.rows.map { it.getOrElse(column) { "" } }
+            cells.flatMap { it.split(Regex("\\s+")) }
+                .maxOfOrNull { word ->
+                    measurer.measure(androidx.compose.ui.text.AnnotatedString(word), style = cellStyle, maxLines = 1, softWrap = false)
+                        .size.width.toFloat()
+                }?.plus(horizontalPadding) ?: horizontalPadding
+        }
+        val availablePx = with(density) { available.toPx() }
+        val widths = allocateTableWidths(natural, minimum, availablePx)
+        val total = widths.sum()
+        val scrollable = total > availablePx + 1f
         val scrollState = rememberScrollState()
         val gridModifier = if (scrollable) Modifier.horizontalScroll(scrollState) else Modifier
 
         SelectionContainer {
             Column(
-                modifier = gridModifier
-                    .width(if (scrollable) totalWidth else available)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(MobileDesign.Soft),
+                modifier = gridModifier.width(with(density) { total.toDp() }),
             ) {
-                MarkdownTableRow(block.header, columnWidth, header = true, color = color)
+                MarkdownTableRow(
+                    block.header,
+                    widths.map { with(density) { it.toDp() } },
+                    block.alignments,
+                    header = true,
+                    color = color,
+                )
                 HorizontalDivider(color = MobileDesign.Line)
                 block.rows.forEachIndexed { index, row ->
-                    MarkdownTableRow(row, columnWidth, header = false, color = color)
+                    MarkdownTableRow(
+                        row,
+                        widths.map { with(density) { it.toDp() } },
+                        block.alignments,
+                        header = false,
+                        color = color,
+                    )
                     if (index != block.rows.lastIndex) HorizontalDivider(color = MobileDesign.Line)
                 }
             }
@@ -366,18 +426,42 @@ private fun MarkdownTableBlock(block: MarkdownBlock.Table, color: Color) {
     }
 }
 
+/**
+ * Gives every column its natural width when the table fits; otherwise takes the
+ * space off the widest columns first, keeping every column at least as wide as
+ * its longest word. Only when even those minima overflow does the table scroll.
+ */
+private fun allocateTableWidths(natural: List<Float>, minimum: List<Float>, available: Float): List<Float> {
+    if (natural.isEmpty()) return emptyList()
+    val naturalTotal = natural.sum()
+    if (naturalTotal <= available) return natural
+    val minimumTotal = minimum.sum()
+    if (minimumTotal >= available) return minimum
+    val extra = available - minimumTotal
+    val slack = natural.indices.map { (natural[it] - minimum[it]).coerceAtLeast(0f) }
+    val slackTotal = slack.sum().takeIf { it > 0f } ?: return minimum
+    return natural.indices.map { minimum[it] + extra * (slack[it] / slackTotal) }
+}
+
 @Composable
-private fun MarkdownTableRow(cells: List<String>, columnWidth: Dp, header: Boolean, color: Color) {
+private fun MarkdownTableRow(
+    cells: List<String>,
+    columnWidths: List<Dp>,
+    alignments: List<androidx.compose.ui.text.style.TextAlign>,
+    header: Boolean,
+    color: Color,
+) {
     Row(Modifier.fillMaxWidth()) {
-        cells.forEach { cell ->
+        cells.forEachIndexed { index, cell ->
             Text(
                 text = rememberInline(cell),
                 color = color,
                 fontSize = 14.sp,
                 lineHeight = 20.sp,
                 fontWeight = if (header) FontWeight.SemiBold else FontWeight.Normal,
+                textAlign = alignments.getOrElse(index) { androidx.compose.ui.text.style.TextAlign.Start },
                 modifier = Modifier
-                    .width(columnWidth)
+                    .width(columnWidths.getOrElse(index) { 88.dp })
                     .padding(horizontal = 10.dp, vertical = 8.dp),
             )
         }

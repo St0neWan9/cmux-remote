@@ -1,17 +1,29 @@
 package com.cmuxremote.mobile.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.slideInHorizontally
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.material.icons.rounded.ChevronLeft
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
@@ -28,6 +40,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.cmuxremote.mobile.ConversationUi
 import com.cmuxremote.mobile.CmuxViewModel
+import com.cmuxremote.mobile.GroupUi
 import com.cmuxremote.mobile.R
 import com.cmuxremote.mobile.ShellState
 import com.cmuxremote.mobile.adaptive.PaneLayout
@@ -52,8 +65,11 @@ fun CmuxApp(viewModel: CmuxViewModel) {
     val selectedKey by viewModel.selectedKey.collectAsStateWithLifecycle()
     val busy by viewModel.busy.collectAsStateWithLifecycle()
     val pendingImages by viewModel.pendingImages.collectAsStateWithLifecycle()
+    val imagePreparing by viewModel.imagePreparing.collectAsStateWithLifecycle()
+    val imageError by viewModel.imageError.collectAsStateWithLifecycle()
     val taskDetail by viewModel.task.collectAsStateWithLifecycle()
     val toolDetail by viewModel.toolDetail.collectAsStateWithLifecycle()
+    val groupPage by viewModel.group.collectAsStateWithLifecycle()
     val canStart by viewModel.canStart.collectAsStateWithLifecycle()
     val timingOpen by viewModel.timingOpen.collectAsStateWithLifecycle()
     val connectionOpen by viewModel.connectionOpen.collectAsStateWithLifecycle()
@@ -63,6 +79,8 @@ fun CmuxApp(viewModel: CmuxViewModel) {
     val hostFilter by viewModel.hostFilter.collectAsStateWithLifecycle()
     val voiceListening by viewModel.voiceListening.collectAsStateWithLifecycle()
     val voiceError by viewModel.voiceError.collectAsStateWithLifecycle()
+    val speechDraft by viewModel.speechDraft.collectAsStateWithLifecycle()
+    val speechState by viewModel.speechState.collectAsStateWithLifecycle()
     val savedConnection by viewModel.connection.collectAsStateWithLifecycle()
     val pairing by viewModel.pairing.collectAsStateWithLifecycle()
     val addingDevice by viewModel.addingDevice.collectAsStateWithLifecycle()
@@ -73,7 +91,12 @@ fun CmuxApp(viewModel: CmuxViewModel) {
     val relayError by viewModel.relayError.collectAsStateWithLifecycle()
     val reachable by viewModel.reachable.collectAsStateWithLifecycle()
     val probed by viewModel.probed.collectAsStateWithLifecycle()
+    val connecting by viewModel.connecting.collectAsStateWithLifecycle()
+    val hostReachable by viewModel.hostReachable.collectAsStateWithLifecycle()
     val pendingOperation by viewModel.pendingOperation.collectAsStateWithLifecycle()
+    val feedBusy by viewModel.feedBusy.collectAsStateWithLifecycle()
+    val feedError by viewModel.feedError.collectAsStateWithLifecycle()
+    val feedHost by viewModel.feedHost.collectAsStateWithLifecycle()
     val backgroundSync by viewModel.backgroundSync.collectAsStateWithLifecycle()
     val query by viewModel.query.collectAsStateWithLifecycle()
     val sortByTime by viewModel.sortByTime.collectAsStateWithLifecycle()
@@ -86,24 +109,29 @@ fun CmuxApp(viewModel: CmuxViewModel) {
     val imageStore = remember { com.cmuxremote.mobile.data.ChatImageStore(context) }
     // Both pickers prepare the chosen bytes the same way: bounded JPEG, no metadata.
     val attachUri: (android.net.Uri) -> Unit = { uri ->
+        viewModel.beginImagePreparation()
         kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
-            runCatching {
+            try {
                 val target = java.io.File(context.cacheDir, "picked-${java.util.UUID.randomUUID()}.img")
                 context.contentResolver.openInputStream(uri)?.use { input ->
                     target.outputStream().use { output -> input.copyTo(output) }
                 }
                 val prepared = imageStore.prepare(target)
                 target.delete()
-                prepared
-            }.onSuccess { prepared -> viewModel.attachImage(prepared.fileName, prepared.base64) }
+                viewModel.attachImage(prepared.fileName, prepared.base64)
+            } catch (_: Exception) {
+                viewModel.endImagePreparation(context.getString(R.string.chat_image_prepare_failed))
+            } finally {
+                viewModel.endImagePreparation()
+            }
         }
     }
     val picker = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.PickMultipleVisualMedia(4),
     ) { uris -> uris.forEach(attachUri) }
     val imageFilePicker = androidx.activity.compose.rememberLauncherForActivityResult(
-        androidx.activity.result.contract.ActivityResultContracts.OpenDocument(),
-    ) { uri -> uri?.let(attachUri) }
+        androidx.activity.result.contract.ActivityResultContracts.OpenMultipleDocuments(),
+    ) { uris -> uris.forEach(attachUri) }
     // The image is written to a one-off cache file so the chooser can read it; the
     // FileProvider exposes only that directory.
     val shareImage: (ByteArray, String) -> Unit = { bytes, name ->
@@ -133,15 +161,19 @@ fun CmuxApp(viewModel: CmuxViewModel) {
 
     LaunchedEffect(conversation?.session?.id) { if (conversation != null) viewModel.loadModels() }
 
-    // Nearby Macs are searched for only while a pairing page is on screen.
+    // Pairing needs nearby Macs; a paired Mac also needs discovery so a moved
+    // endpoint can be found again without pairing from scratch.
     val pairingVisible = shell is ShellState.Pairing || addingDevice
-    LaunchedEffect(pairingVisible) {
-        if (pairingVisible) {
+    val discover = pairingVisible || shell is ShellState.Connected
+    LaunchedEffect(discover) {
+        if (discover) {
             viewModel.startDiscovery()
-            viewModel.refreshRelayDirectory()
         } else {
             viewModel.stopDiscovery()
         }
+    }
+    LaunchedEffect(pairingVisible) {
+        if (pairingVisible) viewModel.refreshRelayDirectory()
     }
 
     val conversationPane: @Composable (Modifier, (() -> Unit)?) -> Unit = { paneModifier, back ->
@@ -160,20 +192,39 @@ fun CmuxApp(viewModel: CmuxViewModel) {
                 onConfirmModelSwitch = viewModel::confirmModelSwitch,
                 onCancelModelSwitch = viewModel::cancelModelSwitch,
                 offline = probed && !reachable,
+                connecting = connecting,
                 onRetryConnection = viewModel::retryConnection,
                 onRename = viewModel::rename,
                 onResume = if (canStart) viewModel::resume else null,
                 busy = busy,
-                onOpenProject = viewModel::openProject,
+                feedBusy = feedBusy,
+                canControl = viewModel.allows(com.cmuxremote.mobile.protocol.ClientCapability.ConversationControl),
+                hostName = viewModel.openHostName(),
+                // Each entry is shown only when this conversation's Mac granted it.
+                onOpenProject = if (viewModel.allows(com.cmuxremote.mobile.protocol.ClientCapability.ProjectRead)) {
+                    viewModel::openProject
+                } else {
+                    null
+                },
                 onOpenImage = viewModel::openImage,
                 onOpenTiming = viewModel::openTiming,
                 onOpenTask = viewModel::openTask,
-                onAnswerQuestion = viewModel::answerQuestionFromMessage,
+                onAnswerQuestion = if (viewModel.allows(com.cmuxremote.mobile.protocol.ClientCapability.FeedReply)) {
+                    viewModel::answerQuestionFromMessage
+                } else {
+                    null
+                },
                 dictating = voiceListening,
-                onToggleVoice = viewModel::toggleVoice,
+                onToggleVoice = if (open.session.writable && !open.session.working && !busy) viewModel::toggleVoice else null,
                 voiceError = voiceError,
+                speechDraft = speechDraft,
+                speechListening = speechState == com.cmuxremote.mobile.SpeechState.Listening,
+                onFinishVoice = viewModel::finishVoice,
+                onUseSpeech = viewModel::useSpeechDraft,
+                onCancelSpeech = viewModel::cancelSpeechDraft,
                 onOpenDetail = viewModel::openToolDetail,
                 onOpenReference = { path -> viewModel.openProjectAt(path) },
+                onOpenGroup = viewModel::openGroup,
                 onLoadOlder = viewModel::loadOlder,
                 onRefreshConversation = viewModel::refreshOpen,
                 onCopyText = { text ->
@@ -190,6 +241,8 @@ fun CmuxApp(viewModel: CmuxViewModel) {
                 onQuote = viewModel::appendQuote,
                 onSelectText = { text -> viewModel.showText(selectTextTitle, text, false) },
                 pendingImages = pendingImages,
+                imagePreparing = imagePreparing,
+                imageError = imageError,
                 onRemoveImage = viewModel::removeImage,
                 onPickImages = if (open.session.writable) openPicker else null,
                 onPickImageFile = if (open.session.writable) { { imageFilePicker.launch(arrayOf("image/*")) } } else null,
@@ -219,18 +272,28 @@ fun CmuxApp(viewModel: CmuxViewModel) {
                     selectedWorkspace = startState.selectedWorkspace,
                     roots = startState.roots,
                     selectedRoot = startState.selectedRoot,
+                    path = startState.path,
+                    folders = startState.folders,
+                    foldersTruncated = startState.foldersTruncated,
+                    foldersLoading = startState.foldersLoading,
+                    foldersError = startState.foldersError,
                     agents = startState.agents,
                     selectedAgent = startState.agent,
                     prompt = startState.prompt,
                     busy = startState.busy,
+                    uncertain = startState.uncertain,
                     error = startState.error,
                     notice = startState.notice,
                     onBack = { viewModel.closeStart() },
                     onPickWorkspace = viewModel::pickStartWorkspace,
                     onPickRoot = viewModel::pickStartRoot,
+                    onRefreshRoots = viewModel::refreshStartRoots,
+                    onOpenFolder = viewModel::openStartFolder,
+                    onUpFolder = viewModel::upStartFolder,
                     onPickAgent = viewModel::pickStartAgent,
                     onPrompt = viewModel::startPrompt,
                     onStart = viewModel::startSession,
+                    onStartFresh = viewModel::startSessionFresh,
                 )
             }
             return@BoxWithConstraints
@@ -258,6 +321,7 @@ fun CmuxApp(viewModel: CmuxViewModel) {
                         onRefreshRelay = viewModel::refreshRelayDirectory,
                         onPairListed = viewModel::pairListed,
                         onResetIdentity = viewModel::resetIdentity,
+                        onPairLegacy = viewModel::pairLegacy,
                     )
                 }
             }
@@ -266,6 +330,7 @@ fun CmuxApp(viewModel: CmuxViewModel) {
                 AwaitingOwnerScreen(
                     hostName = state.hostName,
                     requestID = state.requestID,
+                    clientID = state.clientID,
                     onCancel = viewModel::cancelPairing,
                 )
             }
@@ -291,6 +356,8 @@ fun CmuxApp(viewModel: CmuxViewModel) {
                     error = state.error,
                     canStart = canStart,
                     selectedID = selectedKey,
+                    hostReachable = hostReachable,
+                    canReadConversations = viewModel.canReadConversations(),
                 )
                 val listActions = SessionListActions(
                     onSelect = { item ->
@@ -298,6 +365,7 @@ fun CmuxApp(viewModel: CmuxViewModel) {
                         state.sessions.firstOrNull { it.hostID + ":" + it.session.id == key }?.let(viewModel::open)
                     },
                     onOpenFeed = viewModel::openFeed,
+                    onOpenFeedHost = { id -> viewModel.openFeed(id) },
                     onStart = viewModel::openStart,
                     onStartInWorkspace = if (canStart) viewModel::startInWorkspace else null,
                     onRefresh = viewModel::refresh,
@@ -321,6 +389,10 @@ fun CmuxApp(viewModel: CmuxViewModel) {
                         hasMore = detail.nextOffset != null,
                         loadingMore = detail.loadingMore,
                         onLoadMore = viewModel::loadMoreTask,
+                        messages = detail.messages,
+                        command = detail.command,
+                        totalBytes = detail.totalBytes,
+                        running = detail.running,
                     )
                 }
                 val sessions = state.sessions.map { present(it, context) }
@@ -329,22 +401,28 @@ fun CmuxApp(viewModel: CmuxViewModel) {
                     PaneLayout.Compact -> AppDrawer(
                         open = sidebarOpen,
                         onOpenChange = viewModel::setSidebar,
-                        allowsEdgeOpening = conversation == null && project == null && image == null && !feedOpen,
+                        allowsEdgeOpening = conversation == null && project == null && image == null &&
+                            !feedOpen && !addingDevice && !connectionOpen && !diagnosticsOpen,
                         drawer = { close ->
                             DrawerContent(
-                                hostName = state.hostName,
-                                workspaces = state.workspaces.map { (id, title) -> id to title },
-                                sessions = listModel.sessions,
-                                selectedWorkspace = workspaceFilter,
-                                onWorkspace = { id -> viewModel.setWorkspaceFilter(id); close() },
-                                onConnection = { close(); viewModel.openConnection() },
-                                onAddMac = { close(); viewModel.setAddingDevice(true) },
+                                model = listModel,
+                                actions = listActions,
+                                onSelectSession = { session ->
+                                    close()
+                                    listActions.onSelect(session)
+                                },
+                                onHostConnection = { id ->
+                                    close()
+                                    viewModel.openConnection(id)
+                                },
+                                closed = close,
                                 modifier = Modifier.fillMaxSize(),
                             )
                         },
                     ) { Box(insets) {
                         if (project != null) {
                             BackHandler { viewModel.closeProject() }
+                            PushIn {
                             ProjectScreen(
                                 title = conversation?.session?.title ?: stringResource(R.string.common_project),
                                 changes = project!!.changes,
@@ -355,11 +433,19 @@ fun CmuxApp(viewModel: CmuxViewModel) {
                                 onBack = { viewModel.closeProject() },
                                 onSelect = viewModel::selectChange,
                                 onOpenPath = viewModel::selectChange,
-                                onRefresh = viewModel::openProject,
+                                mode = project!!.mode,
+                                inputPath = project!!.inputPath,
+                                onPathChange = viewModel::setProjectPath,
+                                onOpenPathInput = viewModel::openProjectPathInput,
+                                onShowChanges = viewModel::showProjectChanges,
+                                onShowDiff = viewModel::showProjectDiff,
+                                onRefresh = viewModel::refreshProject,
                             )
+                            }
                         } else if (image != null) {
                             val shown = image!!
                             BackHandler { viewModel.closeImage() }
+                            PushIn {
                             ImagePreviewScreen(
                                 title = shown.reference.name.ifBlank { stringResource(R.string.common_image) },
                                 bytes = shown.bytes,
@@ -371,17 +457,23 @@ fun CmuxApp(viewModel: CmuxViewModel) {
                                 },
                                 onRetry = { viewModel.openImage(shown.reference) },
                             )
+                            }
                         } else if (feedOpen) {
                             BackHandler { viewModel.closeFeed() }
+                            PushIn {
                             FeedScreen(
-                                items = (shell as? ShellState.Connected)?.feed ?: emptyList(),
+                                items = ((shell as? ShellState.Connected)?.feed ?: emptyList()).filter { feedHost == null || it.hostID == feedHost },
                                 onBack = { viewModel.closeFeed() },
                                 onAnswer = viewModel::answerQuestion,
                                 onDecide = viewModel::decideWithKind,
+                                busy = feedBusy,
+                                loading = (shell as? ShellState.Connected)?.loading == true,
+                                error = feedError ?: (shell as? ShellState.Connected)?.error,
                             )
+                            }
                         } else if (conversation != null) {
                             BackHandler { viewModel.close() }
-                            conversationPane(Modifier.fillMaxSize(), { viewModel.close() })
+                            PushIn { conversationPane(Modifier.fillMaxSize(), { viewModel.close() }) }
                         } else {
                             SessionListScreen(
                                 model = listModel,
@@ -405,7 +497,13 @@ fun CmuxApp(viewModel: CmuxViewModel) {
                                 onBack = { viewModel.closeProject() },
                                 onSelect = viewModel::selectChange,
                                 onOpenPath = viewModel::selectChange,
-                                onRefresh = viewModel::openProject,
+                                mode = project!!.mode,
+                                inputPath = project!!.inputPath,
+                                onPathChange = viewModel::setProjectPath,
+                                onOpenPathInput = viewModel::openProjectPathInput,
+                                onShowChanges = viewModel::showProjectChanges,
+                                onShowDiff = viewModel::showProjectDiff,
+                                onRefresh = viewModel::refreshProject,
                                 modifier = Modifier.weight(1f),
                             )
                         } else if (image != null) {
@@ -424,11 +522,14 @@ fun CmuxApp(viewModel: CmuxViewModel) {
                             )
                         } else if (feedOpen) {
                             FeedScreen(
-                                items = state.feed,
+                                items = state.feed.filter { feedHost == null || it.hostID == feedHost },
                                 onBack = viewModel::closeFeed,
                                 onAnswer = viewModel::answerQuestion,
                                 onDecide = viewModel::decideWithKind,
                                 modifier = Modifier.weight(1f),
+                                busy = feedBusy,
+                                loading = state.loading,
+                                error = feedError ?: state.error,
                             )
                         } else {
                             conversationPane(Modifier.weight(1f), null)
@@ -483,7 +584,7 @@ fun CmuxApp(viewModel: CmuxViewModel) {
                         identity = saved.host.id,
                         certificate = saved.host.certificateSHA256,
                         protocolName = "v2 HTTPS · link v3",
-                        reachable = reachable,
+                        reachable = hostReachable[saved.host.id] ?: reachable,
                         capabilities = saved.scope.capabilities.map { it.raw },
                         overRelay = viewModel.overRelay,
                         keystoreBacking = viewModel.keyBacking,
@@ -507,6 +608,42 @@ fun CmuxApp(viewModel: CmuxViewModel) {
         if (diagnosticsOpen) {
             BackHandler { viewModel.closeDiagnostics() }
             DiagnosticLogScreen(onBack = viewModel::closeDiagnostics)
+        }
+
+        groupPage?.let { page ->
+            BackHandler { viewModel.closeGroup() }
+            val rows = toolRowModels(page.messages)
+            Column(
+                Modifier
+                    .fillMaxSize()
+                    .background(MobileDesign.Canvas)
+                    .windowInsetsPadding(WindowInsets.safeDrawing),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp),
+                ) {
+                    androidx.compose.material3.Icon(
+                        androidx.compose.material.icons.Icons.Rounded.ChevronLeft,
+                        contentDescription = stringResource(R.string.common_back),
+                        tint = MobileDesign.Ink,
+                        modifier = Modifier.size(36.dp).clickable { viewModel.closeGroup() }.padding(6.dp),
+                    )
+                    Text(
+                        text = stringResource(R.string.chat_operation_count_plural, rows.size),
+                        color = MobileDesign.Ink,
+                        style = androidx.compose.material3.MaterialTheme.typography.titleMedium,
+                    )
+                }
+                ActivityGroupPage(
+                    rows = rows,
+                    onOpenDetail = { row ->
+                        viewModel.openToolDetail(row.id, if (row.kind == "file_edit") "diff" else "output")
+                    },
+                    onOpenReference = { path -> viewModel.openProjectAt(path) },
+                )
+            }
         }
 
         toolDetail?.let { detail ->
@@ -556,6 +693,7 @@ fun CmuxApp(viewModel: CmuxViewModel) {
                 is ShellState.AwaitingOwner -> AwaitingOwnerScreen(
                     hostName = state.hostName,
                     requestID = state.requestID,
+                    clientID = state.clientID,
                     onCancel = viewModel::cancelPairing,
                 )
                 is ShellState.Failed -> FailedScreen(
@@ -580,6 +718,7 @@ fun CmuxApp(viewModel: CmuxViewModel) {
                     onRefreshRelay = viewModel::refreshRelayDirectory,
                     onPairListed = viewModel::pairListed,
                     onResetIdentity = viewModel::resetIdentity,
+                        onPairLegacy = viewModel::pairLegacy,
                     onBack = { viewModel.setAddingDevice(false) },
                 )
             }
@@ -639,7 +778,12 @@ private fun present(hosted: com.cmuxremote.mobile.HostedSession, context: androi
         age = relativeAge(session.updatedAt, context),
         workspaceKey = session.workspaceID ?: "",
         hostKey = hosted.hostID,
+        hostName = hosted.hostName,
         updatedAt = runCatching { java.time.Instant.parse(session.updatedAt) }.getOrNull(),
+        cwd = session.cwd,
+        writable = session.writable,
+        working = session.working,
+        resumable = session.resumable,
         trailing = when {
             session.working -> SessionTrailing.Working
             session.resumable -> SessionTrailing.Resumable
@@ -655,6 +799,11 @@ private fun presentLegacy(session: SessionDescriptor, context: android.content.C
     agent = session.agent.replaceFirstChar { it.uppercase() },
     age = relativeAge(session.updatedAt, context),
     workspaceKey = session.workspaceID ?: "",
+    updatedAt = runCatching { java.time.Instant.parse(session.updatedAt) }.getOrNull(),
+    cwd = session.cwd,
+    writable = session.writable,
+    working = session.working,
+    resumable = session.resumable,
     trailing = when {
         session.working -> SessionTrailing.Working
         session.resumable -> SessionTrailing.Resumable
@@ -674,4 +823,14 @@ private fun relativeAge(timestamp: String?, context: android.content.Context): S
         minutes < 24 * 60 -> context.getString(R.string.common_hours_ago, (minutes / 60).toInt())
         else -> context.getString(R.string.common_days_ago, (minutes / (24 * 60)).toInt())
     }
+}
+
+
+/** A detail page enters from the trailing edge, like a pushed page. */
+@androidx.compose.runtime.Composable
+private fun PushIn(content: @androidx.compose.runtime.Composable () -> Unit) {
+    AnimatedVisibility(
+        visible = true,
+        enter = slideInHorizontally(initialOffsetX = { it / 3 }) + fadeIn(),
+    ) { content() }
 }

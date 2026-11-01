@@ -60,6 +60,8 @@ class SpeechInput(private val context: Context) {
     val maxBytes: Int = 8192
 
     private val mainHandler = Handler(Looper.getMainLooper())
+    /** Receives the live transcript while dictation runs, for the draft strip. */
+    var onPartial: ((String) -> Unit)? = null
     private var session: Session? = null
     private var permissionRequest: kotlinx.coroutines.CancellableContinuation<Boolean>? = null
     @Volatile private var partial: String = ""
@@ -322,7 +324,11 @@ class SpeechInput(private val context: Context) {
                 return
             }
             partial = text
-            if (final) complete(if (text.isBlank()) ERROR_NO_SPEECH else null)
+            if (final) {
+                complete(if (text.isBlank()) ERROR_NO_SPEECH else null)
+            } else {
+                runOnMain { onPartial?.invoke(text) }
+            }
         }
 
         override fun onReadyForSpeech(params: Bundle?) = Unit

@@ -47,6 +47,23 @@ class KeyVault(private val context: Context) {
         runCatching { keyStore().deleteEntry(ALIAS) }
     }
 
+    /**
+     * Seals app data (the approved Macs' grants) with a non-exportable Keystore
+     * key of its own, so a reset of the device identity can discard it too.
+     */
+    @Synchronized
+    fun seal(data: ByteArray): ByteArray = encrypt(wrappingKey(SEALED_ALIAS), data)
+
+    /** Opens data written by [seal]; a Keystore invalidation makes this throw. */
+    @Synchronized
+    fun openSealed(envelope: ByteArray): ByteArray = decrypt(wrappingKey(SEALED_ALIAS), envelope)
+
+    /** Forgets the sealed-data key; the caller also deletes its ciphertext. */
+    @Synchronized
+    fun resetSealed() {
+        runCatching { keyStore().deleteEntry(SEALED_ALIAS) }
+    }
+
     /** Whether the key is currently protected by the hardware-backed keystore (for diagnostics only). */
     fun backing(): String = runCatching {
         val key = keyStore().getKey(ALIAS, null) as? SecretKey ?: return@runCatching PLAIN
@@ -55,15 +72,15 @@ class KeyVault(private val context: Context) {
         if (info.isInsideSecureHardware) SECURE else PLAIN
     }.getOrDefault(PLAIN)
 
-    private fun wrappingKey(): SecretKey {
+    private fun wrappingKey(alias: String = ALIAS): SecretKey {
         val store = keyStore()
-        val existing = runCatching { store.getKey(ALIAS, null) as? SecretKey }.getOrNull()
+        val existing = runCatching { store.getKey(alias, null) as? SecretKey }.getOrNull()
         if (existing != null) return existing
-        runCatching { store.deleteEntry(ALIAS) }
+        runCatching { store.deleteEntry(alias) }
         val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, KEYSTORE_PROVIDER)
         generator.init(
             KeyGenParameterSpec.Builder(
-                ALIAS,
+                alias,
                 KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT,
             )
                 .setKeySize(AES_KEY_BITS)
@@ -113,6 +130,7 @@ class KeyVault(private val context: Context) {
 
     private companion object {
         const val ALIAS = "cmux-remote.identity.wrap"
+        const val SEALED_ALIAS = "cmux-remote.connections.wrap"
         const val KEYSTORE_PROVIDER = "AndroidKeyStore"
         const val TRANSFORMATION = "AES/GCM/NoPadding"
         const val AES_KEY_BITS = 256

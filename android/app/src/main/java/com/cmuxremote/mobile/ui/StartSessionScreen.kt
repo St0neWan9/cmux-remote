@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -34,16 +35,24 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.cmuxremote.mobile.R
 import com.cmuxremote.mobile.ui.components.FloatingSurface
+import com.cmuxremote.mobile.ui.components.WorkingIndicator
 import com.cmuxremote.mobile.ui.theme.MobileDesign
 
 /** One approved workspace that can start a conversation. */
-data class StartWorkspace(val id: String, val title: String)
+data class StartWorkspace(
+    val id: String,
+    val title: String,
+    /** The Mac that approved this workspace; a start must go back to it. */
+    val hostID: String = "",
+    val hostName: String = "",
+)
 
 /** A folder offered as the working directory for a new conversation. */
 data class StartRoot(val id: String, val path: String)
@@ -61,24 +70,37 @@ fun StartSessionScreen(
     selectedWorkspace: StartWorkspace?,
     roots: List<StartRoot>,
     selectedRoot: StartRoot?,
+    /** Relative to the selected root; empty means the root itself. */
+    path: String = "",
+    folders: List<String> = emptyList(),
+    foldersTruncated: Boolean = false,
+    foldersLoading: Boolean = false,
+    foldersError: String? = null,
     agents: List<String>,          // e.g. ["claude", "codex"]
     selectedAgent: String,
     prompt: String,
     busy: Boolean,
+    /** The last start's outcome is unknown; the main button checks again. */
+    uncertain: Boolean = false,
     error: String?,
     notice: String?,
     onBack: () -> Unit,
     onPickWorkspace: (StartWorkspace) -> Unit,
     onPickRoot: (StartRoot) -> Unit,
+    onRefreshRoots: () -> Unit = {},
+    onOpenFolder: (String) -> Unit = {},
+    onUpFolder: () -> Unit = {},
     onPickAgent: (String) -> Unit,
     onPrompt: (String) -> Unit,
     onStart: () -> Unit,
+    onStartFresh: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val canStart = selectedWorkspace != null &&
         selectedRoot != null &&
         !busy &&
         !(selectedAgent == "codex" && prompt.isBlank())
+    val multipleHosts = workspaces.map { it.hostName }.filter { it.isNotBlank() }.distinct().size > 1
 
     Column(modifier.fillMaxSize().background(MobileDesign.Canvas)) {
         Row(
@@ -87,7 +109,7 @@ fun StartSessionScreen(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Box(
-                modifier = Modifier.size(36.dp).clip(CircleShape).clickable(onClick = onBack),
+                modifier = Modifier.size(44.dp).clip(CircleShape).clickable(onClick = onBack),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
@@ -127,8 +149,13 @@ fun StartSessionScreen(
                     ) {
                         workspaces.forEach { workspace ->
                             ChoiceChip(
-                                text = workspace.title,
+                                text = if (multipleHosts && workspace.hostName.isNotBlank()) {
+                                    workspace.title + " · " + workspace.hostName
+                                } else {
+                                    workspace.title
+                                },
                                 selected = workspace.id == selectedWorkspace?.id,
+                                tag = "start.workspace." + workspace.id,
                                 onClick = { onPickWorkspace(workspace) },
                             )
                         }
@@ -137,7 +164,15 @@ fun StartSessionScreen(
             }
 
             FloatingSurface(contentPadding = PaddingValues(16.dp)) {
-                SectionLabel(stringResource(R.string.start_directory))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    SectionLabel(stringResource(R.string.start_directory), modifier = Modifier.weight(1f))
+                    Text(
+                        text = stringResource(R.string.start_refresh),
+                        color = MobileDesign.Accent,
+                        style = MaterialTheme.typography.labelMedium,
+                        modifier = Modifier.clickable(enabled = !busy) { onRefreshRoots() },
+                    )
+                }
                 Spacer(Modifier.height(10.dp))
                 if (roots.isEmpty()) {
                     Text(stringResource(R.string.start_no_directories), color = MobileDesign.Muted, style = MaterialTheme.typography.bodyMedium)
@@ -147,8 +182,58 @@ fun StartSessionScreen(
                             RootRow(
                                 root = root,
                                 selected = root.id == selectedRoot?.id,
+                                modifier = Modifier.testTag("start.root." + root.id),
                                 onClick = { onPickRoot(root) },
                             )
+                        }
+                    }
+                }
+                if (selectedRoot != null) {
+                    Spacer(Modifier.height(12.dp))
+                    // The path is relative to the root; the root itself sends an empty path.
+                    Text(
+                        text = if (path.isBlank()) selectedRoot.path else selectedRoot.path + "/" + path,
+                        color = MobileDesign.Muted,
+                        style = MaterialTheme.typography.labelMedium,
+                        fontFamily = FontFamily.Monospace,
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    if (path.isNotBlank()) {
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            text = stringResource(R.string.start_up),
+                            color = MobileDesign.Accent,
+                            style = MaterialTheme.typography.labelMedium,
+                            modifier = Modifier.clickable(enabled = !busy) { onUpFolder() },
+                        )
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    SectionLabel(stringResource(R.string.start_subfolders))
+                    when {
+                        foldersLoading -> Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.Center) {
+                            androidx.compose.material3.CircularProgressIndicator(color = MobileDesign.Accent, strokeWidth = 2.dp, modifier = Modifier.size(22.dp))
+                        }
+                        foldersError != null -> Text(foldersError, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelMedium)
+                        folders.isEmpty() -> Text(stringResource(R.string.start_no_subfolders), color = MobileDesign.Muted, style = MaterialTheme.typography.labelMedium)
+                        else -> Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            folders.forEach { name ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .clickable(enabled = !busy) { onOpenFolder(name) }
+                                        .padding(horizontal = 8.dp, vertical = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    Icon(Icons.Rounded.Folder, contentDescription = null, tint = MobileDesign.Muted, modifier = Modifier.size(16.dp))
+                                    Text(name, color = MobileDesign.Ink, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
+                            }
+                            if (foldersTruncated) {
+                                Text(stringResource(R.string.start_truncated), color = MobileDesign.Muted, style = MaterialTheme.typography.labelMedium)
+                            }
                         }
                     }
                 }
@@ -165,6 +250,7 @@ fun StartSessionScreen(
                         ChoiceChip(
                             text = agent.replaceFirstChar { it.uppercase() },
                             selected = agent == selectedAgent,
+                            tag = "start.agent." + agent,
                             onClick = { onPickAgent(agent) },
                         )
                     }
@@ -187,7 +273,7 @@ fun StartSessionScreen(
                         // Stop accepting input once the message would pass 4 KiB of UTF-8.
                         if (utf8Size(next) <= PromptLimitBytes) onPrompt(next)
                     },
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().testTag("start.prompt"),
                     placeholder = { Text(stringResource(R.string.start_prompt_placeholder), color = MobileDesign.Muted) },
                     minLines = 3,
                     maxLines = 6,
@@ -214,13 +300,31 @@ fun StartSessionScreen(
                 onClick = onStart,
                 enabled = canStart,
                 shape = CircleShape,
-                modifier = Modifier.fillMaxWidth().heightIn(min = MobileDesign.Control),
+                modifier = Modifier.fillMaxWidth().heightIn(min = MobileDesign.Control).testTag("start.here"),
                 colors = ButtonDefaults.buttonColors(containerColor = MobileDesign.Accent),
             ) {
                 Text(
-                    text = if (busy) stringResource(R.string.start_starting) else stringResource(R.string.start_start),
+                    text = when {
+                        busy -> stringResource(R.string.start_starting)
+                        uncertain -> stringResource(R.string.start_retry)
+                        else -> stringResource(R.string.start_start)
+                    },
                     color = if (canStart) MobileDesign.Canvas else MobileDesign.Muted,
                 )
+                if (busy) {
+                    Spacer(Modifier.width(8.dp))
+                    WorkingIndicator(size = 14.dp)
+                }
+            }
+            if (uncertain) {
+                androidx.compose.material3.OutlinedButton(
+                    onClick = onStartFresh,
+                    enabled = !busy,
+                    shape = CircleShape,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = MobileDesign.Control),
+                ) {
+                    Text(stringResource(R.string.start_fresh), color = MobileDesign.Ink)
+                }
             }
         }
     }
@@ -232,7 +336,7 @@ private fun SectionLabel(text: String, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun ChoiceChip(text: String, selected: Boolean, onClick: () -> Unit) {
+private fun ChoiceChip(text: String, selected: Boolean, tag: String? = null, onClick: () -> Unit) {
     Text(
         text = text,
         color = if (selected) MobileDesign.Canvas else MobileDesign.Ink,
@@ -240,6 +344,7 @@ private fun ChoiceChip(text: String, selected: Boolean, onClick: () -> Unit) {
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
         modifier = Modifier
+            .then(if (tag != null) Modifier.testTag(tag) else Modifier)
             .clip(CircleShape)
             .background(if (selected) MobileDesign.Ink else MobileDesign.Soft)
             .clickable(onClick = onClick)
@@ -248,9 +353,9 @@ private fun ChoiceChip(text: String, selected: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
-private fun RootRow(root: StartRoot, selected: Boolean, onClick: () -> Unit) {
+private fun RootRow(root: StartRoot, selected: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
             .background(if (selected) MobileDesign.AccentSoft else MobileDesign.Soft)

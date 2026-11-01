@@ -19,6 +19,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -34,8 +36,10 @@ fun Pill(
     onClick: (() -> Unit)? = null,
 ) {
     val shape = CircleShape
+    val isSelected = selected
     Row(
         modifier = modifier
+            .semantics { this.selected = isSelected }
             .background(if (selected) MobileDesign.Ink else MobileDesign.Soft, shape)
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
             .padding(horizontal = 12.dp, vertical = 8.dp),
