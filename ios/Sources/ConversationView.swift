@@ -216,7 +216,12 @@ struct ConversationView: View {
         // The blank tail goes above the rows while the page shows its end: a conversation shorter than the
         // page then rests against the composer. A prompt this phone sent takes the tail below itself instead,
         // so the reply grows into the room under it; the total is the same either way, so the page does not move.
-        if tailFirst && !showsInitialLoading { Color.clear.frame(height: max(0, bottom - timelineContentHeight)) }
+        //
+        // Only once the rows have a height. Before the first layout pass the measured height is zero, and a filler
+        // of the whole page puts every row below the fold — where a lazy stack never lays out, so the height it
+        // would have measured never arrives. That is a blank page that stays blank, and dragging only reaches the
+        // filler. (Seen on a phone over the relay; the same page lays out instantly on a fast link.)
+        if tailFirst && !showsInitialLoading && timelineContentHeight > 0 { Color.clear.frame(height: max(0, bottom - timelineContentHeight)) }
         // The rows' own height, measured where nothing else can stretch it.
         LazyVStack(alignment: .leading, spacing: 6) {
             if model.hasMore {
