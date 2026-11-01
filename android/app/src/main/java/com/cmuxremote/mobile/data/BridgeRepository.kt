@@ -58,6 +58,8 @@ data class ChatMessage(
     val command: String? = null,
     val exitCode: Int? = null,
     val durationSeconds: Double? = null,
+    /** When this tool call finished, for the card's own timestamp. */
+    val completedAt: java.time.Instant? = null,
 )
 
 /** Timing anchors for one prompt and its response, as the Bridge recorded them. */
@@ -110,7 +112,26 @@ data class ToolDetailPage(
 data class BackgroundTaskInfo(val id: String, val tool: String, val summary: String, val running: Boolean)
 
 /** One page of a detached task's record; a null next offset means the record ended. */
-data class TaskPage(val text: String, val nextOffset: Int?)
+data class TaskPage(
+    val text: String,
+    val nextOffset: Int?,
+    /** `agent` carries a conversation snapshot; a command carries text output. */
+    val kind: String? = null,
+    val messages: List<ChatMessage> = emptyList(),
+    val running: Boolean? = null,
+    val totalBytes: Int? = null,
+    val command: String? = null,
+)
+
+/** Subfolders under one launch root. */
+data class LaunchListing(val directories: List<String>, val truncated: Boolean)
+
+/** The running turn's live text; `compacting` is absent on an older Bridge. */
+data class PreviewSnapshot(
+    val text: String?,
+    val available: Boolean,
+    val compacting: Boolean? = null,
+)
 
 /** An opaque image reference bound to one recorded message and transcript generation. */
 data class ImageReference(val id: String, val messageID: String, val generation: String, val name: String)
@@ -122,18 +143,49 @@ data class FeedItem(
     val status: String,
     val title: String,
     val questions: List<FeedQuestion>,
+    /** Which Mac reported it; Feed replies must go back to that Mac. */
+    val hostID: String = "",
+    /** The conversation it belongs to, when the Bridge names one. */
+    val sessionID: String? = null,
+    val hostName: String = "",
     val plan: String? = null,
     val body: String? = null,
+    val questionPrompt: String? = null,
+    val text: String? = null,
+    val reason: String? = null,
     val toolName: String? = null,
     val toolInput: String? = null,
     val toolResult: String? = null,
     val toolResultIsError: Boolean = false,
+    val toolResultTruncated: Boolean = false,
+    val toolInputTruncated: Boolean = false,
+    val planTruncated: Boolean = false,
+    val todos: List<FeedTodo> = emptyList(),
+    val availableModes: List<String>? = null,
+    val source: String? = null,
+    val toolInputCapabilities: String? = null,
     val feedback: String? = null,
     val decisionMode: String? = null,
     val selections: List<String> = emptyList(),
-)
+) {
+    /** Only a pending event may be answered; a record is shown read-only. */
+    val pending: Boolean get() = status == "pending"
+}
 
-data class FeedQuestion(val prompt: String, val options: List<String>, val multiSelect: Boolean)
+data class FeedTodo(val content: String, val completed: Boolean)
+
+data class FeedOption(val id: String, val label: String, val description: String?)
+
+data class FeedQuestion(
+    val prompt: String,
+    val options: List<String>,
+    val multiSelect: Boolean,
+    val header: String? = null,
+    val allowCustom: Boolean = true,
+    val allowSkip: Boolean = false,
+    /** Option identity and description, in the same order as [options]. */
+    val optionDetails: List<FeedOption> = emptyList(),
+)
 
 /** The Bridge writes ISO-8601 dates; a malformed one is no timing at all. */
 private fun instantOrNull(text: String): java.time.Instant? =
@@ -201,6 +253,11 @@ class BridgeRepository(val connection: AuthorizedConnection, private val client:
      * check. The epoch may be cached; this never is.
      */
     suspend fun probe() {
+        // A legacy Bridge has no signed identity route; a bounded read proves it answers.
+        if (connection.isLegacy) {
+            client.call("GET", "/v2/sessions")
+            return
+        }
         client.announcement()
     }
 
@@ -277,9 +334,14 @@ class BridgeRepository(val connection: AuthorizedConnection, private val client:
         )
     }
 
-    suspend fun preview(sessionID: String): String? {
+    suspend fun preview(sessionID: String): PreviewSnapshot {
         val value = client.call("GET", "/v2/sessions/$sessionID/preview")
-        return value.asObject()?.string("text")?.takeIf { it.isNotBlank() }
+        val object_ = value.asObject() ?: return PreviewSnapshot(null, available = false)
+        return PreviewSnapshot(
+            text = object_.string("text")?.takeIf { it.isNotBlank() },
+            available = object_.bool("available") ?: true,
+            compacting = object_.bool("compacting"),
+        )
     }
 
     /** Sends one prompt. The operation id is the durable identity; a failure is never auto-retried. */
@@ -311,21 +373,48 @@ class BridgeRepository(val connection: AuthorizedConnection, private val client:
                 title = object_.string("title") ?: object_.string("tool_name") ?: "",
                 plan = object_.string("plan"),
                 body = object_.string("body"),
+                sessionID = object_.string("session_id") ?: object_.string("sessionID"),
+                questionPrompt = object_.string("question_prompt"),
+                text = object_.string("text"),
+                reason = object_.string("reason"),
                 toolName = object_.string("tool_name"),
                 toolInput = object_.string("tool_input"),
                 toolResult = object_.string("tool_result"),
                 toolResultIsError = object_.bool("tool_result_is_error") ?: false,
+                toolResultTruncated = object_.bool("tool_result_truncated") ?: false,
+                toolInputTruncated = object_.bool("tool_input_truncated") ?: false,
+                planTruncated = object_.bool("plan_truncated") ?: false,
+                todos = object_.array("todos")?.mapNotNull { todo ->
+                    val row = todo.asObject() ?: return@mapNotNull null
+                    FeedTodo(
+                        content = row.string("content") ?: "",
+                        completed = row.string("state") == "completed",
+                    )
+                } ?: emptyList(),
+                availableModes = object_.array("available_modes")?.strings(),
+                source = object_.string("source"),
+                toolInputCapabilities = object_.string("tool_input_capabilities"),
                 feedback = object_.objectValue("decision")?.string("feedback"),
                 decisionMode = object_.objectValue("decision")?.string("mode"),
                 selections = object_.objectValue("decision")?.array("selections")?.strings() ?: emptyList(),
                 questions = object_.array("questions")?.mapNotNull { question ->
                     val q = question.asObject() ?: return@mapNotNull null
+                    val details = q.array("options")?.mapIndexedNotNull { index, option ->
+                        val row = option.asObject() ?: return@mapIndexedNotNull null
+                        FeedOption(
+                            id = row.string("id")?.takeIf { it.isNotEmpty() } ?: index.toString(),
+                            label = row.string("label") ?: "",
+                            description = row.string("description"),
+                        )
+                    } ?: emptyList()
                     FeedQuestion(
-                        prompt = q.string("prompt") ?: "",
-                        options = q.array("options")?.mapNotNull { option ->
-                            (option.asObject()?.string("label"))
-                        } ?: emptyList(),
+                        prompt = q.string("prompt") ?: q.string("question") ?: "",
+                        options = details.map { it.label },
                         multiSelect = q.bool("multi_select") ?: false,
+                        header = q.string("header"),
+                        allowCustom = q.bool("allow_custom") ?: true,
+                        allowSkip = q.bool("allow_skip") ?: false,
+                        optionDetails = details,
                     )
                 } ?: emptyList(),
             )
@@ -420,7 +509,18 @@ class BridgeRepository(val connection: AuthorizedConnection, private val client:
         val value = client.call("GET", "/v2/sessions/$sessionID/tasks/$taskID", mapOf("offset" to offset.toString()))
         val object_ = value.asObject() ?: return TaskPage("", null)
         val text = object_.string("text") ?: object_.string("output") ?: ""
-        return TaskPage(text, object_.int("next_offset"))
+        val snapshot = object_.objectValue("snapshot")
+        return TaskPage(
+            text = text,
+            nextOffset = object_.int("next_offset"),
+            kind = object_.string("kind"),
+            messages = snapshot?.array("messages")?.mapNotNull(::decodeMessage)
+                ?: object_.array("messages")?.mapNotNull(::decodeMessage)
+                ?: emptyList(),
+            running = object_.bool("running"),
+            totalBytes = object_.int("total_bytes") ?: object_.int("totalBytes"),
+            command = object_.string("command"),
+        )
     }
 
     /** Folders a workspace can start a conversation in. */
@@ -435,14 +535,36 @@ class BridgeRepository(val connection: AuthorizedConnection, private val client:
         }
     }
 
-    /** Opens a terminal running a fixed agent command in an approved folder. */
-    suspend fun startSession(workspaceID: String, rootID: String, path: String, agent: String, prompt: String?): JsonElement {
+    /** Subfolders of one launch root; `path` is relative to the root, empty for the root. */
+    suspend fun startFolders(workspaceID: String, rootID: String, path: String): LaunchListing {
+        val query = if (path.isBlank()) emptyMap() else mapOf("path" to path)
+        val value = client.call("GET", "/v2/workspaces/$workspaceID/directories/$rootID", query)
+        val object_ = value.asObject() ?: return LaunchListing(emptyList(), false)
+        return LaunchListing(
+            directories = object_.array("directories")?.strings() ?: emptyList(),
+            truncated = object_.bool("truncated") ?: false,
+        )
+    }
+
+    /**
+     * Opens a terminal running a fixed agent command in an approved folder.
+     * The operation id is the durable identity: retrying an unknown outcome with
+     * the same id asks the Mac what happened instead of opening another terminal.
+     */
+    suspend fun startSession(
+        workspaceID: String,
+        rootID: String,
+        path: String,
+        agent: String,
+        prompt: String?,
+        operationID: String = UUID.randomUUID().toString(),
+    ): JsonElement {
         val body = buildJsonObject {
             put("root_id", JsonPrimitive(rootID))
             put("path", JsonPrimitive(path))
             put("agent", JsonPrimitive(agent))
             if (!prompt.isNullOrBlank()) put("prompt", JsonPrimitive(prompt))
-            put("operation_id", JsonPrimitive(UUID.randomUUID().toString()))
+            put("operation_id", JsonPrimitive(operationID))
         }
         return client.call("POST", "/v2/workspaces/$workspaceID/sessions", emptyMap(), com.cmuxremote.mobile.protocol.Json.bytes(body))
     }
@@ -489,7 +611,7 @@ class BridgeRepository(val connection: AuthorizedConnection, private val client:
                 connection.endpoint.port,
                 connection.host.certificateSHA256,
             )
-            val client = BridgeClient(http, connection.host, connection.privateKey, connection.clientID)
+            val client = BridgeClient(http, connection.host, connection.privateKey, connection.clientID, connection.legacyToken)
             return BridgeRepository(connection, client)
         }
 
@@ -567,6 +689,7 @@ class BridgeRepository(val connection: AuthorizedConnection, private val client:
                 command = kind.string("command"),
                 exitCode = kind.int("exit_code") ?: kind.int("exitCode"),
                 durationSeconds = kind.double("duration_seconds") ?: kind.double("durationSeconds"),
+                completedAt = (kind.string("completed_at") ?: kind.string("completedAt"))?.let(::instantOrNull),
             )
         }
     }

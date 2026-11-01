@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material3.Icon
@@ -19,6 +20,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -34,10 +36,26 @@ fun SessionRow(
     selected: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    /** The list's clock, refreshed periodically so a relative time does not go stale. */
+    nowMillis: Long = System.currentTimeMillis(),
+    /** Several Macs are listed together, so the row names its own. */
+    showMac: Boolean = false,
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val meta = buildList {
+        add(session.agent)
+        if (showMac && !session.hostName.isNullOrBlank()) add(session.hostName)
+        add(relativeAge(session.updatedAt, session.age, nowMillis, context))
+        when (session.trailing) {
+            SessionTrailing.Resumable -> add(context.getString(R.string.common_resumable))
+            SessionTrailing.Locked -> add(context.getString(R.string.common_read_only))
+            else -> Unit
+        }
+    }.filter { it.isNotBlank() }.joinToString("  ·  ")
     Row(
         modifier = modifier
             .fillMaxWidth()
+            .testTag("session." + session.id)
             .clip(RoundedCornerShape(14.dp))
             .background(if (selected) MobileDesign.AccentSoft else MobileDesign.Canvas)
             .clickable(onClick = onClick)
@@ -55,28 +73,41 @@ fun SessionRow(
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                text = "${session.agent}  ·  ${session.age}",
+                text = meta,
                 color = MobileDesign.Muted,
                 style = MaterialTheme.typography.labelMedium,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        when (session.trailing) {
-            SessionTrailing.Working -> WorkingIndicator()
-            SessionTrailing.Locked -> Icon(
-                Icons.Rounded.Lock,
-                contentDescription = stringResource(R.string.common_read_only),
+        // A running row spins; every other row is a page, so it carries a chevron.
+        if (session.trailing == SessionTrailing.Working) {
+            WorkingIndicator()
+        } else {
+            Icon(
+                Icons.Rounded.ChevronRight,
+                contentDescription = null,
                 tint = MobileDesign.Muted,
-                modifier = Modifier.size(15.dp),
+                modifier = Modifier.size(16.dp),
             )
-            SessionTrailing.Resumable -> Icon(
-                Icons.Rounded.Refresh,
-                contentDescription = stringResource(R.string.common_resumable),
-                tint = MobileDesign.Muted,
-                modifier = Modifier.size(15.dp),
-            )
-            SessionTrailing.None -> Unit
         }
     }
+}
+
+/** A localized relative age; the stored label is a fallback when the timestamp is malformed. */
+private fun relativeAge(
+    updatedAt: java.time.Instant?,
+    stored: String,
+    nowMillis: Long,
+    context: android.content.Context,
+): String {
+    val instant = updatedAt ?: return stored
+    // The platform's relative formatter covers every range and the reader's locale,
+    // instead of four hand-written buckets.
+    return android.text.format.DateUtils.getRelativeTimeSpanString(
+        instant.toEpochMilli(),
+        nowMillis,
+        android.text.format.DateUtils.MINUTE_IN_MILLIS,
+        android.text.format.DateUtils.FORMAT_ABBREV_RELATIVE,
+    ).toString()
 }

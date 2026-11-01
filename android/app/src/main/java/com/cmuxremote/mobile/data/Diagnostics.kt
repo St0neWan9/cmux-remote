@@ -19,8 +19,8 @@ object Diagnostics {
 
     /** Tokens, keys, grants and signatures are long base64 or hex runs; never keep one. */
     private val SECRET = Regex("[A-Za-z0-9+/_-]{32,}={0,2}")
-    private val TIME = DateTimeFormatter.ofPattern("HH:mm:ss.SSS", Locale.US)
-    private val STAMP = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS", Locale.US)
+    private val TIME = DateTimeFormatter.ofPattern("HH:mm:ss.SSS", java.util.Locale.getDefault())
+    private val STAMP = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS", java.util.Locale.getDefault())
 
     private val lock = Any()
     private val buffer = ArrayDeque<Entry>()
@@ -52,7 +52,7 @@ object Diagnostics {
         val header = "cmux-remote $version · Android ${Build.VERSION.RELEASE ?: "?"}" +
             " · ${LocalDateTime.now().format(STAMP)}"
         val lines = snapshot.map { entry ->
-            "[${clock(entry.atMillis)}] [${entry.level.name.uppercase(Locale.US)}] [${entry.category}] ${entry.message}"
+            "[${clock(entry.atMillis)}] [${entry.level.name.uppercase(java.util.Locale.getDefault())}] [${entry.category}] ${entry.message}"
         }
         return (listOf(header) + lines).joinToString("\n")
     }

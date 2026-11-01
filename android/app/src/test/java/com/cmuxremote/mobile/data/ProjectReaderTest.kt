@@ -41,7 +41,8 @@ class ProjectReaderTest {
         assertEquals(
             listOf(
                 ProjectChange(path = "Sources/Foo.swift", status = " M", added = null, removed = null),
-                ProjectChange(path = "old name.swift", status = "R ", added = null, removed = null),
+                // The second porcelain entry is the source of the rename, kept for "old → new".
+                ProjectChange(path = "old name.swift", status = "R ", added = null, removed = null, oldPath = "new name.swift"),
                 ProjectChange(path = "docs/with space.md", status = "A ", added = null, removed = null),
             ),
             changes,
@@ -73,6 +74,17 @@ class ProjectReaderTest {
         assertEquals(ProjectText(path = "src/App.kt", text = "@@ -1 +1 @@", truncated = true), text)
         assertEquals(listOf("/v2/sessions/session-1/diff"), calls.map { it.path })
         assertEquals(mapOf("path" to "src/App.kt"), calls.single().query)
+    }
+
+    @Test
+    fun wholeRepositoryDiffOmitsThePathQuery() = runTest {
+        val reader = makeReader(jsonObjectOf("path" to jsonString(""), "text" to jsonString("diff")))
+
+        reader.diff("session-1", "")
+
+        assertEquals(listOf("/v2/sessions/session-1/diff"), calls.map { it.path })
+        // An empty path is the whole working tree, not a file named "".
+        assertEquals(emptyMap<String, String>(), calls.single().query)
     }
 
     @Test
