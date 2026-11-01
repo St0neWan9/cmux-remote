@@ -3,17 +3,26 @@ package com.cmuxremote.mobile.ui
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
+import android.util.Size
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
+import androidx.camera.core.FocusMeteringAction
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
+import androidx.camera.core.resolutionselector.ResolutionSelector
+import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -23,8 +32,14 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.FlashOff
+import androidx.compose.material.icons.rounded.FlashOn
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -38,7 +53,14 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size as GeometrySize
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathFillType
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
@@ -54,14 +76,19 @@ import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.common.InputImage
 import java.util.concurrent.Executor
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.resume
 import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
 
 /**
  * Full-screen QR capture that reports only the decoded string. The camera belongs to this
  * composable: it is unbound as soon as one code arrives, and the caller validates the value.
+ *
+ * The frame and tap-to-focus exist because a camera preview alone gives the reader nothing to
+ * aim at: an unfocused, unbounded preview looked like the scanner was not running at all.
  */
 @Composable
 fun QrScannerScreen(
@@ -131,17 +158,120 @@ private fun CameraPreview(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val previewView = remember {
-        PreviewView(context).apply { scaleType = PreviewView.ScaleType.FILL_CENTER }
+        PreviewView(context).apply {
+            scaleType = PreviewView.ScaleType.FILL_CENTER
+            // A TextureView keeps Compose's frame and instructions above the preview on every
+            // device; a SurfaceView can punch through them.
+            implementationMode = PreviewView.ImplementationMode.COMPATIBLE
+        }
     }
     val analysisExecutor = remember { Executors.newSingleThreadExecutor() }
     val previewUseCase = remember { Preview.Builder().build() }
     val analysisUseCase = remember {
         ImageAnalysis.Builder()
+            .setResolutionSelector(
+                ResolutionSelector.Builder()
+                    .setResolutionStrategy(
+                        ResolutionStrategy(
+                            Size(1280, 720),
+                            ResolutionStrategy.FALLBACK_RULE_CLOSEST_LOWER_THEN_HIGHER,
+                        ),
+                    )
+                    .build(),
+            )
             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
             .build()
     }
+    var camera by remember { mutableStateOf<Camera?>(null) }
+    var torchOn by remember { mutableStateOf(false) }
+    var hasFlash by remember { mutableStateOf(false) }
+    var reticle by remember { mutableStateOf<Offset?>(null) }
 
-    AndroidView(factory = { previewView }, modifier = Modifier.fillMaxSize())
+    // A tap focuses and meters at that point, and leaves a short-lived frame where it landed.
+    val focusAt: (Offset) -> Unit = { point ->
+        val current = camera
+        if (current != null) {
+            val metering = previewView.meteringPointFactory.createPoint(point.x, point.y)
+            current.cameraControl.startFocusAndMetering(
+                FocusMeteringAction.Builder(
+                    metering,
+                    FocusMeteringAction.FLAG_AF or FocusMeteringAction.FLAG_AE,
+                )
+                    .setAutoCancelDuration(5, TimeUnit.SECONDS)
+                    .build(),
+            )
+            reticle = point
+        }
+    }
+    LaunchedEffect(reticle) {
+        if (reticle != null) {
+            delay(700)
+            reticle = null
+        }
+    }
+
+    Box(Modifier.fillMaxSize()) {
+        AndroidView(factory = { previewView }, modifier = Modifier.fillMaxSize())
+        Box(
+            Modifier
+                .fillMaxSize()
+                .pointerInput(camera) {
+                    detectTapGestures { focusAt(it) }
+                },
+        )
+        ScanOverlay(reticle = reticle)
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal))
+                .padding(horizontal = 28.dp, vertical = 24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Text(
+                text = stringResource(R.string.pair_scan_guide),
+                color = Color.White,
+                style = MaterialTheme.typography.bodyMedium,
+                textAlign = TextAlign.Center,
+            )
+            Text(
+                text = stringResource(R.string.pair_scan_focus_hint),
+                color = Color.White.copy(alpha = 0.75f),
+                style = MaterialTheme.typography.labelMedium,
+                textAlign = TextAlign.Center,
+            )
+            if (hasFlash) {
+                Surface(
+                    shape = CircleShape,
+                    color = if (torchOn) Color.White else Color.Black.copy(alpha = 0.45f),
+                ) {
+                    TextButton(
+                        onClick = {
+                            val next = !torchOn
+                            camera?.cameraControl?.enableTorch(next)
+                            torchOn = next
+                        },
+                    ) {
+                        Icon(
+                            if (torchOn) Icons.Rounded.FlashOn else Icons.Rounded.FlashOff,
+                            contentDescription = stringResource(
+                                if (torchOn) R.string.pair_scan_torch_off else R.string.pair_scan_torch_on,
+                            ),
+                            tint = if (torchOn) MobileDesign.Ink else Color.White,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Spacer(Modifier.size(6.dp))
+                        Text(
+                            text = stringResource(R.string.pair_scan_torch),
+                            color = if (torchOn) MobileDesign.Ink else Color.White,
+                            style = MaterialTheme.typography.labelMedium,
+                        )
+                    }
+                }
+            }
+        }
+    }
 
     LaunchedEffect(previewView, lifecycleOwner) {
         var provider: ProcessCameraProvider? = null
@@ -161,34 +291,84 @@ private fun CameraPreview(
             previewUseCase.setSurfaceProvider(previewView.surfaceProvider)
             analysisUseCase.setAnalyzer(analysisExecutor, currentAnalyzer)
             currentProvider.unbindAll()
-            try {
-                currentProvider.bindToLifecycle(
-                    lifecycleOwner,
-                    CameraSelector.DEFAULT_BACK_CAMERA,
-                    previewUseCase,
-                    analysisUseCase,
-                )
-            } catch (backCameraError: RuntimeException) {
-                // A device may expose only a front-facing camera.
-                currentProvider.unbindAll()
-                try {
-                    currentProvider.bindToLifecycle(
-                        lifecycleOwner,
-                        CameraSelector.DEFAULT_FRONT_CAMERA,
-                        previewUseCase,
-                        analysisUseCase,
-                    )
-                } catch (frontCameraError: RuntimeException) {
+            // Ask what the device actually exposes: an emulator or a device without a usable
+            // camera used to fall through with a black preview instead of a clear message.
+            val selector = when {
+                currentProvider.hasCamera(CameraSelector.DEFAULT_BACK_CAMERA) -> CameraSelector.DEFAULT_BACK_CAMERA
+                currentProvider.hasCamera(CameraSelector.DEFAULT_FRONT_CAMERA) -> CameraSelector.DEFAULT_FRONT_CAMERA
+                else -> {
                     onUnavailable()
                     return@LaunchedEffect
                 }
             }
+            val bound = try {
+                currentProvider.bindToLifecycle(
+                    lifecycleOwner,
+                    selector,
+                    previewUseCase,
+                    analysisUseCase,
+                )
+            } catch (error: RuntimeException) {
+                onUnavailable()
+                return@LaunchedEffect
+            }
+            camera = bound
+            hasFlash = bound.cameraInfo.hasFlashUnit()
+            // Focus the middle of the frame once the preview has a size, so the first seconds
+            // are not spent on a blurry close-up.
+            previewView.post {
+                val point = Offset(previewView.width / 2f, previewView.height * 0.42f)
+                if (point.x > 0f && point.y > 0f) focusAt(point)
+            }
             awaitCancellation()
         } finally {
+            camera = null
+            torchOn = false
             analysisUseCase.clearAnalyzer()
             analyzer?.close()
             provider?.unbindAll()
             analysisExecutor.shutdown()
+        }
+    }
+}
+
+/** Dims everything outside the code frame and draws its corners; the reticle marks a tap. */
+@Composable
+private fun ScanOverlay(reticle: Offset?) {
+    Canvas(Modifier.fillMaxSize()) {
+        val side = minOf(size.width, size.height) * 0.66f
+        val left = (size.width - side) / 2f
+        val top = (size.height - side) / 2f - size.height * 0.05f
+        val frame = Rect(left, top, left + side, top + side)
+
+        val scrim = Path().apply {
+            fillType = PathFillType.EvenOdd
+            addRect(Rect(0f, 0f, size.width, size.height))
+            addRect(frame)
+        }
+        drawPath(scrim, Color.Black.copy(alpha = 0.55f))
+
+        val corner = side * 0.16f
+        val stroke = 3.dp.toPx()
+        val accent = Color.White
+        fun bracket(x: Float, y: Float, dx: Float, dy: Float) {
+            drawLine(accent, Offset(x, y), Offset(x + dx, y), strokeWidth = stroke)
+            drawLine(accent, Offset(x, y), Offset(x, y + dy), strokeWidth = stroke)
+        }
+        bracket(frame.left, frame.top, corner, corner)
+        bracket(frame.right, frame.top, -corner, corner)
+        bracket(frame.left, frame.bottom, corner, -corner)
+        bracket(frame.right, frame.bottom, -corner, -corner)
+
+        reticle?.let { point ->
+            val half = 32.dp.toPx()
+            drawRoundRect(
+                color = accent,
+                topLeft = Offset(point.x - half, point.y - half),
+                size = GeometrySize(half * 2, half * 2),
+                cornerRadius = androidx.compose.ui.geometry.CornerRadius(8.dp.toPx()),
+                style = Stroke(width = 2.dp.toPx()),
+            )
         }
     }
 }
