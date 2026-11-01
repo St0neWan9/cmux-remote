@@ -43,7 +43,6 @@ export class RelayRoom extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     ctx.storage.sql.exec("CREATE TABLE IF NOT EXISTS nonces (key TEXT PRIMARY KEY, expires INTEGER NOT NULL)");
-    ctx.storage.sql.exec("CREATE TABLE IF NOT EXISTS registry (id INTEGER PRIMARY KEY, value TEXT NOT NULL)");
   }
   async fetch(request: Request): Promise<Response> {
     try {
@@ -83,9 +82,9 @@ export class RelayRoom extends DurableObject<Env> {
         if (pending) {
           if (value.clientPublicKey !== undefined || !Number.isSafeInteger(value.expiresAt) || value.expiresAt! <= now || value.expiresAt! > now + 600) throw new RelayFailure("enrollment_expired");
         } else if (value.kind !== "approved" || value.expiresAt !== undefined || value.clientPublicKey !== proof.clientPublicKey) throw new RelayFailure("invalid_permit");
-        const registry = this.ctx.storage.sql.exec<{ value: string }>("SELECT value FROM registry WHERE id = 1").toArray();
-        const revoked = registry.length ? JSON.parse(registry[0].value) as string[] : [];
-        if (revoked.includes(clientID)) throw new RelayFailure("revoked");
+        // Revocation is enforced by the Bridge on every request and subscription; the
+        // relay grants transport only. Keeping a revoked list here also refused a
+        // revoked device's *enrollment* before the owner could approve it again.
         const clients = this.ctx.getWebSockets("client").filter(x => x.readyState === 1);
         if (clients.filter(x => (x.deserializeAttachment() as Connection).pending === pending).length >= (pending ? 4 : 16)) throw new RelayFailure("capacity", 429);
         this.claimNonce(clientID + ":" + proof.nonce, proof.timestamp + 61, now);
@@ -134,13 +133,11 @@ export class RelayRoom extends DurableObject<Env> {
           return;
         }
         if (envelope.kind === "registry") {
+          // Older Bridges still send their revocation snapshot; acknowledge it so the
+          // relay is ready, but do not gate transport on it (the Bridge authorizes reads).
           if (!envelope.revoked || envelope.revoked.length > 100 || !envelope.revoked.every(identity)) throw new RelayFailure("invalid_registry");
-          // SQLite is synchronous: ordering with client admission/revocation does not depend on detached promises.
-          this.ctx.storage.sql.exec("CREATE TABLE IF NOT EXISTS registry (id INTEGER PRIMARY KEY, value TEXT NOT NULL)");
-          this.ctx.storage.sql.exec("INSERT OR REPLACE INTO registry (id, value) VALUES (1, ?)", JSON.stringify(envelope.revoked));
           state.ready = true; socket.serializeAttachment(state);
           socket.send(JSON.stringify({ kind: "ready" }));
-          for (const peer of this.ctx.getWebSockets("client")) if (envelope.revoked.includes((peer.deserializeAttachment() as Connection).clientID ?? "")) peer.close(1008, "revoked");
           return;
         }
         if (!envelope.channel_id || !/^[0-9a-f-]{36}$/.test(envelope.channel_id)) throw new RelayFailure("invalid_channel");
