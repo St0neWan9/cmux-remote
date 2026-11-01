@@ -56,7 +56,6 @@ import com.cmuxremote.mobile.ui.components.FloatingSurface
 import com.cmuxremote.mobile.ui.components.Pill
 import com.cmuxremote.mobile.ui.components.SessionRow
 import com.cmuxremote.mobile.ui.components.StatusDot
-import com.cmuxremote.mobile.ui.components.WorkingIndicator
 import com.cmuxremote.mobile.ui.theme.MobileDesign
 
 /** Everything the list needs to render, independent of how it is hosted. */
@@ -287,11 +286,8 @@ private fun SessionListContent(
                 item {
                     FilterChips(model.statusFilter, actions.onStatus)
                 }
-                if (model.loading && filtered.isEmpty()) {
-                    item {
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) { WorkingIndicator() }
-                    }
-                }
+                // The pull-to-refresh indicator already answers "is this loading";
+                // a second spinner in the list drew two at once.
                 if (model.error != null) {
                     item { Text(model.error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelMedium) }
                 }

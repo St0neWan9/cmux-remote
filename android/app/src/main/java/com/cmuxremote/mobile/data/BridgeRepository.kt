@@ -156,9 +156,9 @@ class BridgeRepository(val connection: AuthorizedConnection, private val client:
     }
 
     /** Routes reads through the relay link once the LAN path is proven unreachable. */
-    fun useRelayLink(client: com.cmuxremote.mobile.bridge.LinkClient) {
+    fun useRelayLink(client: com.cmuxremote.mobile.bridge.LinkClient, epoch: String? = null) {
         this.relayLink = client
-        this.client.useLink(client)
+        this.client.useLink(client, epoch)
     }
 
     val overRelay: Boolean get() = relayLink != null
@@ -168,6 +168,33 @@ class BridgeRepository(val connection: AuthorizedConnection, private val client:
 
     /** The epoch the next signed read would use; the link binds its subscriptions to it. */
     suspend fun epoch(): String = client.currentEpoch()
+
+    /**
+     * This device's current approved relay permit, signed by the host.
+     *
+     * A permit is only transport admission; the grant still authorizes every
+     * resource. Refreshing it here keeps a saved connection usable when the Mac
+     * rotates its relay configuration, without a new pairing.
+     */
+    suspend fun relayHint(): com.cmuxremote.mobile.protocol.RelayHint {
+        val value = client.call("GET", "/v2/relay")
+        val signed = com.cmuxremote.mobile.protocol.decodeSignedJson(
+            com.cmuxremote.mobile.protocol.Json.text(value),
+        )
+        com.cmuxremote.mobile.protocol.Signer.verify(
+            signed,
+            "relay3-hint",
+            connection.host.publicKey,
+        )
+        val hint = com.cmuxremote.mobile.protocol.RelayHint.from(
+            signed.value as? JsonObject
+                ?: throw ProtocolException("invalid_response", "The relay hint is not an object."),
+        )
+        if (hint.hostID != connection.host.id || hint.clientID != connection.clientID || hint.epoch.isBlank()) {
+            throw ProtocolException("invalid_identity", "The relay hint belongs to another connection.")
+        }
+        return hint
+    }
 
     /**
      * One real round trip to the Bridge, for the connection page's reachability

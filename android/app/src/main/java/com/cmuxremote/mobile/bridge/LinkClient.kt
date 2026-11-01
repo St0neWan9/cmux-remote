@@ -191,8 +191,13 @@ class LinkClient(
      */
     suspend fun request(method: String, uri: String, authorization: String?, body: ByteArray? = null): ByteArray {
         val id = UUID.randomUUID().toString()
+        if (sending == null || closed) {
+            android.util.Log.w("cmux-relay", "request before link ready $method $uri")
+            throw ProtocolException("link_failed", "The link is not ready.", 502)
+        }
         val deferred = kotlinx.coroutines.CompletableDeferred<ByteArray>()
         pending[id] = Pending(method, deferred)
+        android.util.Log.i("cmux-relay", "request $method $uri id=$id")
         try {
             val frame = buildJsonObject {
                 put("kind", JsonPrimitive("request"))

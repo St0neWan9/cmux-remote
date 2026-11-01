@@ -290,10 +290,11 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /** The status bar's retry: probe again, then re-read whatever page is on screen. */
+    /** The status bar's retry: probe again, refresh the relay hint, then re-read the page. */
     fun retryConnection() {
         refreshConnection()
         viewModelScope.launch {
+            repository?.let { refreshRelayHint(it) }
             if (_conversation.value != null) reloadOpen() else refresh()
         }
     }
@@ -376,7 +377,7 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
     val start: StateFlow<StartUi?> = _start.asStateFlow()
 
     /** One approved Mac and its own repository. */
-    private class HostRuntime(val connection: AuthorizedConnection, val repository: BridgeRepository) {
+    private class HostRuntime(var connection: AuthorizedConnection, val repository: BridgeRepository) {
         val id: String get() = connection.host.id
         val name: String get() = connection.host.name
     }
@@ -743,12 +744,15 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
         _connection.value = connection
         _reachable.value = true
         _probed.value = true
-        if (hosts.none { it.id == connection.host.id }) {
-            runCatching { BridgeRepository.open(connection) }.onSuccess { hosts += HostRuntime(connection, it) }
-        }
         _canStart.value = connection.scope.has(com.cmuxremote.mobile.protocol.ClientCapability.ConversationStart)
         if (_backgroundSync.value) com.cmuxremote.mobile.background.BackgroundSync.schedule(getApplication())
-        val repository = BridgeRepository.open(connection)
+        // Reuse the host's repository: a second instance would keep the relay link
+        // while the list refreshed through the old, LAN-only one.
+        val existingHost = hosts.firstOrNull { it.id == connection.host.id }
+        val repository = existingHost?.repository ?: BridgeRepository.open(connection).also {
+            hosts += HostRuntime(connection, it)
+        }
+        existingHost?.connection = connection
         this.repository = repository
         // Show the last background snapshot immediately; the live read replaces it.
         _shell.value = cachedState() ?: ShellState.Connected(connection.host.name, emptyList(), loading = true)
@@ -757,7 +761,7 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
             // A Mac reachable only through its relay carries every read on the link.
             if ((forceRelay || !lanReachable(repository, connection)) && connection.endpoint.relay != null) {
                 val relayed = dialRelay(connection, repository) ?: return@launch
-                repository.useRelayLink(relayed.link)
+                repository.useRelayLink(relayed.link, relayed.epoch)
                 live?.stop()
                 live = LiveUpdates(
                     connection,
@@ -769,8 +773,50 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
                 live?.start()
                 live?.watch(listPaths())
             }
+            // Over whichever transport answered, learn the current approved relay
+            // permit so a rotated relay needs no new pairing.
+            refreshRelayHint(repository)
             refresh()
         }
+    }
+
+    /**
+     * Replaces the saved relay permit with the host's current signed hint.
+     * Failure is routine (an old Bridge, or a stale permit with no reachable
+     * transport) and must not disturb the read that follows.
+     */
+    private suspend fun refreshRelayHint(repository: BridgeRepository) {
+        val hint = runCatching { repository.relayHint() }.getOrElse { error ->
+            com.cmuxremote.mobile.data.Diagnostics.log(
+                com.cmuxremote.mobile.data.Diagnostics.Level.Debug,
+                "relay",
+                "relay hint unavailable: ${(error as? ProtocolException)?.code ?: error.javaClass.simpleName}",
+            )
+            return
+        }
+        val host = hosts.firstOrNull { it.repository === repository } ?: return
+        val relay = hint.relay
+        relay?.let { endpoint ->
+            endpoint.validate(host.connection.host.id, Identity.publicKeyBase64(host.connection.privateKey))
+            endpoint.verify(host.connection.host.publicKey)
+        }
+        if (host.connection.endpoint.relay?.admission == relay?.admission &&
+            host.connection.endpoint.relay?.origin == relay?.origin
+        ) {
+            return
+        }
+        val updated = host.connection.copy(
+            endpoint = host.connection.endpoint.copy(relay = relay),
+        )
+        host.connection = updated
+        runCatching { store.saveToList(updated) }
+        if (_connection.value?.host?.id == updated.host.id) _connection.value = updated
+        rememberRelayOrigin(relay?.origin)
+        com.cmuxremote.mobile.data.Diagnostics.log(
+            com.cmuxremote.mobile.data.Diagnostics.Level.Info,
+            "relay",
+            "approved relay permit refreshed from ${relay?.origin ?: "LAN only"}",
+        )
     }
 
     /**
@@ -802,7 +848,10 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
     private suspend fun lanReachable(repository: BridgeRepository, connection: AuthorizedConnection): Boolean =
         runCatching { kotlinx.coroutines.withTimeout(6_000) { repository.epoch(); true } }.getOrDefault(false)
 
-    private class Relayed(val link: com.cmuxremote.mobile.bridge.LinkClient)
+    private class Relayed(
+        val link: com.cmuxremote.mobile.bridge.LinkClient,
+        val epoch: String,
+    )
 
     /** Dials the host's relay and returns the authenticated link, or null. */
     private suspend fun dialRelay(connection: AuthorizedConnection, repository: BridgeRepository): Relayed? {
@@ -816,11 +865,32 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
             onEvent = { event -> onLiveChange(event.id) },
         )
         return try {
+            android.util.Log.i("cmux-relay", "dial relay ${relay.origin}")
             link.connectForcedRelay(relay)
-            // The epoch is read over the link itself: the LAN may be the unreachable path.
-            link.epoch = repository.withLink(link) { epoch() }
-            Relayed(link)
+            android.util.Log.i("cmux-relay", "relay connected open=${link.isOpen} relayed=${link.dialedViaRelay}")
+            // The epoch must be read *over this link*: the LAN is the unreachable path,
+            // so a normal signed HTTPS read would time out and leave the link unused.
+            val body = link.request("GET", "/v2/identity", null, null)
+            val signed = com.cmuxremote.mobile.protocol.decodeSignedJson(String(body, Charsets.UTF_8))
+            com.cmuxremote.mobile.protocol.Signer.verify(signed, "host", connection.host.publicKey)
+            val announcement = com.cmuxremote.mobile.protocol.HostAnnouncement.from(
+                signed.value as? kotlinx.serialization.json.JsonObject
+                    ?: throw ProtocolException("invalid_response", "The identity is not an object."),
+            )
+            if (announcement.host.id != connection.host.id || announcement.epoch.isBlank()) {
+                throw ProtocolException("host_changed", "The relay link answered for another host.")
+            }
+            link.epoch = announcement.epoch
+            android.util.Log.i("cmux-relay", "relay epoch read ${announcement.epoch}")
+            Relayed(link, announcement.epoch)
         } catch (error: Exception) {
+            android.util.Log.w("cmux-relay", "relay dial failed: ${error.javaClass.name} ${(error as? ProtocolException)?.code ?: error.message}")
+            com.cmuxremote.mobile.data.Diagnostics.log(
+                com.cmuxremote.mobile.data.Diagnostics.Level.Warning,
+                "relay",
+                "relay dial failed: ${(error as? ProtocolException)?.code ?: error.javaClass.simpleName}",
+            )
+            runCatching { link.close() }
             null
         }
     }
@@ -954,6 +1024,8 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
         val host = hosts.firstOrNull { it.id == hosted.hostID } ?: return
         repository = host.repository
         _selectedKey.value = hosted.hostID + ":" + hosted.session.id
+        // A secondary Mac only reaches its own transport now; refresh its permit too.
+        viewModelScope.launch { refreshRelayHint(host.repository) }
         open(hosted.session)
     }
 

@@ -225,6 +225,23 @@ data class EnrollmentStatus(
     }
 }
 
+/** A signed routing hint carrying this device's current approved relay permit. */
+data class RelayHint(
+    val hostID: String,
+    val clientID: String,
+    val epoch: String,
+    val relay: com.cmuxremote.mobile.bridge.RelayEndpoint?,
+) {
+    companion object {
+        fun from(json: JsonObject): RelayHint = RelayHint(
+            hostID = json.string("hostID") ?: "",
+            clientID = json.string("clientID") ?: "",
+            epoch = json.string("epoch") ?: "",
+            relay = com.cmuxremote.mobile.bridge.RelayEndpoint.from(json["relay"]),
+        )
+    }
+}
+
 /** What the Bridge signs to prove its runtime epoch. */
 data class HostAnnouncement(val host: HostIdentity, val epoch: String, val version: Int) {
     companion object {
