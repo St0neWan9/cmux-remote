@@ -405,6 +405,8 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
     private var pollLoop: Job? = null
     /** Fills the stored copy backwards while its page is open. */
     private var backfill: Job? = null
+    /** Automatic earlier-page loads wait this long; a pull does not. */
+    private var nextOlderAt = 0L
     /** A burst of live notifications writes the stored copy at most this often. */
     private val lastStoredAt = mutableMapOf<String, Long>()
 
@@ -1433,51 +1435,79 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
 
     /** Sends the draft once; a failed send keeps the text so it can be inspected, never auto-retried. */
     /** Pages in earlier history, keeping the rows already read. */
-    fun loadOlder() {
+    /**
+     * Pages in earlier messages.
+     *
+     * A pull is the reader asking, so it is not filtered by what the page believes:
+     * a stale `hasMore` is exactly what once made the gesture do nothing, and asking
+     * again costs one request that answers honestly. Automatic loads keep the 0.8 s
+     * pause so a scroll at the top cannot chain pages while the list is laying out.
+     */
+    fun loadOlder(pull: Boolean = false) {
         val current = repository ?: return
         val value = _conversation.value ?: return
-        if (value.loadingOlder || !value.hasMore) return
+        if (value.loadingOlder) return
+        val now = System.currentTimeMillis()
+        if (!pull) {
+            if (!value.hasMore) return
+            if (now < nextOlderAt) return
+        }
         val oldest = value.messages.firstOrNull()?.seq ?: return
+        nextOlderAt = now + OLDER_PAUSE_MS
         _conversation.update { it?.copy(loadingOlder = true) }
         val scope = storeScope(current.connection)
+        val sessionID = value.session.id
         viewModelScope.launch {
-            // An earlier page already stored never asks the Mac again.
-            val stored = withContext(Dispatchers.IO) {
-                runCatching {
-                    conversations.page(scope, value.session.id, beforeSeq = oldest, limit = 40)
-                }.getOrNull()?.takeIf { it.generation == value.generation }
-            }
-            val page = stored ?: runCatching {
-                current.history(value.session.id, beforeSeq = oldest, limit = 40)
-            }.getOrNull()
-            if (page == null) {
-                _conversation.update { it?.copy(loadingOlder = false) }
-                return@launch
-            }
-            // A page from a replaced transcript belongs to another seq space; refresh instead
-            // of mixing it in, and do not store it over the current generation.
-            if (page.generation != value.generation) {
-                _conversation.update { it?.copy(loadingOlder = false) }
-                reloadOpen()
-                return@launch
-            }
-            if (stored == null) {
-                withContext(Dispatchers.IO) {
+            // The flag answers "is a page in flight", so it clears however this read ends.
+            try {
+                // An earlier page already stored never asks the Mac again.
+                val stored = withContext(Dispatchers.IO) {
                     runCatching {
-                        conversations.save(page, scope, value.session.id, complete = !page.hasMore)
+                        conversations.page(scope, sessionID, beforeSeq = oldest, limit = 40)
+                    }.getOrNull()?.takeIf { it.generation == value.generation }
+                }
+                val page = stored ?: runCatching {
+                    current.history(sessionID, beforeSeq = oldest, limit = 40)
+                }.getOrNull()
+                if (page == null) return@launch
+                // A page from a replaced transcript belongs to another seq space; refresh instead
+                // of mixing it in, and do not store it over the current generation.
+                if (page.generation != value.generation) {
+                    reloadOpen()
+                    return@launch
+                }
+                if (stored == null) {
+                    withContext(Dispatchers.IO) {
+                        runCatching {
+                            conversations.save(page, scope, sessionID, complete = !page.hasMore)
+                        }
                     }
                 }
-            }
-            _conversation.update { ui ->
-                if (ui?.session?.id != value.session.id) ui else ui.copy(
-                    messages = ConversationMerge.messages(ui.messages, page.messages),
-                    responses = ConversationMerge.responses(ui.responses, page.responses),
-                    images = ConversationMerge.images(ui.images, page.images, page.generation),
-                    hasMore = page.hasMore,
-                    loadingOlder = false,
-                )
+                _conversation.update { ui ->
+                    if (ui?.session?.id != sessionID) {
+                        ui
+                    } else {
+                        ui.copy(
+                            messages = ConversationMerge.messages(ui.messages, page.messages),
+                            responses = ConversationMerge.responses(ui.responses, page.responses),
+                            images = ConversationMerge.images(ui.images, page.images, page.generation),
+                            // The page that answered decides; asking again after a false is
+                            // still allowed through a pull.
+                            hasMore = page.hasMore,
+                        )
+                    }
+                }
+            } finally {
+                _conversation.update {
+                    if (it?.session?.id != sessionID) it else it.copy(loadingOlder = false)
+                }
             }
         }
+    }
+
+    /** A pull when there is no earlier page to ask for: read the newest page again. */
+    fun refreshOpen() {
+        viewModelScope.launch { reloadOpen() }
     }
 
     fun send() {
@@ -1643,6 +1673,7 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
         /** iOS fills 64 pages; anything longer is resumed on the next open. */
         const val BACKFILL_PAGES = 64
         const val STORE_COALESCE_MS = 2_000L
+        const val OLDER_PAUSE_MS = 800L
     }
 
     private suspend fun reloadOpen() {

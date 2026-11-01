@@ -46,7 +46,9 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Text
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -101,7 +103,8 @@ fun ConversationScreen(
     onOpenDetail: ((String, String) -> Unit)? = null,
     onOpenReference: ((String) -> Unit)? = null,
     onOpenTask: ((com.cmuxremote.mobile.data.BackgroundTaskInfo) -> Unit)? = null,
-    onLoadOlder: (() -> Unit)? = null,
+    onLoadOlder: ((Boolean) -> Unit)? = null,
+    onRefreshConversation: (() -> Unit)? = null,
     pendingImages: List<Pair<String, String>> = emptyList(),
     onRemoveImage: (Int) -> Unit = {},
     onPickImages: (() -> Unit)? = null,
@@ -167,6 +170,7 @@ fun ConversationScreen(
             onOpenDetail = onOpenDetail,
             onOpenReference = onOpenReference,
             onLoadOlder = onLoadOlder,
+            onRefreshConversation = onRefreshConversation,
             onCopyText = onCopyText,
             onShareText = onShareText,
             onQuote = onQuote,
@@ -397,6 +401,7 @@ fun ConversationHeader(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ConversationTimeline(
     state: ConversationUi,
@@ -408,7 +413,10 @@ fun ConversationTimeline(
     onOpenDetail: ((String, String) -> Unit)? = null,
     onOpenReference: ((String) -> Unit)? = null,
     onOpenTask: ((com.cmuxremote.mobile.data.BackgroundTaskInfo) -> Unit)? = null,
-    onLoadOlder: (() -> Unit)? = null,
+    /** `true` is the reader's own pull; it bypasses the page's belief that nothing is left. */
+    onLoadOlder: ((Boolean) -> Unit)? = null,
+    /** A pull when there is no earlier page to ask for: read the newest page again. */
+    onRefreshConversation: (() -> Unit)? = null,
     onCopyText: ((String) -> Unit)? = null,
     onShareText: ((String) -> Unit)? = null,
     onQuote: ((String) -> Unit)? = null,
@@ -439,9 +447,20 @@ fun ConversationTimeline(
     // The generation is part of the key: a read that replaced the page while the
     // reader was at the top must be able to fetch earlier messages again.
     LaunchedEffect(firstVisible, state.generation, state.hasMore) {
-        if (firstVisible <= 1 && state.hasMore && !state.loadingOlder) onLoadOlder?.invoke()
+        if (firstVisible <= 1 && state.hasMore && !state.loadingOlder) onLoadOlder?.invoke(false)
+    }
+    // The pull is the reader asking, not the system's refresh control: the page's
+    // own top row carries the spinner, so this container draws no second one.
+    val pull: () -> Unit = {
+        if (state.hasMore) onLoadOlder?.invoke(true) else onRefreshConversation?.invoke()
     }
     Box(modifier.fillMaxWidth()) {
+    PullToRefreshBox(
+        isRefreshing = state.loadingOlder,
+        onRefresh = pull,
+        modifier = Modifier.fillMaxSize(),
+        indicator = {},
+    ) {
     LazyColumn(
         state = listState,
         modifier = Modifier.fillMaxSize(),
@@ -467,7 +486,7 @@ fun ConversationTimeline(
                         .fillMaxWidth()
                         // A short conversation whose groups fit on one screen cannot be
                         // scrolled, so the row itself is the way to ask for an older page.
-                        .clickable(enabled = !state.loadingOlder && onLoadOlder != null) { onLoadOlder?.invoke() }
+                        .clickable(enabled = !state.loadingOlder && onLoadOlder != null) { onLoadOlder?.invoke(true) }
                         .padding(vertical = 8.dp),
                     horizontalArrangement = Arrangement.Center,
                 ) {
@@ -614,6 +633,7 @@ fun ConversationTimeline(
             }
         }
     }
+    }
     if (!atLatest && state.messages.isNotEmpty()) {
         FloatingActionButton(
             onClick = { scope.launch { listState.animateScrollToItem((state.messages.size - 1).coerceAtLeast(0)) } },
@@ -634,7 +654,9 @@ private sealed interface TimelineEntry {
     val key: String
     data class Single(val message: ChatMessage) : TimelineEntry { override val key = message.id }
     data class Group(val rows: List<ChatMessage>, val isLatest: Boolean) : TimelineEntry {
-        override val key = "group-" + (rows.firstOrNull()?.id ?: "")
+        // Keyed by its newest row: an earlier page prepended above must not change the
+        // group's identity, or the list loses the reader's place when the page grows.
+        override val key = "group-" + (rows.lastOrNull()?.id ?: "")
     }
 }
 

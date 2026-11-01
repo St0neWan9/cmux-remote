@@ -166,6 +166,7 @@ fun CmuxApp(viewModel: CmuxViewModel) {
                 onOpenDetail = viewModel::openToolDetail,
                 onOpenReference = { path -> viewModel.openProjectAt(path) },
                 onLoadOlder = viewModel::loadOlder,
+                onRefreshConversation = viewModel::refreshOpen,
                 onCopyText = { text ->
                     val clipboard = clipboard
                     clipboard?.setText(androidx.compose.ui.text.AnnotatedString(text))
