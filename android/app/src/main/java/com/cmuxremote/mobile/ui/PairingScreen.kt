@@ -384,6 +384,12 @@ fun AwaitingOwnerScreen(
                 color = MobileDesign.Ink,
                 fontWeight = FontWeight.SemiBold,
             )
+            Spacer(Modifier.height(12.dp))
+            Text(
+                text = stringResource(R.string.pair_awaiting_missing_hint),
+                color = MobileDesign.Muted,
+                style = MaterialTheme.typography.labelMedium,
+            )
         }
         Button(
             onClick = onCancel,

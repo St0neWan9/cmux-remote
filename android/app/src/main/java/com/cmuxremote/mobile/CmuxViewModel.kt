@@ -3,6 +3,7 @@ package com.cmuxremote.mobile
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.cmuxremote.mobile.bridge.AndroidCapabilitiesBeforeStart
 import com.cmuxremote.mobile.bridge.Enrollment
 import com.cmuxremote.mobile.bridge.LiveUpdates
 import com.cmuxremote.mobile.bridge.PendingEnrollment
@@ -481,7 +482,12 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
             } catch (error: ProtocolException) {
                 if (error.code != "invalid_enrollment") throw error
                 enrollment.close()
-                enrollment = Enrollment.fromBootstrap(bootstrap, store.privateKey(), clientKind = "iphone")
+                enrollment = Enrollment.fromBootstrap(
+                    bootstrap,
+                    store.privateKey(),
+                    clientKind = "iphone",
+                    capabilities = AndroidCapabilitiesBeforeStart,
+                )
                 enrollment.submit()
             }
             enrollment to status
@@ -541,13 +547,20 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
                 // A Bridge older than this client cannot decode the "android" kind and
                 // closes the request; the iPhone kind means the same thing to it.
                 if (error.code != "invalid_enrollment") throw error
+                // Bridges before this client reject both the android kind and the
+                // conversationStart capability; retry as the kind and scope they know.
                 com.cmuxremote.mobile.data.Diagnostics.log(
                     com.cmuxremote.mobile.data.Diagnostics.Level.Info,
                     "enrollment",
-                    "Bridge does not accept the android kind; retrying as iphone",
+                    "Bridge rejected the android request; retrying as iphone without conversationStart",
                 )
                 enrollment.close()
-                enrollment = Enrollment.begin(code, store.privateKey(), clientKind = "iphone")
+                enrollment = Enrollment.begin(
+                    code,
+                    store.privateKey(),
+                    clientKind = "iphone",
+                    capabilities = AndroidCapabilitiesBeforeStart,
+                )
                 enrollment.submit()
             }
             enrollment to status
@@ -557,8 +570,22 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
     /** Pairs with a Mac found on the local network; the owner still has to approve it. */
     fun pairDiscovered(bridge: com.cmuxremote.mobile.bridge.DiscoveredBridge) {
         beginPairing {
-            val enrollment = Enrollment.beginDiscovered(bridge.endpoint, bridge.host, store.privateKey())
-            enrollment to enrollment.submit()
+            var enrollment = Enrollment.beginDiscovered(bridge.endpoint, bridge.host, store.privateKey())
+            val status = try {
+                enrollment.submit()
+            } catch (error: ProtocolException) {
+                if (error.code != "invalid_enrollment") throw error
+                enrollment.close()
+                enrollment = Enrollment.beginDiscovered(
+                    bridge.endpoint,
+                    bridge.host,
+                    store.privateKey(),
+                    clientKind = "iphone",
+                    capabilities = AndroidCapabilitiesBeforeStart,
+                )
+                enrollment.submit()
+            }
+            enrollment to status
         }
     }
 
@@ -1752,6 +1779,10 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
                 "outcome_unknown" -> R.string.error_outcome_unknown
                 "invalid_enrollment" -> R.string.error_invalid_enrollment
                 "enrollment_pending" -> R.string.error_enrollment_pending
+                "enrollment_closed" -> R.string.error_enrollment_closed
+                "enrollment_expired" -> R.string.error_enrollment_expired
+                "request_expired" -> R.string.error_request_expired
+                "invalid_pairing" -> R.string.error_invalid_pairing
                 "invalid_route", "invalid_response" -> R.string.error_invalid_response
                 "invalid_image" -> R.string.error_invalid_image
                 else -> null

@@ -60,6 +60,10 @@
     <string name="error_outcome_unknown">The outcome is unknown. Check on the Mac before trying again.</string>
     <string name="error_invalid_enrollment">This Mac does not accept the enrollment request.</string>
     <string name="error_enrollment_pending">This Mac has not approved this device yet.</string>
+    <string name="error_enrollment_closed">The pairing window on the Mac was refreshed or closed. Open Add Device again and scan within five minutes, without refreshing that page.</string>
+    <string name="error_enrollment_expired">The pairing window expired. Generate a new code on the Mac.</string>
+    <string name="error_request_expired">This request expired or was cleared. Scan again.</string>
+    <string name="error_invalid_pairing">That is not a current pairing code. Open Add Device on the Mac again.</string>
     <string name="error_invalid_response">The Mac returned a response this app cannot read.</string>
     <string name="error_invalid_image">That image does not meet the upload limits.</string>
 
@@ -86,6 +90,7 @@
     <string name="pair_retry_saved">Already paired? Retry the saved connection</string>
     <string name="pair_awaiting_owner">Waiting for %1$s to approve</string>
     <string name="pair_awaiting_owner_note">Open Cmux Remote → Devices on your Mac, then verify and approve this request.</string>
+    <string name="pair_awaiting_missing_hint">If this device is missing from the Mac\'s pending list, open Add Device there again and scan immediately; do not refresh that page or restart the Mac app.</string>
     <string name="pair_failed_title">Can\'t connect</string>
     <string name="pair_scan_title">Scan QR code</string>
     <string name="pair_scan_guide">Put the pairing code from your Mac inside the frame</string>

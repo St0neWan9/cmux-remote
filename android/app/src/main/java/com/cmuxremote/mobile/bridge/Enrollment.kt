@@ -88,6 +88,12 @@ val AndroidCapabilities: List<ClientCapability> = listOf(
     ClientCapability.ConversationStart,
 )
 
+/**
+ * A Bridge older than conversationStart rejects the whole request over the unknown
+ * capability, so pairing falls back to this set: everything the old Bridge can grant.
+ */
+val AndroidCapabilitiesBeforeStart: List<ClientCapability> = AndroidCapabilities - ClientCapability.ConversationStart
+
 /** A request awaiting the Mac owner's approval. */
 class PendingEnrollment(
     val bootstrap: EnrollmentBootstrap,
@@ -246,10 +252,11 @@ object Enrollment {
         privateKey: ByteArray,
         clientName: String = "cmux Android",
         clientKind: String = "android",
+        capabilities: List<ClientCapability> = AndroidCapabilities,
         now: Long = System.currentTimeMillis() / 1000,
     ): PendingEnrollment {
         val bootstrap = EnrollmentQr.bootstrap(code, now)
-        return pending(bootstrap, privateKey, clientName, clientKind)
+        return pending(bootstrap, privateKey, clientName, clientKind, capabilities)
     }
 
     /**
@@ -262,13 +269,14 @@ object Enrollment {
         privateKey: ByteArray,
         clientName: String = "cmux Android",
         clientKind: String = "android",
+        capabilities: List<ClientCapability> = AndroidCapabilities,
         now: Long = System.currentTimeMillis() / 1000,
     ): PendingEnrollment {
         bootstrap.validate(now)
         if (bootstrap.workspaces.isEmpty()) {
             throw ProtocolException("invalid_pairing", "No workspace was shared for this window.")
         }
-        return pending(bootstrap, privateKey, clientName, clientKind)
+        return pending(bootstrap, privateKey, clientName, clientKind, capabilities)
     }
 
     /**
@@ -284,6 +292,7 @@ object Enrollment {
         privateKey: ByteArray,
         clientName: String = "cmux Android",
         clientKind: String = "android",
+        capabilities: List<ClientCapability> = AndroidCapabilities,
         now: Long = System.currentTimeMillis() / 1000,
     ): PendingEnrollment {
         val http = PinnedHttpClient(endpoint.host, endpoint.port, trustedHost.certificateSHA256)
@@ -311,7 +320,7 @@ object Enrollment {
         ) {
             throw ProtocolException("host_changed", "The enrollment belongs to another Mac.")
         }
-        return pending(bootstrap, privateKey, clientName, clientKind)
+        return pending(bootstrap, privateKey, clientName, clientKind, capabilities)
     }
 
     private fun pending(
@@ -319,6 +328,7 @@ object Enrollment {
         privateKey: ByteArray,
         clientName: String,
         clientKind: String,
+        capabilities: List<ClientCapability>,
     ): PendingEnrollment {
         val http = PinnedHttpClient(bootstrap.endpoint.host, bootstrap.endpoint.port, bootstrap.host.certificateSHA256)
         val publicKey = Identity.publicKeyBase64(privateKey)
@@ -331,7 +341,7 @@ object Enrollment {
             clientName = clientName,
             clientKind = clientKind,
             nonce = UUID.randomUUID().toString(),
-            scope = ClientScope.of(bootstrap.workspaces, AndroidCapabilities),
+            scope = ClientScope.of(bootstrap.workspaces, capabilities),
             expiresAt = bootstrap.expiresAt,
         )
         val signed = Signer.sign(request.toJson(), "enrollment-request", privateKey)
