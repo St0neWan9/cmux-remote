@@ -17,7 +17,8 @@ class MainActivity : ComponentActivity() {
         // Debug-only test hook: a UI test can hand over the enrollment code the
         // Mac printed, instead of typing a long URL into the field.
         if (BuildConfig.DEBUG) {
-            // A UI test can drive the "add another Mac" overlay, not only first use.
+            // A UI test can drive identity reset and the "add another Mac" overlay.
+            if (intent?.getBooleanExtra("reset_identity", false) == true) model.resetIdentity()
             if (intent?.getBooleanExtra("add_device", false) == true) model.setAddingDevice(true)
             // Typing a URL through an IME is unreliable in a UI test; this seeds one relay.
             intent?.getStringExtra("relay_origin")?.takeIf { it.isNotBlank() }?.let(model::addRelayOrigin)

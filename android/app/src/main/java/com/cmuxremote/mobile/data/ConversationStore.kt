@@ -184,6 +184,14 @@ class ConversationStore(context: Context, private val limits: Limits = Limits())
         }
     }
 
+    /** Drops every stored conversation, for a deliberate identity reset. */
+    fun clearAll() = synchronized(lock) {
+        runCatching {
+            val db = helper.writableDatabase
+            for (table in TABLES) db.delete(table, null, null)
+        }
+    }
+
     private fun createSchema(db: SQLiteDatabase) {
         db.execSQL("CREATE TABLE IF NOT EXISTS $TABLE_META (scope TEXT NOT NULL, session_id TEXT NOT NULL, payload BLOB NOT NULL, PRIMARY KEY (scope, session_id)) WITHOUT ROWID")
         db.execSQL("CREATE TABLE IF NOT EXISTS $TABLE_MESSAGE (scope TEXT NOT NULL, session_id TEXT NOT NULL, id TEXT NOT NULL, seq INTEGER NOT NULL, payload BLOB NOT NULL, PRIMARY KEY (scope, session_id, id)) WITHOUT ROWID")
