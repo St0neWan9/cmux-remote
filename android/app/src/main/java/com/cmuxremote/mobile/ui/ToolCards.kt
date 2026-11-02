@@ -80,7 +80,7 @@ data class ToolRowModel(
 )
 
 /** A group longer than this draws only its newest slice; the whole turn opens on its own page. */
-/** Above this many rows the inline slice collapses to its newest [InlineRowLimit]. */
+/** Operations a group may draw whole; longer groups draw their newest slice. */
 private const val InlineGroupThreshold = 5
 private const val InlineRowLimit = 10
 
@@ -122,8 +122,10 @@ fun ActivityGroupCard(
         }
         return
     }
-    // A long group draws only its newest slice here; the full page is one tap away.
-    val visibleRows = if (rows.size > InlineGroupThreshold) rows.takeLast(InlineRowLimit) else rows
+    val operationCount = rows.count { it.kind != "thought" }
+    val drawsWhole = operationCount <= InlineGroupThreshold
+    // A long group draws only its newest slice here; the summary opens the full page.
+    val visibleRows = if (drawsWhole) rows else rows.takeLast(InlineRowLimit)
 
     Column(
         modifier
@@ -139,7 +141,12 @@ fun ActivityGroupCard(
                 .semantics {
                     stateDescription = expandedLabel
                 }
-                .clickable { onHoldPlace?.invoke(); choice = !expanded }
+                .clickable {
+                    onHoldPlace?.invoke()
+                    // A group too long for the timeline is read on its own page;
+                    // tapping its summary opens that page instead of inflating it.
+                    if (!drawsWhole) onOpenFull() else choice = !expanded
+                }
                 .padding(vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(9.dp),
@@ -164,32 +171,14 @@ fun ActivityGroupCard(
             )
         }
         if (expanded) {
-            // The iPhone caps the whole open card at 280pt and scrolls inside it.
-            Column(
-                modifier = Modifier
-                    .heightIn(max = 280.dp)
-                    .verticalScroll(rememberScrollState()),
-            ) {
-                visibleRows.forEach { row ->
-                    ToolDisclosureRow(
-                        row = row,
-                        onOpenDetail = { onOpenDetail(row) },
-                        onOpenReference = onOpenReference,
-                        onHoldPlace = onHoldPlace,
-                    )
-                }
-            }
-            if (rows.size > InlineGroupThreshold) {
-                Text(
-                    text = stringResource(R.string.chat_view_all_operations, rows.size),
-                    color = MobileDesign.Accent,
-                    style = MaterialTheme.typography.labelMedium,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(MobileDesign.AccentSoft, RoundedCornerShape(50))
-                        .clickable(onClick = onOpenFull)
-                        .padding(horizontal = 12.dp, vertical = 10.dp),
+            // Rows flow with the timeline; there is no inner scroller and no
+            // "view all" button. A long group opens its own page from the summary.
+            visibleRows.forEach { row ->
+                ToolDisclosureRow(
+                    row = row,
+                    onOpenDetail = { onOpenDetail(row) },
+                    onOpenReference = onOpenReference,
+                    onHoldPlace = onHoldPlace,
                 )
             }
         }
@@ -204,10 +193,13 @@ fun toolRowModels(messages: List<com.cmuxremote.mobile.data.ChatMessage>): List<
             id = message.id,
             kind = message.kind,
             title = when (message.kind) {
-                // The command's first line is the card's own summary title.
-                "terminal" -> message.command?.lineSequence()?.firstOrNull()?.takeIf { it.isNotBlank() }
+                // The agent describes each operation; the command/input stays in the card.
+                "terminal" -> message.summary?.takeIf { it.isNotBlank() }
+                    ?: message.command
                     ?: stringResource(R.string.tool_card_shell)
-                else -> message.filePath ?: message.toolName ?: message.command
+                "file_edit" -> message.filePath ?: stringResource(R.string.chat_file_change)
+                else -> message.summary?.takeIf { it.isNotBlank() }
+                    ?: message.toolName
                     ?: message.text.ifBlank { stringResource(R.string.chat_operation) }
             },
             status = message.status,

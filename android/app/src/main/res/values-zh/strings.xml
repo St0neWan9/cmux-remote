@@ -239,7 +239,7 @@
     <string name="chat_timing_note">已记录的运行时间不包含轮次之间的空闲时间。缺失的时长不计入累计；响应耗时估算使用会话记录的时间戳。</string>
     <string name="chat_compacting">正在压缩上下文…</string>
     <string name="chat_running_timer">运行中 %1$s</string>
-    <string name="chat_used_time">用时 %1$s</string>
+    <string name="chat_used_time">运行 %1$s</string>
     <string name="chat_used_time_approx">用时约 %1$s</string>
     <string name="chat_recorded_turns">已记录 %1$d 轮回复的运行时间。</string>
     <string name="chat_view_all_operations">查看全部 %1$d 个操作</string>
@@ -379,9 +379,9 @@
     <string name="error_pairing_failed">配对失败。</string>
     <string name="chat_image_not_confirmed">图片没有确认送达。</string>
     <string name="chat_outcome_unconfirmed_note">这条消息的结果仍未确认，请先在 Mac 上查看。</string>
-    <string name="chat_duration_seconds">%1$d 秒</string>
-    <string name="chat_duration_minutes">%1$d 分 %2$02d 秒</string>
-    <string name="chat_duration_hours">%1$d 小时 %2$02d 分</string>
+    <string name="chat_duration_seconds">%1$ds</string>
+    <string name="chat_duration_minutes">%1$dm %2$02ds</string>
+    <string name="chat_duration_hours">%1$dh %2$02dm</string>
     <string name="chat_speech_listening">正在听写…</string>
     <string name="chat_speech_draft">听写结果</string>
     <string name="chat_speech_finish">完成</string>
@@ -426,4 +426,5 @@
     <string name="chat_background_tasks_open">打开后台任务</string>
     <string name="common_zoom_in">放大</string>
     <string name="common_zoom_out">缩小</string>
+    <string name="sessions_all_hosts">全部</string>
 </resources>

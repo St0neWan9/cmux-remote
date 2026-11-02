@@ -271,7 +271,7 @@ private fun CompactProjectBody(
             }
         }
         when {
-            loading -> Box(Modifier.fillMaxWidth().padding(vertical = 24.dp), contentAlignment = Alignment.Center) {
+            loading && text == null -> Box(Modifier.fillMaxWidth().padding(vertical = 24.dp), contentAlignment = Alignment.Center) {
                 WorkingIndicator()
             }
             text != null && text.text.isEmpty() -> Text(
@@ -328,7 +328,7 @@ private fun WideProjectBody(
         Box(Modifier.width(1.dp).fillMaxHeight().background(MobileDesign.Line))
         Box(Modifier.weight(1f).fillMaxHeight()) {
             when {
-                loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                loading && text == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     WorkingIndicator()
                 }
                 text != null && text.text.isEmpty() -> Text(
