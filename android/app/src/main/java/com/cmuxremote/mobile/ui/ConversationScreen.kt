@@ -423,19 +423,12 @@ private fun subtitle(session: SessionDescriptor, agentModel: String?, hostName: 
     listOf(
         session.agent.replaceFirstChar { it.uppercase() },
         agentModel ?: "",
-        // The iPhone names the Mac, not an opaque workspace id.
+        // The iPhone names the Mac, not an opaque workspace id; the subtitle
+        // ends there, without a running/resumable state word.
         hostName ?: "",
-        stateLabel(session, context),
     )
         .filter { it.isNotEmpty() }
         .joinToString(" · ")
-
-private fun stateLabel(session: SessionDescriptor, context: Context): String = when {
-    session.working -> context.getString(R.string.common_working)
-    session.resumable -> context.getString(R.string.common_resumable)
-    !session.writable -> context.getString(R.string.common_read_only)
-    else -> ""
-}
 
 @Composable
 fun ConversationHeader(
@@ -799,6 +792,17 @@ fun ConversationTimeline(
                 }
             }
         }
+        if (state.clipped && !state.hasMore) {
+            // The iPhone puts this at the top, where the missing earlier messages would be.
+            item(key = "clipped") {
+                Text(
+                    stringResource(R.string.chat_history_clipped),
+                    color = MobileDesign.Muted,
+                    style = MaterialTheme.typography.labelMedium,
+                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                )
+            }
+        }
         items(timelineEntries(state.messages), key = { it.key }) { entry ->
             when (entry) {
                 is TimelineEntry.Single -> Column(
@@ -920,15 +924,6 @@ fun ConversationTimeline(
         if (looseImages.isNotEmpty()) {
             item(key = "loose-images") { MessageImages(looseImages, onOpenImage) }
         }
-        if (state.clipped) {
-            item(key = "clipped") {
-                Text(
-                    stringResource(R.string.chat_history_clipped),
-                    color = MobileDesign.Muted,
-                    style = MaterialTheme.typography.labelMedium,
-                )
-            }
-        }
         if (state.preview != null) {
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -997,7 +992,7 @@ fun ConversationTimeline(
             androidx.compose.animation.scaleIn(initialScale = 0.8f),
         exit = androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(180)) +
             androidx.compose.animation.scaleOut(targetScale = 0.8f),
-        modifier = Modifier.align(Alignment.BottomEnd),
+        modifier = Modifier.align(Alignment.BottomCenter),
     ) {
         Box(
             modifier = Modifier
@@ -1012,9 +1007,12 @@ fun ConversationTimeline(
                         "scroll",
                         "jump to latest",
                     )
+                    // Asking for the end resumes following: later output keeps the page at the bottom.
+                    autoFollow = true
                     scope.launch {
                         val last = listState.layoutInfo.totalItemsCount - 1
                         if (last >= 0) listState.animateScrollToItem(last)
+                        autoFollow = true
                     }
                 }
                 .testTag("chat.latest"),
@@ -1361,12 +1359,14 @@ fun ComposerArea(
     stopRequested: Boolean = false,
 ) {
     var focused by remember { mutableStateOf(false) }
+    // A focused bar, an image draft or a multi-line draft takes the two-row layout.
+    val expanded = focused || hasImages || draft.contains('\n')
     val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
     Column(
         modifier = modifier
             .fillMaxWidth()
             .testTag("voice.draft")
-            .padding(horizontal = 18.dp, vertical = 10.dp),
+            .padding(horizontal = if (expanded) 0.dp else 18.dp, vertical = 10.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         if (hasBackgroundTasks) {
@@ -1392,8 +1392,9 @@ fun ComposerArea(
                 Text(stringResource(R.string.chat_stop_requested), color = MobileDesign.Muted, style = MaterialTheme.typography.labelMedium)
             }
         }
-        val attach: @Composable () -> Unit = {
+        val attach: @Composable (Boolean) -> Unit = { isExpanded ->
             ComposerAttach(
+                expanded = isExpanded,
                 canSend = canSend,
                 sending = sending,
                 sendBlocked = sendBlocked,
@@ -1403,15 +1404,16 @@ fun ComposerArea(
                 onOpenFeed = onOpenFeed,
             )
         }
-        val voice: @Composable () -> Unit = {
-            ComposerVoice(dictating = dictating, enabled = onToggleVoice != null && !sendBlocked) {
+        val voice: @Composable (Boolean) -> Unit = { isExpanded ->
+            ComposerVoice(dictating = dictating, expanded = isExpanded, enabled = onToggleVoice != null && !sendBlocked) {
                 // Recording starts with the keyboard down, so dictation has the screen.
                 focusManager.clearFocus()
                 onToggleVoice?.invoke()
             }
         }
-        val send: @Composable () -> Unit = {
+        val send: @Composable (Boolean) -> Unit = { isExpanded ->
             ComposerSend(
+                expanded = isExpanded,
                 working = working,
                 draftBlank = draft.isBlank(),
                 canSend = canSend,
@@ -1428,32 +1430,31 @@ fun ComposerArea(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .shadow(6.dp, RoundedCornerShape(if (focused) 30.dp else 26.dp), clip = false)
-                .background(MobileDesign.Canvas, RoundedCornerShape(if (focused) 30.dp else 26.dp))
-                .border(
-                    if (focused) 1.dp else 0.5.dp,
-                    if (focused) MobileDesign.Accent else MobileDesign.Line,
-                    RoundedCornerShape(if (focused) 30.dp else 26.dp),
-                )
-                .padding(horizontal = 10.dp, vertical = 8.dp),
+                .shadow(6.dp, RoundedCornerShape(if (expanded) 26.dp else 30.dp), clip = false)
+                .background(MobileDesign.Canvas, RoundedCornerShape(if (expanded) 26.dp else 30.dp))
+                .border(0.5.dp, MobileDesign.Line, RoundedCornerShape(if (expanded) 26.dp else 30.dp))
+                .padding(
+                    horizontal = if (expanded) 10.dp else 6.dp,
+                    vertical = if (expanded) 7.dp else 5.dp,
+                ),
         ) {
-            ComposerLayout(focused = focused, modifier = Modifier.fillMaxWidth()) {
-                attach()
+            ComposerLayout(expanded = expanded, modifier = Modifier.fillMaxWidth()) {
+                attach(expanded)
                 ComposerField(
                     draft = draft,
                     onDraftChange = onDraftChange,
                     enabled = canSend,
-                    focused = focused,
+                    expanded = expanded,
                     expandedMaxLines = expandedMaxLines,
                     modifier = Modifier,
                     onFocusChanged = { focused = it },
                 )
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(if (expanded) 10.dp else 6.dp),
                 ) {
-                    voice()
-                    send()
+                    voice(expanded)
+                    send(expanded)
                 }
             }
         }
@@ -1519,28 +1520,28 @@ private fun MessageImages(
  */
 @Composable
 private fun ComposerLayout(
-    focused: Boolean,
+    expanded: Boolean,
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit,
 ) {
     androidx.compose.ui.layout.Layout(content = content, modifier = modifier) { measurables, constraints ->
-        val spacing = 10.dp.roundToPx()
+        val spacing = if (expanded) 10.dp.roundToPx() else 6.dp.roundToPx()
         val gap = 6.dp.roundToPx()
         val attach = measurables[0].measure(constraints.copy(minWidth = 0))
         val actions = measurables[2].measure(constraints.copy(minWidth = 0))
-        val fieldWidth = if (focused) {
+        val fieldWidth = if (expanded) {
             constraints.maxWidth
         } else {
             (constraints.maxWidth - attach.width - actions.width - spacing * 2).coerceAtLeast(0)
         }
         val field = measurables[1].measure(constraints.copy(minWidth = fieldWidth, maxWidth = fieldWidth))
-        val height = if (focused) {
+        val height = if (expanded) {
             field.height + gap + maxOf(attach.height, actions.height)
         } else {
             maxOf(field.height, attach.height, actions.height)
         }
         layout(constraints.maxWidth, height) {
-            if (focused) {
+            if (expanded) {
                 field.placeRelative(0, 0)
                 attach.placeRelative(0, field.height + gap)
                 actions.placeRelative(constraints.maxWidth - actions.width, field.height + gap)
@@ -1558,7 +1559,7 @@ private fun ComposerField(
     draft: String,
     onDraftChange: (String) -> Unit,
     enabled: Boolean,
-    focused: Boolean,
+    expanded: Boolean,
     expandedMaxLines: Int,
     modifier: Modifier,
     onFocusChanged: (Boolean) -> Unit,
@@ -1568,11 +1569,12 @@ private fun ComposerField(
         onValueChange = onDraftChange,
         modifier = modifier
             .testTag("chat.composer")
+            .padding(vertical = if (expanded) 11.dp else 8.dp)
             .onFocusChanged { onFocusChanged(it.isFocused) },
         enabled = enabled,
         textStyle = TextStyle(color = MobileDesign.Ink, fontSize = 15.sp),
         cursorBrush = SolidColor(MobileDesign.Accent),
-        maxLines = if (focused) expandedMaxLines else 4,
+        maxLines = if (expanded) expandedMaxLines else 1,
         decorationBox = { inner ->
             Box {
                 if (draft.isEmpty()) Text(stringResource(R.string.chat_input_placeholder), color = MobileDesign.Muted, fontSize = 15.sp)
@@ -1584,6 +1586,7 @@ private fun ComposerField(
 
 @Composable
 private fun ComposerAttach(
+    expanded: Boolean,
     canSend: Boolean,
     sending: Boolean,
     sendBlocked: Boolean,
@@ -1596,14 +1599,14 @@ private fun ComposerAttach(
     val hasActions = onPickImages != null || onPickImageFile != null || onOpenProject != null || onOpenFeed != null
     Box {
         Box(
-            modifier = Modifier.size(44.dp).testTag("chat.attach").clickable(enabled = hasActions) { actions = true },
+            modifier = Modifier.size(if (expanded) 44.dp else 38.dp).testTag("chat.attach").clickable(enabled = hasActions) { actions = true },
             contentAlignment = Alignment.Center,
         ) {
             Icon(
                 Icons.Rounded.Add,
                 contentDescription = stringResource(R.string.chat_add_attachment),
                 tint = if (hasActions) MobileDesign.Ink else MobileDesign.Muted,
-                modifier = Modifier.size(20.dp),
+                modifier = Modifier.size(if (expanded) 23.dp else 20.dp),
             )
         }
         DropdownMenu(expanded = actions, onDismissRequest = { actions = false }) {
@@ -1638,9 +1641,9 @@ private fun ComposerAttach(
 }
 
 @Composable
-private fun ComposerVoice(dictating: Boolean, enabled: Boolean, onClick: () -> Unit) {
+private fun ComposerVoice(dictating: Boolean, expanded: Boolean, enabled: Boolean, onClick: () -> Unit) {
     Box(
-        modifier = Modifier.size(44.dp).testTag("chat.voice").clickable(enabled = enabled, onClick = onClick),
+        modifier = Modifier.size(if (expanded) 44.dp else 38.dp).testTag("chat.voice").clickable(enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         Icon(
@@ -1652,13 +1655,14 @@ private fun ComposerVoice(dictating: Boolean, enabled: Boolean, onClick: () -> U
                 enabled -> MobileDesign.Ink
                 else -> MobileDesign.Muted
             },
-            modifier = Modifier.size(20.dp),
+            modifier = Modifier.size(if (expanded) 21.dp else 19.dp),
         )
     }
 }
 
 @Composable
 private fun ComposerSend(
+    expanded: Boolean,
     working: Boolean,
     draftBlank: Boolean,
     canSend: Boolean,
@@ -1670,29 +1674,44 @@ private fun ComposerSend(
 ) {
     if (working && draftBlank) {
         Box(
-            modifier = Modifier.size(44.dp).clip(CircleShape).background(MobileDesign.Accent).clickable(onClick = onStop).testTag("chat.stop"),
+            modifier = Modifier
+                .size(if (expanded) 44.dp else 38.dp)
+                .testTag("chat.stop"),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(Icons.Rounded.Stop, contentDescription = stringResource(R.string.chat_stop), tint = MobileDesign.Canvas, modifier = Modifier.size(16.dp))
+            Box(
+                modifier = Modifier
+                    .size(if (expanded) 40.dp else 34.dp)
+                    .clip(CircleShape)
+                    .background(MobileDesign.Accent)
+                    .clickable(onClick = onStop),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Rounded.Stop, contentDescription = stringResource(R.string.chat_stop), tint = MobileDesign.Canvas, modifier = Modifier.size(15.dp))
+            }
         }
     } else {
         // A prepared image is a draft of its own; text is optional.
         val enabled = canSend && (!draftBlank || hasImages) && !sending && !sendBlocked
         Box(
-            modifier = Modifier
-                .size(44.dp)
-                .clip(CircleShape)
-                .background(if (enabled) MobileDesign.Accent else MaterialTheme.colorScheme.surfaceVariant)
-                .clickable(enabled = enabled, onClick = onSend)
-                .testTag("chat.send"),
+            modifier = Modifier.size(if (expanded) 44.dp else 38.dp).testTag("chat.send"),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(
-                Icons.Rounded.ArrowUpward,
-                contentDescription = stringResource(R.string.chat_send),
-                tint = if (enabled) MobileDesign.Canvas else MobileDesign.Muted,
-                modifier = Modifier.size(20.dp),
-            )
+            Box(
+                modifier = Modifier
+                    .size(if (expanded) 40.dp else 34.dp)
+                    .clip(CircleShape)
+                    .background(if (enabled) MobileDesign.Accent else MaterialTheme.colorScheme.surfaceVariant)
+                    .clickable(enabled = enabled, onClick = onSend),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Rounded.ArrowUpward,
+                    contentDescription = stringResource(R.string.chat_send),
+                    tint = if (enabled) MobileDesign.Canvas else MobileDesign.Muted,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
         }
     }
 }

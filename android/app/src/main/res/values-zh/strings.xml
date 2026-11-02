@@ -247,8 +247,8 @@
     <string name="chat_open_reference">打开 %1$s</string>
     <string name="chat_exit_code">退出码 %1$d</string>
     <string name="chat_elapsed">用时 %1$s</string>
-    <string name="chat_operation_count_singular">1 个操作</string>
-    <string name="chat_operation_count_plural">%1$d 个操作</string>
+    <string name="chat_operation_count_singular">1 项操作</string>
+    <string name="chat_operation_count_plural">%1$d 项操作</string>
     <string name="chat_tool_record">工具记录</string>
     <string name="chat_select_text">选择文本</string>
     <string name="chat_task_empty">（暂无内容）</string>
@@ -427,4 +427,6 @@
     <string name="common_zoom_in">放大</string>
     <string name="common_zoom_out">缩小</string>
     <string name="sessions_all_hosts">全部</string>
+    <string name="sessions_collapse_sidebar">收起侧栏</string>
+    <string name="sessions_expand_sidebar">展开侧栏</string>
 </resources>

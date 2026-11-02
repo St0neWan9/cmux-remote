@@ -453,8 +453,16 @@ fun SessionBrowserPane(
     model: SessionListModel,
     actions: SessionListActions,
     modifier: Modifier = Modifier,
+    onCollapseSidebar: (() -> Unit)? = null,
 ) {
-    SessionListContent(model, actions, modifier.fillMaxHeight(), dense = false, compact = false)
+    SessionListContent(
+        model,
+        actions,
+        modifier.fillMaxHeight(),
+        dense = false,
+        compact = false,
+        onCollapseSidebar = onCollapseSidebar,
+    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.ExperimentalFoundationApi::class)
@@ -465,6 +473,7 @@ private fun SessionListContent(
     modifier: Modifier,
     dense: Boolean,
     compact: Boolean,
+    onCollapseSidebar: (() -> Unit)? = null,
 ) {
     var searching by remember { mutableStateOf(false) }
     // Only a pull shows the refresh spinner; background refreshes stay quiet.
@@ -554,6 +563,21 @@ private fun SessionListContent(
                     .border(0.5.dp, MobileDesign.Line, CircleShape),
                     ) {
                         Icon(Icons.Rounded.Menu, contentDescription = stringResource(R.string.common_sidebar), tint = MobileDesign.Ink)
+                    }
+                } else if (onCollapseSidebar != null) {
+                    // Wide sidebar: the same top-left control as the phone, but it hides the column.
+                    IconButton(
+                        onClick = onCollapseSidebar,
+                        modifier = Modifier
+                            .shadow(3.dp, CircleShape)
+                            .background(MobileDesign.Canvas, CircleShape)
+                            .border(0.5.dp, MobileDesign.Line, CircleShape),
+                    ) {
+                        Icon(
+                            Icons.Rounded.Menu,
+                            contentDescription = stringResource(R.string.sessions_collapse_sidebar),
+                            tint = MobileDesign.Ink,
+                        )
                     }
                 }
                 Spacer(Modifier.weight(1f))
