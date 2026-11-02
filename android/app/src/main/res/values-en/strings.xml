@@ -239,7 +239,7 @@
     <string name="chat_timing_note">Recorded run time excludes idle time between turns. Missing durations are not added to the total; response-time estimates use the timestamps recorded by the conversation.</string>
     <string name="chat_compacting">Compacting context…</string>
     <string name="chat_running_timer">Running %1$s</string>
-    <string name="chat_used_time">Took %1$s</string>
+    <string name="chat_used_time">Worked for %1$s</string>
     <string name="chat_used_time_approx">Took about %1$s</string>
     <string name="chat_recorded_turns">Recorded run time for %1$d replies.</string>
     <string name="chat_view_all_operations">View all %1$d operations</string>
@@ -426,4 +426,5 @@
     <string name="chat_background_tasks_open">Open background tasks</string>
     <string name="common_zoom_in">Zoom in</string>
     <string name="common_zoom_out">Zoom out</string>
+    <string name="sessions_all_hosts">All</string>
 </resources>

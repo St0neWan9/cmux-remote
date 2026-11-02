@@ -206,8 +206,13 @@ fun MacTabs(
     modifier: Modifier = Modifier,
     /** Last known reachability per Mac; an unprobed Mac has no dot yet. */
     reachable: Map<String, Boolean?> = emptyMap(),
-    /** A read is in flight for this Mac; its dot shows a spinner instead. */
+    /** A dial is in flight for this Mac; its dot shows a spinner instead. */
     connecting: Map<String, Boolean> = emptyMap(),
+    /** Every Mac's authorized workspaces, shown under its own capsule. */
+    hostWorkspaces: Map<String, Map<String, String>> = emptyMap(),
+    workspaceID: String? = null,
+    /** Picks a workspace on the Mac that owns it. */
+    onWorkspace: ((String, String?) -> Unit)? = null,
 ) {
     Row(
         modifier = modifier.horizontalScroll(rememberScrollState()),
@@ -215,22 +220,59 @@ fun MacTabs(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (hosts.size > 1) {
-            // "All Macs" is a scope, not a Mac, so it carries no status dot.
+            // "All" is a scope, not a Mac, so it carries no status dot.
             Capsule(
-                text = stringResource(R.string.sessions_all_macs),
+                text = stringResource(R.string.sessions_all_hosts),
                 selected = selected == null,
                 dot = null,
                 tag = "sessions.host.all",
             ) { onSelect(null) }
         }
         hosts.forEach { (id, name) ->
-            Capsule(
-                text = name,
-                selected = hosts.size == 1 || selected == id,
-                dot = reachable[id],
-                connecting = connecting[id] == true,
-                tag = "sessions.host.$id",
-            ) { onSelect(id) }
+            val workspaces = hostWorkspaces[id].orEmpty()
+            val chosen = workspaceID?.let { workspaces[it] }
+            val isSelected = hosts.size == 1 || selected == id
+            var menu by remember { mutableStateOf(false) }
+            Box {
+                Capsule(
+                    text = if (isSelected && chosen != null) name + " · " + chosen else name,
+                    selected = isSelected,
+                    dot = reachable[id],
+                    connecting = connecting[id] == true,
+                    tag = "sessions.host.$id",
+                    trailingChevron = isSelected && workspaces.size > 1,
+                ) {
+                    if (isSelected && workspaces.size > 1 && onWorkspace != null) menu = true else onSelect(id)
+                }
+                if (isSelected && workspaces.size > 1 && onWorkspace != null) {
+                    DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.sessions_all_workspaces)) },
+                            trailingIcon = if (workspaceID == null) {
+                                { Icon(Icons.Rounded.Check, contentDescription = null) }
+                            } else null,
+                            onClick = {
+                                menu = false
+                                onSelect(id)
+                                onWorkspace(id, null)
+                            },
+                        )
+                        workspaces.forEach { (workspaceId, title) ->
+                            DropdownMenuItem(
+                                text = { Text(title) },
+                                trailingIcon = if (workspaceID == workspaceId) {
+                                    { Icon(Icons.Rounded.Check, contentDescription = null) }
+                                } else null,
+                                onClick = {
+                                    menu = false
+                                    onSelect(id)
+                                    onWorkspace(id, workspaceId)
+                                },
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -242,6 +284,7 @@ private fun Capsule(
     dot: Boolean?,
     tag: String? = null,
     connecting: Boolean = false,
+    trailingChevron: Boolean = false,
     onClick: () -> Unit,
 ) {
     val connected = stringResource(R.string.connection_status_connected)
@@ -277,33 +320,8 @@ private fun Capsule(
             )
         }
         Text(text, color = if (selected) MobileDesign.Ink else MobileDesign.Muted, style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-    }
-}
-
-/** A workspace filter capsule: the menu lists every workspace the device may read. */
-@Composable
-fun WorkspaceFilterCapsule(
-    workspaces: List<Pair<String, String>>,
-    selected: String?,
-    onSelect: (String?) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    var open by remember { mutableStateOf(false) }
-    Box(modifier.testTag("sessions.menu")) {
-        Text(
-            text = workspaces.firstOrNull { it.first == selected }?.second ?: stringResource(R.string.sessions_all_workspaces),
-            color = MobileDesign.Muted,
-            style = MaterialTheme.typography.labelMedium,
-            modifier = Modifier
-                .background(MobileDesign.Canvas, RoundedCornerShape(50))
-                .clickable { open = true }
-                .padding(horizontal = 12.dp, vertical = 8.dp),
-        )
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            DropdownMenuItem(text = { Text(stringResource(R.string.sessions_all_workspaces)) }, onClick = { onSelect(null); open = false })
-            workspaces.forEach { (id, title) ->
-                DropdownMenuItem(text = { Text(title) }, onClick = { onSelect(id); open = false })
-            }
+        if (trailingChevron) {
+            Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = null, tint = MobileDesign.Muted, modifier = Modifier.size(14.dp))
         }
     }
 }

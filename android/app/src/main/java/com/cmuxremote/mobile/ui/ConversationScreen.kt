@@ -480,12 +480,18 @@ fun ConversationHeader(
         }
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(title, color = MobileDesign.Ink, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            if (subtitle.isNotEmpty()) {
+            if (models.isNotEmpty()) {
+                // The model is switched from the subtitle itself, as on the iPhone.
+                ModelMenu(
+                    current = currentModel,
+                    options = models,
+                    enabled = canSwitchModel,
+                    onPick = onSwitchModel,
+                    label = subtitle,
+                )
+            } else if (subtitle.isNotEmpty()) {
                 Text(subtitle, color = MobileDesign.Muted, style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-        }
-        if (models.isNotEmpty()) {
-            ModelMenu(current = currentModel, options = models, enabled = canSwitchModel, onPick = onSwitchModel)
         }
         Box {
             var open by remember { mutableStateOf(false) }
@@ -701,6 +707,7 @@ fun ConversationTimeline(
         }
     }
     val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+    val responseByFirst = remember(state.responses) { state.responses.associateBy { it.firstMessageID } }
     // Scrolling the transcript puts the keyboard away, as the iPhone's interactive dismissal does.
     val dismissKeyboardOnScroll = remember(keyboard) {
         object : androidx.compose.ui.input.nestedscroll.NestedScrollConnection {
@@ -764,18 +771,6 @@ fun ConversationTimeline(
                 }
             }
         }
-        if (state.loading && state.messages.isEmpty()) {
-            item {
-                Column(
-                    Modifier.fillParentMaxHeight(0.8f).fillMaxWidth(),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center,
-                ) {
-                    WorkingIndicator()
-                    Text(stringResource(R.string.chat_loading), color = MobileDesign.Muted, style = MaterialTheme.typography.labelMedium)
-                }
-            }
-        }
         if (!state.loading && state.messages.isEmpty() && state.error == null) {
             item {
                 Column(
@@ -815,6 +810,11 @@ fun ConversationTimeline(
                     if (state.session.working && state.turnStartedAt != null && entry.message.id == lastReply?.id) {
                         LiveRunLabel(since = state.turnStartedAt, compacting = state.compacting)
                         HorizontalDivider(color = androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.1f), thickness = 0.5.dp)
+                    } else if (entry.message.kind == "prose" && entry.message.role != "user") {
+                        // The iPhone places the finished reply's duration, and its divider,
+                        // at the start of the reply's own timeline item.
+                        responseByFirst[entry.message.id]?.durationSeconds
+                            ?.let { ResponseRunLabel(seconds = it, recorded = true) }
                     }
                     when {
                         entry.message.kind == "prose" && entry.message.role == "user" ->
@@ -878,12 +878,6 @@ fun ConversationTimeline(
                     if (entry.message.kind == "prose" && entry.message.role != "user") {
                         val response = state.responses.lastOrNull { it.lastMessageID == entry.message.id }
                         if (response != null) {
-                            if (response.durationSeconds != null) {
-                                ResponseRunLabel(
-                                    seconds = response.durationSeconds,
-                                    recorded = response.recordedDuration,
-                                )
-                            }
                             ResponseFooter(
                                 completedAt = response.completedAt,
                                 onCopy = { onCopyText?.invoke(entry.message.text) },
@@ -896,24 +890,28 @@ fun ConversationTimeline(
                 }
                 is TimelineEntry.Group -> {
                     val models = toolRowModels(entry.rows)
-                    ActivityGroupCard(
-                        rows = models,
-                        isLatest = entry.isLatest,
-                        onOpenFull = { onOpenGroup?.invoke(entry.rows) },
-                        onOpenDetail = { row ->
-                            onOpenDetail?.invoke(
-                                row.id,
-                                when {
-                                    row.kind == "file_edit" -> "diff"
-                                    // A tool that recorded no output opens what it was asked to do.
-                                    row.output.isNullOrBlank() -> "input"
-                                    else -> "output"
-                                },
-                            )
-                        },
-                        onOpenReference = onOpenReference,
-                        onHoldPlace = holdPlace,
-                    )
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        responseByFirst[entry.rows.firstOrNull()?.id]?.durationSeconds
+                            ?.let { ResponseRunLabel(seconds = it, recorded = true) }
+                        ActivityGroupCard(
+                            rows = models,
+                            isLatest = entry.isLatest,
+                            onOpenFull = { onOpenGroup?.invoke(entry.rows) },
+                            onOpenDetail = { row ->
+                                onOpenDetail?.invoke(
+                                    row.id,
+                                    when {
+                                        row.kind == "file_edit" -> "diff"
+                                        // A tool that recorded no output opens what it was asked to do.
+                                        row.output.isNullOrBlank() -> "input"
+                                        else -> "output"
+                                    },
+                                )
+                            },
+                            onOpenReference = onOpenReference,
+                            onHoldPlace = holdPlace,
+                        )
+                    }
                 }
             }
         }
@@ -983,6 +981,15 @@ fun ConversationTimeline(
             }
         }
     }
+    }
+    if (state.loading && state.messages.isEmpty() && state.error == null) {
+        // The first read covers the page instead of showing a row inside the timeline.
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                WorkingIndicator()
+                Text(stringResource(R.string.chat_loading), color = MobileDesign.Muted, style = MaterialTheme.typography.labelMedium)
+            }
+        }
     }
     androidx.compose.animation.AnimatedVisibility(
         visible = !atLatest && state.messages.isNotEmpty(),

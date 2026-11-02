@@ -62,6 +62,8 @@ data class ChatMessage(
     val completedAt: java.time.Instant? = null,
     /** A lifecycle event's stable name, when the message is a status row. */
     val event: String? = null,
+    /** The agent's own one-line description of a tool or command. */
+    val summary: String? = null,
 )
 
 /** Timing anchors for one prompt and its response, as the Bridge recorded them. */
@@ -736,6 +738,7 @@ class BridgeRepository(val connection: AuthorizedConnection, private val client:
                 role = role,
                 kind = type,
                 text = kind.string("text") ?: kind.string("summary") ?: kind.string("prompt") ?: "",
+                summary = kind.string("summary"),
                 toolName = kind.string("tool_name") ?: kind.string("toolName"),
                 status = kind.string("status"),
                 event = kind.string("event"),

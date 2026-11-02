@@ -467,6 +467,11 @@ private fun SessionListContent(
     compact: Boolean,
 ) {
     var searching by remember { mutableStateOf(false) }
+    // Only a pull shows the refresh spinner; background refreshes stay quiet.
+    var pullRefreshing by remember { mutableStateOf(false) }
+    androidx.compose.runtime.LaunchedEffect(model.loading) {
+        if (!model.loading) pullRefreshing = false
+    }
     // Relative times re-read the clock, so "3m ago" becomes "4m ago" without a refresh.
     var now by remember { mutableStateOf(System.currentTimeMillis()) }
     androidx.compose.runtime.LaunchedEffect(Unit) {
@@ -551,6 +556,7 @@ private fun SessionListContent(
                         Icon(Icons.Rounded.Menu, contentDescription = stringResource(R.string.common_sidebar), tint = MobileDesign.Ink)
                     }
                 }
+                Spacer(Modifier.weight(1f))
                 SessionTitleMenu(
                     sortByTime = model.sortByTime,
                     pendingCount = maxOf(model.pending.size, model.pendingCount),
@@ -573,7 +579,14 @@ private fun SessionListContent(
                 }
             }
         }
-        PullToRefreshBox(isRefreshing = model.loading, onRefresh = actions.onRefresh, modifier = Modifier.weight(1f)) {
+        PullToRefreshBox(
+            isRefreshing = pullRefreshing,
+            onRefresh = {
+                pullRefreshing = true
+                actions.onRefresh()
+            },
+            modifier = Modifier.weight(1f),
+        ) {
             Box(Modifier.fillMaxSize()) {
             LazyColumn(
                 modifier = Modifier.testTag("sessions.list"),
@@ -622,6 +635,12 @@ private fun SessionListContent(
                         selected = model.hostFilter,
                         reachable = model.hostReachable,
                         connecting = model.hostConnecting,
+                        hostWorkspaces = model.hostWorkspaces,
+                        workspaceID = model.workspaceFilter,
+                        onWorkspace = { hostID, workspaceID ->
+                            actions.onHost(hostID)
+                            actions.onWorkspace(workspaceID)
+                        },
                         onSelect = actions.onHost,
                     )
                 }
@@ -650,13 +669,6 @@ private fun SessionListContent(
                             onOpenHost = actions.onOpenFeedHost,
                         )
                     }
-                }
-                item {
-                    WorkspaceFilterCapsule(
-                        workspaces = model.workspaces.map { (id, title) -> id to title },
-                        selected = model.workspaceFilter,
-                        onSelect = actions.onWorkspace,
-                    )
                 }
                 item {
                     FilterChips(model.statusFilter, actions.onStatus)
@@ -834,13 +846,6 @@ private fun SessionListContent(
             }
             }
         }
-        SessionFooter(
-            dense = dense,
-            hostName = model.hosts.firstOrNull()?.second.orEmpty(),
-            reachable = model.hosts.firstOrNull()?.let { model.hostReachable[it.first] },
-            connecting = model.hosts.firstOrNull()?.let { model.hostConnecting[it.first] } == true,
-            onRefresh = actions.onRefresh,
-        )
     }
 }
 
@@ -910,52 +915,6 @@ private fun PendingCard(
                     text = { Text("$name · $hostCount", color = MobileDesign.Ink, style = MaterialTheme.typography.bodyMedium) },
                     onClick = { menu = false; onOpenHost?.invoke(id) },
                 )
-            }
-        }
-    }
-}
-
-@Composable
-private fun SessionFooter(
-    dense: Boolean = false,
-    hostName: String = "",
-    reachable: Boolean? = null,
-    connecting: Boolean = false,
-    onRefresh: () -> Unit = {},
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(MobileDesign.Canvas)
-            .padding(horizontal = MobileDesign.PageInset, vertical = if (dense) 4.dp else 10.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            if (hostName.isNotBlank()) {
-                if (connecting) {
-                    WorkingIndicator(size = 10.dp)
-                } else {
-                    Box(
-                        Modifier.size(7.dp).background(
-                            when (reachable) {
-                                true -> MobileDesign.Good
-                                false -> MaterialTheme.colorScheme.error
-                                null -> MobileDesign.Muted
-                            },
-                            CircleShape,
-                        ),
-                    )
-                }
-                Icon(Icons.Rounded.Computer, contentDescription = null, tint = MobileDesign.Muted, modifier = Modifier.size(16.dp))
-                Text(hostName, color = MobileDesign.Ink, style = MaterialTheme.typography.bodyMedium)
-            }
-            Spacer(Modifier.weight(1f))
-            IconButton(onClick = onRefresh) {
-                Icon(Icons.Rounded.MoreVert, contentDescription = stringResource(R.string.common_refresh), tint = MobileDesign.Muted, modifier = Modifier.size(18.dp))
             }
         }
     }
