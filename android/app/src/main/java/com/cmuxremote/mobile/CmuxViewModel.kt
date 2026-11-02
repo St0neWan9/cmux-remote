@@ -531,6 +531,11 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setSidebar(open: Boolean) { _sidebarOpen.value = open }
 
+    /** Wide layouts can hide their persistent browser column to give the page the full width. */
+    private val _browserCollapsed = MutableStateFlow(false)
+    val browserCollapsed: StateFlow<Boolean> = _browserCollapsed.asStateFlow()
+    fun setBrowserCollapsed(collapsed: Boolean) { _browserCollapsed.value = collapsed }
+
     fun toggleCollapsed(key: String) {
         val next = _collapsed.value.toMutableSet().apply { if (!add(key)) remove(key) }
         _collapsed.value = next; prefs.edit().putString("collapsed", next.sorted().joinToString("\n")).apply()

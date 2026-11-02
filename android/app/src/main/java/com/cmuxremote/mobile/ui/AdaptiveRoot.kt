@@ -33,6 +33,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.ChevronRight
+import androidx.compose.material3.Icon
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
@@ -60,6 +63,7 @@ fun CmuxApp(viewModel: CmuxViewModel) {
     val shell by viewModel.shell.collectAsStateWithLifecycle()
     val conversation by viewModel.conversation.collectAsStateWithLifecycle()
     val hinge = rememberHingeState()
+    val browserCollapsed by viewModel.browserCollapsed.collectAsStateWithLifecycle()
     val feedOpen by viewModel.feedOpen.collectAsStateWithLifecycle()
     val project by viewModel.project.collectAsStateWithLifecycle()
     val image by viewModel.image.collectAsStateWithLifecycle()
@@ -555,8 +559,17 @@ fun CmuxApp(viewModel: CmuxViewModel) {
                     } }
 
                     is PaneLayout.TwoPane -> Row(insets) {
-                        SessionBrowserPane(model = listModel, actions = listActions, modifier = Modifier.width(layout.browserWidthDp.dp))
-                        VerticalLine()
+                        if (browserCollapsed) {
+                            SidebarRail(onExpand = { viewModel.setBrowserCollapsed(false) })
+                        } else {
+                            SessionBrowserPane(
+                                model = listModel,
+                                actions = listActions,
+                                modifier = Modifier.width(layout.browserWidthDp.dp),
+                                onCollapseSidebar = { viewModel.setBrowserCollapsed(true) },
+                            )
+                            VerticalLine()
+                        }
                         if (project != null) {
                             BackHandler { viewModel.closeProject() }
                             ProjectScreen(
@@ -610,8 +623,17 @@ fun CmuxApp(viewModel: CmuxViewModel) {
                     }
 
                     is PaneLayout.ThreePane -> Row(insets) {
-                        SessionBrowserPane(model = listModel, actions = listActions, modifier = Modifier.width(layout.browserWidthDp.dp))
-                        VerticalLine()
+                        if (browserCollapsed) {
+                            SidebarRail(onExpand = { viewModel.setBrowserCollapsed(false) })
+                        } else {
+                            SessionBrowserPane(
+                                model = listModel,
+                                actions = listActions,
+                                modifier = Modifier.width(layout.browserWidthDp.dp),
+                                onCollapseSidebar = { viewModel.setBrowserCollapsed(true) },
+                            )
+                            VerticalLine()
+                        }
                         conversationPane(Modifier.weight(1f), null)
                         VerticalLine()
                         SupportingPane(
@@ -848,6 +870,26 @@ fun CmuxApp(viewModel: CmuxViewModel) {
                     },
             )
         }
+    }
+}
+
+/** The thin handle that brings a collapsed wide sidebar back. */
+@Composable
+private fun SidebarRail(onExpand: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .width(24.dp)
+            .fillMaxHeight()
+            .background(MobileDesign.Soft)
+            .clickable(onClick = onExpand),
+        contentAlignment = Alignment.TopCenter,
+    ) {
+        Icon(
+            Icons.Rounded.ChevronRight,
+            contentDescription = stringResource(R.string.sessions_expand_sidebar),
+            tint = MobileDesign.Muted,
+            modifier = Modifier.padding(top = 28.dp).size(18.dp),
+        )
     }
 }
 
