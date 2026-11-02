@@ -18,9 +18,9 @@ final class ConversationRefreshTests: XCTestCase {
         ChatMessage(id: "m\(seq)", seq: seq, role: .agent, timestamp: Date(timeIntervalSinceReferenceDate: 0),
                     kind: .prose(ChatProse(text: "m\(seq)")))
     }
-    private func page(_ seqs: [Int], cursor: String?, hasMore: Bool = true) -> ConversationArchivePage {
+    private func page(_ seqs: [Int], cursor: String?, hasMore: Bool = true, generation: String? = nil) -> ConversationArchivePage {
         ConversationArchivePage(snapshot: ConversationSnapshot(messages: seqs.map(message), hasMore: hasMore,
-                                                               generation: generation, clipped: false), nextCursor: cursor,
+                                                               generation: generation ?? self.generation, clipped: false), nextCursor: cursor,
                                 complete: !hasMore)
     }
     /// One archive whose pages the test swaps between refreshes, standing for the same conversation moments later.
@@ -76,6 +76,18 @@ final class ConversationRefreshTests: XCTestCase {
         archive.replace([nil: page([300, 400, 500], cursor: "c1"), "c1": page([100, 200], cursor: nil)])
         await model.refresh()
         XCTAssertEqual(model.messages.map(\.seq), [100, 200, 300, 400, 500])
+    }
+    func testAReplacedTranscriptIsReportedSoThePageCanMoveToIt() async throws {
+        // A compaction rewrites the transcript: the conversation on screen is not the one that arrives.
+        let archive = Archive([nil: page([100, 200], cursor: nil)])
+        let model = try makeModel(archive)
+        await model.refresh()
+        XCTAssertEqual(model.messages.map(\.seq), [100, 200])
+        XCTAssertEqual(model.replacementCount, 0)
+        archive.replace([nil: page([900], cursor: nil, generation: "G2")])
+        await model.refresh()
+        XCTAssertEqual(model.messages.map(\.seq), [900])
+        XCTAssertEqual(model.replacementCount, 1, "A replaced transcript was not reported to the page")
     }
     func testAStoredCopyIsShownEvenBeforeThePreviousVisitsHoldIsLifted() async throws {
         // Coming back to a page runs the restore before the visit re-enables reads; the stored copy is not a read.

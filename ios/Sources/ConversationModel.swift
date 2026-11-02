@@ -130,6 +130,12 @@ final class ConversationModel {
     var clipped = false
     private var generation: String?
     var historyGeneration: String? { generation }
+    /// Bumped when a read replaced the conversation instead of extending it.
+    ///
+    /// The rows the page was showing are gone, and the scroll offset it holds means nothing among the new ones:
+    /// left where it is, the page can rest past the end of a shorter transcript — blank until the reader asks
+    /// for the latest. The page moves to the new end when this changes.
+    private(set) var replacementCount = 0
     /// Everything the timeline's id lookups depend on. It changes when a message, a reply or an image appears or
     /// the conversation is replaced, and not when the page merely re-evaluates, which is what makes caching them safe.
     var timelineIndexKey: String {
@@ -424,7 +430,12 @@ final class ConversationModel {
                     else { positions[message.id] = next.count; next.append(message) }
                 }
                 messages = next.sorted { $0.seq < $1.seq }
-            } else { olderReads.suspend(); loadingOlder = false; messages = history.messages; responses = []; generation = history.generation; hasMore = history.hasMore }
+            } else {
+                // A transcript that was rewritten (a compaction) is not the one on screen any more.
+                let replaced = !messages.isEmpty && generation != history.generation
+                olderReads.suspend(); loadingOlder = false; messages = history.messages; responses = []; generation = history.generation; hasMore = history.hasMore
+                if replaced { replacementCount += 1 }
+            }
             clipped = history.clipped
             let updatedIDs = Set(history.messages.map(\.id))
             images = images.filter { $0.generation == history.generation && !updatedIDs.contains($0.messageID) } + (history.images ?? [])
