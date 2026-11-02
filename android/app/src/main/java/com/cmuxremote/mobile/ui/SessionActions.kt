@@ -57,7 +57,7 @@ fun ModelMenu(
     var customText by remember { mutableStateOf("") }
     Box(modifier) {
         Row(
-            modifier = (if (label != null) Modifier.fillMaxWidth() else Modifier.background(MobileDesign.Soft, CircleShape))
+            modifier = (if (label != null) Modifier else Modifier.background(MobileDesign.Soft, CircleShape))
                 .clickable(enabled = enabled, onClick = { expanded = true })
                 .then(if (label != null) Modifier else Modifier.padding(horizontal = 12.dp, vertical = 8.dp)),
             verticalAlignment = Alignment.CenterVertically,
@@ -69,7 +69,7 @@ fun ModelMenu(
                 style = MaterialTheme.typography.labelMedium,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                modifier = if (label != null) Modifier.weight(1f) else Modifier,
+                modifier = if (label != null) Modifier.weight(1f, fill = false) else Modifier,
             )
             Icon(
                 Icons.Rounded.ArrowDropDown,

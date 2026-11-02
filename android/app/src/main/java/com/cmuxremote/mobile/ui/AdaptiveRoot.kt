@@ -173,6 +173,9 @@ fun CmuxApp(viewModel: CmuxViewModel) {
     var scanning by remember { mutableStateOf(false) }
 
     LaunchedEffect(conversation?.session?.id) { if (conversation != null) viewModel.loadModels() }
+    LaunchedEffect(browserCollapsed, conversation == null) {
+        if (browserCollapsed && conversation == null) viewModel.setBrowserCollapsed(false)
+    }
 
     // Pairing needs nearby Macs; a paired Mac also needs discovery so a moved
     // endpoint can be found again without pairing from scratch.
@@ -559,14 +562,16 @@ fun CmuxApp(viewModel: CmuxViewModel) {
                     } }
 
                     is PaneLayout.TwoPane -> Row(insets) {
-                        if (browserCollapsed) {
-                            SidebarRail(onExpand = { viewModel.setBrowserCollapsed(false) })
-                        } else {
+                        if (!browserCollapsed) {
                             SessionBrowserPane(
                                 model = listModel,
                                 actions = listActions,
                                 modifier = Modifier.width(layout.browserWidthDp.dp),
-                                onCollapseSidebar = { viewModel.setBrowserCollapsed(true) },
+                                onCollapseSidebar = if (conversation != null) {
+                                    { viewModel.setBrowserCollapsed(true) }
+                                } else {
+                                    null
+                                },
                             )
                             VerticalLine()
                         }
@@ -618,23 +623,31 @@ fun CmuxApp(viewModel: CmuxViewModel) {
                                 onRefresh = viewModel::refresh,
                             )
                         } else {
-                            conversationPane(Modifier.weight(1f), null)
+                            conversationPane(
+                                Modifier.weight(1f),
+                                if (browserCollapsed) ({ viewModel.setBrowserCollapsed(false) }) else null,
+                            )
                         }
                     }
 
                     is PaneLayout.ThreePane -> Row(insets) {
-                        if (browserCollapsed) {
-                            SidebarRail(onExpand = { viewModel.setBrowserCollapsed(false) })
-                        } else {
+                        if (!browserCollapsed) {
                             SessionBrowserPane(
                                 model = listModel,
                                 actions = listActions,
                                 modifier = Modifier.width(layout.browserWidthDp.dp),
-                                onCollapseSidebar = { viewModel.setBrowserCollapsed(true) },
+                                onCollapseSidebar = if (conversation != null) {
+                                    { viewModel.setBrowserCollapsed(true) }
+                                } else {
+                                    null
+                                },
                             )
                             VerticalLine()
                         }
-                        conversationPane(Modifier.weight(1f), null)
+                        conversationPane(
+                            Modifier.weight(1f),
+                            if (browserCollapsed) ({ viewModel.setBrowserCollapsed(false) }) else null,
+                        )
                         VerticalLine()
                         SupportingPane(
                             messages = conversation?.messages ?: emptyList(),
@@ -873,25 +886,6 @@ fun CmuxApp(viewModel: CmuxViewModel) {
     }
 }
 
-/** The thin handle that brings a collapsed wide sidebar back. */
-@Composable
-private fun SidebarRail(onExpand: () -> Unit) {
-    Box(
-        modifier = Modifier
-            .width(24.dp)
-            .fillMaxHeight()
-            .background(MobileDesign.Soft)
-            .clickable(onClick = onExpand),
-        contentAlignment = Alignment.TopCenter,
-    ) {
-        Icon(
-            Icons.Rounded.ChevronRight,
-            contentDescription = stringResource(R.string.sessions_expand_sidebar),
-            tint = MobileDesign.Muted,
-            modifier = Modifier.padding(top = 28.dp).size(18.dp),
-        )
-    }
-}
 
 @Composable
 private fun DetailPane(
