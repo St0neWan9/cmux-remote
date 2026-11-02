@@ -797,6 +797,8 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
     private var lastListRefreshAt = 0L
     /** A recent conversation read only needs the new tail, as the iPhone does. */
     private val lastConversationReadAt = mutableMapOf<String, Long>()
+    /** A single failed read is not an offline Mac; three in a row are. */
+    private val conversationFailures = mutableMapOf<String, Int>()
 
     init {
         // A network that comes back needs a redial; the encrypted links do not
@@ -858,6 +860,10 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
 
     private suspend fun redialAll(only: List<HostRuntime> = hosts) {
         _connecting.value = true
+        // Only the Macs being dialed turn; the rest of the list stays still.
+        (_shell.value as? ShellState.Connected)?.let { current ->
+            _shell.value = current.copy(hostConnecting = only.associate { it.id to true })
+        }
         // Each host keeps its own link and repository; a redial replaces only that link.
         only.forEach { host ->
             runCatching { refreshRelayHint(host.repository) }
@@ -866,6 +872,9 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
         _reachable.value = hosts.any { host -> runCatching { host.repository.epoch() }.isSuccess }
         _probed.value = true
         _connecting.value = false
+        (_shell.value as? ShellState.Connected)?.let { current ->
+            _shell.value = current.copy(hostConnecting = emptyMap())
+        }
         if (_conversation.value != null) reloadOpen() else refresh()
     }
 
@@ -1529,7 +1538,8 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
             _shell.value = shell.copy(
                 loading = true,
                 error = null,
-                hostConnecting = hosts.associate { it.id to true },
+                // A background read is not a dial: no Mac's tab turns for it.
+                hostConnecting = emptyMap(),
             )
             val cache = com.cmuxremote.mobile.background.SessionSnapshotCache(getApplication())
             val previousByHost = shell.sessions.groupBy { it.hostID }
@@ -1603,7 +1613,6 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
             val feed = results.flatMap { it.feed }
             val pending = feed.filter { it.status == "pending" }
             val anyReached = results.any { it.reached }
-            _reachable.value = anyReached
             _probed.value = true
             results.forEach { read ->
                 if (read.reached) {
@@ -1615,8 +1624,21 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
                     if (failures >= 3) quietHosts.add(read.host.id)
                 }
             }
-            _hostReachable.value = results.associate {
-                it.host.id to if (it.host.id in quietHosts) null else it.reached
+            // A single failed read leaves the last known state in place; only a Mac
+            // that stays down (quiet) loses its status.
+            _hostReachable.value = results.associate { read ->
+                val previous = _hostReachable.value[read.host.id]
+                read.host.id to when {
+                    read.reached -> true
+                    // A Mac retried in the background keeps its red dot; still, one
+                    // failed read does not flip a healthy Mac.
+                    else -> previous ?: false
+                }
+            }
+            if (anyReached) {
+                _reachable.value = true
+            } else if (results.isNotEmpty() && results.all { it.host.id in quietHosts }) {
+                _reachable.value = false
             }
             _feedError.value = results.firstNotNullOfOrNull { it.feedError }
             // A filter naming a Mac or workspace that no longer exists would hide
@@ -1733,6 +1755,8 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
                         loading = false,
                     )
                 }
+                conversationFailures.remove(openHostID)
+                _reachable.value = true
                 lastStoredAt[scope + ":" + session.id] = System.currentTimeMillis()
                 withContext(Dispatchers.IO) {
                     runCatching {
@@ -1810,9 +1834,20 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
 
     /** A refusal from the Bridge still means it answered; only a transport failure is offline. */
     private fun noteReadFailure(error: Throwable) {
-        _reachable.value = error is ProtocolException &&
-            error.code !in setOf("connection_failed", "link_failed", "timeout")
         _probed.value = true
+        // A refusal still means the Mac answered; only transport failures count
+        // toward the connection bar.
+        if (error is ProtocolException && !isConnectivity(error)) {
+            conversationFailures.remove(openHostID)
+            _reachable.value = true
+            return
+        }
+        val hostID = openHostID ?: return
+        val failures = (conversationFailures[hostID] ?: 0) + 1
+        conversationFailures[hostID] = failures
+        // One lost poll is not news: the iPhone only shows the bar once the link
+        // is actually down, not after every failed read.
+        if (failures >= 3) _reachable.value = false
     }
 
     /**

@@ -33,6 +33,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.cmuxremote.mobile.R
 import com.cmuxremote.mobile.ui.theme.MobileDesign
@@ -48,23 +49,27 @@ fun ModelMenu(
     enabled: Boolean,
     onPick: (ModelOption) -> Unit,
     modifier: Modifier = Modifier,
+    /** When set, the menu is the subtitle line itself rather than a pill. */
+    label: String? = null,
 ) {
     var expanded by remember(enabled) { mutableStateOf(false) }
     var custom by remember { mutableStateOf(false) }
     var customText by remember { mutableStateOf("") }
     Box(modifier) {
         Row(
-            modifier = Modifier
-                .background(MobileDesign.Soft, CircleShape)
+            modifier = (if (label != null) Modifier.fillMaxWidth() else Modifier.background(MobileDesign.Soft, CircleShape))
                 .clickable(enabled = enabled, onClick = { expanded = true })
-                .padding(horizontal = 12.dp, vertical = 8.dp),
+                .then(if (label != null) Modifier else Modifier.padding(horizontal = 12.dp, vertical = 8.dp)),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(3.dp),
         ) {
             Text(
-                text = current ?: stringResource(R.string.common_model),
-                color = if (enabled) MobileDesign.Ink else MobileDesign.Muted,
+                text = label ?: current ?: stringResource(R.string.common_model),
+                color = if (enabled) MobileDesign.Muted else MobileDesign.Muted.copy(alpha = 0.6f),
                 style = MaterialTheme.typography.labelMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = if (label != null) Modifier.weight(1f) else Modifier,
             )
             Icon(
                 Icons.Rounded.ArrowDropDown,

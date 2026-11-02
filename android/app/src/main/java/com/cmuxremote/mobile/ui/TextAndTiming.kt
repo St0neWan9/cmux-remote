@@ -255,7 +255,7 @@ fun ResponseFooter(
             icon = Icons.Rounded.SelectAll,
             modifier = Modifier.testTag("response.select"),
         ) { onSelectText() }
-        Spacer(Modifier.weight(1f))
+        // The reply time follows the actions, as on the iPhone, instead of being right-aligned.
         if (completedAt != null) {
             Text(
                 text = completionTime(completedAt),
@@ -264,6 +264,7 @@ fun ResponseFooter(
                 modifier = Modifier.padding(start = 10.dp),
             )
         }
+        Spacer(Modifier.weight(1f))
     }
 }
 
