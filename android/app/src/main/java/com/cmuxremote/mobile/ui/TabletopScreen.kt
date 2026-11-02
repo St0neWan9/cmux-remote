@@ -104,9 +104,14 @@ fun PendingDecisionCard(
                             modifier = Modifier.weight(1f),
                         ) { Text(option, color = MobileDesign.Canvas, maxLines = 1) }
                     } else {
-                        OutlinedButton(
+                        Button(
                             onClick = { onAnswer(listOf(option)) },
                             shape = RoundedCornerShape(50),
+                            border = androidx.compose.foundation.BorderStroke(0.5.dp, MobileDesign.Line),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MobileDesign.Canvas,
+                                contentColor = MobileDesign.Ink,
+                            ),
                             modifier = Modifier.weight(1f),
                         ) { Text(option, color = MobileDesign.Ink, maxLines = 1) }
                     }
@@ -121,9 +126,14 @@ fun PendingDecisionCard(
                     shape = RoundedCornerShape(50),
                     modifier = Modifier.weight(1f),
                 ) { Text(stringResource(R.string.feed_allow_once), color = MobileDesign.Canvas) }
-                OutlinedButton(
+                Button(
                     onClick = { onMode("deny") },
                     shape = RoundedCornerShape(50),
+                    border = androidx.compose.foundation.BorderStroke(0.5.dp, MobileDesign.Line),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MobileDesign.Canvas,
+                        contentColor = MobileDesign.Ink,
+                    ),
                     modifier = Modifier.weight(1f),
                 ) { Text(stringResource(R.string.feed_deny), color = MobileDesign.Ink) }
             }

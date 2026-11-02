@@ -59,6 +59,8 @@ sealed interface ShellState {
         val feed: List<FeedItem> = emptyList(),
         /** Pending count from the last background pass, until a live read replaces it. */
         val cachedPending: Int = 0,
+        /** When that background snapshot was written, for a small "cached" note. */
+        val cachedAt: Long? = null,
         /** Workspace id to its title, for the list's groups. */
         val workspaces: Map<String, String> = emptyMap(),
         /** Every approved Mac, for the list's tabs. */
@@ -66,6 +68,18 @@ sealed interface ShellState {
         val canStart: Boolean = false,
         val loading: Boolean = false,
         val error: String? = null,
+        /** Each Mac's last read error, omitted once that Mac goes quiet. */
+        val hostErrors: Map<String, String> = emptyMap(),
+        /** Each Mac's own workspace titles, kept when a read fails. */
+        val hostWorkspaces: Map<String, Map<String, String>> = emptyMap(),
+        /** Each Mac's ConversationStart grant, for the new-session menu. */
+        val hostCanStart: Map<String, Boolean> = emptyMap(),
+        /** Macs whose current read is still in flight. */
+        val hostConnecting: Map<String, Boolean> = emptyMap(),
+        /** Live pending Feed items per Mac. */
+        val hostPending: Map<String, Int> = emptyMap(),
+        /** Pending count from each Mac's stored snapshot, used while it is unreachable. */
+        val hostCachedPending: Map<String, Int> = emptyMap(),
     ) : ShellState
     data class Failed(val code: String, val message: String) : ShellState
 }
@@ -196,6 +210,9 @@ data class TaskUi(
     val command: String? = null,
     val totalBytes: Int? = null,
     val running: Boolean = false,
+    /** An Agent task has messages before the first page, fetched on demand. */
+    val hasEarlier: Boolean = false,
+    val loadingEarlier: Boolean = false,
 )
 
 class CmuxViewModel(application: Application) : AndroidViewModel(application) {
@@ -348,6 +365,9 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
     /** Which Mac the connection page describes; it may not be the open conversation's Mac. */
     private val _connectionHostID = MutableStateFlow<String?>(null)
     val connectionHostID: StateFlow<String?> = _connectionHostID.asStateFlow()
+    /** The protocol the Bridge itself reports, shown only when it answers with one. */
+    private val _connectionProtocol = MutableStateFlow<String?>(null)
+    val connectionProtocol: StateFlow<String?> = _connectionProtocol.asStateFlow()
     private val _diagnosticsOpen = MutableStateFlow(false)
     val diagnosticsOpen: StateFlow<Boolean> = _diagnosticsOpen.asStateFlow()
     private val _selectText = MutableStateFlow<SelectTextRequest?>(null)
@@ -381,6 +401,8 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
     /** The open conversation's Mac, for the page's subtitle. */
     fun openHostName(): String? = openHost()?.name
 
+    fun openHostID(): String? = openHost()?.id
+
     /**
      * Probes the Mac again so the connection page can say whether it answers.
      * The probe is one signed read; it grants nothing.
@@ -403,10 +425,13 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
         _connectionHostID.value = host.id
         _probed.value = false
         _connecting.value = true
+        _connectionProtocol.value = null
         viewModelScope.launch {
-            val reached = runCatching {
+            val probe = runCatching {
                 kotlinx.coroutines.withTimeout(8_000) { current.probe() }
-            }.isSuccess
+            }
+            if (_connectionHostID.value == host.id) _connectionProtocol.value = probe.getOrNull()
+            val reached = probe.isSuccess
             if (_connectionHostID.value == host.id) _reachable.value = reached
             _hostReachable.value = _hostReachable.value + (host.id to reached)
             _probed.value = true
@@ -524,6 +549,9 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
     val toolDetail: StateFlow<ToolDetailUi?> = _toolDetail.asStateFlow()
     private val _start = MutableStateFlow<StartUi?>(null)
     val start: StateFlow<StartUi?> = _start.asStateFlow()
+    /** A start in progress is shown on the list, while the sheet/page is already closed. */
+    private val _listNotice = MutableStateFlow<String?>(null)
+    val listNotice: StateFlow<String?> = _listNotice.asStateFlow()
 
     /** One approved Mac and its own repository. */
     private class HostRuntime(var connection: AuthorizedConnection, var repository: BridgeRepository) {
@@ -546,6 +574,16 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
 
     /** The Macs advertising themselves on this network while a pairing page is open. */
     private val discovery = com.cmuxremote.mobile.bridge.BridgeDiscovery(application)
+    /** UI-test only: a fixed nearby list, so a screenshot never names a real Mac. */
+    fun seedDiscovered(entries: List<Pair<String, String>>) {
+        _discovered.value = entries.map { (id, name) ->
+            com.cmuxremote.mobile.bridge.DiscoveredBridge(
+                host = com.cmuxremote.mobile.protocol.HostIdentity(id, id, id, name),
+                endpoint = com.cmuxremote.mobile.protocol.BridgeEndpoint("127.0.0.1", 1),
+            )
+        }
+    }
+
     private val _discovered = MutableStateFlow<List<com.cmuxremote.mobile.bridge.DiscoveredBridge>>(emptyList())
     val discovered: StateFlow<List<com.cmuxremote.mobile.bridge.DiscoveredBridge>> = _discovered.asStateFlow()
 
@@ -665,7 +703,8 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
                     if (existing == null || existing.expiresAt <= entry.expiresAt) found[entry.host.id] = entry
                 }
             }
-            _relayHosts.value = found.values.sortedBy { it.host.name.lowercase() }
+            val collator = java.text.Collator.getInstance()
+            _relayHosts.value = found.values.sortedWith { a, b -> collator.compare(a.host.name, b.host.name) }
             _relayError.value = if (_relayHosts.value.isEmpty()) failure else null
             _relayLoading.value = false
         }
@@ -714,7 +753,7 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
             val status = try {
                 enrollment.submit()
             } catch (error: ProtocolException) {
-                if (error.code != "invalid_enrollment") throw error
+                if (error.code !in setOf("invalid_enrollment", "outcome_unknown")) throw error
                 enrollment.close()
                 enrollment = Enrollment.fromBootstrap(
                     bootstrap,
@@ -748,11 +787,16 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
     private var projectJob: Job? = null
     /** Watches an open background task while it runs. */
     private var taskFollow: Job? = null
+    private var imageJob: Job? = null
     /** Automatic earlier-page loads wait this long; a pull does not. */
     private var nextOlderAt = 0L
     private var relayRefresh: Job? = null
     /** A burst of live notifications writes the stored copy at most this often. */
     private val lastStoredAt = mutableMapOf<String, Long>()
+    /** Sessions notifications refresh the list at most this often; Feed changes stay immediate. */
+    private var lastListRefreshAt = 0L
+    /** A recent conversation read only needs the new tail, as the iPhone does. */
+    private val lastConversationReadAt = mutableMapOf<String, Long>()
 
     init {
         // A network that comes back needs a redial; the encrypted links do not
@@ -761,7 +805,8 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
             val manager = application.getSystemService(android.content.Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
             val callback = object : android.net.ConnectivityManager.NetworkCallback() {
                 override fun onAvailable(network: android.net.Network) {
-                    if (hosts.isEmpty()) return
+                    // A background wake owns its own reads; a path change must not start links.
+                    if (hosts.isEmpty() || backgroundedAt != null) return
                     viewModelScope.launch { redialAll() }
                 }
             }
@@ -798,17 +843,23 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
         liveRefresh?.cancel()
         // A project read that outlives its page is wasted; the page reloads on return.
         projectJob?.cancel()
+        // The approval request stays; only its polling pauses until onForeground.
+        approvalPoll?.cancel()
+        approvalPoll = null
         discovery.stop()
+        // Links pause with the app; onForeground redials and starts them again.
+        lives.values.forEach { it.stop() }
+        lives.clear()
         // The pass is scheduled when the app leaves, not only when it connected.
         if (_backgroundSync.value && hosts.isNotEmpty()) {
             com.cmuxremote.mobile.background.BackgroundSync.schedule(getApplication())
         }
     }
 
-    private suspend fun redialAll() {
+    private suspend fun redialAll(only: List<HostRuntime> = hosts) {
         _connecting.value = true
         // Each host keeps its own link and repository; a redial replaces only that link.
-        hosts.forEach { host ->
+        only.forEach { host ->
             runCatching { refreshRelayHint(host.repository) }
             startLive(host)
         }
@@ -871,7 +922,7 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
             } catch (error: ProtocolException) {
                 // A Bridge older than this client cannot decode the "android" kind and
                 // closes the request; the iPhone kind means the same thing to it.
-                if (error.code != "invalid_enrollment") throw error
+                if (error.code !in setOf("invalid_enrollment", "outcome_unknown")) throw error
                 // Bridges before this client reject both the android kind and the
                 // conversationStart capability; retry as the kind and scope they know.
                 com.cmuxremote.mobile.data.Diagnostics.log(
@@ -988,7 +1039,7 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
             val status = try {
                 enrollment.submit()
             } catch (error: ProtocolException) {
-                if (error.code != "invalid_enrollment") throw error
+                if (error.code !in setOf("invalid_enrollment", "outcome_unknown")) throw error
                 enrollment.close()
                 enrollment = Enrollment.beginDiscovered(
                     bridge.endpoint,
@@ -1054,8 +1105,8 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
         approvalPoll = viewModelScope.launch {
             var transientFailures = 0
             try {
-                repeat(150) {
-                    if (!isActive) return@launch
+                // The request lives until the Mac's bootstrap expires, not for a fixed count.
+                poll@ while (isActive && System.currentTimeMillis() / 1000 < enrollment.bootstrap.expiresAt) {
                     delay(2_000)
                     // A lost poll is not a denied request: retry transiently for the
                     // life of the window instead of ending a pairing the owner may
@@ -1063,17 +1114,16 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
                     val status = try {
                         enrollment.status()
                     } catch (error: ProtocolException) {
-                        if (transientEnrollment(error) && transientFailures < 8) {
+                        if (transientEnrollment(error)) {
                             transientFailures += 1
-                            return@repeat
+                            continue@poll
                         }
                         throw error
                     } catch (error: Exception) {
-                        if (transientFailures < 8) {
-                            transientFailures += 1
-                            return@repeat
-                        }
-                        throw error
+                        // A lost poll is retried until the window closes; only a
+                        // definitive refusal ends the pairing.
+                        transientFailures += 1
+                        continue@poll
                     }
                     transientFailures = 0
                     if (status.state == "approved") {
@@ -1140,7 +1190,10 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
 
     /** A poll failure the next poll may recover from. */
     private fun transientEnrollment(error: ProtocolException): Boolean =
-        error.code in setOf("connection_failed", "link_failed", "timeout", "relay_unavailable", "invalid_proof", "replayed_request")
+        error.code in setOf(
+            "connection_failed", "link_failed", "timeout", "relay_unavailable",
+            "invalid_proof", "replayed_request", "outcome_unknown", "socket_unavailable",
+        )
 
     private suspend fun finish(enrollment: PendingEnrollment, status: EnrollmentStatus) {
         pendingEnrollment = null
@@ -1176,9 +1229,17 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
         connection.validate()
         // Do not install a grant the Mac does not answer on: the owner may have
         // approved a Mac whose address this phone cannot reach.
-        val answered = runCatching {
+        val probe = runCatching {
             kotlinx.coroutines.withTimeout(8_000) { BridgeRepository.open(connection).probe() }
-        }.isSuccess
+        }
+        probe.exceptionOrNull()?.let { error ->
+            com.cmuxremote.mobile.data.Diagnostics.log(
+                com.cmuxremote.mobile.data.Diagnostics.Level.Warning,
+                "pair",
+                "probe failed: " + ((error as? ProtocolException)?.code ?: error.javaClass.simpleName),
+            )
+        }
+        val answered = probe.isSuccess
         if (!answered) {
             enrollment.close()
             publishPairing(
@@ -1318,6 +1379,7 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
             hostName = hosts.first().name,
             sessions = sessions,
             cachedPending = entries.sumOf { it.second.pendingCount },
+            cachedAt = entries.maxOfOrNull { it.second.at },
             hosts = hosts.map { it.id to it.name },
             loading = true,
             canStart = _canStart.value,
@@ -1407,6 +1469,12 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
                 // Only the open conversation's own Mac changes what its page shows.
                 if (openHostID == hostID) reloadOpen()
             } else {
+                val sessionsPath = path.startsWith("/v2/sessions")
+                val now = System.currentTimeMillis()
+                if (sessionsPath) {
+                    if (now - lastListRefreshAt < 8_000) return@launch
+                    lastListRefreshAt = now
+                }
                 refresh()
                 if (openHostID == hostID) reloadOpen()
             }
@@ -1430,12 +1498,39 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /** A pull only redials Macs already known to be down, then re-reads. */
+    fun refreshList() {
+        // null means the Mac has not answered yet (or has gone quiet), which is
+        // exactly the set a pull should redial; a reachable Mac only needs a read.
+        val dropped = hosts.filter { _hostReachable.value[it.id] != true }
+        if (dropped.isEmpty()) {
+            refresh()
+            return
+        }
+        viewModelScope.launch {
+            dropped.forEach { host ->
+                runCatching { refreshRelayHint(host.repository) }
+                startLive(host)
+            }
+            redialAll(dropped)
+        }
+    }
+
+    /** The title menu's refresh redials every Mac, as the iPhone does. */
+    fun reconnectAll() {
+        viewModelScope.launch { redialAll() }
+    }
+
     fun refresh() {
         if (hosts.isEmpty()) return
         viewModelScope.launch {
             val shell = _shell.value as? ShellState.Connected
                 ?: ShellState.Connected(hosts.first().name, emptyList())
-            _shell.value = shell.copy(loading = true, error = null)
+            _shell.value = shell.copy(
+                loading = true,
+                error = null,
+                hostConnecting = hosts.associate { it.id to true },
+            )
             val cache = com.cmuxremote.mobile.background.SessionSnapshotCache(getApplication())
             val previousByHost = shell.sessions.groupBy { it.hostID }
                 .mapValues { (_, values) -> values.map { it.session } }
@@ -1487,12 +1582,24 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
                             feedError = feedRead.exceptionOrNull()?.let { error ->
                                 (error as? ProtocolException)?.userMessage() ?: error.message
                             },
+                            errorMessage = read.exceptionOrNull()?.let { error ->
+                                (error as? ProtocolException)?.userMessage() ?: error.message
+                            },
+                            canStart = scope.has(com.cmuxremote.mobile.protocol.ClientCapability.ConversationStart),
                         )
                     }
                 }.map { it.await() }
             }
+            com.cmuxremote.mobile.data.Diagnostics.log(
+                com.cmuxremote.mobile.data.Diagnostics.Level.Info,
+                "list",
+                "read ${results.sumOf { it.sessions.size }} sessions from ${results.size} Macs",
+            )
             val sessions = results.flatMap { read -> read.sessions.map { HostedSession(read.host.id, read.host.name, it) } }
-            val workspaces = results.flatMap { it.workspaces.entries }.associate { it.key to it.value }
+            val workspaces = results.flatMap { read ->
+                // A Mac that failed keeps the titles it published last time.
+                (if (read.reached) read.workspaces else shell.hostWorkspaces[read.host.id].orEmpty()).entries
+            }.associate { it.key to it.value }
             val feed = results.flatMap { it.feed }
             val pending = feed.filter { it.status == "pending" }
             val anyReached = results.any { it.reached }
@@ -1518,6 +1625,11 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
             _workspaceFilter.value?.let { id ->
                 if (workspaces.keys.none { it.equals(id, ignoreCase = true) }) _workspaceFilter.value = null
             }
+            // A rotated relay hint is learned on every full refresh, as on the iPhone.
+            results.filter { it.reached }.forEach { read ->
+                launch { refreshRelayHint(read.host.repository) }
+            }
+            val previousWorkspaces = shell.hostWorkspaces
             _shell.value = ShellState.Connected(
                 hostName = hosts.first().name,
                 sessions = sessions,
@@ -1529,6 +1641,17 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
                 loading = false,
                 error = if (anyReached) null else getApplication<Application>().getString(R.string.error_connection),
                 canStart = _canStart.value,
+                // A quiet Mac's error is not news; its own read error stays with it.
+                hostErrors = results.mapNotNull { read ->
+                    read.errorMessage?.takeIf { read.host.id !in quietHosts }?.let { read.host.id to it }
+                }.toMap(),
+                hostWorkspaces = results.associate { read ->
+                    read.host.id to if (read.reached) read.workspaces else previousWorkspaces[read.host.id].orEmpty()
+                },
+                hostCanStart = results.associate { it.host.id to it.canStart },
+                hostConnecting = hosts.associate { it.id to false },
+                hostPending = results.associate { it.host.id to it.feed.count { item -> item.status == "pending" } },
+                hostCachedPending = results.associate { it.host.id to it.cachedPending },
             )
         }
     }
@@ -1542,6 +1665,8 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
         val reached: Boolean,
         val cachedPending: Int,
         val feedError: String? = null,
+        val errorMessage: String? = null,
+        val canStart: Boolean = false,
     )
 
     fun open(hosted: HostedSession) {
@@ -1556,6 +1681,11 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
 
     fun open(session: SessionDescriptor) {
         val current = repository ?: return
+        com.cmuxremote.mobile.data.Diagnostics.log(
+            com.cmuxremote.mobile.data.Diagnostics.Level.Debug,
+            "open",
+            "conversation ${session.id.take(8)}",
+        )
         backfill?.cancel()
         // Selection is host-qualified: two Macs may report the same session id.
         val host = hosts.firstOrNull { it.repository === current }
@@ -1668,12 +1798,15 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
         connection.host.id + ":" + connection.clientID
 
     /** Codes the connection bar owns; they resolve on the next redial without user action. */
-    private fun isConnectivity(error: ProtocolException): Boolean =
-        error.code in setOf(
+    private fun isConnectivity(error: Throwable): Boolean {
+        if (error is java.io.IOException) return true
+        val code = (error as? ProtocolException)?.code ?: return false
+        return code in setOf(
             "connection_failed", "link_failed", "timeout", "relay_unavailable",
             "bridge_offline", "bridge_starting", "bridge_replaced", "invalid_proof",
-            "replayed_request", "relay_configuration",
+            "replayed_request", "relay_configuration", "capacity", "socket_unavailable",
         )
+    }
 
     /** A refusal from the Bridge still means it answered; only a transport failure is offline. */
     private fun noteReadFailure(error: Throwable) {
@@ -1741,6 +1874,11 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
     fun openFeed() = openFeed(hostID = null)
 
     fun openFeed(hostID: String?) {
+        com.cmuxremote.mobile.data.Diagnostics.log(
+            com.cmuxremote.mobile.data.Diagnostics.Level.Debug,
+            "open",
+            "feed ${hostID?.take(8) ?: "all"}",
+        )
         _feedHost.value = hostID
         _feedOpen.value = true
     }
@@ -1755,6 +1893,11 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
     /** Opens the project page at a file a tool referenced, or at its first change. */
     fun openProjectAt(path: String?) {
         val conversation = _conversation.value ?: return
+        com.cmuxremote.mobile.data.Diagnostics.log(
+            com.cmuxremote.mobile.data.Diagnostics.Level.Debug,
+            "open",
+            "project ${conversation.session.id.take(8)}",
+        )
         _project.value = ProjectUi(inputPath = path.orEmpty())
         projectJob?.cancel()
         projectJob = viewModelScope.launch {
@@ -1861,7 +2004,8 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
         val current = repository ?: return
         val conversation = _conversation.value ?: return
         _image.value = ImageUi(reference)
-        viewModelScope.launch {
+        imageJob?.cancel()
+        imageJob = viewModelScope.launch {
             try {
                 val bytes = current.image(conversation.session.id, reference)
                 _image.value = ImageUi(reference, bytes = bytes, loading = false)
@@ -1872,6 +2016,8 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun closeImage() {
+        imageJob?.cancel()
+        imageJob = null
         _image.value = null
     }
 
@@ -1899,7 +2045,14 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
             if (cached != null) {
                 _task.update { ui ->
                     if (ui?.task?.id != info.id) ui
-                    else ui.copy(text = cached.text, nextOffset = cached.nextOffset, loading = false)
+                    else ui.copy(
+                        text = cached.text,
+                        nextOffset = cached.nextOffset,
+                        command = cached.command,
+                        totalBytes = cached.totalBytes,
+                        messages = cached.messagesJson?.let { BridgeRepository.decodeMessages(it) }.orEmpty(),
+                        loading = false,
+                    )
                 }
             }
             try {
@@ -1926,6 +2079,10 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
                                 text = page.text,
                                 nextOffset = page.nextOffset,
                                 storedAt = System.currentTimeMillis(),
+                                command = page.command,
+                                totalBytes = page.totalBytes,
+                                messagesJson = page.messages.takeIf { it.isNotEmpty() }
+                                    ?.let { BridgeRepository.encodeMessages(it) },
                             ),
                             scope,
                             sessionID,
@@ -1933,9 +2090,36 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
                         )
                     }
                 }
+                _task.update { it?.copy(hasEarlier = page.messages.isNotEmpty() && page.kind == "agent") }
                 if (page.running == true) startTaskFollow(current, scope, sessionID, info.id)
             } catch (error: ProtocolException) {
                 _task.update { it?.copy(loading = false, error = error.userMessage()) }
+            }
+        }
+    }
+
+    /** Steps one page back through an Agent task's own conversation. */
+    fun loadEarlierTask() {
+        val ui = _task.value ?: return
+        val current = repository ?: return
+        val first = ui.messages.minOfOrNull { it.seq } ?: return
+        if (ui.loadingEarlier || !ui.hasEarlier) return
+        val conversation = _conversation.value ?: return
+        _task.update { it?.copy(loadingEarlier = true) }
+        viewModelScope.launch {
+            try {
+                val page = current.task(conversation.session.id, ui.task.id, beforeSeq = first)
+                _task.update { state ->
+                    val known = state?.messages.orEmpty().map { it.id }.toSet()
+                    val older = page.messages.filter { it.id !in known }
+                    state?.copy(
+                        messages = older + state.messages,
+                        hasEarlier = older.isNotEmpty(),
+                        loadingEarlier = false,
+                    )
+                }
+            } catch (error: Exception) {
+                _task.update { it?.copy(loadingEarlier = false, error = (error as? ProtocolException)?.userMessage() ?: it.error) }
             }
         }
     }
@@ -1969,6 +2153,10 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
                                 text = page.text,
                                 nextOffset = page.nextOffset,
                                 storedAt = System.currentTimeMillis(),
+                                command = page.command,
+                                totalBytes = page.totalBytes,
+                                messagesJson = page.messages.takeIf { it.isNotEmpty() }
+                                    ?.let { BridgeRepository.encodeMessages(it) },
                             ),
                             scope,
                             sessionID,
@@ -2014,6 +2202,10 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
                                 text = combined,
                                 nextOffset = page.nextOffset,
                                 storedAt = System.currentTimeMillis(),
+                                command = page.command,
+                                totalBytes = page.totalBytes,
+                                messagesJson = page.messages.takeIf { it.isNotEmpty() }
+                                    ?.let { BridgeRepository.encodeMessages(it) },
                             ),
                             scope,
                             sessionID,
@@ -2135,7 +2327,7 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
             // the workspace row names its Mac and the start goes back to it.
             val targets = hosts.filter {
                 it.connection.scope.has(com.cmuxremote.mobile.protocol.ClientCapability.ConversationStart)
-            }.ifEmpty { hosts }
+            }
             val collected = kotlinx.coroutines.coroutineScope {
                 targets.map { host ->
                     async(Dispatchers.IO) {
@@ -2162,8 +2354,8 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
                     },
                 )
             }
-            val preferred = workspaces.firstOrNull { it.id == workspaceID } ?: workspaces.firstOrNull()
-            preferred?.let { pickStartWorkspace(it) }
+            // A group's own "+" names its workspace; the general entry waits for a choice.
+            workspaceID?.let { id -> workspaces.firstOrNull { it.id == id } }?.let { pickStartWorkspace(it) }
         }
     }
 
@@ -2189,16 +2381,9 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             try {
                 val roots = host.repository.startRoots(workspace.id).map { (id, path) -> StartRoot(id, path) }
-                _start.update { it?.copy(roots = roots, selectedRoot = roots.firstOrNull(), busy = false) }
-                roots.firstOrNull()?.let { selectStartPath("") }
+                _start.update { it?.copy(roots = roots, selectedRoot = null, busy = false) }
             } catch (error: ProtocolException) {
-                _start.update {
-                    it?.copy(
-                        busy = false,
-                        error = error.userMessage(),
-                        notice = getApplication<Application>().getString(R.string.start_no_directories),
-                    )
-                }
+                _start.update { it?.copy(busy = false, error = error.userMessage()) }
             }
         }
     }
@@ -2304,14 +2489,12 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
                     }
                     return@launch
                 }
-                _start.update {
-                    it?.copy(
-                        busy = false,
-                        operation = null,
-                        uncertain = false,
-                        prompt = "",
-                        notice = getApplication<Application>().getString(R.string.start_waiting),
-                    )
+                // The page closes as soon as the Mac accepts; the wait happens on the list.
+                _listNotice.value = getApplication<Application>().getString(R.string.start_waiting)
+                _start.value = null
+                if (surface.isNullOrBlank()) {
+                    _listNotice.value = getApplication<Application>().getString(R.string.start_not_seen)
+                    return@launch
                 }
                 repeat(20) {
                     delay(1500)
@@ -2326,14 +2509,12 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
                             (surface.isNullOrBlank() || session.surfaceID?.lowercase() == surface.lowercase())
                     }
                     if (match != null) {
-                        _start.value = null
+                        _listNotice.value = null
                         open(match)
                         return@launch
                     }
                 }
-                _start.update {
-                    it?.copy(notice = getApplication<Application>().getString(R.string.start_not_seen))
-                }
+                _listNotice.value = getApplication<Application>().getString(R.string.start_not_seen)
             } catch (error: ProtocolException) {
                 val uncertain = error.code == "outcome_unknown"
                 val message = when (error.code) {
@@ -2360,7 +2541,7 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
         if (!conversation.session.writable) return
         viewModelScope.launch {
             runCatching { current.models(conversation.session.id) }
-                .onSuccess { list -> _models.value = list.map { (id, label) -> ModelOption(id, label) } }
+                .onSuccess { list -> _models.value = list.map { (id, label, detail) -> ModelOption(id, label, detail) } }
         }
     }
 
@@ -2472,7 +2653,8 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
     fun sendWithImages(prepared: List<Pair<String, String>>) {
         val current = repository ?: return
         val value = _conversation.value ?: return
-        if (value.sending) return
+        // An unresolved earlier send must be inspected before another one goes out.
+        if (value.sending || _pendingOperation.value != null) return
         val text = value.draft.trim()
         val scope = storeScope(current.connection)
         viewModelScope.launch {
@@ -2691,6 +2873,7 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
         val match = value.feed.firstOrNull { item ->
             item.pending &&
                 (item.sessionID == null || item.sessionID == value.session.id) &&
+                (item.agent == null || item.agent.equals(value.session.agent, ignoreCase = true)) &&
                 item.questions.any { it.prompt == prompt }
         }
         if (match == null) {
@@ -2717,11 +2900,17 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
         // A resolved or expired event is a record; it must never be submitted again.
         if (!item.pending || _feedBusy.value) return
         val host = feedHost(item) ?: return
+        // A Mac that did not grant FeedReply cannot answer, whatever the card shows.
+        if (!host.connection.scope.has(com.cmuxremote.mobile.protocol.ClientCapability.FeedReply)) return
         _feedBusy.value = true
         _feedError.value = null
         viewModelScope.launch {
             try {
                 send(host.repository, item)
+                // The card becomes a record at once; the reads below confirm it.
+                _conversation.update { ui ->
+                    ui?.copy(feed = ui.feed.map { if (it.requestID == requestID) it.copy(status = "resolved") else it })
+                }
                 if (openHostID == host.id) reloadOpen()
                 refresh()
             } catch (error: ProtocolException) {
@@ -2800,6 +2989,10 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
                 "speech_permission" -> R.string.error_speech_permission
                 "speech_unavailable" -> R.string.error_speech_unavailable
                 "speech_too_long" -> R.string.error_speech_too_long
+                "draft_storage_failed" -> R.string.error_draft_storage
+                "keychain_failed" -> R.string.error_keychain
+                "socket_denied", "socket_unavailable" -> R.string.error_socket
+                "capacity" -> R.string.error_capacity
                 else -> null
             }
             id?.let { getApplication<Application>().getString(it) } ?: run {
@@ -2850,7 +3043,11 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
         val current = host.repository
         val value = _conversation.value ?: return
         runCatching {
-            val snapshot = current.history(value.session.id)
+            val readKey = storeScope(current.connection) + ":" + value.session.id
+            val readAt = System.currentTimeMillis()
+            val recent = readAt - (lastConversationReadAt[readKey] ?: 0L) < 60_000
+            val snapshot = current.history(value.session.id, limit = if (recent) 30 else 100)
+            lastConversationReadAt[readKey] = readAt
             val sessions = current.sessions()
             val feed = runCatching { current.feed() }.getOrDefault(emptyList())
                 .map { it.copy(hostID = host.id, hostName = host.name) }

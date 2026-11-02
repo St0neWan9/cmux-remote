@@ -26,7 +26,7 @@ fun FloatingSurface(
         // on Add Device, Start Session and the list's reminders.
         modifier = modifier
             .fillMaxWidth()
-            .shadow(6.dp, shape, clip = false)
+            .shadow(14.dp, shape, clip = false, ambientColor = MobileDesign.Shadow, spotColor = MobileDesign.Shadow)
             .border(0.5.dp, MobileDesign.Line, shape),
         shape = shape,
         color = MobileDesign.Canvas,

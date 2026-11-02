@@ -16,6 +16,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ArrowDropDown
+import androidx.compose.material.icons.rounded.HelpOutline
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -101,13 +102,32 @@ fun QuestionFormCard(
         questions.all { !it.allowSkip } &&
         questions.indices.count { drafts[it]?.label(questions[it]) != null } < questions.size
     // A prompt with no options is answered by the submit itself; anything else needs a choice.
-    val answersNothing = answers.isEmpty() && questions.any { it.options.isNotEmpty() }
+    // With no questions there is nothing to submit; the iPhone disables the action.
+    val answersNothing = answers.isEmpty() && (questions.isEmpty() || questions.any { it.options.isNotEmpty() })
 
     FloatingSurface(modifier = modifier.fillMaxWidth()) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            androidx.compose.material3.Icon(
+                Icons.Rounded.HelpOutline,
+                contentDescription = null,
+                tint = MobileDesign.Muted,
+                modifier = Modifier.size(15.dp),
+            )
+            Text(stringResource(R.string.chat_decisions), color = MobileDesign.Muted, style = MaterialTheme.typography.labelMedium)
+        }
+        if (record != null && answers.isNotEmpty()) {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = stringResource(R.string.chat_question_answered, answers.joinToString(", ")),
+                color = MobileDesign.Muted,
+                style = MaterialTheme.typography.labelMedium,
+            )
+        }
+        Spacer(Modifier.height(8.dp))
         if (questions.isEmpty()) {
             Text(stringResource(R.string.feed_no_questions), color = MobileDesign.Muted, style = MaterialTheme.typography.bodyMedium)
-        } else {
-            questions.forEachIndexed { index, question ->
+        }
+        questions.forEachIndexed { index, question ->
                 if (index > 0) Spacer(Modifier.height(18.dp))
                 if (record != null) {
                     val answer = record.getOrNull(index)
@@ -167,33 +187,23 @@ fun QuestionFormCard(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Button(
+                    com.cmuxremote.mobile.ui.components.FloatingAction(
+                        text = stringResource(R.string.feed_submit_answer),
                         onClick = { onSubmit(answers) },
                         modifier = Modifier.testTag(tag + ".submit"),
                         enabled = !busy && !missingRequired && !answersNothing,
-                        shape = CircleShape,
-                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MobileDesign.Accent,
-                            contentColor = MobileDesign.Canvas,
-                        ),
-                    ) {
-                        Text(stringResource(R.string.feed_submit_answer), maxLines = 1)
-                    }
+                        prominent = true,
+                    )
                     if (questions.any { it.allowSkip }) {
-                        OutlinedButton(
+                        com.cmuxremote.mobile.ui.components.FloatingAction(
+                            text = stringResource(R.string.feed_skip_question),
                             onClick = { onSubmit(emptyList()) },
                             modifier = Modifier.testTag(tag + ".skip"),
                             enabled = !busy,
-                            shape = CircleShape,
-                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
-                        ) {
-                            Text(stringResource(R.string.feed_skip_question), color = if (busy) MobileDesign.Muted else MobileDesign.Ink, maxLines = 1)
-                        }
+                        )
                     }
                 }
             }
-        }
     }
 }
 
@@ -218,12 +228,14 @@ fun PermissionDecisionCard(
         if (!subject.isNullOrBlank()) {
             Spacer(Modifier.height(8.dp))
             Surface(color = MobileDesign.Code, shape = RoundedCornerShape(12.dp)) {
-                Text(
-                    text = subject,
-                    color = MobileDesign.Muted,
-                    style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-                )
+                androidx.compose.foundation.text.selection.SelectionContainer {
+                    Text(
+                        text = subject,
+                        color = MobileDesign.Muted,
+                        style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                    )
+                }
             }
         }
         Spacer(Modifier.height(14.dp))
@@ -232,30 +244,21 @@ fun PermissionDecisionCard(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             if (primary != null) {
-                Button(
+                com.cmuxremote.mobile.ui.components.FloatingAction(
+                    text = permissionModeLabel(primary),
                     onClick = { onDecide(primary) },
                     enabled = !busy,
-                    shape = CircleShape,
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MobileDesign.Accent,
-                        contentColor = MobileDesign.Canvas,
-                    ),
+                    prominent = true,
                     modifier = Modifier.weight(1f),
-                ) {
-                    Text(permissionModeLabel(primary), maxLines = 1)
-                }
+                )
             }
             if ("deny" in allowedModes) {
-                OutlinedButton(
+                com.cmuxremote.mobile.ui.components.FloatingAction(
+                    text = stringResource(R.string.feed_deny),
                     onClick = { onDecide("deny") },
                     enabled = !busy,
-                    shape = CircleShape,
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
                     modifier = Modifier.weight(1f),
-                ) {
-                    Text(stringResource(R.string.feed_deny), color = if (busy) MobileDesign.Muted else MobileDesign.Ink, maxLines = 1)
-                }
+                )
             }
         }
         if (wider.isNotEmpty()) {
@@ -353,10 +356,8 @@ fun PlanDecisionCard(
         if (!plan.isNullOrBlank()) {
             Spacer(Modifier.height(10.dp))
             Surface(color = MobileDesign.Code, shape = RoundedCornerShape(12.dp)) {
-                Text(
+                com.cmuxremote.mobile.ui.markdown.MarkdownText(
                     text = plan,
-                    color = MobileDesign.Ink,
-                    style = MaterialTheme.typography.bodyMedium,
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
                 )
             }

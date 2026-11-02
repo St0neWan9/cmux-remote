@@ -11,6 +11,11 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlin.coroutines.resume
+
+private const val RESOLVE_TIMEOUT_MS = 8_000L
 
 /** A Mac that advertises itself on the local network, with the endpoint it resolved to. */
 data class DiscoveredBridge(
@@ -30,7 +35,7 @@ object DiscoveryTxt {
         val id = field("hostID") ?: return null
         val publicKey = field("publicKey") ?: return null
         val certificate = field("certificate") ?: return null
-        val name = field("name") ?: serviceName
+        val name = field("name") ?: return null
         val host = HostIdentity(id, publicKey, certificate, name)
         return runCatching { host.validate(); host }.getOrNull()
     }
@@ -51,7 +56,6 @@ class BridgeDiscovery(private val context: Context) {
     private var nsd: NsdManager? = null
     private var listener: NsdManager.DiscoveryListener? = null
     private var multicast: WifiManager.MulticastLock? = null
-    private val resolving = ConcurrentHashMap.newKeySet<String>()
     private val found = ConcurrentHashMap<String, DiscoveredBridge>()
     private val running = AtomicBoolean(false)
     /** Only one resolve at a time: Android answers a second one with FAILURE_ALREADY_ACTIVE. */
@@ -111,27 +115,45 @@ class BridgeDiscovery(private val context: Context) {
             }
     }
 
-    private fun resolve(manager: NsdManager, service: NsdServiceInfo, onChange: (List<DiscoveredBridge>) -> Unit) {
-        @Suppress("DEPRECATION")
-        runCatching {
-            manager.resolveService(service, object : NsdManager.ResolveListener {
-                override fun onResolveFailed(info: NsdServiceInfo, errorCode: Int) {
-                    resolving.remove(info.serviceName)
-                }
+    /**
+     * Resolves one service, then releases the queue. A resolve that never calls back would
+     * otherwise block every later service, so the wait is bounded like the iOS browser's.
+     */
+    private suspend fun resolve(manager: NsdManager, service: NsdServiceInfo, onChange: (List<DiscoveredBridge>) -> Unit) {
+        withTimeoutOrNull(RESOLVE_TIMEOUT_MS) {
+            suspendCancellableCoroutine { continuation ->
+                @Suppress("DEPRECATION")
+                val started = runCatching {
+                    manager.resolveService(service, object : NsdManager.ResolveListener {
+                        override fun onResolveFailed(info: NsdServiceInfo, errorCode: Int) {
+                            Diagnostics.log(
+                                Diagnostics.Level.Warning,
+                                "discovery",
+                                "resolve failed for ${info.serviceName}: $errorCode",
+                            )
+                            if (continuation.isActive) continuation.resume(Unit)
+                        }
 
-                override fun onServiceResolved(info: NsdServiceInfo) {
-                    val host = DiscoveryTxt.parse(info.serviceName, info.attributes) ?: return
-                    val address = info.host?.hostAddress ?: return
-                    val endpoint = BridgeEndpoint(address, info.port)
-                    found[host.id] = DiscoveredBridge(host, endpoint)
-                    Diagnostics.log(
-                        Diagnostics.Level.Debug,
-                        "discovery",
-                        "found ${host.name} at $address:${info.port}",
-                    )
-                    onChange(DiscoveryTxt.bounded(found.values.toList()))
+                        override fun onServiceResolved(info: NsdServiceInfo) {
+                            val host = DiscoveryTxt.parse(info.serviceName, info.attributes)
+                            val address = info.host?.hostAddress
+                            if (host != null && address != null) {
+                                val endpoint = BridgeEndpoint(address, info.port)
+                                // Keyed by service, not identity: two services are two rows.
+                                found[info.serviceName] = DiscoveredBridge(host, endpoint)
+                                Diagnostics.log(
+                                    Diagnostics.Level.Debug,
+                                    "discovery",
+                                    "found ${host.name} at $address:${info.port}",
+                                )
+                                onChange(DiscoveryTxt.bounded(found.values.toList()))
+                            }
+                            if (continuation.isActive) continuation.resume(Unit)
+                        }
+                    })
                 }
-            })
+                if (started.isFailure && continuation.isActive) continuation.resume(Unit)
+            }
         }
     }
 
@@ -144,7 +166,6 @@ class BridgeDiscovery(private val context: Context) {
         listener = null
         nsd = null
         found.clear()
-        resolving.clear()
         runCatching { multicast?.release() }
         multicast = null
     }

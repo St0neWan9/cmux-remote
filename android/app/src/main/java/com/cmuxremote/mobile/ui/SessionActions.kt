@@ -13,6 +13,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ArrowDropDown
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -37,7 +38,7 @@ import com.cmuxremote.mobile.R
 import com.cmuxremote.mobile.ui.theme.MobileDesign
 
 /** A model the agent's own configuration offers. */
-data class ModelOption(val id: String, val label: String)
+data class ModelOption(val id: String, val label: String, val detail: String? = null)
 
 /** A pill that shows the current model and opens the models the agent offers. */
 @Composable
@@ -76,11 +77,21 @@ fun ModelMenu(
             options.forEach { option ->
                 DropdownMenuItem(
                     text = {
-                        Text(
-                            text = option.label,
-                            color = if (option.id == current) MobileDesign.Accent else MobileDesign.Ink,
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
+                        Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                            Text(
+                                text = option.label,
+                                color = if (option.id == current) MobileDesign.Accent else MobileDesign.Ink,
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                            option.detail?.takeIf { it.isNotBlank() }?.let { detail ->
+                                Text(detail, color = MobileDesign.Muted, style = MaterialTheme.typography.labelMedium)
+                            }
+                        }
+                    },
+                    trailingIcon = if (option.id == current) {
+                        { Icon(Icons.Rounded.Check, contentDescription = null, tint = MobileDesign.Accent) }
+                    } else {
+                        null
                     },
                     onClick = {
                         expanded = false
@@ -109,6 +120,7 @@ fun ModelMenu(
                         value = customText,
                         onValueChange = { customText = it },
                         singleLine = true,
+                        shape = RoundedCornerShape(16.dp),
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }
@@ -142,13 +154,17 @@ fun RenameDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.chat_rename_session), color = MobileDesign.Ink) },
         text = {
-            OutlinedTextField(
-                value = text,
-                onValueChange = { text = it },
-                modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text(stringResource(R.string.chat_session_name_placeholder), color = MobileDesign.Muted) },
-                singleLine = true,
-            )
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(stringResource(R.string.chat_rename_note), color = MobileDesign.Muted, style = MaterialTheme.typography.bodyMedium)
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = { text = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    placeholder = { Text(stringResource(R.string.chat_session_name_placeholder), color = MobileDesign.Muted) },
+                    singleLine = true,
+                )
+            }
         },
         confirmButton = {
             TextButton(
