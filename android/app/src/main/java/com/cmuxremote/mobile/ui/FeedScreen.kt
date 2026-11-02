@@ -42,6 +42,7 @@ import com.cmuxremote.mobile.ui.theme.MobileDesign
  * The decisions the Mac is waiting on, and the record of the ones already answered.
  * Every reply is one fixed choice: the phone never composes a command.
  */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun FeedScreen(
     items: List<FeedItem>,
@@ -52,33 +53,55 @@ fun FeedScreen(
     busy: Boolean = false,
     loading: Boolean = false,
     error: String? = null,
+    onRefresh: (() -> Unit)? = null,
 ) {
     var history by remember { mutableStateOf(false) }
     val shown = items.filter { history || it.pending }
     val multipleHosts = items.map { it.hostID }.filter { it.isNotEmpty() }.distinct().size > 1
     Column(modifier.fillMaxSize().background(MobileDesign.Canvas).testTag("feed.page")) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            if (onBack != null) {
-                Box(Modifier.size(44.dp).clickable(onClick = onBack), contentAlignment = Alignment.Center) {
-                    Icon(Icons.Rounded.ChevronLeft, contentDescription = stringResource(R.string.common_back), tint = MobileDesign.Ink)
-                }
-            }
-            Text(stringResource(R.string.feed_title), color = MobileDesign.Ink, style = MaterialTheme.typography.titleMedium)
-            Spacer(Modifier.weight(1f))
-            Text(
-                text = if (history) stringResource(R.string.feed_all_events) else stringResource(R.string.feed_only_pending),
-                color = MobileDesign.Accent,
-                style = MaterialTheme.typography.labelMedium,
-                modifier = Modifier
-                    .testTag("feed.history.toggle")
-                    .background(MobileDesign.Soft, CircleShape)
-                    .clickable { history = !history }
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
+        if (onBack != null) {
+            WhitePageHeader(
+                title = stringResource(R.string.feed_title),
+                dismissal = PageDismissal.Back,
+                onDismiss = onBack,
+                trailing = {
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        com.cmuxremote.mobile.ui.components.Pill(
+                            text = stringResource(R.string.feed_only_pending),
+                            modifier = Modifier.testTag("feed.pending.toggle"),
+                            selected = !history,
+                            onClick = { history = false },
+                        )
+                        com.cmuxremote.mobile.ui.components.Pill(
+                            text = stringResource(R.string.feed_all_events),
+                            modifier = Modifier.testTag("feed.history.toggle"),
+                            selected = history,
+                            onClick = { history = true },
+                        )
+                    }
+                },
             )
+        } else {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(stringResource(R.string.feed_title), color = MobileDesign.Ink, style = MaterialTheme.typography.titleMedium)
+                Spacer(Modifier.weight(1f))
+                com.cmuxremote.mobile.ui.components.Pill(
+                    text = stringResource(R.string.feed_only_pending),
+                    modifier = Modifier.testTag("feed.pending.toggle"),
+                    selected = !history,
+                    onClick = { history = false },
+                )
+                com.cmuxremote.mobile.ui.components.Pill(
+                    text = stringResource(R.string.feed_all_events),
+                    modifier = Modifier.testTag("feed.history.toggle"),
+                    selected = history,
+                    onClick = { history = true },
+                )
+            }
         }
         if (loading && shown.isEmpty()) {
             Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
@@ -86,16 +109,21 @@ fun FeedScreen(
             }
         } else if (shown.isEmpty()) {
             Text(
-                text = if (history) stringResource(R.string.feed_no_events) else stringResource(R.string.feed_nothing_to_answer),
+                text = stringResource(R.string.feed_nothing_to_answer),
                 color = MobileDesign.Muted,
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
             )
         }
-        LazyColumn(
+        androidx.compose.material3.pulltorefresh.PullToRefreshBox(
+            isRefreshing = loading,
+            onRefresh = { onRefresh?.invoke() },
             modifier = Modifier.weight(1f),
+        ) {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(MobileDesign.SectionGap),
         ) {
             items(shown, key = { it.hostID + ":" + it.requestID }) { item ->
                 // A record is never actionable, even if it is a question or permission kind.
@@ -161,6 +189,7 @@ fun FeedScreen(
                 }
             }
         }
+        }
     }
 }
 
@@ -183,7 +212,9 @@ private fun RecordCard(item: FeedItem, showHost: Boolean) {
         }
         if (!item.body.isNullOrBlank()) {
             Spacer(Modifier.height(6.dp))
-            Text(item.body, color = MobileDesign.Muted, style = MaterialTheme.typography.bodyMedium)
+            androidx.compose.foundation.text.selection.SelectionContainer {
+                Text(item.body, color = MobileDesign.Ink, style = MaterialTheme.typography.bodyMedium)
+            }
         }
         if (!item.plan.isNullOrBlank()) {
             Spacer(Modifier.height(6.dp))
@@ -195,11 +226,13 @@ private fun RecordCard(item: FeedItem, showHost: Boolean) {
         }
         if (!item.toolInput.isNullOrBlank()) {
             Spacer(Modifier.height(6.dp))
-            Text(
-                item.toolInput,
-                color = MobileDesign.Muted,
-                style = MaterialTheme.typography.labelMedium.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace),
-            )
+            androidx.compose.foundation.text.selection.SelectionContainer {
+                Text(
+                    item.toolInput,
+                    color = MobileDesign.Muted,
+                    style = MaterialTheme.typography.labelMedium.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace),
+                )
+            }
         }
         if (item.toolResult != null) {
             Spacer(Modifier.height(6.dp))

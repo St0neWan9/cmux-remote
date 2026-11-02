@@ -132,7 +132,7 @@
     <string name="pair_scan_torch_on">打开补光灯</string>
     <string name="pair_scan_torch_off">关闭补光灯</string>
     <string name="pair_nearby">附近的 Mac</string>
-    <string name="pair_searching">正在查找…</string>
+    <string name="pair_searching">正在搜索局域网…</string>
     <string name="pair_trust_host">连接这台 Mac？</string>
     <string name="pair_trust_instructions">核对名称和身份，确认是你自己的 Mac 后再请求访问：</string>
     <string name="pair_confirm_identity">核对无误，请求访问</string>
@@ -168,7 +168,6 @@
     <string name="sessions_unreachable">连不上</string>
     <string name="sessions_filter_all">全部</string>
     <string name="sessions_filter_working">运行中</string>
-    <string name="sessions_filter_pending">待处理</string>
     <string name="sessions_filter_read_only">只读</string>
     <string name="sessions_pending_items">%1$d 项待处理</string>
 
@@ -394,4 +393,37 @@
     <string name="pair_legacy_token">共享 token</string>
     <string name="pair_legacy_fingerprint">证书 SHA-256 指纹</string>
     <string name="pair_legacy_connect">使用共享 token 连接</string>
+    <string name="common_expanded">已展开</string>
+    <string name="common_collapsed">已折叠</string>
+    <string name="pair_relay_placeholder">https://your-relay.workers.dev</string>
+    <string name="connection_status_connected">已连接</string>
+    <string name="connection_status_unreachable">连不上</string>
+    <string name="connection_status_unknown">状态未知</string>
+    <string name="sessions_cached_at">缓存于 %1$s</string>
+    <string name="chat_additional_event">其他会话事件</string>
+    <string name="chat_tool_details">工具详情</string>
+    <string name="chat_rename_note">只有这台手机会显示这个名称，Mac 上的标题不变。</string>
+    <string name="start_prompt_required">这个 Agent 必填</string>
+    <string name="project_title">文件与改动</string>
+    <string name="sessions_pending_waiting">%1$d 项等待你处理</string>
+    <string name="chat_decisions">需要决定</string>
+    <string name="pair_request_label">请求</string>
+    <string name="pair_client_label">设备</string>
+    <string name="pair_legacy_fill">用粘贴的 JSON 填充连接字段</string>
+    <string name="error_draft_storage">待确认的发送无法保存或恢复，请先检查对话再重新发送。</string>
+    <string name="error_keychain">连接成功，但无法保存设备密钥，请检查应用签名。</string>
+    <string name="error_socket">请打开 cmux 并检查 socket 访问设置。</string>
+    <string name="error_capacity">这台 Mac 已无法再接受新设备。</string>
+    <string name="error_speech_no_speech">没有识别到文字，请重试或直接输入。</string>
+    <string name="chat_question_answered">已回答：%1$s</string>
+    <string name="chat_status_session_started">会话已开始</string>
+    <string name="chat_status_session_ended">会话已结束</string>
+    <string name="chat_status_interrupted">已中断</string>
+    <string name="chat_status_context_compacted">上下文已压缩</string>
+    <string name="chat_load_earlier">加载更早</string>
+    <string name="chat_no_reference">没有记录图片引用。</string>
+    <string name="chat_background_tasks_count">%1$d 个后台任务</string>
+    <string name="chat_background_tasks_open">打开后台任务</string>
+    <string name="common_zoom_in">放大</string>
+    <string name="common_zoom_out">缩小</string>
 </resources>

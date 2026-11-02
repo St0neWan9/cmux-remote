@@ -41,9 +41,9 @@ class DiscoveryTxtTest {
     }
 
     @Test
-    fun fallsBackToTheServiceNameWhenNoNameIsPublished() {
-        val host = DiscoveryTxt.parse("cmux-remote-abc", attributes("name" to ""))
-        assertEquals("cmux-remote-abc", host?.name)
+    fun dropsAServiceThatDoesNotPublishItsName() {
+        // The Mac app names itself in the record; the service name is not a substitute.
+        assertNull(DiscoveryTxt.parse("cmux-remote-abc", attributes("name" to "")))
     }
 
     @Test

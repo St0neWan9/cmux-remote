@@ -77,7 +77,9 @@ object RelayDirectory {
             if (bootstrap.endpoint.relay?.origin != origin) continue
             if (runCatching { bootstrap.validate(now) }.isFailure) continue
             val existing = latest[bootstrap.host.id]
-            if (existing == null || existing.expiresAt <= bootstrap.expiresAt) latest[bootstrap.host.id] = bootstrap
+            // The first entry wins a tie, as the iOS client does.
+            if (existing != null && existing.expiresAt >= bootstrap.expiresAt) continue
+            latest[bootstrap.host.id] = bootstrap
         }
         return latest.values.sortedBy { it.host.name.lowercase() }
     }

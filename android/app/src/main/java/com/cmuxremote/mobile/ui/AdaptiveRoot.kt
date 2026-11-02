@@ -35,6 +35,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -52,6 +54,7 @@ import com.cmuxremote.mobile.model.SessionTrailing
 import com.cmuxremote.mobile.ui.theme.MobileDesign
 
 /** The whole app: pairing, then the adaptive browser and conversation shell. */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun CmuxApp(viewModel: CmuxViewModel) {
     val shell by viewModel.shell.collectAsStateWithLifecycle()
@@ -91,6 +94,7 @@ fun CmuxApp(viewModel: CmuxViewModel) {
     val relayError by viewModel.relayError.collectAsStateWithLifecycle()
     val reachable by viewModel.reachable.collectAsStateWithLifecycle()
     val probed by viewModel.probed.collectAsStateWithLifecycle()
+    val connectionProtocol by viewModel.connectionProtocol.collectAsStateWithLifecycle()
     val connecting by viewModel.connecting.collectAsStateWithLifecycle()
     val hostReachable by viewModel.hostReachable.collectAsStateWithLifecycle()
     val pendingOperation by viewModel.pendingOperation.collectAsStateWithLifecycle()
@@ -104,6 +108,7 @@ fun CmuxApp(viewModel: CmuxViewModel) {
     val statusFilter by viewModel.statusFilter.collectAsStateWithLifecycle()
     val collapsed by viewModel.collapsed.collectAsStateWithLifecycle()
     val start by viewModel.start.collectAsStateWithLifecycle()
+    val listNotice by viewModel.listNotice.collectAsStateWithLifecycle()
     val context = androidx.compose.ui.platform.LocalContext.current
     val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
     val imageStore = remember { com.cmuxremote.mobile.data.ChatImageStore(context) }
@@ -126,9 +131,13 @@ fun CmuxApp(viewModel: CmuxViewModel) {
             }
         }
     }
-    val picker = androidx.activity.compose.rememberLauncherForActivityResult(
-        androidx.activity.result.contract.ActivityResultContracts.PickMultipleVisualMedia(4),
-    ) { uris -> uris.forEach(attachUri) }
+    // The chooser offers only the slots the draft still has, as the iPhone does.
+    val imageSlots = (4 - pendingImages.size).coerceAtLeast(1)
+    val picker = androidx.compose.runtime.key(imageSlots) {
+        androidx.activity.compose.rememberLauncherForActivityResult(
+            androidx.activity.result.contract.ActivityResultContracts.PickMultipleVisualMedia(imageSlots),
+        ) { uris -> uris.forEach(attachUri) }
+    }
     val imageFilePicker = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.OpenMultipleDocuments(),
     ) { uris -> uris.forEach(attachUri) }
@@ -195,7 +204,11 @@ fun CmuxApp(viewModel: CmuxViewModel) {
                 connecting = connecting,
                 onRetryConnection = viewModel::retryConnection,
                 onRename = viewModel::rename,
-                onResume = if (canStart) viewModel::resume else null,
+                onResume = if (viewModel.allows(com.cmuxremote.mobile.protocol.ClientCapability.ConversationStart)) {
+                    viewModel::resume
+                } else {
+                    null
+                },
                 busy = busy,
                 feedBusy = feedBusy,
                 canControl = viewModel.allows(com.cmuxremote.mobile.protocol.ClientCapability.ConversationControl),
@@ -226,7 +239,7 @@ fun CmuxApp(viewModel: CmuxViewModel) {
                 onOpenReference = { path -> viewModel.openProjectAt(path) },
                 onOpenGroup = viewModel::openGroup,
                 onLoadOlder = viewModel::loadOlder,
-                onRefreshConversation = viewModel::refreshOpen,
+                onRefreshConversation = { if (probed && !reachable) viewModel.retryConnection() else viewModel.refreshOpen() },
                 onCopyText = { text ->
                     val clipboard = clipboard
                     clipboard?.setText(androidx.compose.ui.text.AnnotatedString(text))
@@ -246,7 +259,13 @@ fun CmuxApp(viewModel: CmuxViewModel) {
                 onRemoveImage = viewModel::removeImage,
                 onPickImages = if (open.session.writable) openPicker else null,
                 onPickImageFile = if (open.session.writable) { { imageFilePicker.launch(arrayOf("image/*")) } } else null,
-                onOpenFeed = viewModel::openFeed,
+                // The Feed entry is shown only for a Mac that granted feedRead, and it
+                // opens that Mac's queue rather than every Mac's.
+                onOpenFeed = if (viewModel.allows(com.cmuxremote.mobile.protocol.ClientCapability.FeedRead)) {
+                    { viewModel.openFeed(viewModel.openHostID()) }
+                } else {
+                    null
+                },
                 onForceStop = viewModel::forceStop,
                 pendingSend = pendingOperation != null,
                 onCheckPending = viewModel::checkPendingSend,
@@ -264,9 +283,8 @@ fun CmuxApp(viewModel: CmuxViewModel) {
         val compactDense = maxHeight.value < 560f
         val insets = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)
         val startState = start
-        if (startState != null) {
-            Box(insets) {
-                BackHandler { viewModel.closeStart() }
+        val startContent: @Composable () -> Unit = {
+            if (startState != null) {
                 StartSessionScreen(
                     workspaces = startState.workspaces,
                     selectedWorkspace = startState.selectedWorkspace,
@@ -295,6 +313,14 @@ fun CmuxApp(viewModel: CmuxViewModel) {
                     onStart = viewModel::startSession,
                     onStartFresh = viewModel::startSessionFresh,
                 )
+            }
+        }
+        // Starting over a connected list is a sheet, as on the iPhone; pairing
+        // still replaces the shell because there is no list behind it.
+        if (startState != null && shell !is ShellState.Connected) {
+            Box(insets) {
+                BackHandler { viewModel.closeStart() }
+                PushIn { startContent() }
             }
             return@BoxWithConstraints
         }
@@ -327,16 +353,51 @@ fun CmuxApp(viewModel: CmuxViewModel) {
             }
 
             is ShellState.AwaitingOwner -> Box(insets) {
-                AwaitingOwnerScreen(
-                    hostName = state.hostName,
-                    requestID = state.requestID,
-                    clientID = state.clientID,
-                    onCancel = viewModel::cancelPairing,
+                // The pairing page stays put; only discovery is replaced by the request card.
+                PairingScreen(
+                    state = ShellState.Pairing(),
+                    onPair = viewModel::pair,
+                    onRetrySaved = viewModel::restore,
+                    onScan = { scanning = true },
+                    discovered = discovered,
+                    approvedHostIDs = viewModel.approvedHostIDs(),
+                    onPairDiscovered = viewModel::pairDiscovered,
+                    relayOrigins = relayOrigins,
+                    relayHosts = relayHosts,
+                    relayLoading = relayLoading,
+                    relayError = relayError,
+                    onAddRelay = viewModel::addRelayOrigin,
+                    onRemoveRelay = viewModel::removeRelayOrigin,
+                    onRefreshRelay = viewModel::refreshRelayDirectory,
+                    onPairListed = viewModel::pairListed,
+                    onResetIdentity = viewModel::resetIdentity,
+                    onPairLegacy = viewModel::pairLegacy,
+                    awaiting = AwaitingEnrollment(state.hostName, state.requestID, state.clientID),
+                    onCancelEnrollment = viewModel::cancelPairing,
                 )
             }
 
             is ShellState.Failed -> Box(insets) {
-                FailedScreen(code = state.code, message = state.message, onRetry = viewModel::restore)
+                // The escape stays inline on the pairing page, as on iOS.
+                PairingScreen(
+                    state = ShellState.Pairing(error = state.message),
+                    onPair = viewModel::pair,
+                    onRetrySaved = viewModel::restore,
+                    onScan = { scanning = true },
+                    discovered = discovered,
+                    approvedHostIDs = viewModel.approvedHostIDs(),
+                    onPairDiscovered = viewModel::pairDiscovered,
+                    relayOrigins = relayOrigins,
+                    relayHosts = relayHosts,
+                    relayLoading = relayLoading,
+                    relayError = relayError,
+                    onAddRelay = viewModel::addRelayOrigin,
+                    onRemoveRelay = viewModel::removeRelayOrigin,
+                    onRefreshRelay = viewModel::refreshRelayDirectory,
+                    onPairListed = viewModel::pairListed,
+                    onResetIdentity = viewModel::resetIdentity,
+                    onPairLegacy = viewModel::pairLegacy,
+                )
             }
 
             is ShellState.Connected -> {
@@ -352,12 +413,20 @@ fun CmuxApp(viewModel: CmuxViewModel) {
                     collapsed = collapsed,
                     pending = state.pending,
                     pendingCount = state.cachedPending,
+                    cachedAt = state.cachedAt,
+                    notice = listNotice,
                     loading = state.loading,
                     error = state.error,
-                    canStart = canStart,
+                    canStart = canStart || state.hostCanStart.values.any { it },
                     selectedID = selectedKey,
                     hostReachable = hostReachable,
                     canReadConversations = viewModel.canReadConversations(),
+                    hostErrors = state.hostErrors,
+                    hostWorkspaces = state.hostWorkspaces,
+                    hostCanStart = state.hostCanStart,
+                    hostConnecting = state.hostConnecting,
+                    hostPending = state.hostPending,
+                    hostCachedPending = state.hostCachedPending,
                 )
                 val listActions = SessionListActions(
                     onSelect = { item ->
@@ -368,7 +437,8 @@ fun CmuxApp(viewModel: CmuxViewModel) {
                     onOpenFeedHost = { id -> viewModel.openFeed(id) },
                     onStart = viewModel::openStart,
                     onStartInWorkspace = if (canStart) viewModel::startInWorkspace else null,
-                    onRefresh = viewModel::refresh,
+                    onRefresh = viewModel::refreshList,
+                    onReconnect = viewModel::reconnectAll,
                     onAddMac = { viewModel.setAddingDevice(true) },
                     onSearch = viewModel::search,
                     onSort = viewModel::setSortByTime,
@@ -393,6 +463,9 @@ fun CmuxApp(viewModel: CmuxViewModel) {
                         command = detail.command,
                         totalBytes = detail.totalBytes,
                         running = detail.running,
+                        hasEarlier = detail.hasEarlier,
+                        loadingEarlier = detail.loadingEarlier,
+                        onLoadEarlier = viewModel::loadEarlierTask,
                     )
                 }
                 val sessions = state.sessions.map { present(it, context) }
@@ -411,10 +484,7 @@ fun CmuxApp(viewModel: CmuxViewModel) {
                                     close()
                                     listActions.onSelect(session)
                                 },
-                                onHostConnection = { id ->
-                                    close()
-                                    viewModel.openConnection(id)
-                                },
+                                onHostConnection = { id -> viewModel.openConnection(id) },
                                 closed = close,
                                 modifier = Modifier.fillMaxSize(),
                             )
@@ -424,7 +494,7 @@ fun CmuxApp(viewModel: CmuxViewModel) {
                             BackHandler { viewModel.closeProject() }
                             PushIn {
                             ProjectScreen(
-                                title = conversation?.session?.title ?: stringResource(R.string.common_project),
+                                title = stringResource(R.string.project_title),
                                 changes = project!!.changes,
                                 selectedPath = project!!.selectedPath,
                                 text = project!!.text,
@@ -469,6 +539,7 @@ fun CmuxApp(viewModel: CmuxViewModel) {
                                 busy = feedBusy,
                                 loading = (shell as? ShellState.Connected)?.loading == true,
                                 error = feedError ?: (shell as? ShellState.Connected)?.error,
+                                onRefresh = viewModel::refresh,
                             )
                             }
                         } else if (conversation != null) {
@@ -487,8 +558,9 @@ fun CmuxApp(viewModel: CmuxViewModel) {
                         SessionBrowserPane(model = listModel, actions = listActions, modifier = Modifier.width(layout.browserWidthDp.dp))
                         VerticalLine()
                         if (project != null) {
+                            BackHandler { viewModel.closeProject() }
                             ProjectScreen(
-                                title = conversation?.session?.title ?: stringResource(R.string.common_project),
+                                title = stringResource(R.string.project_title),
                                 changes = project!!.changes,
                                 selectedPath = project!!.selectedPath,
                                 text = project!!.text,
@@ -530,6 +602,7 @@ fun CmuxApp(viewModel: CmuxViewModel) {
                                 busy = feedBusy,
                                 loading = state.loading,
                                 error = feedError ?: state.error,
+                                onRefresh = viewModel::refresh,
                             )
                         } else {
                             conversationPane(Modifier.weight(1f), null)
@@ -583,7 +656,7 @@ fun CmuxApp(viewModel: CmuxViewModel) {
                         endpoint = "${saved.endpoint.host}:${saved.endpoint.port}",
                         identity = saved.host.id,
                         certificate = saved.host.certificateSHA256,
-                        protocolName = "v2 HTTPS · link v3",
+                        protocolName = connectionProtocol,
                         reachable = hostReachable[saved.host.id] ?: reachable,
                         capabilities = saved.scope.capabilities.map { it.raw },
                         overRelay = viewModel.overRelay,
@@ -624,12 +697,17 @@ fun CmuxApp(viewModel: CmuxViewModel) {
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp),
                 ) {
-                    androidx.compose.material3.Icon(
-                        androidx.compose.material.icons.Icons.Rounded.ChevronLeft,
-                        contentDescription = stringResource(R.string.common_back),
-                        tint = MobileDesign.Ink,
-                        modifier = Modifier.size(36.dp).clickable { viewModel.closeGroup() }.padding(6.dp),
-                    )
+                    Box(
+                        modifier = Modifier.size(44.dp).clickable { viewModel.closeGroup() },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        androidx.compose.material3.Icon(
+                            androidx.compose.material.icons.Icons.Rounded.ChevronLeft,
+                            contentDescription = stringResource(R.string.common_back),
+                            tint = MobileDesign.Ink,
+                            modifier = Modifier.size(22.dp),
+                        )
+                    }
                     Text(
                         text = stringResource(R.string.chat_operation_count_plural, rows.size),
                         color = MobileDesign.Ink,
@@ -651,7 +729,7 @@ fun CmuxApp(viewModel: CmuxViewModel) {
             val fields = if (detail.field == "diff") listOf("diff") else listOf("input", "output")
             val message = conversation?.messages?.firstOrNull { it.id == detail.messageID }
             ToolDetailScreen(
-                title = message?.filePath ?: message?.toolName ?: toolRecordTitle,
+                title = stringResource(R.string.chat_tool_details),
                 fields = fields,
                 selectedField = fields.indexOf(detail.field).coerceAtLeast(0),
                 text = detail.text,
@@ -689,20 +767,19 @@ fun CmuxApp(viewModel: CmuxViewModel) {
 
         if (addingDevice) {
             BackHandler { viewModel.setAddingDevice(false) }
-            when (val state = pairing) {
-                is ShellState.AwaitingOwner -> AwaitingOwnerScreen(
-                    hostName = state.hostName,
-                    requestID = state.requestID,
-                    clientID = state.clientID,
-                    onCancel = viewModel::cancelPairing,
-                )
-                is ShellState.Failed -> FailedScreen(
-                    code = state.code,
-                    message = state.message,
-                    onRetry = { viewModel.setAddingDevice(false); viewModel.restore() },
-                )
-                else -> PairingScreen(
-                    state = state as? ShellState.Pairing ?: ShellState.Pairing(),
+            run {
+                val state = pairing
+                // One page for every pairing phase: waiting and errors stay inline.
+                PairingScreen(
+                    state = when (state) {
+                        is ShellState.Pairing -> state
+                        is ShellState.Failed -> ShellState.Pairing(error = state.message)
+                        else -> ShellState.Pairing()
+                    },
+                    awaiting = (state as? ShellState.AwaitingOwner)?.let {
+                        AwaitingEnrollment(it.hostName, it.requestID, it.clientID)
+                    },
+                    onCancelEnrollment = viewModel::cancelPairing,
                     onPair = viewModel::pair,
                     onRetrySaved = { viewModel.setAddingDevice(false); viewModel.restore() },
                     onScan = { scanning = true },
@@ -731,6 +808,44 @@ fun CmuxApp(viewModel: CmuxViewModel) {
                     viewModel.pair(code)
                 },
                 onCancel = { scanning = false },
+            )
+        }
+
+        if (startState != null && shell is ShellState.Connected) {
+            androidx.compose.material3.ModalBottomSheet(
+                onDismissRequest = viewModel::closeStart,
+                containerColor = MobileDesign.Canvas,
+            ) {
+                Box(Modifier.fillMaxWidth().fillMaxHeight(0.92f)) { startContent() }
+            }
+        }
+
+        // A page that replaces the root has no stack entry to pop, so it carries
+        // its own edge swipe, as the iPhone's WhitePage does.
+        val edgeBack: (() -> Unit)? = when {
+            diagnosticsOpen -> viewModel::closeDiagnostics
+            connectionOpen -> viewModel::closeConnection
+            image != null -> viewModel::closeImage
+            project != null -> viewModel::closeProject
+            feedOpen -> viewModel::closeFeed
+            groupPage != null -> viewModel::closeGroup
+            startState != null -> viewModel::closeStart
+            else -> null
+        }
+        if (edgeBack != null) {
+            var dragged by remember(edgeBack) { mutableStateOf(0f) }
+            Box(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .width(24.dp)
+                    .align(Alignment.CenterStart)
+                    .pointerInput(edgeBack) {
+                        detectHorizontalDragGestures(
+                            onDragStart = { dragged = 0f },
+                            onHorizontalDrag = { _, amount -> dragged += amount },
+                            onDragEnd = { if (dragged > 56.dp.toPx()) edgeBack() },
+                        )
+                    },
             )
         }
     }
@@ -828,9 +943,13 @@ private fun relativeAge(timestamp: String?, context: android.content.Context): S
 
 /** A detail page enters from the trailing edge, like a pushed page. */
 @androidx.compose.runtime.Composable
-private fun PushIn(content: @androidx.compose.runtime.Composable () -> Unit) {
+internal fun PushIn(content: @androidx.compose.runtime.Composable () -> Unit) {
+    // Start hidden and show on the first frame, so the transition actually plays.
+    var shown by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    androidx.compose.runtime.LaunchedEffect(Unit) { shown = true }
     AnimatedVisibility(
-        visible = true,
-        enter = slideInHorizontally(initialOffsetX = { it / 3 }) + fadeIn(),
+        visible = shown,
+        enter = slideInHorizontally(initialOffsetX = { it / 3 }) +
+            fadeIn(androidx.compose.animation.core.tween(220)),
     ) { content() }
 }

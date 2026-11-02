@@ -22,6 +22,7 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Book
+import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.Build
 import androidx.compose.material.icons.rounded.Cancel
 import androidx.compose.material.icons.rounded.CheckCircle
@@ -29,6 +30,7 @@ import androidx.compose.material.icons.rounded.ChevronLeft
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
+import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Terminal
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -43,9 +45,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -76,7 +80,9 @@ data class ToolRowModel(
 )
 
 /** A group longer than this draws only its newest slice; the whole turn opens on its own page. */
-private const val InlineRowLimit = 6
+/** Above this many rows the inline slice collapses to its newest [InlineRowLimit]. */
+private const val InlineGroupThreshold = 5
+private const val InlineRowLimit = 10
 
 /** Room a code block takes before it starts scrolling inside itself. */
 private val CodeBlockMaxHeight = 280.dp
@@ -104,20 +110,35 @@ fun ActivityGroupCard(
     // null means "follow the newest group"; a tap records the reader's own choice.
     var choice by remember { mutableStateOf<Boolean?>(null) }
     val expanded = choice ?: isLatest
+    val expandedLabel = stringResource(if (expanded) R.string.common_expanded else R.string.common_collapsed)
     LaunchedEffect(isLatest) {
         if (!isLatest) choice = null
     }
 
+    // Reasoning on its own is prose, not a collapsed tool group: show it in full.
+    if (rows.isNotEmpty() && rows.all { it.kind == "thought" }) {
+        Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            rows.forEach { row -> ToolDisclosureRow(row, onOpenDetail = { onOpenDetail(row) }, onOpenReference = onOpenReference) }
+        }
+        return
+    }
     // A long group draws only its newest slice here; the full page is one tap away.
-    val visibleRows = if (rows.size > InlineRowLimit) rows.takeLast(InlineRowLimit) else rows
+    val visibleRows = if (rows.size > InlineGroupThreshold) rows.takeLast(InlineRowLimit) else rows
 
     Column(
-        modifier.fillMaxWidth().animateContentSize(animationSpec = androidx.compose.animation.core.tween(180, easing = androidx.compose.animation.core.FastOutSlowInEasing)),
+        modifier
+            .fillMaxWidth()
+            .heightIn(min = 44.dp)
+            .animateContentSize(animationSpec = androidx.compose.animation.core.tween(180, easing = androidx.compose.animation.core.FastOutSlowInEasing)),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .testTag("activity." + (rows.firstOrNull()?.id ?: "group"))
+                .semantics {
+                    stateDescription = expandedLabel
+                }
                 .clickable { onHoldPlace?.invoke(); choice = !expanded }
                 .padding(vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -130,7 +151,7 @@ fun ActivityGroupCard(
                 modifier = Modifier.size(16.dp),
             )
             Text(
-                text = groupLabel(rows.size),
+                text = groupLabel(rows.count { it.kind != "thought" }),
                 color = MobileDesign.Muted,
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.weight(1f),
@@ -143,15 +164,22 @@ fun ActivityGroupCard(
             )
         }
         if (expanded) {
-            visibleRows.forEach { row ->
-                ToolDisclosureRow(
-                    row = row,
-                    onOpenDetail = { onOpenDetail(row) },
-                    onOpenReference = onOpenReference,
-                    onHoldPlace = onHoldPlace,
-                )
+            // The iPhone caps the whole open card at 280pt and scrolls inside it.
+            Column(
+                modifier = Modifier
+                    .heightIn(max = 280.dp)
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                visibleRows.forEach { row ->
+                    ToolDisclosureRow(
+                        row = row,
+                        onOpenDetail = { onOpenDetail(row) },
+                        onOpenReference = onOpenReference,
+                        onHoldPlace = onHoldPlace,
+                    )
+                }
             }
-            if (rows.size > InlineRowLimit) {
+            if (rows.size > InlineGroupThreshold) {
                 Text(
                     text = stringResource(R.string.chat_view_all_operations, rows.size),
                     color = MobileDesign.Accent,
@@ -176,7 +204,9 @@ fun toolRowModels(messages: List<com.cmuxremote.mobile.data.ChatMessage>): List<
             id = message.id,
             kind = message.kind,
             title = when (message.kind) {
-                "terminal" -> stringResource(R.string.tool_card_shell)
+                // The command's first line is the card's own summary title.
+                "terminal" -> message.command?.lineSequence()?.firstOrNull()?.takeIf { it.isNotBlank() }
+                    ?: stringResource(R.string.tool_card_shell)
                 else -> message.filePath ?: message.toolName ?: message.command
                     ?: message.text.ifBlank { stringResource(R.string.chat_operation) }
             },
@@ -231,18 +261,27 @@ internal fun ToolDisclosureRow(
     onOpenReference: ((String) -> Unit)? = null,
     onHoldPlace: (() -> Unit)? = null,
 ) {
+    if (row.kind == "thought") {
+        com.cmuxremote.mobile.ui.markdown.MarkdownText(row.title, modifier = Modifier.fillMaxWidth())
+        return
+    }
     var expanded by remember(row.id) { mutableStateOf(false) }
+    val expandedLabel = stringResource(if (expanded) R.string.common_expanded else R.string.common_collapsed)
     Column(Modifier.fillMaxWidth().animateContentSize(animationSpec = androidx.compose.animation.core.tween(180, easing = androidx.compose.animation.core.FastOutSlowInEasing)), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .testTag("tool.disclosure." + row.id)
+                .semantics {
+                    stateDescription = expandedLabel
+                }
                 .clickable { onHoldPlace?.invoke(); expanded = !expanded }
                 .padding(vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(9.dp),
         ) {
             Icon(
-                iconFor(row.kind),
+                iconFor(row),
                 contentDescription = null,
                 tint = MobileDesign.Muted,
                 modifier = Modifier.size(16.dp),
@@ -308,7 +347,7 @@ private fun ToolCodeCard(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(MobileDesign.Soft, RoundedCornerShape(MobileDesign.CardRadius))
+            .background(MobileDesign.ToolCard, RoundedCornerShape(MobileDesign.CardRadius))
             .border(0.5.dp, MobileDesign.Line, RoundedCornerShape(MobileDesign.CardRadius))
             .padding(CardInset),
         verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -319,7 +358,7 @@ private fun ToolCodeCard(
             hasBody = true
         }
         if (!row.output.isNullOrBlank()) {
-            ToolCodeBlock(row.output)
+            ToolCodeBlock(row.output, secondary = true)
             hasBody = true
         }
         if (!row.diff.isNullOrBlank()) {
@@ -381,20 +420,35 @@ private fun ToolCodeCard(
 
 /** Tool text follows the page's own scroll, wraps long lines, and is selectable. */
 @Composable
-private fun ToolCodeBlock(text: String) {
-    SelectionContainer(
-        modifier = Modifier
-            .fillMaxWidth()
-            .heightIn(max = CodeBlockMaxHeight)
-            .verticalScroll(rememberScrollState()),
-    ) {
-        Text(
-            text = text,
-            color = MobileDesign.Ink,
-            fontFamily = FontFamily.Monospace,
-            fontSize = 13.sp,
-            lineHeight = 19.sp,
-            modifier = Modifier.fillMaxWidth(),
+private fun ToolCodeBlock(text: String, secondary: Boolean = false) {
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+    Box(Modifier.fillMaxWidth()) {
+        SelectionContainer(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = CodeBlockMaxHeight)
+                .verticalScroll(rememberScrollState()),
+        ) {
+            Text(
+                text = text,
+                color = if (secondary) MobileDesign.Muted else MobileDesign.Ink,
+                fontFamily = FontFamily.Monospace,
+                fontSize = 13.sp,
+                lineHeight = 19.sp,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        // Copying the whole block is one tap; selecting part of it still works in place.
+        androidx.compose.material3.Icon(
+            Icons.Rounded.ContentCopy,
+            contentDescription = "copy all",
+            tint = MobileDesign.Muted,
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .size(16.dp)
+                .clickable {
+                    clipboard.setText(androidx.compose.ui.text.AnnotatedString(text))
+                },
         )
     }
 }
@@ -572,10 +626,15 @@ private fun groupLabel(count: Int): String =
     if (count == 1) stringResource(R.string.chat_operation_count_singular)
     else stringResource(R.string.chat_operation_count_plural, count)
 
-private fun iconFor(kind: String): ImageVector = when (kind) {
-    "terminal" -> Icons.Rounded.Terminal
-    "file_edit" -> Icons.Rounded.Description
-    else -> Icons.Rounded.Build
+private fun iconFor(row: ToolRowModel): ImageVector = when {
+    row.kind == "terminal" -> Icons.Rounded.Terminal
+    row.kind == "file_edit" -> Icons.Rounded.Description
+    // Read-like tools use the book; other searches use the magnifier.
+    row.toolName?.lowercase() in setOf("read", "notebookread", "readfile") -> Icons.Rounded.Book
+    row.toolName?.lowercase()?.contains("search") == true ||
+        row.toolName?.lowercase() in setOf("grep", "glob", "ls", "find") -> Icons.Rounded.Search
+    // Anything else is a generic tool; the iPhone uses the magnifier rather than a wrench.
+    else -> Icons.Rounded.Search
 }
 
 @Composable

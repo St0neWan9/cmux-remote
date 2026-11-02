@@ -56,13 +56,8 @@ fun MarkdownText(
     selectable: Boolean = true,
 ) {
     val blocks = remember(text) { parseMarkdownBlocks(text) }
-    if (selectable) {
-        SelectionContainer {
-            MarkdownColumn(blocks = blocks, color = color, modifier = modifier)
-        }
-    } else {
-        MarkdownColumn(blocks = blocks, color = color, modifier = modifier)
-    }
+    // Each block is its own selection range, as the iPhone's per-block text views are.
+    MarkdownColumn(blocks = blocks, color = color, modifier = modifier, selectable = selectable)
 }
 
 /** Block kinds only, for a JVM test that asserts parsing without pulling in Compose rendering. */
@@ -270,20 +265,28 @@ private fun structure(line: String): MarkdownBlock? {
 // ---------------------------------------------------------------------------------------------
 
 @Composable
-private fun MarkdownColumn(blocks: List<MarkdownBlock>, color: Color, modifier: Modifier) {
+private fun MarkdownColumn(
+    blocks: List<MarkdownBlock>,
+    color: Color,
+    modifier: Modifier,
+    selectable: Boolean = true,
+) {
     Column(
         modifier = modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         blocks.forEach { block ->
-            when (block) {
-                is MarkdownBlock.Code -> MarkdownCodeBlock(block.text, color)
-                is MarkdownBlock.Heading -> MarkdownHeading(block, color)
-                is MarkdownBlock.Bullet -> MarkdownListItem("•", block.text, color)
-                is MarkdownBlock.Ordered -> MarkdownListItem(block.marker, block.text, color)
-                is MarkdownBlock.Table -> MarkdownTableBlock(block, color)
-                is MarkdownBlock.Paragraph -> MarkdownParagraph(block.text, color)
+            val body: @Composable () -> Unit = {
+                when (block) {
+                    is MarkdownBlock.Code -> MarkdownCodeBlock(block.text, color)
+                    is MarkdownBlock.Heading -> MarkdownHeading(block, color)
+                    is MarkdownBlock.Bullet -> MarkdownListItem("•", block.text, color)
+                    is MarkdownBlock.Ordered -> MarkdownListItem(block.marker, block.text, color)
+                    is MarkdownBlock.Table -> MarkdownTableBlock(block, color)
+                    is MarkdownBlock.Paragraph -> MarkdownParagraph(block.text, color)
+                }
             }
+            if (selectable) SelectionContainer { body() } else body()
         }
     }
 }
@@ -454,7 +457,7 @@ private fun MarkdownTableRow(
     Row(Modifier.fillMaxWidth()) {
         cells.forEachIndexed { index, cell ->
             Text(
-                text = rememberInline(cell),
+                text = rememberInline(cell, MobileDesign.Muted),
                 color = color,
                 fontSize = 14.sp,
                 lineHeight = 20.sp,
@@ -473,12 +476,12 @@ private fun MarkdownTableRow(
 // ---------------------------------------------------------------------------------------------
 
 @Composable
-private fun rememberInline(text: String): AnnotatedString {
+private fun rememberInline(text: String, codeColor: Color? = null): AnnotatedString {
     val uriHandler = LocalUriHandler.current
-    return remember(text, uriHandler) { inlineMarkdown(text, uriHandler) }
+    return remember(text, uriHandler, codeColor) { inlineMarkdown(text, uriHandler, codeColor) }
 }
 
-private fun inlineMarkdown(text: String, uriHandler: UriHandler): AnnotatedString {
+private fun inlineMarkdown(text: String, uriHandler: UriHandler, codeColor: Color? = null): AnnotatedString {
     val linkStyle = SpanStyle(
         color = MobileDesign.Accent,
         textDecoration = TextDecoration.Underline,
@@ -490,7 +493,7 @@ private fun inlineMarkdown(text: String, uriHandler: UriHandler): AnnotatedStrin
         }
     }
     return buildAnnotatedString {
-        appendInlineBody(text, SpanStyle(), linkStyle, listener)
+        appendInlineBody(text, SpanStyle(), linkStyle, listener, codeColor)
     }
 }
 
@@ -499,6 +502,7 @@ private fun AnnotatedString.Builder.appendInlineBody(
     span: SpanStyle,
     linkStyle: SpanStyle,
     listener: LinkInteractionListener,
+    codeColor: Color? = null,
 ) {
     var index = 0
     var literalStart = 0
@@ -512,14 +516,14 @@ private fun AnnotatedString.Builder.appendInlineBody(
             withStyle(span) { append(text.substring(literalStart, token.start)) }
         }
         when {
-            token.code -> withStyle(span + inlineCodeStyle()) { append(token.content) }
+            token.code -> withStyle(span + inlineCodeStyle(codeColor)) { append(token.content) }
             token.url != null -> withLink(
                 LinkAnnotation.Url(token.url, TextLinkStyles(style = linkStyle), listener),
             ) {
                 // The label may itself contain emphasis or code spans.
-                appendInlineBody(token.content, span, linkStyle, listener)
+                appendInlineBody(token.content, span, linkStyle, listener, codeColor)
             }
-            token.style != null -> appendInlineBody(token.content, span + token.style, linkStyle, listener)
+            token.style != null -> appendInlineBody(token.content, span + token.style, linkStyle, listener, codeColor)
             else -> withStyle(span) { append(token.content) }
         }
         index = token.end
@@ -529,10 +533,10 @@ private fun AnnotatedString.Builder.appendInlineBody(
 }
 
 /** Built lazily so a JVM parsing test never initializes Compose-backed design tokens. */
-private fun inlineCodeStyle(): SpanStyle = SpanStyle(
+private fun inlineCodeStyle(color: Color? = null): SpanStyle = SpanStyle(
     fontFamily = FontFamily.Monospace,
-    background = MobileDesign.Code,
-    color = MobileDesign.Ink,
+    background = if (color == null) MobileDesign.Code else Color.Transparent,
+    color = color ?: MobileDesign.Ink,
 )
 
 private data class InlineToken(

@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ChevronRight
+import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material3.Icon
@@ -46,12 +47,7 @@ fun SessionRow(
         add(session.agent)
         if (showMac && !session.hostName.isNullOrBlank()) add(session.hostName)
         add(relativeAge(session.updatedAt, session.age, nowMillis, context))
-        when (session.trailing) {
-            SessionTrailing.Resumable -> add(context.getString(R.string.common_resumable))
-            SessionTrailing.Locked -> add(context.getString(R.string.common_read_only))
-            else -> Unit
-        }
-    }.filter { it.isNotBlank() }.joinToString("  ·  ")
+    }.filter { it.isNotBlank() }
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -72,17 +68,46 @@ fun SessionRow(
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
-            Text(
-                text = meta,
-                color = MobileDesign.Muted,
-                style = MaterialTheme.typography.labelMedium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            // One column per fact, as the iPhone lays them out, not one joined line.
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(5.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                meta.forEachIndexed { index, part ->
+                    if (index > 0) {
+                        Text("·", color = MobileDesign.Muted, style = MaterialTheme.typography.labelMedium)
+                    }
+                    Text(
+                        text = part,
+                        color = MobileDesign.Muted,
+                        style = MaterialTheme.typography.labelMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                // A resumable or read-only row says so with its own mark.
+                val trailingIcon = when (session.trailing) {
+                    SessionTrailing.Resumable -> Icons.Rounded.Schedule
+                    SessionTrailing.Locked -> Icons.Rounded.Lock
+                    else -> null
+                }
+                if (trailingIcon != null) {
+                    Text("·", color = MobileDesign.Muted, style = MaterialTheme.typography.labelMedium)
+                    Icon(trailingIcon, contentDescription = null, tint = MobileDesign.Muted, modifier = Modifier.size(12.dp))
+                    Text(
+                        text = context.getString(
+                            if (session.trailing == SessionTrailing.Resumable) R.string.common_resumable else R.string.common_read_only,
+                        ),
+                        color = MobileDesign.Muted,
+                        style = MaterialTheme.typography.labelMedium,
+                        maxLines = 1,
+                    )
+                }
+            }
         }
         // A running row spins; every other row is a page, so it carries a chevron.
         if (session.trailing == SessionTrailing.Working) {
-            WorkingIndicator()
+            WorkingIndicator(modifier = Modifier.testTag("session.working"))
         } else {
             Icon(
                 Icons.Rounded.ChevronRight,

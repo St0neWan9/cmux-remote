@@ -89,7 +89,10 @@ class LinkClient(
                 "link",
                 "LAN link failed: ${error.code}",
             )
-            if (error.code == "host_changed" || error.code == "invalid_certificate") throw error
+            if (error.code in setOf(
+                "host_changed", "invalid_certificate", "invalid_signature", "invalid_grant",
+                "unauthorized", "forbidden", "invalid_response",
+            )) throw error
         }
         val relay = endpoint.relay ?: throw ProtocolException("link_failed", "The Mac cannot be reached.", 502)
         // An enrollment permit names no device yet; the link's own join signature binds this one.
@@ -147,6 +150,9 @@ class LinkClient(
                     // A revoked identity is refused by the relay before enrollment, so this
                     // is not a lost link: the device identity itself must be replaced.
                     refused == "revoked" -> "revoked"
+                    // A pin or handshake failure is a trust decision, not an unreachable Mac:
+                    // it must fail closed instead of silently moving the session to the relay.
+                    t is javax.net.ssl.SSLPeerUnverifiedException || t is javax.net.ssl.SSLHandshakeException -> "invalid_certificate"
                     response?.code == 401 || response?.code == 403 -> "unauthorized"
                     else -> "link_failed"
                 }

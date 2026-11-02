@@ -38,7 +38,6 @@ class BackgroundSyncWorker(context: Context, params: WorkerParameters) : Corouti
     override suspend fun doWork(): Result {
         val connections = runCatching { ConnectionStore(applicationContext).loadAll() }
             .getOrDefault(emptyList())
-            .take(MAX_HOSTS)
         // Nothing paired means there is nothing to retry.
         if (connections.isEmpty()) return Result.success()
 
@@ -94,25 +93,85 @@ class BackgroundSyncWorker(context: Context, params: WorkerParameters) : Corouti
     /** Reads one Mac once. Cancellation is the worker's, never this Mac's, so it still propagates. */
     private suspend fun readHost(connection: AuthorizedConnection): HostRead? = try {
         val repository = BridgeRepository.open(connection)
-        val sessions = repository.sessions()
-        val pending = readPending(repository)
-        // Keep the newest conversations' text warm, as the iPhone's background pass
-        // does; the list alone made a notification tap open an empty page offline.
-        val store = com.cmuxremote.mobile.data.ConversationStore(applicationContext)
-        val scope = connection.host.id + ":" + connection.clientID
-        sessions
-            .sortedByDescending { it.updatedAt.orEmpty() }
-            .take(BACKGROUND_SESSIONS)
-            .forEach { session ->
-                runCatching { repository.history(session.id) }.onSuccess { snapshot ->
-                    runCatching { store.save(snapshot, scope, session.id, complete = !snapshot.hasMore) }
-                }
+        // A Mac only reachable through its relay still answers: the LAN read is
+        // tried first, then the same signed requests run over the relay link.
+        val lan = runCatching { repository.sessions() }
+        if (lan.isSuccess) {
+            readBody(repository, connection, lan.getOrThrow())
+        } else {
+            val link = dialRelay(connection) ?: throw (lan.exceptionOrNull() ?: IllegalStateException("unreachable"))
+            try {
+                repository.withLink(link) { readBody(this, connection, sessions()) }
+            } finally {
+                link.close()
             }
-        HostRead(sessions, pending)
+        }
     } catch (cancelled: CancellationException) {
         throw cancelled
     } catch (_: Exception) {
         null
+    }
+
+    private suspend fun dialRelay(connection: AuthorizedConnection): com.cmuxremote.mobile.bridge.LinkClient? {
+        val relay = connection.endpoint.relay ?: return null
+        val link = com.cmuxremote.mobile.bridge.LinkClient(
+            host = connection.host,
+            endpoint = connection.endpoint,
+            privateKey = connection.privateKey,
+            clientID = connection.clientID,
+            agreementKey = com.cmuxremote.mobile.protocol.HpkeSession.generateKeyPair(),
+            onEvent = {},
+        )
+        return try {
+            link.connectForcedRelay(relay)
+            val body = link.request("GET", "/v2/identity", null, null)
+            val signed = com.cmuxremote.mobile.protocol.decodeSignedJson(String(body, Charsets.UTF_8))
+            com.cmuxremote.mobile.protocol.Signer.verify(signed, "host", connection.host.publicKey)
+            val announcement = com.cmuxremote.mobile.protocol.HostAnnouncement.from(
+                signed.value as? kotlinx.serialization.json.JsonObject
+                    ?: throw com.cmuxremote.mobile.protocol.ProtocolException("invalid_response", "The identity is not an object."),
+            )
+            if (announcement.host.id != connection.host.id || announcement.epoch.isBlank()) {
+                throw com.cmuxremote.mobile.protocol.ProtocolException("host_changed", "The relay answered for another host.")
+            }
+            link.epoch = announcement.epoch
+            link
+        } catch (_: Exception) {
+            link.close()
+            null
+        }
+    }
+
+    private suspend fun readBody(
+        repository: BridgeRepository,
+        connection: AuthorizedConnection,
+        sessions: List<SessionDescriptor>,
+    ): HostRead {
+        val pending = readPending(repository)
+        // Keep the conversations that are running or changed since this pass last
+        // stored them warm, as the iPhone's background pass does.
+        val store = com.cmuxremote.mobile.data.ConversationStore(applicationContext)
+        val scope = connection.host.id + ":" + connection.clientID
+        val prefs = applicationContext.getSharedPreferences("background-sync", android.content.Context.MODE_PRIVATE)
+        val cutoff = java.time.Instant.now().minusSeconds(24 * 60 * 60)
+        sessions
+            .filter { session ->
+                val updated = runCatching { java.time.Instant.parse(session.updatedAt) }.getOrNull()
+                session.working ||
+                    (updated != null && updated.isAfter(cutoff) &&
+                        updated.toEpochMilli() > prefs.getLong(scope + ":" + session.id, 0L))
+            }
+            .sortedByDescending { it.updatedAt.orEmpty() }
+            .take(BACKGROUND_SESSIONS)
+            .forEach { session ->
+                runCatching { repository.history(session.id) }.onSuccess { snapshot ->
+                    runCatching {
+                        store.save(snapshot, scope, session.id, complete = !snapshot.hasMore)
+                        prefs.edit().putLong(scope + ":" + session.id, System.currentTimeMillis()).apply()
+                    }
+                }
+            }
+        return HostRead(sessions, pending)
     }
 
     /** A Mac without feed access still contributes its session list; only the count is lost. */
@@ -149,7 +208,6 @@ class BackgroundSyncWorker(context: Context, params: WorkerParameters) : Corouti
         const val UNIQUE_NAME = "cmux-background-sync"
 
         private const val PERIOD_MINUTES = 15L
-        private const val MAX_HOSTS = 4
         private const val PER_HOST_BUDGET_MS = 20_000L
         private const val TOTAL_BUDGET_MS = 60_000L
         /** The iPhone's background pass keeps the newest twelve conversations. */

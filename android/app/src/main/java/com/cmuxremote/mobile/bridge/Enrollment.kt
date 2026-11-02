@@ -43,6 +43,11 @@ object EnrollmentQr {
             }
             return decodeSignedJson(trimmed)
         }
+        // The scheme, host and empty path must be exact: `enroll-extra` is not ours.
+        val uri = runCatching { java.net.URI(trimmed) }.getOrNull()
+        if (uri?.scheme != "cmux-remote" || uri.host != "enroll" || !uri.path.isNullOrEmpty()) {
+            throw ProtocolException("invalid_pairing", "Scan a version 2 enrollment code from the Mac.")
+        }
         val query = trimmed.substringAfter('?', "")
         val params = query.split('&').filter { it.isNotEmpty() }.mapNotNull { part ->
             val name = part.substringBefore('=', "")

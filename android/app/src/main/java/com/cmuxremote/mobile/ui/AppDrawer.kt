@@ -29,6 +29,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
@@ -87,6 +88,9 @@ fun AppDrawer(
     content: @Composable () -> Unit,
 ) {
     val context = LocalContext.current
+    // In RTL the drawer and its edge strip mirror to the right.
+    val rtl = androidx.compose.ui.platform.LocalLayoutDirection.current == androidx.compose.ui.unit.LayoutDirection.Rtl
+    val direction = if (rtl) -1f else 1f
     val closeSidebarLabel = stringResource(R.string.common_close_sidebar)
     val reduceMotion = remember(context) { systemAnimationsDisabled(context) }
 
@@ -104,7 +108,7 @@ fun AppDrawer(
         val dragging = remember { mutableStateOf(false) }
         val raised by remember(offset) { derivedStateOf { offset.value > 0f } }
 
-        val cornerRadius = if (raised) PanelCornerRadius else 0.dp
+        val cornerRadius = PanelCornerRadius * (offset.value / widthPx.coerceAtLeast(1f)).coerceIn(0f, 1f)
         val shape = RoundedCornerShape(cornerRadius)
         val settle = settleSpec(reduceMotion)
 
@@ -128,6 +132,7 @@ fun AppDrawer(
                 opening = false,
                 open = open,
                 reduceMotion = reduceMotion,
+                rtl = rtl,
                 onOpenChange = onOpenChange,
             )
         } else {
@@ -142,6 +147,7 @@ fun AppDrawer(
                 opening = true,
                 open = open,
                 reduceMotion = reduceMotion,
+                rtl = rtl,
                 onOpenChange = onOpenChange,
             )
         } else {
@@ -167,7 +173,7 @@ fun AppDrawer(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .graphicsLayer { translationX = if (dragging.value) dragOffset.floatValue else offset.value }
+                .graphicsLayer { translationX = direction * (if (dragging.value) dragOffset.floatValue else offset.value) }
                 .shadow(
                     elevation = if (raised) 16.dp else 0.dp,
                     shape = shape,
@@ -209,6 +215,7 @@ fun AppDrawer(
         if (!open && allowsEdgeOpening) {
             Box(
                 modifier = Modifier
+                    .align(if (rtl) Alignment.CenterEnd else Alignment.CenterStart)
                     .width(EdgeStripWidth)
                     .fillMaxHeight()
                     .clearAndSetSemantics { }
@@ -235,6 +242,7 @@ private fun Modifier.drawerDrag(
     opening: Boolean,
     open: Boolean,
     reduceMotion: Boolean,
+    rtl: Boolean,
     onOpenChange: (Boolean) -> Unit,
 ): Modifier {
     val latestOpen = rememberUpdatedState(open)
@@ -242,7 +250,8 @@ private fun Modifier.drawerDrag(
     val scope = rememberCoroutineScope()
     val settle = settleSpec(reduceMotion)
 
-    return pointerInput(widthPx, opening, reduceMotion) {
+    val direction = if (rtl) -1f else 1f
+    return pointerInput(widthPx, opening, reduceMotion, rtl) {
         if (widthPx <= 0f) return@pointerInput
         val minimumDistance = maxOf(EdgeStripWidth.toPx(), viewConfiguration.touchSlop)
         val tracker = VelocityTracker()
@@ -278,7 +287,7 @@ private fun Modifier.drawerDrag(
                 if (started) {
                     val base = if (opening) 0f else widthPx
                     dragging.value = true
-                    dragOffset.floatValue = (base + totalX).coerceIn(0f, widthPx)
+                    dragOffset.floatValue = (base + totalX * direction).coerceIn(0f, widthPx)
                     change.consume()
                 }
 
@@ -299,7 +308,7 @@ private fun Modifier.drawerDrag(
                 current
             } else {
                 val horizontal = abs(totalX) > abs(totalY)
-                val predicted = totalX + tracker.calculateVelocity().x * ProjectedVelocitySeconds
+                val predicted = (totalX + tracker.calculateVelocity().x * ProjectedVelocitySeconds) * direction
                 when {
                     !horizontal -> current
                     abs(totalX) <= 0f -> current

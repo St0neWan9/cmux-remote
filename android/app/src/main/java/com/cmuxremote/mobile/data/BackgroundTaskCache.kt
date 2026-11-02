@@ -35,6 +35,11 @@ class BackgroundTaskCache(private val directory: File) {
         val text: String,
         val nextOffset: Int?,
         val storedAt: Long,
+        /** A detached command's own text and byte count, kept with the output. */
+        val command: String? = null,
+        val totalBytes: Int? = null,
+        /** An Agent task's own conversation, so its sheet opens with rows too. */
+        val messagesJson: String? = null,
     )
 
     private val lock = Any()
@@ -102,6 +107,9 @@ class BackgroundTaskCache(private val directory: File) {
         put("running", JsonPrimitive(entry.running))
         put("text", JsonPrimitive(entry.text))
         entry.nextOffset?.let { put("nextOffset", JsonPrimitive(it)) }
+        entry.command?.let { put("command", JsonPrimitive(it)) }
+        entry.totalBytes?.let { put("totalBytes", JsonPrimitive(it)) }
+        entry.messagesJson?.let { put("messages", JsonPrimitive(it)) }
         put("storedAt", JsonPrimitive(entry.storedAt))
     }.toString()
 
@@ -114,6 +122,9 @@ class BackgroundTaskCache(private val directory: File) {
             text = text,
             nextOffset = json.int("nextOffset"),
             storedAt = json.long("storedAt") ?: 0L,
+            command = json.string("command"),
+            totalBytes = json.int("totalBytes"),
+            messagesJson = json.string("messages"),
         )
     }
 
