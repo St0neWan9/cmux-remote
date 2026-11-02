@@ -12,6 +12,8 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.windowInsetsPadding
@@ -21,10 +23,21 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ChevronLeft
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.ContentCopy
+import androidx.compose.material.icons.rounded.FormatQuote
+import androidx.compose.material.icons.rounded.SelectAll
+import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material3.Text
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.ContentCopy
+import androidx.compose.material.icons.rounded.FormatQuote
+import androidx.compose.material.icons.rounded.SelectAll
+import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -34,9 +47,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.material.icons.rounded.HourglassEmpty
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
@@ -127,7 +145,13 @@ fun SelectTextScreen(
 
 /** "运行中 3m 47s" or "正在压缩上下文…", updating once per second. */
 @Composable
-fun LiveRunLabel(since: Instant, compacting: Boolean, modifier: Modifier = Modifier) {
+fun LiveRunLabel(
+    since: Instant,
+    compacting: Boolean,
+    modifier: Modifier = Modifier,
+    /** The composer row draws the app's own spinner too, so it adds no mark of its own. */
+    showsMark: Boolean = true,
+) {
     var now by remember { mutableStateOf(Instant.now()) }
     LaunchedEffect(since) {
         while (true) {
@@ -137,10 +161,28 @@ fun LiveRunLabel(since: Instant, compacting: Boolean, modifier: Modifier = Modif
     }
     val seconds = Duration.between(since, now).seconds.coerceAtLeast(0L).toInt()
     Row(
-        modifier = modifier,
+        modifier = modifier.testTag("response.elapsed"),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(7.dp),
     ) {
+        if (showsMark) {
+            val pulse = androidx.compose.animation.core.rememberInfiniteTransition(label = "hourglass")
+            val alpha by pulse.animateFloat(
+                initialValue = 0.35f,
+                targetValue = 1f,
+                animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+                    animation = androidx.compose.animation.core.tween(900),
+                    repeatMode = androidx.compose.animation.core.RepeatMode.Reverse,
+                ),
+                label = "hourglassAlpha",
+            )
+            androidx.compose.material3.Icon(
+                androidx.compose.material.icons.Icons.Rounded.HourglassEmpty,
+                contentDescription = null,
+                tint = MobileDesign.Muted,
+                modifier = modifier.size(13.dp).alpha(alpha),
+            )
+        }
         Text(
             text = if (compacting) stringResource(R.string.chat_compacting)
             else stringResource(R.string.chat_running_timer, runTimer(seconds)),
@@ -156,11 +198,11 @@ fun ResponseRunLabel(seconds: Double, recorded: Boolean, modifier: Modifier = Mo
     val duration = compactDuration(seconds)
     Column(
         modifier = modifier.fillMaxWidth().padding(top = 6.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
+        horizontalAlignment = Alignment.Start,
     ) {
         Text(
-            text = if (recorded) stringResource(R.string.chat_used_time, duration)
-            else stringResource(R.string.chat_used_time_approx, duration),
+            // The iPhone uses one wording whether or not the Mac recorded a duration.
+            text = stringResource(R.string.chat_used_time, duration),
             color = MobileDesign.Muted,
             style = MaterialTheme.typography.bodyMedium.copy(fontFeatureSettings = "tnum"),
         )
@@ -175,7 +217,7 @@ fun ResponseFooter(
     completedAt: Instant?,
     onCopy: () -> Unit,
     onShare: () -> Unit,
-    onQuote: () -> Unit,
+    onQuote: (() -> Unit)? = null,
     onSelectText: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -187,16 +229,32 @@ fun ResponseFooter(
         }
     }
     Row(
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth().testTag("response.footer"),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        FooterAction(if (copied) stringResource(R.string.common_copied) else stringResource(R.string.common_copy)) {
+        FooterAction(
+            modifier = Modifier.testTag("response.copy"),
+            label = if (copied) stringResource(R.string.common_copied) else stringResource(R.string.common_copy),
+            icon = if (copied) androidx.compose.material.icons.Icons.Rounded.Check else androidx.compose.material.icons.Icons.Rounded.ContentCopy,
+        ) {
             onCopy()
             copied = true
         }
-        FooterAction(stringResource(R.string.common_share), onShare)
-        FooterAction(stringResource(R.string.common_quote), onQuote)
-        FooterAction(stringResource(R.string.common_select_text), onSelectText)
+        FooterAction(
+            label = stringResource(R.string.common_share),
+            icon = Icons.Rounded.Share,
+            modifier = Modifier.testTag("response.share"),
+        ) { onShare() }
+        if (onQuote != null) FooterAction(
+            label = stringResource(R.string.common_quote),
+            icon = Icons.Rounded.FormatQuote,
+            modifier = Modifier.testTag("response.quote"),
+        ) { onQuote() }
+        FooterAction(
+            label = stringResource(R.string.common_select_text),
+            icon = Icons.Rounded.SelectAll,
+            modifier = Modifier.testTag("response.select"),
+        ) { onSelectText() }
         Spacer(Modifier.weight(1f))
         if (completedAt != null) {
             Text(
@@ -260,50 +318,88 @@ private fun PageHeader(
     title: String,
     onBack: () -> Unit,
     trailing: (@Composable () -> Unit)? = null,
+) = WhitePageHeader(title, PageDismissal.Back, onBack, trailing)
+
+/** How a page is left: a pushed page slides back, a presented one closes at the top right. */
+enum class PageDismissal { Back, Close, None }
+
+/** The iPhone's shared white page header: centered title, 44pt action on one side. */
+@Composable
+fun WhitePageHeader(
+    title: String,
+    dismissal: PageDismissal,
+    onDismiss: () -> Unit,
+    trailing: (@Composable () -> Unit)? = null,
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = MobileDesign.PageInset, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Box(
-            modifier = Modifier.size(44.dp).clip(CircleShape).clickable(onClick = onBack),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                Icons.Rounded.ChevronLeft,
-                contentDescription = stringResource(R.string.common_back),
-                tint = MobileDesign.Ink,
-                modifier = Modifier.size(22.dp),
-            )
+        if (dismissal == PageDismissal.Back) {
+            Box(
+                modifier = Modifier.size(44.dp).testTag("page.back").clickable(onClick = onDismiss),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Rounded.ChevronLeft, contentDescription = stringResource(R.string.common_back), tint = MobileDesign.Ink, modifier = Modifier.size(22.dp))
+            }
+        } else {
+            Spacer(Modifier.size(44.dp))
         }
         Text(
             text = title,
             color = MobileDesign.Ink,
             style = MaterialTheme.typography.titleMedium,
-            maxLines = 1,
+            maxLines = 2,
             overflow = TextOverflow.Ellipsis,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
             modifier = Modifier.weight(1f),
         )
-        trailing?.invoke()
+        if (trailing != null) {
+            trailing()
+        } else if (dismissal == PageDismissal.Close) {
+            Box(
+                modifier = Modifier.size(44.dp).testTag("page.close").clickable(onClick = onDismiss),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Rounded.Close, contentDescription = stringResource(R.string.common_close), tint = MobileDesign.Ink, modifier = Modifier.size(20.dp))
+            }
+        } else {
+            Spacer(Modifier.size(44.dp))
+        }
     }
 }
 
+
 @Composable
-private fun FooterAction(label: String, onClick: () -> Unit) {
-    TextButton(
-        onClick = onClick,
-        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+private fun FooterAction(
+    label: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector? = null,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    // One 36×44 icon target; the label is the accessibility name, not visible text.
+    Box(
+        modifier = modifier.width(36.dp).height(44.dp).clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
     ) {
-        Text(text = label, color = MobileDesign.Muted, fontSize = 13.sp, maxLines = 1)
+        Icon(
+            icon ?: Icons.Rounded.ContentCopy,
+            contentDescription = label,
+            tint = MobileDesign.Muted,
+            modifier = Modifier.size(15.dp),
+        )
     }
 }
 
 /** `47s` or `3m 47s`, the same spelling as the finished label. */
+@Composable
 private fun runTimer(seconds: Int): String {
     val total = seconds.coerceAtLeast(0)
-    if (total < 60) return "${total}s"
-    return String.format(java.util.Locale.getDefault(), "%dm %02ds", total / 60, total % 60)
+    return when {
+        total < 60 -> stringResource(R.string.chat_duration_seconds, total)
+        total < 3_600 -> stringResource(R.string.chat_duration_minutes, total / 60, total % 60)
+        else -> stringResource(R.string.chat_duration_hours, total / 3_600, (total % 3_600) / 60)
+    }
 }
 
 /** `3m 47s`, with units the reader's language spells itself. */

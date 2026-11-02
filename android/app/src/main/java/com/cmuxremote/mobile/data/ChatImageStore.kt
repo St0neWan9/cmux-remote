@@ -166,15 +166,15 @@ class ChatImageStore(private val context: Context) {
     private data class Size(val width: Int, val height: Int)
 
     private companion object {
-        const val MAX_SOURCE_BYTES = 30L * 1024 * 1024
-        const val MAX_PAYLOAD_BYTES = 512 * 1024
+        const val MAX_SOURCE_BYTES = 32L * 1024 * 1024
+        const val MAX_PAYLOAD_BYTES = 128 * 1024
         // The Bridge accepts 4096px, but the iPhone sends 1600px so a reply is not
         // dominated by photos; Android uses the same bound.
         const val MAX_SIDE = 1600
         const val MAX_PIXELS = 8_388_608L
         const val MAX_ATTEMPTS = 8
         const val HEX = "0123456789abcdef"
-        val QUALITIES = intArrayOf(85, 75, 65, 55, 45, 35, 25)
+        val QUALITIES = intArrayOf(85, 65, 45, 25)
     }
 }
 

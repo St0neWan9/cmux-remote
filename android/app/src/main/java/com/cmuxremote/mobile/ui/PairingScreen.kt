@@ -21,10 +21,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.ChevronLeft
 import androidx.compose.material.icons.rounded.ChevronRight
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Cloud
+import androidx.compose.material.icons.rounded.Devices
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.Laptop
 import androidx.compose.material.icons.rounded.QrCodeScanner
+import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Wifi
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -55,6 +59,7 @@ import com.cmuxremote.mobile.R
 import com.cmuxremote.mobile.ShellState
 import com.cmuxremote.mobile.bridge.DiscoveredBridge
 import com.cmuxremote.mobile.protocol.EnrollmentBootstrap
+import com.cmuxremote.mobile.ui.components.FloatingAction
 import com.cmuxremote.mobile.ui.components.FloatingSurface
 import com.cmuxremote.mobile.ui.components.WorkingIndicator
 import com.cmuxremote.mobile.ui.theme.MobileDesign
@@ -85,6 +90,9 @@ fun PairingScreen(
     /** Explicitly joins a legacy shared-token Mac. */
     onPairLegacy: ((com.cmuxremote.mobile.data.LegacyPairing) -> Unit)? = null,
     onBack: (() -> Unit)? = null,
+    /** Non-null while the owner has not answered: replaces discovery with the request card. */
+    awaiting: AwaitingEnrollment? = null,
+    onCancelEnrollment: (() -> Unit)? = null,
 ) {
     var relayDraft by remember { mutableStateOf("") }
     var advanced by remember { mutableStateOf(false) }
@@ -108,7 +116,7 @@ fun PairingScreen(
         Spacer(Modifier.height(8.dp))
         if (onBack != null) {
             Box(
-                modifier = Modifier.size(44.dp).clip(CircleShape).clickable(onClick = onBack),
+                modifier = Modifier.size(44.dp).clip(CircleShape).clickable(onClick = onBack).testTag("pair.back"),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
@@ -120,7 +128,7 @@ fun PairingScreen(
             }
         }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Icon(Icons.Rounded.Laptop, null, tint = MobileDesign.Muted, modifier = Modifier.size(22.dp))
+            Icon(Icons.Rounded.Devices, null, tint = MobileDesign.Muted, modifier = Modifier.size(22.dp))
             Text(stringResource(R.string.pair_title), style = MaterialTheme.typography.titleLarge, color = MobileDesign.Ink)
         }
         Text(
@@ -160,6 +168,9 @@ fun PairingScreen(
             )
         }
 
+        if (awaiting != null) {
+            AwaitingEnrollmentCard(awaiting, onCancelEnrollment ?: {})
+        } else {
         FloatingSurface(contentPadding = PaddingValues(16.dp)) {
             SectionTitle(stringResource(R.string.pair_nearby))
             Spacer(Modifier.height(8.dp))
@@ -168,7 +179,7 @@ fun PairingScreen(
             }
             discovered.forEach { bridge ->
                 HostRow(
-                    icon = Icons.Rounded.Laptop,
+                    icon = Icons.Rounded.Wifi,
                     name = bridge.host.name,
                     id = bridge.host.id,
                     approved = bridge.host.id in approvedHostIDs,
@@ -181,8 +192,20 @@ fun PairingScreen(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 SectionTitle(stringResource(R.string.pair_relay), modifier = Modifier.weight(1f))
                 if (onRefreshRelay != null) {
-                    TextButton(onClick = onRefreshRelay, enabled = !relayLoading) {
-                        Text(stringResource(R.string.common_refresh), color = MobileDesign.Accent)
+                    Box(
+                        modifier = Modifier
+                            .size(44.dp)
+                            .clip(CircleShape)
+                            .clickable(enabled = !relayLoading, onClick = onRefreshRelay)
+                            .testTag("pair.relay.refresh"),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            Icons.Rounded.Refresh,
+                            contentDescription = stringResource(R.string.common_refresh),
+                            tint = if (relayLoading) MobileDesign.Muted else MobileDesign.Accent,
+                            modifier = Modifier.size(19.dp),
+                        )
                     }
                 }
             }
@@ -226,12 +249,21 @@ fun PairingScreen(
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f),
                         )
-                        Text(
-                            text = stringResource(R.string.pair_relay_remove),
-                            color = MobileDesign.Accent,
-                            style = MaterialTheme.typography.labelMedium,
-                            modifier = Modifier.clickable { onRemoveRelay(origin) }.padding(vertical = 4.dp),
-                        )
+                        Box(
+                            modifier = Modifier
+                                .size(44.dp)
+                                .clip(CircleShape)
+                                .clickable { onRemoveRelay(origin) }
+                                .testTag("pair.relay.remove"),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                Icons.Rounded.Close,
+                                contentDescription = stringResource(R.string.pair_relay_remove),
+                                tint = MobileDesign.Muted,
+                                modifier = Modifier.size(16.dp),
+                            )
+                        }
                     }
                 }
             }
@@ -239,22 +271,21 @@ fun PairingScreen(
             OutlinedTextField(
                 value = relayDraft,
                 onValueChange = { relayDraft = it.trim() },
-                modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("https://your-relay.workers.dev", color = MobileDesign.Muted) },
+                modifier = Modifier.fillMaxWidth().testTag("pair.relay.origin"),
+                placeholder = { Text(stringResource(R.string.pair_relay_placeholder), color = MobileDesign.Muted) },
                 label = { Text(stringResource(R.string.pair_relay_address), color = MobileDesign.Muted) },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Done),
                 singleLine = true,
             )
             Spacer(Modifier.height(10.dp))
-            Button(
+            FloatingAction(
+                text = stringResource(R.string.pair_relay_add),
                 onClick = { val value = relayDraft; relayDraft = ""; onAddRelay(value) },
-                enabled = relayDraft.isNotBlank() && !relayLoading,
-                shape = CircleShape,
                 modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.buttonColors(containerColor = MobileDesign.Accent),
-            ) {
-                Text(stringResource(R.string.pair_relay_add), color = MobileDesign.Canvas)
-            }
+                enabled = relayDraft.isNotBlank() && !relayLoading,
+            )
+        }
+
         }
 
         FloatingSurface(contentPadding = PaddingValues(16.dp)) {
@@ -304,6 +335,24 @@ fun PairingScreen(
                 }
                 if (onPairLegacy != null) {
                     Spacer(Modifier.height(16.dp))
+                    TextButton(
+                        onClick = {
+                            val parsed = runCatching {
+                                com.cmuxremote.mobile.protocol.Json.parse(importText) as? kotlinx.serialization.json.JsonObject
+                            }.getOrNull()
+                            parsed?.let { json ->
+                                fun v(name: String) = (json[name] as? kotlinx.serialization.json.JsonPrimitive)?.content
+                                v("host")?.let { legacyHost = it }
+                                v("port")?.let { legacyPort = it }
+                                v("token")?.let { legacyToken = it }
+                                v("certificateSHA256")?.let { legacyFingerprint = it }
+                            }
+                        },
+                        enabled = importText.isNotBlank(),
+                        modifier = Modifier.testTag("pair.legacy.fill"),
+                    ) {
+                        Text(stringResource(R.string.pair_legacy_fill), color = MobileDesign.Accent)
+                    }
                     Text(stringResource(R.string.pair_legacy_title), color = MobileDesign.Ink, style = MaterialTheme.typography.bodyMedium)
                     Spacer(Modifier.height(4.dp))
                     Text(
@@ -345,7 +394,9 @@ fun PairingScreen(
                         placeholder = { Text(stringResource(R.string.pair_legacy_fingerprint), color = MobileDesign.Muted) },
                     )
                     Spacer(Modifier.height(8.dp))
-                    OutlinedButton(
+                    FloatingAction(
+                        text = stringResource(R.string.pair_legacy_connect),
+                        prominent = true,
                         onClick = {
                             onPairLegacy(
                                 com.cmuxremote.mobile.data.LegacyPairing(
@@ -358,11 +409,8 @@ fun PairingScreen(
                         },
                         enabled = !state.busy && legacyHost.isNotBlank() && legacyToken.isNotBlank() &&
                             legacyFingerprint.isNotBlank() && legacyPort.isNotBlank(),
-                        shape = CircleShape,
                         modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text(stringResource(R.string.pair_legacy_connect), color = MobileDesign.Ink)
-                    }
+                    )
                 }
                 if (onResetIdentity != null) {
                     Spacer(Modifier.height(14.dp))
@@ -466,11 +514,71 @@ private fun HostRow(
         )
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(name, color = MobileDesign.Ink, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(id.take(16).uppercase(), color = MobileDesign.Muted, style = MaterialTheme.typography.labelMedium)
+            Text(
+                id.take(16),
+                color = MobileDesign.Muted,
+                style = MaterialTheme.typography.labelMedium,
+                fontFamily = FontFamily.Monospace,
+            )
         }
         if (approved) {
             Text(stringResource(R.string.pair_approved), color = MobileDesign.Good, style = MaterialTheme.typography.labelMedium)
+        } else {
+            Icon(Icons.Rounded.ChevronRight, contentDescription = null, tint = MobileDesign.Muted, modifier = Modifier.size(16.dp))
         }
+    }
+}
+
+/** The request one phone is waiting on, shown inside the pairing page as iOS does. */
+data class AwaitingEnrollment(
+    val hostName: String,
+    val requestID: String,
+    val clientID: String = "",
+)
+
+/** The request card the pairing page swaps in for discovery while the Mac owner decides. */
+@Composable
+fun AwaitingEnrollmentCard(awaiting: AwaitingEnrollment, onCancel: () -> Unit) {
+    var showDetails by remember { mutableStateOf(false) }
+    FloatingSurface(contentPadding = PaddingValues(16.dp)) {
+        Text(
+            stringResource(R.string.pair_awaiting_owner, awaiting.hostName),
+            style = MaterialTheme.typography.titleMedium,
+            color = MobileDesign.Ink,
+        )
+        Spacer(Modifier.height(6.dp))
+        Text(stringResource(R.string.pair_awaiting_owner_note), color = MobileDesign.Muted, style = MaterialTheme.typography.bodyMedium)
+        Spacer(Modifier.height(10.dp))
+        Text(
+            text = (awaiting.clientID.ifBlank { awaiting.requestID }).take(12).uppercase(),
+            style = MaterialTheme.typography.titleMedium,
+            color = MobileDesign.Ink,
+            fontWeight = FontWeight.SemiBold,
+            fontFamily = FontFamily.Monospace,
+            modifier = Modifier.clickable { showDetails = !showDetails },
+        )
+        if (showDetails) {
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = stringResource(R.string.pair_request_label) + " " + awaiting.requestID +
+                    (if (awaiting.clientID.isNotBlank()) "\n" + stringResource(R.string.pair_client_label) + " " + awaiting.clientID else ""),
+                style = MaterialTheme.typography.labelMedium,
+                color = MobileDesign.Muted,
+                fontFamily = FontFamily.Monospace,
+            )
+        }
+        Spacer(Modifier.height(12.dp))
+        Text(
+            text = stringResource(R.string.pair_awaiting_missing_hint),
+            color = MobileDesign.Muted,
+            style = MaterialTheme.typography.labelMedium,
+        )
+        Spacer(Modifier.height(10.dp))
+        Button(
+            onClick = onCancel,
+            shape = CircleShape,
+            colors = ButtonDefaults.buttonColors(containerColor = MobileDesign.Soft, contentColor = MobileDesign.Ink),
+        ) { Text(stringResource(R.string.common_cancel)) }
     }
 }
 
@@ -507,7 +615,8 @@ fun AwaitingOwnerScreen(
             if (showDetails) {
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    text = "request " + requestID + (if (clientID.isNotBlank()) "\nclient " + clientID else ""),
+                    text = stringResource(R.string.pair_request_label) + " " + requestID +
+                        (if (clientID.isNotBlank()) "\n" + stringResource(R.string.pair_client_label) + " " + clientID else ""),
                     style = MaterialTheme.typography.labelMedium,
                     color = MobileDesign.Muted,
                     fontFamily = FontFamily.Monospace,

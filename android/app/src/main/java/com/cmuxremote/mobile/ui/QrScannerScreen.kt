@@ -37,6 +37,8 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Remove
 import androidx.compose.material.icons.rounded.FlashOff
 import androidx.compose.material.icons.rounded.FlashOn
 import androidx.compose.material3.Icon
@@ -258,7 +260,12 @@ private fun CameraPreview(
             ) {
                 Surface(shape = CircleShape, color = Color.Black.copy(alpha = 0.45f)) {
                     TextButton(onClick = { zoomBy(-0.5f) }, enabled = zoomRatio > 1f) {
-                        Text("−", color = if (zoomRatio > 1f) Color.White else Color.White.copy(alpha = 0.4f))
+                        Icon(
+                            Icons.Rounded.Remove,
+                            contentDescription = stringResource(R.string.common_zoom_out),
+                            tint = if (zoomRatio > 1f) Color.White else Color.White.copy(alpha = 0.4f),
+                            modifier = Modifier.size(20.dp),
+                        )
                     }
                 }
                 Text(
@@ -268,7 +275,12 @@ private fun CameraPreview(
                 )
                 Surface(shape = CircleShape, color = Color.Black.copy(alpha = 0.45f)) {
                     TextButton(onClick = { zoomBy(0.5f) }, enabled = zoomRatio < maxZoom) {
-                        Text("+", color = if (zoomRatio < maxZoom) Color.White else Color.White.copy(alpha = 0.4f))
+                        Icon(
+                            Icons.Rounded.Add,
+                            contentDescription = stringResource(R.string.common_zoom_in),
+                            tint = if (zoomRatio < maxZoom) Color.White else Color.White.copy(alpha = 0.4f),
+                            modifier = Modifier.size(20.dp),
+                        )
                     }
                 }
             }

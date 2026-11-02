@@ -46,4 +46,51 @@ class ScreenshotSmokeTest {
         val bitmap = compose.onNodeWithTag("feed.page").captureToImage().asAndroidBitmap()
         assertTrue(bitmap.width > 0 && bitmap.height > 0)
     }
+
+    @Test
+    fun theComposerRendersPixels() {
+        compose.setContent {
+            CmuxTheme {
+                ComposerArea(
+                    draft = "Hello",
+                    onDraftChange = {},
+                    onSend = {},
+                    onStop = {},
+                    working = false,
+                    canSend = true,
+                    sending = false,
+                    hasBackgroundTasks = false,
+                    error = null,
+                )
+            }
+        }
+        val bitmap = compose.onNodeWithTag("voice.draft").captureToImage().asAndroidBitmap()
+        assertTrue(bitmap.width > 0 && bitmap.height > 0)
+    }
+
+    @Test
+    fun theDrawerRendersPixels() {
+        compose.setContent {
+            CmuxTheme {
+                DrawerContent(
+                    model = SessionListModel(
+                        sessions = listOf(
+                            com.cmuxremote.mobile.model.SessionItem(
+                                id = "d1", title = "Drawer session", agent = "Claude", age = "now",
+                                trailing = com.cmuxremote.mobile.model.SessionTrailing.None,
+                                hostKey = "h1", writable = true,
+                            ),
+                        ),
+                        hosts = listOf("h1" to "Studio"),
+                    ),
+                    actions = SessionListActions(),
+                    onSelectSession = {},
+                    onHostConnection = {},
+                    closed = {},
+                )
+            }
+        }
+        val bitmap = compose.onNodeWithTag("sessions.drawer").captureToImage().asAndroidBitmap()
+        assertTrue(bitmap.width > 0 && bitmap.height > 0)
+    }
 }
