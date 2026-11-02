@@ -27,6 +27,16 @@ class MainActivity : ComponentActivity() {
             if (intent?.getBooleanExtra("add_device", false) == true) model.setAddingDevice(true)
             // Typing a URL through an IME is unreliable in a UI test; this seeds one relay.
             intent?.getStringExtra("relay_origin")?.takeIf { it.isNotBlank() }?.let(model::addRelayOrigin)
+            // A fixed nearby list keeps a screenshot run off the real network.
+            intent?.getStringExtra("nearby_file")?.let { path ->
+                runCatching {
+                    val rows = org.json.JSONArray(java.io.File(path).readText())
+                    (0 until rows.length()).mapNotNull { index ->
+                        val row = rows.optJSONObject(index) ?: return@mapNotNull null
+                        row.optString("id").takeIf { it.isNotBlank() }?.let { it to row.optString("name") }
+                    }
+                }.getOrNull()?.takeIf { it.isNotEmpty() }?.let(model::seedDiscovered)
+            }
             val direct = intent?.getStringExtra("enroll_code")?.takeIf { it.isNotBlank() }
             // A file survives shell quoting, which the `&` in a code does not.
             val fromFile = intent?.getStringExtra("enroll_file")?.let { path ->

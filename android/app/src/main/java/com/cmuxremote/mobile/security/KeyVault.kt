@@ -26,6 +26,11 @@ class KeyVault(private val context: Context) {
             val stored = runCatching { decrypt(wrappingKey(), envelope) }.getOrNull()
             if (stored != null && stored.size == KEY_SIZE) return stored
             // A restored device or invalidated key cannot open the old ciphertext.
+            com.cmuxremote.mobile.data.Diagnostics.log(
+                com.cmuxremote.mobile.data.Diagnostics.Level.Warning,
+                "identity",
+                "the identity key could not be opened; generating a new identity",
+            )
             runCatching { keyStore().deleteEntry(ALIAS) }
         }
         val identity = ByteArray(KEY_SIZE).also { random.nextBytes(it) }

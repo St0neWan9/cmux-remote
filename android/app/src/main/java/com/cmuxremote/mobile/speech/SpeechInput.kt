@@ -339,7 +339,13 @@ class SpeechInput(private val context: Context) {
 
         override fun onBufferReceived(buffer: ByteArray?) = Unit
 
-        override fun onEndOfSpeech() = Unit
+        override fun onEndOfSpeech() {
+            // A recognizer that ends speech but never delivers a final result still
+            // yields its transcript after five seconds, as the iPhone's fallback does.
+            mainHandler.postDelayed({
+                if (!isClosed) complete(if (partial.isBlank()) ERROR_NO_SPEECH else null)
+            }, FINISHING_FALLBACK_MILLIS)
+        }
 
         override fun onEvent(eventType: Int, params: Bundle?) = Unit
 
@@ -360,7 +366,9 @@ class SpeechInput(private val context: Context) {
 
         override fun onResults(results: Bundle?) {
             if (isClosed) return
-            accept(results?.firstText() ?: "", final = true)
+            // Some on-device recognizers finish with an empty final result while the
+            // live transcript is still good; keep it rather than discarding the words.
+            accept(results?.firstText()?.takeIf { it.isNotBlank() } ?: partial, final = true)
         }
 
         override fun onPartialResults(partialResults: Bundle?) {
@@ -384,5 +392,6 @@ class SpeechInput(private val context: Context) {
 
         private const val PERMISSION_TIMEOUT_MILLIS = 60_000L
         private const val SUPPORT_TIMEOUT_MILLIS = 5_000L
+        private const val FINISHING_FALLBACK_MILLIS = 5_000L
     }
 }

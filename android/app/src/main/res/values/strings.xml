@@ -132,7 +132,7 @@
     <string name="pair_scan_torch_on">Turn on the light</string>
     <string name="pair_scan_torch_off">Turn off the light</string>
     <string name="pair_nearby">Nearby Macs</string>
-    <string name="pair_searching">Searching…</string>
+    <string name="pair_searching">Searching the local network…</string>
     <string name="pair_trust_host">Connect to this Mac?</string>
     <string name="pair_trust_instructions">Check the name and identity below, and only request access if this is your Mac:</string>
     <string name="pair_confirm_identity">That\'s it — request access</string>
@@ -168,7 +168,6 @@
     <string name="sessions_unreachable">Unreachable</string>
     <string name="sessions_filter_all">All</string>
     <string name="sessions_filter_working">Running</string>
-    <string name="sessions_filter_pending">Pending</string>
     <string name="sessions_filter_read_only">Read-only</string>
     <string name="sessions_pending_items">%1$d pending</string>
 
@@ -394,4 +393,37 @@
     <string name="pair_legacy_token">Shared token</string>
     <string name="pair_legacy_fingerprint">Certificate SHA-256 fingerprint</string>
     <string name="pair_legacy_connect">Connect with the shared token</string>
+    <string name="common_expanded">Expanded</string>
+    <string name="common_collapsed">Collapsed</string>
+    <string name="pair_relay_placeholder">https://your-relay.workers.dev</string>
+    <string name="connection_status_connected">Connected</string>
+    <string name="connection_status_unreachable">Unreachable</string>
+    <string name="connection_status_unknown">Status unknown</string>
+    <string name="sessions_cached_at">Cached at %1$s</string>
+    <string name="chat_additional_event">Additional session event</string>
+    <string name="chat_tool_details">Tool details</string>
+    <string name="chat_rename_note">Only this phone shows the name; the Mac keeps its own title.</string>
+    <string name="start_prompt_required">Required for this agent</string>
+    <string name="project_title">Files and changes</string>
+    <string name="sessions_pending_waiting">%1$d waiting for you</string>
+    <string name="chat_decisions">Decisions</string>
+    <string name="pair_request_label">request</string>
+    <string name="pair_client_label">client</string>
+    <string name="pair_legacy_fill">Fill the connection fields from the pasted JSON</string>
+    <string name="error_draft_storage">The pending send could not be saved or restored. Check the conversation before sending again.</string>
+    <string name="error_keychain">The connection succeeded, but the device key could not be saved.</string>
+    <string name="error_socket">Open cmux and check its socket access settings.</string>
+    <string name="error_capacity">This Mac cannot accept another device.</string>
+    <string name="error_speech_no_speech">No speech was recognized. Try again or type your message.</string>
+    <string name="chat_question_answered">Answered: %1$s</string>
+    <string name="chat_status_session_started">Session started</string>
+    <string name="chat_status_session_ended">Session ended</string>
+    <string name="chat_status_interrupted">Interrupted</string>
+    <string name="chat_status_context_compacted">Context compacted</string>
+    <string name="chat_load_earlier">Load earlier</string>
+    <string name="chat_no_reference">No image reference recorded.</string>
+    <string name="chat_background_tasks_count">%1$d background tasks</string>
+    <string name="chat_background_tasks_open">Open background tasks</string>
+    <string name="common_zoom_in">Zoom in</string>
+    <string name="common_zoom_out">Zoom out</string>
 </resources>

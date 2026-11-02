@@ -191,7 +191,17 @@ class BridgeClient(
             "POST" -> builder.post((body ?: ByteArray(0)).toRequestBody(media))
             else -> throw ProtocolException("invalid_route", "Unsupported method.")
         }
-        http.newCall(builder.build()).execute().use { response ->
+        val call = http.newCall(builder.build())
+        val response = try {
+            call.execute()
+        } catch (error: javax.net.ssl.SSLException) {
+            throw ProtocolException("invalid_certificate", "The Mac's certificate could not be verified.")
+        } catch (error: java.net.SocketTimeoutException) {
+            throw ProtocolException("timeout", "The Mac did not answer in time.", 504)
+        } catch (error: java.io.IOException) {
+            throw ProtocolException("connection_failed", "The Mac cannot be reached.", 502)
+        }
+        response.use { response ->
             val length = response.body?.contentLength() ?: 0
             if (length > limit) throw ProtocolException("response_too_large", "The response exceeds the read limit.", 502)
             val data = response.body?.bytes() ?: ByteArray(0)

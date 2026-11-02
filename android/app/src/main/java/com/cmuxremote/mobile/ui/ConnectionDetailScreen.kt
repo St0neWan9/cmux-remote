@@ -44,6 +44,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -77,9 +79,9 @@ private val CapabilityOrder = listOf(
     "conversationControl",
     "feedRead",
     "feedReply",
-    "conversationStart",
     "terminalRead",
     "terminalInput",
+    "conversationStart",
 )
 
 /** Same order as the shared capability list, with anything newer kept after it. */
@@ -117,7 +119,6 @@ fun ConnectionDetailScreen(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var confirmRemove by remember { mutableStateOf(false) }
 
     Column(
         modifier
@@ -126,29 +127,11 @@ fun ConnectionDetailScreen(
             .background(MobileDesign.Canvas)
             .windowInsetsPadding(WindowInsets.safeDrawing),
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Box(
-                modifier = Modifier.size(44.dp).clip(CircleShape).clickable(onClick = onBack),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    Icons.Rounded.ChevronLeft,
-                    contentDescription = stringResource(R.string.common_back),
-                    tint = MobileDesign.Ink,
-                    modifier = Modifier.size(22.dp),
-                )
-            }
-            Text(
-                stringResource(R.string.connection_title),
-                color = MobileDesign.Ink,
-                style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.weight(1f),
-            )
-        }
+        WhitePageHeader(
+            title = stringResource(R.string.connection_title),
+            dismissal = PageDismissal.Close,
+            onDismiss = onBack,
+        )
 
         androidx.compose.material3.pulltorefresh.PullToRefreshBox(
             isRefreshing = loading,
@@ -249,7 +232,7 @@ fun ConnectionDetailScreen(
                 ActionButton(text = stringResource(R.string.connection_diagnostics), onClick = onDiagnostics)
                 ActionButton(
                     text = stringResource(R.string.connection_remove_mac),
-                    onClick = { confirmRemove = true },
+                    onClick = onRemove,
                     destructive = true,
                 )
                 Text(
@@ -262,28 +245,6 @@ fun ConnectionDetailScreen(
         }
     }
 
-    if (confirmRemove) {
-        AlertDialog(
-            onDismissRequest = { confirmRemove = false },
-            title = { Text(stringResource(R.string.connection_remove_title), color = MobileDesign.Ink) },
-            text = { Text(stringResource(R.string.connection_remove_hint), color = MobileDesign.Muted) },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        confirmRemove = false
-                        onRemove()
-                    },
-                ) {
-                    Text(stringResource(R.string.common_remove), color = MaterialTheme.colorScheme.error)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmRemove = false }) {
-                    Text(stringResource(R.string.common_cancel), color = MobileDesign.Muted)
-                }
-            },
-        )
-    }
 }
 
 @Composable
@@ -373,7 +334,11 @@ private fun PermissionsCard(capabilities: List<String>) {
         Spacer(Modifier.height(12.dp))
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             orderedCapabilities(capabilities).forEach { raw ->
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    modifier = Modifier.semantics(mergeDescendants = true) { selected = true },
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
                     Icon(
                         Icons.Rounded.Check,
                         contentDescription = null,
@@ -404,24 +369,11 @@ private fun ActionButton(
     enabled: Boolean = true,
     destructive: Boolean = false,
 ) {
-    Button(
+    com.cmuxremote.mobile.ui.components.FloatingAction(
+        text = text,
         onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
         enabled = enabled,
-        shape = CircleShape,
-        border = BorderStroke(0.5.dp, MobileDesign.Line),
-        modifier = Modifier.fillMaxWidth().heightIn(min = MobileDesign.Control),
-        elevation = ButtonDefaults.buttonElevation(defaultElevation = 3.dp, pressedElevation = 1.dp),
-        colors = ButtonDefaults.buttonColors(
-            containerColor = MobileDesign.Canvas,
-            contentColor = if (destructive) MaterialTheme.colorScheme.error else MobileDesign.Ink,
-            disabledContainerColor = MobileDesign.Canvas,
-            disabledContentColor = MobileDesign.Muted,
-        ),
-    ) {
-        Text(
-            text,
-            style = MaterialTheme.typography.bodyMedium,
-            fontWeight = FontWeight.SemiBold,
-        )
-    }
+        destructive = destructive,
+    )
 }

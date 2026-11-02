@@ -94,41 +94,30 @@ fun DiagnosticLogScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
             .background(MobileDesign.Canvas)
             .windowInsetsPadding(WindowInsets.safeDrawing),
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Box(
-                modifier = Modifier.size(44.dp).clickable(onClick = onBack),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(Icons.Rounded.ChevronLeft, contentDescription = stringResource(R.string.common_back), tint = MobileDesign.Ink)
-            }
-            Text(
-                stringResource(R.string.diagnostics_title),
-                color = MobileDesign.Ink,
-                style = MaterialTheme.typography.titleMedium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        SelectionContainer {
-            Text(
-                text = buildLabel(),
-                color = MobileDesign.Muted,
-                fontFamily = FontFamily.Monospace,
-                fontSize = 11.sp,
-                lineHeight = 15.sp,
-                modifier = Modifier.fillMaxWidth()
-                    .padding(horizontal = MobileDesign.PageInset, vertical = 4.dp),
-            )
-        }
+        WhitePageHeader(
+            title = stringResource(R.string.diagnostics_title),
+            dismissal = PageDismissal.Close,
+            onDismiss = onBack,
+        )
+
         LazyColumn(
             modifier = Modifier.weight(1f).fillMaxWidth(),
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
+            // The build a report came from is the list's header, as on the iPhone.
+            item(key = "build") {
+                SelectionContainer {
+                    Text(
+                        text = buildLabel(),
+                        color = MobileDesign.Muted,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 11.sp,
+                        lineHeight = 15.sp,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            }
             items(entries) { entry -> EntryRow(entry) }
         }
         Row(

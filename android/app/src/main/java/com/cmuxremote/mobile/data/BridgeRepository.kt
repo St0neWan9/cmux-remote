@@ -60,6 +60,8 @@ data class ChatMessage(
     val durationSeconds: Double? = null,
     /** When this tool call finished, for the card's own timestamp. */
     val completedAt: java.time.Instant? = null,
+    /** A lifecycle event's stable name, when the message is a status row. */
+    val event: String? = null,
 )
 
 /** Timing anchors for one prompt and its response, as the Bridge recorded them. */
@@ -147,6 +149,8 @@ data class FeedItem(
     val hostID: String = "",
     /** The conversation it belongs to, when the Bridge names one. */
     val sessionID: String? = null,
+    /** The agent that asked, when the Bridge names one. */
+    val agent: String? = null,
     val hostName: String = "",
     val plan: String? = null,
     val body: String? = null,
@@ -252,14 +256,10 @@ class BridgeRepository(val connection: AuthorizedConnection, private val client:
      * One real round trip to the Bridge, for the connection page's reachability
      * check. The epoch may be cached; this never is.
      */
-    suspend fun probe() {
-        // A legacy Bridge has no signed identity route; a bounded read proves it answers.
-        if (connection.isLegacy) {
-            client.call("GET", "/v2/sessions")
-            return
-        }
-        client.announcement()
-    }
+    /** Returns the Bridge's own protocol label, when it publishes one. */
+    suspend fun probe(): String? =
+        // Signed clients sign a v2 path; the Bridge maps it to its v1 status route.
+        client.call("GET", "/v2/status").asObject()?.string("protocol")
 
     suspend fun workspaces(): List<Pair<String, String>> {
         val value = client.call("GET", "/v2/workspaces")
@@ -374,6 +374,7 @@ class BridgeRepository(val connection: AuthorizedConnection, private val client:
                 plan = object_.string("plan"),
                 body = object_.string("body"),
                 sessionID = object_.string("session_id") ?: object_.string("sessionID"),
+                agent = object_.string("agent"),
                 questionPrompt = object_.string("question_prompt"),
                 text = object_.string("text"),
                 reason = object_.string("reason"),
@@ -505,8 +506,18 @@ class BridgeRepository(val connection: AuthorizedConnection, private val client:
     }
 
     /** One page of a detached task's own record. */
-    suspend fun task(sessionID: String, taskID: String, offset: Int = 0): TaskPage {
-        val value = client.call("GET", "/v2/sessions/$sessionID/tasks/$taskID", mapOf("offset" to offset.toString()))
+    suspend fun task(
+        sessionID: String,
+        taskID: String,
+        offset: Int = 0,
+        /** Reads an Agent task's conversation before this sequence, as the iPhone sheet does. */
+        beforeSeq: Int? = null,
+    ): TaskPage {
+        val query = buildMap {
+            put("offset", offset.toString())
+            if (beforeSeq != null) put("before_seq", beforeSeq.toString())
+        }
+        val value = client.call("GET", "/v2/sessions/$sessionID/tasks/$taskID", query)
         val object_ = value.asObject() ?: return TaskPage("", null)
         val text = object_.string("text") ?: object_.string("output") ?: ""
         val snapshot = object_.objectValue("snapshot")
@@ -572,12 +583,13 @@ class BridgeRepository(val connection: AuthorizedConnection, private val client:
     /** The conversation's project, read through the Bridge's path-scoped routes. */
     suspend fun project(): ProjectReader = ProjectReader { method, path, query, body -> client.call(method, path, query, body) }
 
-    suspend fun models(sessionID: String): List<Pair<String, String>> {
+    /** Each choice's id, label and the agent's own explanation, when it gives one. */
+    suspend fun models(sessionID: String): List<Triple<String, String, String?>> {
         val value = client.call("GET", "/v2/sessions/$sessionID/models")
         return value.asObject()?.array("choices")?.mapNotNull { row ->
             val choice = row.asObject() ?: return@mapNotNull null
             val id = choice.string("id") ?: return@mapNotNull null
-            id to (choice.string("label") ?: id)
+            Triple(id, choice.string("label") ?: id, choice.string("detail") ?: choice.string("description"))
         } ?: emptyList()
     }
 
@@ -656,6 +668,56 @@ class BridgeRepository(val connection: AuthorizedConnection, private val client:
             ),
         )
 
+        /** Stores an Agent task's own conversation alongside its text. */
+        fun encodeMessages(messages: List<ChatMessage>): String = Json.text(
+            kotlinx.serialization.json.JsonArray(
+                messages.map { message ->
+                    buildJsonObject {
+                        put("id", JsonPrimitive(message.id))
+                        put("seq", JsonPrimitive(message.seq))
+                        put("role", JsonPrimitive(message.role))
+                        put(
+                            "kind",
+                            buildJsonObject {
+                                put("type", JsonPrimitive(message.kind))
+                                put("text", JsonPrimitive(message.text))
+                                message.toolName?.let { put("tool_name", JsonPrimitive(it)) }
+                                message.status?.let { put("status", JsonPrimitive(it)) }
+                                message.event?.let { put("event", JsonPrimitive(it)) }
+                                message.filePath?.let { put("file_path", JsonPrimitive(it)) }
+                                message.diff?.let { put("diff", JsonPrimitive(it)) }
+                                message.prompt?.let { put("prompt", JsonPrimitive(it)) }
+                                if (message.options.isNotEmpty()) {
+                                    put(
+                                        "options",
+                                        kotlinx.serialization.json.JsonArray(
+                                            message.options.map { buildJsonObject { put("label", JsonPrimitive(it)) } },
+                                        ),
+                                    )
+                                }
+                                message.selectedOption?.let { put("selected_option_label", JsonPrimitive(it)) }
+                                if (message.references.isNotEmpty()) {
+                                    put(
+                                        "referenced_paths",
+                                        kotlinx.serialization.json.JsonArray(message.references.map { JsonPrimitive(it) }),
+                                    )
+                                }
+                                message.inputDetail?.let { put("input_detail", JsonPrimitive(it)) }
+                                message.output?.let { put("output", JsonPrimitive(it)) }
+                                message.command?.let { put("command", JsonPrimitive(it)) }
+                                message.exitCode?.let { put("exit_code", JsonPrimitive(it)) }
+                                message.durationSeconds?.let { put("duration_seconds", JsonPrimitive(it)) }
+                                message.completedAt?.let { put("completed_at", JsonPrimitive(it.toString())) }
+                            },
+                        )
+                    }
+                },
+            ),
+        )
+
+        fun decodeMessages(text: String): List<ChatMessage> =
+            (Json.parse(text) as? kotlinx.serialization.json.JsonArray)?.mapNotNull(::decodeMessage) ?: emptyList()
+
         /** Decodes one transcript message leniently: an unknown kind still shows its text. */
         fun decodeMessage(row: JsonElement): ChatMessage? {
             val object_ = row.asObject() ?: return null
@@ -676,6 +738,7 @@ class BridgeRepository(val connection: AuthorizedConnection, private val client:
                 text = kind.string("text") ?: kind.string("summary") ?: kind.string("prompt") ?: "",
                 toolName = kind.string("tool_name") ?: kind.string("toolName"),
                 status = kind.string("status"),
+                event = kind.string("event"),
                 filePath = kind.string("file_path") ?: kind.string("filePath"),
                 diff = kind.string("unified_diff") ?: kind.string("unifiedDiff") ?: kind.string("diff"),
                 prompt = prompt,

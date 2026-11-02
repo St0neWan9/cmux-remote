@@ -23,6 +23,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.foundation.border
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.material.icons.rounded.ChevronLeft
 import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material3.Button
@@ -103,31 +108,11 @@ fun StartSessionScreen(
     val multipleHosts = workspaces.map { it.hostName }.filter { it.isNotBlank() }.distinct().size > 1
 
     Column(modifier.fillMaxSize().background(MobileDesign.Canvas)) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Box(
-                modifier = Modifier.size(44.dp).clip(CircleShape).clickable(onClick = onBack),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    Icons.Rounded.ChevronLeft,
-                    contentDescription = stringResource(R.string.common_back),
-                    tint = MobileDesign.Ink,
-                    modifier = Modifier.size(22.dp),
-                )
-            }
-            Text(
-                text = stringResource(R.string.start_title),
-                color = MobileDesign.Ink,
-                style = MaterialTheme.typography.titleMedium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
-            )
-        }
+        WhitePageHeader(
+            title = stringResource(R.string.start_title),
+            dismissal = PageDismissal.Close,
+            onDismiss = onBack,
+        )
 
         Column(
             modifier = Modifier
@@ -143,21 +128,41 @@ fun StartSessionScreen(
                 if (workspaces.isEmpty()) {
                     Text(stringResource(R.string.start_no_workspaces), color = MobileDesign.Muted, style = MaterialTheme.typography.bodyMedium)
                 } else {
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         workspaces.forEach { workspace ->
-                            ChoiceChip(
-                                text = if (multipleHosts && workspace.hostName.isNotBlank()) {
-                                    workspace.title + " · " + workspace.hostName
-                                } else {
-                                    workspace.title
-                                },
-                                selected = workspace.id == selectedWorkspace?.id,
-                                tag = "start.workspace." + workspace.id,
-                                onClick = { onPickWorkspace(workspace) },
-                            )
+                            val chosen = workspace.id == selectedWorkspace?.id
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("start.workspace." + workspace.id)
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .background(if (chosen) MobileDesign.Soft else MobileDesign.Canvas)
+                                    .clickable { onPickWorkspace(workspace) }
+                                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                Icon(
+                                    Icons.Rounded.Folder,
+                                    contentDescription = null,
+                                    tint = if (chosen) MobileDesign.Accent else MobileDesign.Muted,
+                                    modifier = Modifier.size(17.dp),
+                                )
+                                Text(
+                                    text = workspace.title,
+                                    color = MobileDesign.Ink,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    modifier = Modifier.weight(1f),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                if (multipleHosts && workspace.hostName.isNotBlank()) {
+                                    Text(workspace.hostName, color = MobileDesign.Muted, style = MaterialTheme.typography.labelMedium)
+                                }
+                                if (chosen) {
+                                    Icon(Icons.Rounded.Check, contentDescription = null, tint = MobileDesign.Accent, modifier = Modifier.size(17.dp))
+                                }
+                            }
                         }
                     }
                 }
@@ -274,7 +279,22 @@ fun StartSessionScreen(
                         if (utf8Size(next) <= PromptLimitBytes) onPrompt(next)
                     },
                     modifier = Modifier.fillMaxWidth().testTag("start.prompt"),
-                    placeholder = { Text(stringResource(R.string.start_prompt_placeholder), color = MobileDesign.Muted) },
+                    shape = RoundedCornerShape(16.dp),
+                    colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+                        focusedContainerColor = MobileDesign.Canvas,
+                        unfocusedContainerColor = MobileDesign.Canvas,
+                        focusedBorderColor = MobileDesign.Line,
+                        unfocusedBorderColor = MobileDesign.Line,
+                    ),
+                    placeholder = {
+                        Text(
+                            stringResource(
+                                if (selectedAgent == "codex") R.string.start_prompt_required
+                                else R.string.start_prompt_placeholder,
+                            ),
+                            color = MobileDesign.Muted,
+                        )
+                    },
                     minLines = 3,
                     maxLines = 6,
                     singleLine = false,
@@ -293,7 +313,12 @@ fun StartSessionScreen(
                 Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
             }
             if (notice != null) {
-                Text(notice, color = MobileDesign.Muted, style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    notice,
+                    color = MobileDesign.Muted,
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.testTag("start.notice"),
+                )
             }
 
             Button(
@@ -317,10 +342,15 @@ fun StartSessionScreen(
                 }
             }
             if (uncertain) {
-                androidx.compose.material3.OutlinedButton(
+                Button(
                     onClick = onStartFresh,
                     enabled = !busy,
                     shape = CircleShape,
+                    border = androidx.compose.foundation.BorderStroke(0.5.dp, MobileDesign.Line),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MobileDesign.Canvas,
+                        contentColor = MobileDesign.Ink,
+                    ),
                     modifier = Modifier.fillMaxWidth().heightIn(min = MobileDesign.Control),
                 ) {
                     Text(stringResource(R.string.start_fresh), color = MobileDesign.Ink)
@@ -339,14 +369,17 @@ private fun SectionLabel(text: String, modifier: Modifier = Modifier) {
 private fun ChoiceChip(text: String, selected: Boolean, tag: String? = null, onClick: () -> Unit) {
     Text(
         text = text,
-        color = if (selected) MobileDesign.Canvas else MobileDesign.Ink,
+        color = if (selected) MobileDesign.Accent else MobileDesign.Ink,
         style = MaterialTheme.typography.labelMedium,
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
         modifier = Modifier
             .then(if (tag != null) Modifier.testTag(tag) else Modifier)
+            .semantics { this.selected = selected }
+            .then(if (selected) Modifier.shadow(3.dp, CircleShape, clip = false) else Modifier)
             .clip(CircleShape)
-            .background(if (selected) MobileDesign.Ink else MobileDesign.Soft)
+            .background(MobileDesign.Canvas)
+            .border(0.5.dp, MobileDesign.Line, CircleShape)
             .clickable(onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 8.dp),
     )
@@ -370,15 +403,23 @@ private fun RootRow(root: StartRoot, selected: Boolean, modifier: Modifier = Mod
             tint = if (selected) MobileDesign.Accent else MobileDesign.Muted,
             modifier = Modifier.size(16.dp),
         )
-        Text(
-            text = root.path,
-            color = if (selected) MobileDesign.Accent else MobileDesign.Ink,
-            style = MaterialTheme.typography.labelMedium,
-            fontFamily = FontFamily.Monospace,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
-        )
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
+            Text(
+                text = root.path.substringAfterLast('/').ifBlank { root.path },
+                color = if (selected) MobileDesign.Accent else MobileDesign.Ink,
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = root.path,
+                color = MobileDesign.Muted,
+                style = MaterialTheme.typography.labelMedium,
+                fontFamily = FontFamily.Monospace,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
         if (selected) {
             Icon(
                 Icons.Rounded.Check,

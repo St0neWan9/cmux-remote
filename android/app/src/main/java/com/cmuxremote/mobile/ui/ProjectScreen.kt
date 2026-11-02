@@ -29,6 +29,9 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ChevronLeft
+import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Share
+import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -42,6 +45,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
@@ -190,29 +195,19 @@ private fun ProjectHeader(
     onShare: (() -> Unit)? = null,
     onRefresh: (() -> Unit)? = null,
 ) {
-    Row(
-        modifier = modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        Box(
-            modifier = Modifier.size(44.dp).clip(CircleShape).clickable(onClick = onBack),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(Icons.Rounded.ChevronLeft, contentDescription = stringResource(R.string.common_back), tint = MobileDesign.Ink, modifier = Modifier.size(22.dp))
-        }
-        Text(
-            title,
-            color = MobileDesign.Ink,
-            style = MaterialTheme.typography.titleMedium,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
-        )
-        if (onCopy != null) HeaderAction(stringResource(R.string.common_copy), onCopy)
-        if (onShare != null) HeaderAction(stringResource(R.string.common_share), onShare)
-        if (onRefresh != null) HeaderAction(stringResource(R.string.common_refresh), onRefresh)
-    }
+    WhitePageHeader(
+        title = title,
+        dismissal = PageDismissal.Back,
+        onDismiss = onBack,
+        trailing = {
+            Row {
+                if (onCopy != null) HeaderAction(stringResource(R.string.common_copy), Icons.Rounded.ContentCopy, onCopy)
+                if (onShare != null) HeaderAction(stringResource(R.string.common_share), Icons.Rounded.Share, onShare)
+                if (onRefresh != null) HeaderAction(stringResource(R.string.common_refresh), Icons.Rounded.Refresh, onRefresh)
+            }
+        },
+    )
+
 }
 
 @Composable
@@ -224,6 +219,7 @@ private fun ModeChoice(label: String, selected: Boolean, tag: String, onClick: (
         maxLines = 1,
         modifier = Modifier
             .testTag(tag)
+            .semantics { this.selected = selected }
             .clip(CircleShape)
             .background(if (selected) MobileDesign.Ink else MobileDesign.Soft)
             .clickable(onClick = onClick)
@@ -232,16 +228,13 @@ private fun ModeChoice(label: String, selected: Boolean, tag: String, onClick: (
 }
 
 @Composable
-private fun HeaderAction(label: String, onClick: () -> Unit) {
-    Text(
-        text = label,
-        color = MobileDesign.Accent,
-        style = MaterialTheme.typography.labelMedium,
-        modifier = Modifier
-            .clip(CircleShape)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 8.dp, vertical = 6.dp),
-    )
+private fun HeaderAction(label: String, icon: androidx.compose.ui.graphics.vector.ImageVector, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier.size(44.dp).clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(icon, contentDescription = label, tint = MobileDesign.Muted, modifier = Modifier.size(19.dp))
+    }
 }
 
 /** Phone portrait: changed paths above the text, in one scrollable column. */
@@ -418,20 +411,16 @@ private fun ProjectTextBlock(text: ProjectText, modifier: Modifier = Modifier) {
     val horizontal = rememberScrollState()
     LaunchedEffect(text.path) { horizontal.scrollTo(0) }
     Column(modifier) {
-        Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(MobileDesign.Code)) {
-            Box(Modifier.horizontalScroll(horizontal).padding(12.dp)) {
-                SelectionContainer {
-                    Text(
-                        text = text.text,
-                        color = MobileDesign.Ink,
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 12.sp,
-                        lineHeight = 17.sp,
-                        maxLines = Int.MAX_VALUE,
-                        softWrap = false,
-                    )
-                }
-            }
+        SelectionContainer(modifier = Modifier.testTag("project.file")) {
+            Text(
+                text = text.text,
+                color = MobileDesign.Ink,
+                fontFamily = FontFamily.Monospace,
+                fontSize = 13.sp,
+                lineHeight = 19.sp,
+                maxLines = Int.MAX_VALUE,
+                softWrap = true,
+            )
         }
         if (text.truncated) {
             Text(

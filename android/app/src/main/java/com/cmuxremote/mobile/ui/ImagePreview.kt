@@ -33,6 +33,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
@@ -59,14 +60,29 @@ fun ImagePreviewScreen(
 ) {
     var bitmap by remember(bytes) { mutableStateOf<Bitmap?>(null) }
     var scale by remember(bytes) { mutableStateOf(1f) }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
     var offset by remember(bytes) { mutableStateOf(Offset.Zero) }
+    var boxSize by remember { mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }
+    fun clamped(value: Offset, scale: Float): Offset {
+        val maxX = ((scale - 1f) * boxSize.width / 2f).coerceAtLeast(0f)
+        val maxY = ((scale - 1f) * boxSize.height / 2f).coerceAtLeast(0f)
+        return Offset(value.x.coerceIn(-maxX, maxX), value.y.coerceIn(-maxY, maxY))
+    }
 
     LaunchedEffect(bytes) {
         bitmap = if (bytes == null) {
             null
         } else {
             withContext(Dispatchers.Default) {
-                BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                // The Bridge records a single JPEG frame; anything else is not shown.
+                if (!isJpeg(bytes)) return@withContext null
+                val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+                if (bounds.outWidth !in 1..1600 || bounds.outHeight !in 1..1600) {
+                    null
+                } else {
+                    BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                }
             }
         }
     }
@@ -91,6 +107,18 @@ fun ImagePreviewScreen(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
+            if (bytes != null && bitmap != null) {
+                var copied by remember { mutableStateOf(false) }
+                val context = androidx.compose.ui.platform.LocalContext.current
+                Text(
+                    text = stringResource(if (copied) R.string.common_copied else R.string.common_copy),
+                    color = MobileDesign.Accent,
+                    style = MaterialTheme.typography.labelMedium,
+                    modifier = Modifier.clickable {
+                        copied = copyImage(context, bytes)
+                    }.padding(vertical = 4.dp),
+                )
+            }
             if (onShare != null && bitmap != null) {
                 Text(
                     text = stringResource(R.string.common_share),
@@ -133,11 +161,12 @@ fun ImagePreviewScreen(
                 current != null -> Box(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .onSizeChanged { boxSize = it }
                         .pointerInput(Unit) {
                             detectTransformGestures { _, pan, zoom, _ ->
                                 val next = (scale * zoom).coerceIn(1f, 6f)
                                 scale = next
-                                offset = if (next <= 1f) Offset.Zero else offset + pan
+                                offset = if (next <= 1f) Offset.Zero else clamped(offset + pan, next)
                             }
                         }
                         .pointerInput(Unit) {
@@ -147,7 +176,7 @@ fun ImagePreviewScreen(
                                         scale = 1f
                                         offset = Offset.Zero
                                     } else {
-                                        scale = 3f
+                                        scale = 2.5f
                                     }
                                 },
                             )
@@ -172,3 +201,19 @@ fun ImagePreviewScreen(
         }
     }
 }
+
+
+/** Copies a JPEG to the clipboard as a content URI the system can paste. */
+private fun copyImage(context: android.content.Context, bytes: ByteArray): Boolean = runCatching {
+    val directory = java.io.File(context.cacheDir, "clipboard").apply { mkdirs() }
+    val file = java.io.File(directory, "image-${java.util.UUID.randomUUID()}.jpg")
+    file.writeBytes(bytes)
+    val uri = androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.files", file)
+    val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+    clipboard.setPrimaryClip(android.content.ClipData.newUri(context.contentResolver, "image", uri))
+    true
+}.getOrDefault(false)
+
+/** A recorded image is a single JPEG frame, as the iPhone's image source check requires. */
+private fun isJpeg(bytes: ByteArray): Boolean =
+    bytes.size > 3 && bytes[0] == 0xFF.toByte() && bytes[1] == 0xD8.toByte() && bytes[2] == 0xFF.toByte()

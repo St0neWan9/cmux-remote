@@ -1,5 +1,6 @@
 package com.cmuxremote.mobile.ui
 
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -17,11 +18,15 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.platform.testTag
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -48,35 +53,68 @@ fun BackgroundTasksRow(
     modifier: Modifier = Modifier,
 ) {
     if (tasks.isEmpty()) return
-    Row(
+    var expanded by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    Column(
         modifier = modifier
             .fillMaxWidth()
-            .horizontalScroll(rememberScrollState())
+            .animateContentSize(animationSpec = androidx.compose.animation.core.tween(180, easing = androidx.compose.animation.core.FastOutSlowInEasing))
             .padding(horizontal = 16.dp, vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        tasks.forEach { task ->
-            Row(
-                modifier = Modifier
-                    .background(MobileDesign.Soft, CircleShape)
-                    .clickable { onOpen(task) }
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
+        // One summary line, with the gear opening the individual tasks, as on the iPhone.
+        Row(
+            modifier = Modifier.fillMaxWidth().testTag("chat.background_tasks"),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            if (tasks.any { it.running }) WorkingIndicator(size = 11.dp)
+            Text(
+                text = stringResource(R.string.chat_background_tasks_count, tasks.size),
+                color = MobileDesign.Muted,
+                style = MaterialTheme.typography.labelMedium,
+                modifier = Modifier.weight(1f),
+            )
+            Box(
+                modifier = Modifier.size(44.dp).testTag("chat.background_tasks.open").clickable { expanded = !expanded },
+                contentAlignment = Alignment.Center,
             ) {
-                if (task.running) {
-                    WorkingIndicator(size = 10.dp)
-                } else {
-                    Spacer(Modifier.size(7.dp).background(MobileDesign.Muted, CircleShape))
-                }
-                Text(
-                    text = task.tool,
-                    color = MobileDesign.Ink,
-                    style = MaterialTheme.typography.labelMedium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                androidx.compose.material3.Icon(
+                    androidx.compose.material.icons.Icons.Rounded.Settings,
+                    contentDescription = stringResource(R.string.chat_background_tasks_open),
+                    tint = MobileDesign.Muted,
+                    modifier = Modifier.size(17.dp),
                 )
+            }
+        }
+        androidx.compose.animation.AnimatedVisibility(visible = expanded) {
+            Row(
+                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                tasks.forEach { task ->
+                    Row(
+                        modifier = Modifier
+                            .background(MobileDesign.Soft, CircleShape)
+                            .clickable { onOpen(task) }
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        if (task.running) {
+                            WorkingIndicator(size = 10.dp)
+                        } else {
+                            Spacer(Modifier.size(7.dp).background(MobileDesign.Muted, CircleShape))
+                        }
+                        Text(
+                            text = task.tool,
+                            color = MobileDesign.Ink,
+                            style = MaterialTheme.typography.labelMedium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
             }
         }
     }
@@ -102,6 +140,10 @@ fun TaskDetailSheet(
     command: String? = null,
     totalBytes: Int? = null,
     running: Boolean = false,
+    /** The Agent conversation has older pages, read on demand. */
+    hasEarlier: Boolean = false,
+    loadingEarlier: Boolean = false,
+    onLoadEarlier: (() -> Unit)? = null,
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss, containerColor = MobileDesign.Canvas) {
         Column(
@@ -139,13 +181,32 @@ fun TaskDetailSheet(
                 // An Agent task is a conversation; it uses the timeline's own rows
                 // instead of dumping a wall of raw text.
                 val rows = toolRowModels(messages)
+                val messageScroll = rememberScrollState()
+                androidx.compose.runtime.LaunchedEffect(messages.size) {
+                    androidx.compose.runtime.withFrameNanos { }
+                    messageScroll.animateScrollTo(messageScroll.maxValue)
+                }
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .heightIn(max = 460.dp)
-                        .verticalScroll(rememberScrollState()),
+                        .verticalScroll(messageScroll),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
+                    if (hasEarlier && onLoadEarlier != null) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(MobileDesign.Soft, RoundedCornerShape(50))
+                                .clickable(enabled = !loadingEarlier, onClick = onLoadEarlier)
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            if (loadingEarlier) WorkingIndicator(size = 14.dp)
+                            else Text(stringResource(R.string.chat_load_earlier), color = MobileDesign.Muted, style = MaterialTheme.typography.labelMedium)
+                        }
+                    }
                     messages.forEachIndexed { index, message ->
                         when {
                             message.kind == "prose" && message.role == "user" ->
@@ -171,6 +232,12 @@ fun TaskDetailSheet(
                 }
             }
             if (text != null && text.isNotEmpty()) {
+                val outputScroll = rememberScrollState()
+                // A running command's output follows its end, like the iPhone's task sheet.
+                androidx.compose.runtime.LaunchedEffect(text, running) {
+                    androidx.compose.runtime.withFrameNanos { }
+                    outputScroll.animateScrollTo(outputScroll.maxValue)
+                }
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -180,7 +247,7 @@ fun TaskDetailSheet(
                 ) {
                     Box(
                         Modifier
-                            .verticalScroll(rememberScrollState())
+                            .verticalScroll(outputScroll)
                             .horizontalScroll(rememberScrollState())
                             .padding(12.dp),
                     ) {

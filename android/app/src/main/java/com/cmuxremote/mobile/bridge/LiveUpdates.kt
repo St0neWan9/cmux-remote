@@ -32,6 +32,7 @@ class LiveUpdates(
         running = true
         supervisor = scope.launch {
             var attempt = 0
+            var connectedOnce = false
             while (isActive && running) {
                 existing?.let { already ->
                     resubscribe(already)
@@ -52,6 +53,7 @@ class LiveUpdates(
                     client.connect()
                     client.epoch = epoch()
                     attempt = 0
+                    connectedOnce = true
                     resubscribe(client)
                 } catch (_: Exception) {
                     // The next loop iteration redials; HTTPS polling carries the UI meanwhile.
@@ -68,7 +70,13 @@ class LiveUpdates(
                 client.close()
                 link = null
                 attempt++
-                delay(backoffMillis(attempt))
+                if (connectedOnce) {
+                    // A link that worked and dropped is redialed at once, as iOS does.
+                    connectedOnce = false
+                    attempt = 1
+                } else {
+                    delay(backoffMillis(attempt))
+                }
             }
         }
     }
@@ -87,7 +95,7 @@ class LiveUpdates(
     }
 
     private fun backoffMillis(attempt: Int): Long {
-        val seconds = minOf(30L, 1L shl minOf(attempt, 5))
+        val seconds = minOf(32L, 2L shl minOf(attempt, 4))
         return seconds * 1000
     }
 

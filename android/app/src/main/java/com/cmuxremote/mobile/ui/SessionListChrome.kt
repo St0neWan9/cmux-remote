@@ -1,6 +1,7 @@
 package com.cmuxremote.mobile.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
@@ -21,6 +22,7 @@ import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.AddCircle
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Search
@@ -47,6 +49,7 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.ImeAction
@@ -68,14 +71,15 @@ fun SessionSearchField(
     val keyboard = LocalSoftwareKeyboardController.current
     LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
     Row(
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth().testTag("sessions.search"),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Row(
             modifier = Modifier
                 .weight(1f)
-                .background(MobileDesign.Soft, CircleShape)
+                .background(MobileDesign.Canvas, RoundedCornerShape(16.dp))
+                .border(0.5.dp, MobileDesign.Line, RoundedCornerShape(16.dp))
                 .padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -116,29 +120,38 @@ fun SessionTitleMenu(
     onStart: () -> Unit,
     onAddMac: () -> Unit,
     onConnection: () -> Unit = {},
+    /** Per-Mac pending counts, so a several-Mac menu can open the right queue. */
+    pendingQueues: List<Triple<String, String, Int>> = emptyList(),
+    onFeedHost: ((String) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     var open by remember { mutableStateOf(false) }
-    Box(modifier) {
-        Text(
-            text = stringResource(R.string.sessions_title),
-            color = MobileDesign.Ink,
-            fontSize = 22.sp,
-            modifier = Modifier
-                .clickable { open = true }
-                .padding(vertical = 6.dp, horizontal = 2.dp),
-        )
+    Box(modifier.testTag("sessions.menu")) {
+        Row(
+            modifier = Modifier.clickable { open = true }.padding(vertical = 6.dp, horizontal = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Text(text = stringResource(R.string.sessions_title), color = MobileDesign.Ink, fontSize = 17.sp)
+            Icon(
+                Icons.Rounded.KeyboardArrowDown,
+                contentDescription = stringResource(R.string.sessions_sort),
+                tint = MobileDesign.Muted,
+                modifier = Modifier.size(18.dp),
+            )
+        }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
             DropdownMenuItem(
-                text = {
-                    Text(
-                        if (sortByTime) stringResource(R.string.sessions_sort_by_time)
-                        else stringResource(R.string.sessions_sort_by_workspace),
-                    )
-                },
+                text = { Text(stringResource(R.string.sessions_sort_by_workspace)) },
                 leadingIcon = { Icon(Icons.Rounded.Sort, contentDescription = null, tint = MobileDesign.Muted) },
-                trailingIcon = { Icon(Icons.Rounded.Check, contentDescription = null, tint = MobileDesign.Accent) },
-                onClick = { onSort(!sortByTime); open = false },
+                trailingIcon = if (!sortByTime) ({ Icon(Icons.Rounded.Check, contentDescription = null, tint = MobileDesign.Accent) }) else null,
+                onClick = { onSort(false); open = false },
+            )
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.sessions_sort_by_time)) },
+                leadingIcon = { Icon(Icons.Rounded.Sort, contentDescription = null, tint = MobileDesign.Muted) },
+                trailingIcon = if (sortByTime) ({ Icon(Icons.Rounded.Check, contentDescription = null, tint = MobileDesign.Accent) }) else null,
+                onClick = { onSort(true); open = false },
             )
             DropdownMenuItem(
                 text = {
@@ -150,6 +163,14 @@ fun SessionTitleMenu(
                 leadingIcon = { Icon(Icons.Rounded.Notifications, contentDescription = null, tint = MobileDesign.Muted) },
                 onClick = { onFeed(); open = false },
             )
+            if (pendingQueues.size > 1 && onFeedHost != null) {
+                pendingQueues.filter { it.third > 0 }.forEach { (id, name, count) ->
+                    DropdownMenuItem(
+                        text = { Text("$name · $count", color = MobileDesign.Muted, style = MaterialTheme.typography.bodyMedium) },
+                        onClick = { onFeedHost(id); open = false },
+                    )
+                }
+            }
             DropdownMenuItem(
                 text = { Text(stringResource(R.string.common_refresh)) },
                 leadingIcon = { Icon(Icons.Rounded.Refresh, contentDescription = null, tint = MobileDesign.Muted) },
@@ -185,6 +206,8 @@ fun MacTabs(
     modifier: Modifier = Modifier,
     /** Last known reachability per Mac; an unprobed Mac has no dot yet. */
     reachable: Map<String, Boolean?> = emptyMap(),
+    /** A read is in flight for this Mac; its dot shows a spinner instead. */
+    connecting: Map<String, Boolean> = emptyMap(),
 ) {
     Row(
         modifier = modifier.horizontalScroll(rememberScrollState()),
@@ -205,6 +228,7 @@ fun MacTabs(
                 text = name,
                 selected = hosts.size == 1 || selected == id,
                 dot = reachable[id],
+                connecting = connecting[id] == true,
                 tag = "sessions.host.$id",
             ) { onSelect(id) }
         }
@@ -212,18 +236,39 @@ fun MacTabs(
 }
 
 @Composable
-private fun Capsule(text: String, selected: Boolean, dot: Boolean?, tag: String? = null, onClick: () -> Unit) {
+private fun Capsule(
+    text: String,
+    selected: Boolean,
+    dot: Boolean?,
+    tag: String? = null,
+    connecting: Boolean = false,
+    onClick: () -> Unit,
+) {
+    val connected = stringResource(R.string.connection_status_connected)
+    val unreachable = stringResource(R.string.connection_status_unreachable)
+    val unknown = stringResource(R.string.connection_status_unknown)
+    val reconnecting = stringResource(R.string.chat_reconnecting)
     Row(
         modifier = Modifier
             .then(if (tag != null) Modifier.testTag(tag) else Modifier)
             .background(if (selected) MobileDesign.Soft else MobileDesign.Canvas, CircleShape)
-            .semantics { this.selected = selected }
+            .semantics {
+                this.selected = selected
+                stateDescription = when {
+                    connecting -> reconnecting
+                    dot == true -> connected
+                    dot == false -> unreachable
+                    else -> unknown
+                }
+            }
             .clickable(onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        if (dot != null) {
+        if (connecting) {
+            com.cmuxremote.mobile.ui.components.WorkingIndicator(size = 10.dp)
+        } else if (dot != null) {
             Box(
                 Modifier.size(7.dp).background(
                     if (dot) MobileDesign.Good else MaterialTheme.colorScheme.error,
@@ -244,7 +289,7 @@ fun WorkspaceFilterCapsule(
     modifier: Modifier = Modifier,
 ) {
     var open by remember { mutableStateOf(false) }
-    Box(modifier) {
+    Box(modifier.testTag("sessions.menu")) {
         Text(
             text = workspaces.firstOrNull { it.first == selected }?.second ?: stringResource(R.string.sessions_all_workspaces),
             color = MobileDesign.Muted,
