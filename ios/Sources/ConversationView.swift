@@ -453,6 +453,11 @@ struct ConversationView: View {
                 if !initiallyScrolled && !model.messages.isEmpty { settleAtBottom(proxy); initiallyScrolled = true }
                 else if atLatest { scrollTrace.note("scroll new-item"); follow(proxy) }
             }
+            // The transcript was rewritten under the page (a compaction): every row on screen was replaced, so the
+            // page's offset no longer names anything and can rest past the shorter end — the latest is what is left.
+            .onChange(of: model.replacementCount) { _, _ in
+                scrollTrace.note("scroll replaced"); atLatest = true; settleAtBottom(proxy, retries: 4)
+            }
             .onChange(of: model.latestMessageText) { _, _ in if atLatest { scrollTrace.note("scroll new-text"); follow(proxy) } }
             .onChange(of: model.preview) { _, _ in if atLatest { scrollTrace.note("scroll preview"); follow(proxy) } }
             // Opening a cached conversation re-enters with its follow state; start from the last message.
