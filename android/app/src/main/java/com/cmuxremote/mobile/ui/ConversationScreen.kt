@@ -578,6 +578,8 @@ fun ConversationTimeline(
 ) {
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
+    // Following keeps the newest output pinned until the reader drags upward.
+    var autoFollow by remember { mutableStateOf(true) }
     val atLatest by remember { derivedStateOf {
         val layout = listState.layoutInfo
         val last = layout.visibleItemsInfo.lastOrNull() ?: return@derivedStateOf true
@@ -597,7 +599,7 @@ fun ConversationTimeline(
         // latest message is taken to the new latest one.
         val replaced = state.generation != previousGeneration[0]
         if (state.messages.isNotEmpty() &&
-            (firstLayout || ((grew || textGrew) && atLatest) || (replaced && atLatest))
+            (firstLayout || grew || textGrew || replaced) && autoFollow
         ) {
             // The list includes the older-page row, images and the running footer;
             // the message index is not the last item index.
@@ -638,15 +640,23 @@ fun ConversationTimeline(
         }
         previousFirst = currentFirst
     }
-    // The reader's own drag is the third follow state: while they are reading
-    // older text, new messages arrive without moving the page under them.
-    var autoFollow by remember { mutableStateOf(true) }
-    LaunchedEffect(listState.isScrollInProgress) {
-        if (listState.isScrollInProgress) {
-            androidx.compose.runtime.withFrameNanos { }
-            val last = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index
-            autoFollow = last != null && last >= listState.layoutInfo.totalItemsCount - 2
+    // A drag toward older text stops following; returning to the end resumes it.
+    val followConnection = remember {
+        object : androidx.compose.ui.input.nestedscroll.NestedScrollConnection {
+            override fun onPostScroll(
+                consumed: androidx.compose.ui.geometry.Offset,
+                available: androidx.compose.ui.geometry.Offset,
+                source: androidx.compose.ui.input.nestedscroll.NestedScrollSource,
+            ): androidx.compose.ui.geometry.Offset {
+                if (source == androidx.compose.ui.input.nestedscroll.NestedScrollSource.UserInput && consumed.y > 0f) {
+                    autoFollow = false
+                }
+                return androidx.compose.ui.geometry.Offset.Zero
+            }
         }
+    }
+    LaunchedEffect(listState.canScrollForward) {
+        if (!listState.canScrollForward) autoFollow = true
     }
     // A new send takes the reader to the latest row, as the iPhone's jump does.
     LaunchedEffect(state.outgoing) {
@@ -723,7 +733,8 @@ fun ConversationTimeline(
         state = listState,
         modifier = Modifier
             .fillMaxSize()
-            .nestedScroll(dismissKeyboardOnScroll),
+            .nestedScroll(dismissKeyboardOnScroll)
+            .nestedScroll(followConnection),
         contentPadding = PaddingValues(horizontal = 18.dp, vertical = 12.dp),
         // A short conversation sits at the bottom, next to the composer, as on the
         // iPhone; a long one scrolls normally.
@@ -976,15 +987,6 @@ fun ConversationTimeline(
             }
         }
     }
-    }
-    if (state.loading && state.messages.isEmpty() && state.error == null) {
-        // The first read covers the page instead of showing a row inside the timeline.
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                WorkingIndicator()
-                Text(stringResource(R.string.chat_loading), color = MobileDesign.Muted, style = MaterialTheme.typography.labelMedium)
-            }
-        }
     }
     androidx.compose.animation.AnimatedVisibility(
         visible = !atLatest && state.messages.isNotEmpty(),
