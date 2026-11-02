@@ -117,8 +117,15 @@ fun ActivityGroupCard(
 
     // Reasoning on its own is prose, not a collapsed tool group: show it in full.
     if (rows.isNotEmpty() && rows.all { it.kind == "thought" }) {
-        Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            rows.forEach { row -> ToolDisclosureRow(row, onOpenDetail = { onOpenDetail(row) }, onOpenReference = onOpenReference) }
+        Column(modifier.fillMaxWidth()) {
+            rows.forEachIndexed { index, row ->
+                ToolDisclosureRow(
+                    row = row,
+                    onOpenDetail = { onOpenDetail(row) },
+                    onOpenReference = onOpenReference,
+                    modifier = Modifier.padding(top = if (index == 0) 0.dp else 8.dp),
+                )
+            }
         }
         return
     }
@@ -173,12 +180,22 @@ fun ActivityGroupCard(
         if (expanded) {
             // Rows flow with the timeline; there is no inner scroller and no
             // "view all" button. A long group opens its own page from the summary.
-            visibleRows.forEach { row ->
+            visibleRows.forEachIndexed { index, row ->
+                val previous = visibleRows.getOrNull(index - 1)
                 ToolDisclosureRow(
                     row = row,
                     onOpenDetail = { onOpenDetail(row) },
                     onOpenReference = onOpenReference,
                     onHoldPlace = onHoldPlace,
+                    modifier = Modifier.padding(
+                        top = when {
+                            index == 0 -> 0.dp
+                            // Consecutive tool titles keep their own rhythm; the
+                            // extra gap is only against surrounding content.
+                            row.kind != "thought" && previous?.kind != "thought" && previous != null -> 4.dp
+                            else -> 8.dp
+                        },
+                    ),
                 )
             }
         }
@@ -233,13 +250,20 @@ fun ActivityGroupPage(
             .fillMaxWidth()
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 16.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        rows.forEach { row ->
+        rows.forEachIndexed { index, row ->
+            val previous = rows.getOrNull(index - 1)
             ToolDisclosureRow(
                 row = row,
                 onOpenDetail = { onOpenDetail(row) },
                 onOpenReference = onOpenReference,
+                modifier = Modifier.padding(
+                    top = when {
+                        index == 0 -> 0.dp
+                        row.kind != "thought" && previous?.kind != "thought" && previous != null -> 4.dp
+                        else -> 8.dp
+                    },
+                ),
             )
         }
     }
@@ -252,14 +276,20 @@ internal fun ToolDisclosureRow(
     onOpenDetail: () -> Unit,
     onOpenReference: ((String) -> Unit)? = null,
     onHoldPlace: (() -> Unit)? = null,
+    modifier: Modifier = Modifier,
 ) {
     if (row.kind == "thought") {
-        com.cmuxremote.mobile.ui.markdown.MarkdownText(row.title, modifier = Modifier.fillMaxWidth())
+        com.cmuxremote.mobile.ui.markdown.MarkdownText(row.title, modifier = modifier.fillMaxWidth())
         return
     }
     var expanded by remember(row.id) { mutableStateOf(false) }
     val expandedLabel = stringResource(if (expanded) R.string.common_expanded else R.string.common_collapsed)
-    Column(Modifier.fillMaxWidth().animateContentSize(animationSpec = androidx.compose.animation.core.tween(180, easing = androidx.compose.animation.core.FastOutSlowInEasing)), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    Column(
+        modifier
+            .fillMaxWidth()
+            .animateContentSize(animationSpec = androidx.compose.animation.core.tween(180, easing = androidx.compose.animation.core.FastOutSlowInEasing)),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -357,19 +387,31 @@ private fun ToolCodeCard(
             ToolCodeBlock(row.diff)
             hasBody = true
         }
-        if (row.meta != null) {
-            Text(
-                text = row.meta,
-                color = MobileDesign.Muted,
-                style = MaterialTheme.typography.labelMedium,
-            )
-        }
-        row.completedAt?.let { at ->
-            Text(
-                text = stringResource(R.string.tool_card_completed_at, formatCompletedAt(at)),
-                color = MobileDesign.Muted,
-                style = MaterialTheme.typography.labelMedium,
-            )
+        // The result line: the exit code stays on the left; the completion time,
+        // or the running state, sits at the trailing edge as on the iPhone.
+        val resultTrailing = row.completedAt?.let {
+            stringResource(R.string.tool_card_completed_at, formatCompletedAt(it))
+        } ?: row.status?.takeIf { it == "running" }?.let { stringResource(R.string.common_working) }
+        if (row.meta != null || resultTrailing != null) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text(
+                    text = row.meta.orEmpty(),
+                    color = MobileDesign.Muted,
+                    style = MaterialTheme.typography.labelMedium,
+                    modifier = Modifier.weight(1f),
+                )
+                if (resultTrailing != null) {
+                    Text(
+                        text = resultTrailing,
+                        color = MobileDesign.Muted,
+                        style = MaterialTheme.typography.labelMedium.copy(fontFeatureSettings = "tnum"),
+                    )
+                }
+            }
         }
         if (!hasBody) {
             Text(
