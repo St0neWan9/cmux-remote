@@ -14,6 +14,8 @@ import CmuxRemoteBridge
     public private(set) var busy = false
     public private(set) var errorCode: String?
     public var selectedWorkspaces: Set<String> = []
+    /// Shared project folders offered to every workspace's new-session list on the phone.
+    public private(set) var allowedDirectories: [String] = []
     public var port = 7740
     public var relayOrigin = ""
     public var relayKeyFile = ""
@@ -21,9 +23,11 @@ import CmuxRemoteBridge
     public var isSharing: Bool { status["state"].string == "running" }
     public var address: String? { status["address"].string }
     private let owner: any CmuxControlling
+    /// Prefilled key-file path offered when no relay registration is configured yet.
+    private let defaultKeyFile: String
     private var observation: Task<Void, Never>?
     private var actionError: String?
-    public init(owner: any CmuxControlling) { self.owner = owner }
+    public init(owner: any CmuxControlling, defaultKeyFile: String = "") { self.owner = owner; self.defaultKeyFile = defaultKeyFile }
     public func start() {
         guard observation == nil else { return }
         observation = Task { [weak self] in
@@ -40,13 +44,17 @@ import CmuxRemoteBridge
         do {
             status = try await owner.request("bridge.status", params: [:])
             if !relayDraftLoaded {
-                relayOrigin = status["relay"]["origin"].string ?? ""; relayKeyFile = status["relay"]["key_file"].string ?? ""; relayDraftLoaded = true
+                relayOrigin = status["relay"]["origin"].string ?? ""
+                relayKeyFile = status["relay"]["key_file"].string ?? defaultKeyFile; relayDraftLoaded = true
             }
             if let bound = status["port"].int, isSharing { port = bound }
             let requests = try await owner.request("enrollment.pending", params: [:])
             pending = try JSONDecoder().decode([EnrollmentRequest].self, from: JSONEncoder().encode(requests))
             clients = try await owner.request("clients.list", params: [:]).array?.filter { $0["revoked"].bool != true } ?? []
             workspaces = try await owner.request("bridge.workspaces", params: [:])["workspaces"].array ?? []
+            // A resident Bridge that predates shared folders answers `sharing_unsupported`; that leaves the
+            // list empty instead of failing the whole refresh.
+            if let shared = try? await owner.request("directories.allowed", params: [:])["directories"].array { allowedDirectories = shared.compactMap(\.string) }
             selectedWorkspaces.formIntersection(Set(workspaces.compactMap { $0["id"].string?.lowercased() }))
             if let expiresAt, expiresAt <= Int(Date().timeIntervalSince1970) { qrLink = nil; self.expiresAt = nil }
             errorCode = actionError ?? status["error_code"].string
@@ -78,12 +86,13 @@ import CmuxRemoteBridge
     public func closePairing() async {
         await action { _ = try await owner.request("enrollment.close", params: [:]); qrLink = nil; expiresAt = nil }
     }
-    /// The owner may narrow the requested workspaces; approval never expands a request.
-    public func approve(_ request: EnrollmentRequest, workspaces: [String]? = nil) async {
+    /// The owner may narrow the requested workspaces and withhold starting sessions; approval never expands a request.
+    public func approve(_ request: EnrollmentRequest, workspaces: [String]? = nil, allowStart: Bool = true) async {
         await action {
             let chosen = workspaces.map { Set($0.map { $0.lowercased() }) } ?? Set(request.scope.workspaces)
             guard !chosen.isEmpty, chosen.isSubset(of: Set(request.scope.workspaces)) else { throw BridgeError("invalid_scope", "Choose at least one requested workspace.") }
-            let narrowed = ClientScope(workspaces: request.scope.workspaces.filter(chosen.contains), capabilities: request.scope.capabilities)
+            let capabilities = request.scope.capabilities.filter { allowStart || $0 != .conversationStart }
+            let narrowed = ClientScope(workspaces: request.scope.workspaces.filter(chosen.contains), capabilities: capabilities)
             let scope = try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(narrowed))
             _ = try await owner.request("enrollment.approve", params: ["request_id": .string(request.requestID), "scope": scope])
         }
@@ -93,6 +102,10 @@ import CmuxRemoteBridge
     }
     public func revoke(clientID: String) async {
         await action { _ = try await owner.request("clients.revoke", params: ["client_id": .string(clientID)]) }
+    }
+    /// Replaces the shared folder list; the display form the Bridge returns (`~` for home) is sent back as-is.
+    public func saveAllowedDirectories(_ folders: [String]) async {
+        await action { _ = try await owner.request("directories.set_allowed", params: ["directories": .array(folders.map(JSONValue.string))]) }
     }
     private func action(_ operation: () async throws -> Void) async {
         guard !busy else { return }; busy = true

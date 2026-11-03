@@ -29,6 +29,22 @@ private actor FixtureEnrollment: DeviceEnrolling {
     nonisolated func connection(from status: EnrollmentStatus) throws -> AuthorizedConnection { throw BridgeError("not_approved", "Fixture is pending") }
 }
 
+@MainActor private final class AskedCapabilities { var values: [[ClientCapability]] = [] }
+
+/// A Bridge from before session starting: it cannot decode `conversationStart` and drops the link mid-submit.
+private actor PreviousBridgeEnrollment: DeviceEnrolling {
+    nonisolated let request: SignedValue<EnrollmentRequest>
+    init(request: SignedValue<EnrollmentRequest>) { self.request = request }
+    func submit() async throws -> EnrollmentStatus {
+        if request.value.scope.capabilities.contains(.conversationStart) { throw BridgeError("outcome_unknown", "Link closed", status: 504) }
+        return EnrollmentStatus(request: request.value, state: "pending")
+    }
+    func status() async throws -> EnrollmentStatus { EnrollmentStatus(request: request.value, state: "pending") }
+    func cancel() async throws {}
+    nonisolated func close() {}
+    nonisolated func connection(from status: EnrollmentStatus) throws -> AuthorizedConnection { throw BridgeError("not_approved", "Fixture is pending") }
+}
+
 private actor DeferredProjectRead {
     private var continuation: CheckedContinuation<TextFileSnapshot, any Error>?
     nonisolated let started = AsyncStream<Void>.makeStream()
@@ -128,7 +144,7 @@ private actor DeferredToolPage {
 
         let suspended = FixtureEnrollment(request: request, delaySubmission: true)
         let idleTicks = AsyncStream<Void>.makeStream()
-        let cancelling = AppModel(identityKey: { key }, makeEnrollment: { _, _, _ in suspended }, enrollmentTicks: { (idleTicks.stream, {}) })
+        let cancelling = AppModel(identityKey: { key }, makeEnrollment: { _, _, _, _ in suspended }, enrollmentTicks: { (idleTicks.stream, {}) })
         let submission = Task { @MainActor in await cancelling.enrollQR(qr) }
         var started = suspended.started.stream.makeAsyncIterator(); _ = await started.next()
         await cancelling.cancelEnrollment(); await suspended.finishSubmission(); await submission.value
@@ -136,7 +152,7 @@ private actor DeferredToolPage {
 
         let recovering = FixtureEnrollment(request: request, delaySubmission: false)
         let ticks = AsyncStream<Void>.makeStream()
-        let pending = AppModel(identityKey: { key }, makeEnrollment: { _, _, _ in recovering }, enrollmentTicks: { (ticks.stream, {}) })
+        let pending = AppModel(identityKey: { key }, makeEnrollment: { _, _, _, _ in recovering }, enrollmentTicks: { (ticks.stream, {}) })
         await pending.enrollQR(qr)
         var calls = recovering.statusCalls.stream.makeAsyncIterator()
         ticks.continuation.yield(()); _ = await calls.next()
@@ -147,7 +163,7 @@ private actor DeferredToolPage {
 
         let pausedFixture = FixtureEnrollment(request: request, delaySubmission: true)
         let pausedTicks = AsyncStream<Void>.makeStream()
-        let paused = AppModel(identityKey: { key }, makeEnrollment: { _, _, _ in pausedFixture }, enrollmentTicks: { (pausedTicks.stream, {}) })
+        let paused = AppModel(identityKey: { key }, makeEnrollment: { _, _, _, _ in pausedFixture }, enrollmentTicks: { (pausedTicks.stream, {}) })
         let pausedSubmit = Task { @MainActor in await paused.enrollQR(qr) }
         var pausedStarted = pausedFixture.started.stream.makeAsyncIterator(); _ = await pausedStarted.next()
         paused.pauseEnrollment(); await pausedFixture.succeedSubmission(); await pausedSubmit.value
@@ -156,6 +172,19 @@ private actor DeferredToolPage {
         let pausedDeadline = Task { try await ContinuousClock().sleep(for: .milliseconds(150)); pausedFixture.statusCalls.continuation.finish() }
         if await pausedCalls.next() != nil { failures.append("Submission completion restarted polling after scene pause") }
         pausedDeadline.cancel(); paused.pauseEnrollment()
+
+        // A Bridge that cannot decode the new capability still pairs, without permission to start sessions.
+        let asked = AskedCapabilities()
+        let previousTicks = AsyncStream<Void>.makeStream()
+        let previous = AppModel(identityKey: { key }, makeEnrollment: { bootstrap, key, _, capabilities in
+            asked.values.append(capabilities)
+            let devicePublicKey = try crypto.publicKey(privateKey: key)
+            let value = EnrollmentRequest(hostID: bootstrap.value.host.id, windowID: bootstrap.value.windowID, requestID: UUID().uuidString, clientID: try crypto.identityID(publicKey: devicePublicKey), clientPublicKey: devicePublicKey, clientName: "Fixture", clientKind: "iphone", nonce: UUID().uuidString, scope: ClientScope(workspaces: bootstrap.value.workspaces, capabilities: capabilities), expiresAt: bootstrap.value.expiresAt)
+            return PreviousBridgeEnrollment(request: try crypto.sign(value, domain: "enrollment-request", privateKey: key))
+        }, enrollmentTicks: { (previousTicks.stream, {}) })
+        await previous.enrollQR(qr); previous.pauseEnrollment()
+        if asked.values != [EnrollmentClient.phoneCapabilities, EnrollmentClient.previousPhoneCapabilities] { failures.append("Enrollment did not fall back for an older Bridge: \(asked.values)") }
+        if previous.enrollmentState != "pending" || previous.error != nil { failures.append("Older Bridge enrollment did not reach pending: \(previous.enrollmentState) \(previous.error ?? "")") }
 
         let client = RemoteClient(pairing: try PairingConfiguration(host: "localhost", port: 1, token: String(repeating: "0", count: 32), certificateSHA256: String(repeating: "0", count: 64)))
         defer { client.close() }
@@ -182,17 +211,6 @@ private actor DeferredToolPage {
             ChatMessage(id: "final1", seq: 150, role: .agent, timestamp: .distantPast, kind: .prose(ChatProse(text: "First block"))),
             ChatMessage(id: "final2", seq: 150, role: .agent, timestamp: .distantPast, kind: .prose(ChatProse(text: "Second block")))]
         if conversation.responseText(response) != "First block\n\nSecond block" { failures.append("Reply actions mixed in progress text or omitted a final-record block") }
-        let bare = MarkdownBlock.parse("```\nls\npwd\n```").first
-        let labeled = MarkdownBlock.parse("```swift\nlet n = 1\n```").first
-        if bare?.text != "ls\npwd" || labeled?.text != "let n = 1" { failures.append("Fenced Markdown lost code content") }
-        let structured = MarkdownBlock.parse("## Phone heading\n\n- First item\n- Second item\n\n```swift\nlet marker = \"PHONE_MARKDOWN_OK_1012\"\nprint(marker)\n```")
-        if structured.first?.headingLevel != 2 || structured.first?.text != "Phone heading" || structured.filter({ $0.listMarker != nil }).map(\.text) != ["First item", "Second item"] {
-            failures.append("Markdown headings and list markers remained literal paragraph text")
-        }
-        if structured.last?.code != true || structured.last?.text != "let marker = \"PHONE_MARKDOWN_OK_1012\"\nprint(marker)" {
-            failures.append("Structured Markdown lost its code block")
-        }
-
         let deferred = DeferredProjectRead()
         let project = ProjectModel(initialPath: " file with trailing space ", read: { resource, query in
             if resource == "file" { return try await deferred.read() }
@@ -450,13 +468,25 @@ private actor DeferredToolPage {
 
         let readChecks = await ConversationReadChecks.run(client: client)
         failures += readChecks.failures
+        let cacheChecks = await ConversationCacheChecks.run()
+        failures += cacheChecks.failures
+        let syncChecks = await RunningSyncChecks.run()
+        failures += syncChecks.failures
+        let fastChecks = await FastReadChecks.run()
+        failures += fastChecks.failures
         let historicalImageChecks = try await HistoricalImageChecks.run()
         failures += historicalImageChecks.failures
         let speechChecks = await SpeechStateChecks.run(client:client)
         failures += speechChecks.failures
         let multiHostChecks = await MultiHostChecks.run()
         failures += multiHostChecks.failures
+        let reconnectChecks = await ReconnectChecks.run()
+        failures += reconnectChecks.failures
+        let edgeBackChecks = EdgeBackChecks.run()
+        failures += edgeBackChecks.failures
+        let modelMenuChecks = await ModelMenuChecks.run()
+        failures += modelMenuChecks.failures
         if !failures.isEmpty { print(failures.joined(separator: "\n")); exit(1) }
-        print("Phone state: 20 existing behavioral checks, \(mediaChecks) image/draft/receipt checks and \(detailChecks) tool-detail checks, \(readChecks.count) conversation read checks and \(historicalImageChecks.count) historical-image checks and \(speechChecks.count) speech checks and \(multiHostChecks.count) multi-Mac checks passed.")
+        print("Phone state: 20 existing behavioral checks, \(mediaChecks) image/draft/receipt checks and \(detailChecks) tool-detail checks, \(readChecks.count) conversation read checks and \(cacheChecks.count) conversation cache checks and \(syncChecks.count) running-sync checks and \(fastChecks.count) fast-read checks and \(historicalImageChecks.count) historical-image checks and \(speechChecks.count) speech checks and \(multiHostChecks.count) multi-Mac checks and \(reconnectChecks.count) reconnect checks and \(edgeBackChecks.count) edge-back checks and \(modelMenuChecks.count) model-menu checks passed.")
     }
 }

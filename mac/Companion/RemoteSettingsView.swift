@@ -4,16 +4,18 @@ import SwiftUI
 struct RemoteSettingsView: View {
     let app: MacAppModel
     let sectionChanged: () -> Void
+    let openLogs: () -> Void
     var body: some View {
         Group {
             if app.serviceError != nil && app.section != "advanced" {
                 MacPreferencePage { MacSetupRows(app: app) }
             } else {
                 switch app.section {
+                case "general": GeneralSettingsView(launch: app.launch)
                 case "pairing": PairingSettingsView(model: app.sharing)
                 case "devices": DevicesSettingsView(model: app.sharing)
                 case "connect": CompanionView(model: app.remote)
-                case "advanced": MacAdvancedView(app: app)
+                case "advanced": MacAdvancedView(app: app, openLogs: openLogs)
                 default: SharingSettingsView(model: app.sharing)
                 }
             }

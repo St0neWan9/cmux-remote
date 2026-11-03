@@ -16,7 +16,10 @@ struct PairingQRCodeView: View {
     private var qrImage: CGImage? {
         let filter = CIFilter.qrCodeGenerator(); filter.message = Data(link.utf8); filter.correctionLevel = "M"
         guard let output = filter.outputImage else { return nil }
-        let enlarged = output.transformed(by: CGAffineTransform(scaleX: 4, y: 4))
+        // The generator emits one white module around the code. Cropping it leaves the view's own padding as the
+        // only quiet zone, so the code's visible square starts exactly where the view's frame does.
+        let ink = output.extent.insetBy(dx: 1, dy: 1)
+        let enlarged = output.cropped(to: ink).transformed(by: CGAffineTransform(scaleX: 4, y: 4))
         return CIContext().createCGImage(enlarged, from: enlarged.extent)
     }
 }

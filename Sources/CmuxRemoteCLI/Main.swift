@@ -50,6 +50,8 @@ struct Main {
             }
         case "serve", "resident":
             if (options.contains("pair") || command == "resident"), !FileManager.default.fileExists(atPath: state.directory.appendingPathComponent("token").path) { try state.initialize() }
+            BridgeLog.shared.configure(directory: state.directory)
+            BridgeLog.shared.info("bridge", "\(command) starting pid=\(ProcessInfo.processInfo.processIdentifier)")
             let machine = try BridgeMachineLease(home: home)
             let lease = try BridgeRunLease(directory: state.directory)
             defer { withExtendedLifetime((machine, lease)) {} }
@@ -74,7 +76,9 @@ struct Main {
                 let sources = try await SourceBackends(options: options, environment: runtimeEnvironment, home: home, transcripts: transcripts, directory: state.directory, mutations: mutations)
                 cmux = sources.controller; localDesktop = sources.desktop; desktopSocket = sources.desktopSocket; transcriptRoots = roots
             }
-            let service = SessionService(cmux: cmux, home: home, transcriptRoots: transcriptRoots, mutations: mutations)
+            let reader = TranscriptReader(generationStore: TranscriptGenerationStore(directory: state.directory))
+            let service = SessionService(cmux: cmux, home: home, transcriptRoots: transcriptRoots, mutations: mutations,
+                                         aliases: SessionAliasStore(directory: state.directory), reader: reader)
             let events: Task<Void, Never>?
             if let socket = desktopSocket {
                 let client = CmuxEventClient(path: socket, password: runtimeEnvironment["CMUX_REMOTE_SOCKET_PASSWORD"], capability: runtimeEnvironment["CMUX_SOCKET_CAPABILITY"])
@@ -108,7 +112,10 @@ struct Main {
                 let companion = MacCompanionService(repository: connections, mirrors: mirrors, discovery: discovery, catalog: catalog)
                 mac = companion
             } else { mac = nil }
-            let router = BridgeRouter(service: service, authority: authority, legacyToken: options.contains("legacy") ? try state.token() : nil, mirrors: RemoteMirrorService(cmux: cmux, mutations: mutations))
+            let allowedDirectories = AllowedDirectoryRepository(directory: state.directory)
+            let launcher = SessionLauncher(cmux: cmux, home: home, mutations: mutations, sessions: { try await service.sessions() },
+                                           sharedRoots: { allowedDirectories.load() })
+            let router = BridgeRouter(service: service, authority: authority, legacyToken: options.contains("legacy") ? try state.token() : nil, mirrors: RemoteMirrorService(cmux: cmux, mutations: mutations), launcher: launcher)
             let relayRepository = RelayConfigurationRepository(directory: state.directory)
             if let origin = options.value("relay") {
                 if origin == "off" { try relayRepository.remove() }
@@ -130,7 +137,7 @@ struct Main {
                 remembersChoice: command == "resident")
             let ready = AsyncThrowingStream<Void, any Error>.makeStream()
             let owner = Task {
-                do { try await OwnerControlServer().run(path: state.directory.appendingPathComponent("owner.sock").path, authority: authority, service: service, mac: mac, sharing: sharing, onListening: { ready.continuation.yield(()); ready.continuation.finish() }) }
+                do { try await OwnerControlServer().run(path: state.directory.appendingPathComponent("owner.sock").path, authority: authority, service: service, mac: mac, sharing: sharing, allowedDirectories: allowedDirectories, onListening: { ready.continuation.yield(()); ready.continuation.finish() }) }
                 catch { ready.continuation.finish(throwing: error); throw error }
             }
             defer { owner.cancel() }

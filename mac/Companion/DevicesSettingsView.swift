@@ -10,6 +10,8 @@ struct DevicesSettingsView: View {
     @State private var showingRevoke = false
     /// Workspaces the owner left unchecked for a pending request, keyed by request ID.
     @State private var excluded: [String: Set<String>] = [:]
+    /// Pending requests the owner approves without permission to start sessions.
+    @State private var withheldStart: Set<String> = []
     private let design = MacDesignTokens()
     var body: some View {
         MacPreferencePage {
@@ -19,16 +21,32 @@ struct DevicesSettingsView: View {
                     deviceTable(pendingItems, selection: selection($pendingID, in: pendingItems))
                     if let request = selectedRequest {
                         details(clientID: request.clientID, workspaces: [], capabilities: request.scope.capabilities)
-                        ForEach(request.scope.workspaces, id: \.self) { workspace in
-                            Toggle(workspaceName(workspace), isOn: Binding(get: { !(excluded[request.requestID] ?? []).contains(workspace) },
-                                set: { allowed in if allowed { excluded[request.requestID, default: []].remove(workspace) } else { excluded[request.requestID, default: []].insert(workspace) } }))
-                                .toggleStyle(.checkbox).lineLimit(1).disabled(model.busy)
+                        ForEach(liveWorkspaces(request), id: \.self) { workspace in
+                            // The whole row is the control: a checkbox-style toggle only answers a click on its own
+                            // mark and text, which left most of a wide row dead.
+                            Toggle(isOn: Binding(get: { !(excluded[request.requestID] ?? []).contains(workspace) },
+                                set: { allowed in if allowed { excluded[request.requestID, default: []].remove(workspace) } else { excluded[request.requestID, default: []].insert(workspace) } })) {
+                                Text(workspaceName(workspace)).lineLimit(1)
+                                    .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                            }
+                            .toggleStyle(.checkbox).disabled(model.busy)
                         }
                         MacPreferenceNote(text: String(localized: "mac.device.narrowHint", bundle: .interface))
-                        let allowed = request.scope.workspaces.filter { !(excluded[request.requestID] ?? []).contains($0) }
+                        let asksToStart = request.scope.capabilities.contains(.conversationStart)
+                        if asksToStart {
+                            Toggle(isOn: Binding(get: { !withheldStart.contains(request.requestID) },
+                                set: { allowed in if allowed { withheldStart.remove(request.requestID) } else { withheldStart.insert(request.requestID) } })) {
+                                Text(String(localized: "mac.device.allowStart", bundle: .interface))
+                                    .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                            }
+                            .toggleStyle(.checkbox).disabled(model.busy)
+                        }
+                        let allowed = liveWorkspaces(request).filter { !(excluded[request.requestID] ?? []).contains($0) }
                         HStack(spacing: 8) {
                             Button(String(localized: "mac.device.deny", bundle: .interface), role: .destructive) { Task { await model.deny(request) } }.fixedSize()
-                            Button(String(localized: "mac.device.approve", bundle: .interface)) { Task { await model.approve(request, workspaces: allowed) } }.fixedSize()
+                            Button(String(localized: "mac.device.approve", bundle: .interface)) {
+                                Task { await model.approve(request, workspaces: allowed, allowStart: !withheldStart.contains(request.requestID)) }
+                            }.fixedSize()
                                 .disabled(allowed.isEmpty)
                         }.disabled(model.busy)
                     }
@@ -79,12 +97,12 @@ struct DevicesSettingsView: View {
     }
     private var pendingItems: [MacTableItem] {
         model.pending.map { MacTableItem(id: $0.requestID, title: $0.clientName, detail: String($0.clientID.uppercased().prefix(12)),
-                                         symbol: $0.clientKind == "iphone" ? "iphone" : "desktopcomputer") }
+                                         symbol: deviceSymbol($0.clientKind)) }
     }
     private var clientItems: [MacTableItem] {
         model.clients.compactMap { client in
             client["id"].string.map { MacTableItem(id: $0, title: client["name"].string ?? $0, detail: String($0.uppercased().prefix(12)),
-                                                   symbol: client["kind"].string == "iphone" ? "iphone" : "desktopcomputer") }
+                                                   symbol: deviceSymbol(client["kind"].string)) }
         }
     }
     private var selectedRequest: EnrollmentRequest? {
@@ -95,7 +113,18 @@ struct DevicesSettingsView: View {
         let id = selection($clientID, in: clientItems).wrappedValue
         return model.clients.first { $0["id"].string == id }
     }
+    /// The workspaces a pending request names that still exist. A closed one is neither shown nor granted: the
+    /// request was written when the Mac had a workspace list the owner cannot see any more.
+    private func liveWorkspaces(_ request: EnrollmentRequest) -> [String] {
+        let known = Set(model.workspaces.compactMap { $0["id"].string?.lowercased() })
+        return request.scope.workspaces.filter { known.contains($0.lowercased()) }
+    }
     private func workspaceName(_ id: String) -> String {
         model.workspaces.first { $0["id"].string?.lowercased() == id.lowercased() }?["title"].string ?? id
     }
+}
+
+/// A phone-shaped row for either mobile client; the Mac companion stays a desktop.
+private func deviceSymbol(_ kind: String?) -> String {
+    kind == "iphone" || kind == "android" ? "iphone" : "desktopcomputer"
 }

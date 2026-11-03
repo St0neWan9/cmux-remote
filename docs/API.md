@@ -10,10 +10,16 @@ Version 2 uses a device-signed `Authorization: CmuxV2` proof and approved worksp
 | GET /v1/workspaces | workspace.list | cmux workspaces |
 | GET /v1/sessions | cmux-bound chat.sessions.dump / agent hooks, enriched by vault.sessions | cmux sessions only; external history excluded; known ended sessions read-only |
 | GET /v1/sessions/:id/history?before_seq=&limit= | local transcript, pinned upstream parser | messages, has_more, generation, clipped |
+| GET /v1/sessions/:id/archive?tail= | complete local transcript, absolute records | newest archive page, next_cursor, complete |
+| GET /v1/sessions/:id/archive?cursor=&limit= | complete local transcript, absolute records | next older archive page, next_cursor, complete |
 | GET /v1/sessions/:id/tool-detail?message_id=&generation=&field=&offset=&content_id= | complete transcript tool field | bounded revision-bound text page |
+| GET /v1/sessions/:id/tasks/:task_id?offset=&limit= | the agent's own task record for a detached call | subagent conversation, or paged command output |
 | GET /v1/sessions/:id/preview | surface.read_text + prose extractor | replaceable preview, availability |
 | POST /v1/sessions/:id/send | fixed mobile.chat.send | text, optional attachments, and operation_id |
 | POST /v1/sessions/:id/interrupt | mobile.chat.interrupt or explicit send_key | hard and operation_id |
+| GET /v1/sessions/:id/models | the agent's own configuration on the Mac | choices, accepts_custom, persists_default |
+| POST /v1/sessions/:id/model | `/model <name>` (Claude) or the Codex `/model` picker | model and operation_id |
+| POST /v1/sessions/:id/title | `mobile.terminal.rename` (desktop) or `tab.rename` (cmux-tui) | title and operation_id; an empty title clears the custom name |
 | GET /v1/feed | feed.list | captured Feed items; not all provider approvals |
 | POST /v1/feed/:request/reply | feed.permission/question/exit_plan.reply | matching kind, decision fields, operation_id |
 | GET /v1/sessions/:id/changes | local Git | porcelain change entries |
@@ -21,9 +27,97 @@ Version 2 uses a device-signed `Authorization: CmuxV2` proof and approved worksp
 | GET /v1/sessions/:id/file?path= | constrained local project file | bounded text and relative path |
 | GET /v1/operations/:operation_id | owner-only persisted operation journal | current device's scoped accepted/unknown status |
 
-No generic cmux RPC proxy, shell execution endpoint, arbitrary absolute-path fetch or desktop focus endpoint is exposed.
+`GET /v2/sessions/:id/archive` pages a transcript by byte offset instead of reading it whole. Without a cursor, `tail` selects how many of the newest messages the first page returns (default 100, maximum 200) and reading starts at EOF; with `cursor`, `limit` selects the next older page. Each request reads only one bounded chunk ending at the requested offset. A page is bounded to 200 messages and about 1 MiB, and `next_cursor` encodes the page's generation plus the byte offset of its first returned line. `complete` is true only when that offset is zero. Archive messages carry the byte offset of the line that produced them as their sequence number, and their `generation` is the path's stable generation: it survives Bridge restarts and window movement, and changes only when the record is replaced, truncated, or shrinks. A cursor from a different generation answers `history_cursor_stale` (409). `history_too_large` (413) is reserved for a configured chunk larger than the supported bound; a large record is paged, never refused for its size. Tool-detail and image references issued by an archive page resolve while the message is inside the ordinary bounded history window.
+
+No generic cmux RPC proxy, shell execution endpoint, arbitrary absolute-path fetch or desktop focus endpoint is exposed. Starting a conversation (below) types only a fixed agent command chosen from an enum.
 
 The first phone version polls foreground snapshots; `events.stream` is a Bridge backend seam rather than a claim that local cmux supplies full chat deltas. Mutation error `outcome_unknown` is intentionally not an automatic retry signal. Legacy pairing is endpoint + bearer token + pinned certificate fingerprint and requires explicit server enablement; v2 uses independently identified clients and owner-approved scopes. Neither has a cmux account identity.
+
+## Starting conversations
+
+These routes require signed v2 requests and the `conversationStart` capability for the workspace. Legacy clients cannot use them. Both desktop cmux workspaces and cmux-tui daemon workspaces are supported.
+
+| Route | Source | Result |
+| --- | --- | --- |
+| GET /v1/workspaces/:id/directories | the workspace's `current_directory` and the directories of its own conversations | up to 32 `{id, path}` roots; `id` is opaque, `path` is for display |
+| GET /v1/workspaces/:id/directories/:root?path= | visible subfolders of a folder inside that root | `{root_id, path, directories, truncated}`, at most 500 names |
+| POST /v1/workspaces/:id/sessions | `{root_id, path, agent: "claude"\|"codex", prompt?, operation_id}` | `{operation_id, accepted, surface_id?}` |
+
+A root is never the home directory, `/`, a parent of home or a credential folder (`ProjectFilePolicy.projectRoot`). `path` is relative to the root; `..`, hidden components and symbolic links that leave the root or land on a hidden folder are refused with `directory_forbidden`. A root that is no longer part of the workspace is `stale_binding`.
+
+The owner's shared folders come first, before the workspace's own directory and the folders of its conversations. They are set on the Mac (`directories.allowed` and `directories.set_allowed` on the owner-only channel) and stored in an owner-only `allowed-directories.json` beside the other Bridge state; the list is machine-wide, so one entry appears in every workspace's new-session list, and it is read per request, so a change needs no Bridge restart. A shared folder is subject to the same `ProjectFilePolicy` check as any other root: the owner cannot share `/`, the home directory, a parent of home or a credential folder, and an unusable entry is refused when it is saved instead of dropped silently. At most 32 folders are stored, matching the root cap.
+
+`prompt` is the first message, at most 4 KiB. Codex requires one: it reports its conversation only after a first message, so without it the phone could never open the new conversation (`prompt_required`). The message is passed as one argument to the fixed program (`claude <message>` or `codex --no-daemon <message>`), quoted with POSIX single quotes or, when it holds control characters or line breaks, ANSI-C `$'…'` quoting, so it is never interpreted by the shell. A message that is a single word or starts with `-` gets a leading space so it cannot name a subcommand (`codex login`) or an option. The durable record stores only a digest of the message. Codex runs with `--no-daemon` because its shared background server executes hooks with the environment of whichever Codex terminal started it, so a second terminal's conversation would never be reported.
+
+Starting records a durable intent, rechecks the grant and folder, then calls `surface.create` with `type: terminal`, the resolved `working_directory`, `initial_input: "<command line>\r"` and `focus: false`. The new tab opens in the workspace's focused pane; the desktop does not switch workspace or window. Repeating an operation returns its receipt without opening another terminal (`surface_id` is then absent). A failed or unconfirmed `surface.create` is `outcome_unknown` and is never retried under the same identity; the phone offers to check again or to open another terminal with a new identity. The conversation appears in `/v1/sessions` once the agent reports its binding.
+
+In a cmux-tui daemon workspace the roots also include the working directories of the workspace's terminals, since a daemon workspace has no directory of its own. The Bridge calls the daemon's `workspace.run` with the workspace's `ws_` identity, `cwd`, `argv: [<login shell>, "-ic", "<command line>; exec <login shell> -l"]` (the daemon's `-lc` skips interactive startup files where agents are often put on `PATH`, so the owner's interactive shell runs the agent as a typed command would, and a login shell stays open after it exits) and an idempotency and correlation key derived from the device and operation, so a resent write is deduplicated by the daemon too. The daemon keeps the session's focused workspace and pane, but the new tab becomes the visible tab of the workspace's active pane: the daemon offers no background tab creation, and selecting the previous tab again (`tab.focus`) would move session focus, so it is not done.
+
+An older Bridge cannot decode `conversationStart` and closes the link during enrollment; the phone then asks again without it.
+
+## Resuming a conversation
+
+A conversation keeps its identity when its Agent session moves to a new terminal, because the id is derived from the
+provider and its session id rather than from a terminal. `GET /v1/sessions` reports `resumable: true` only when the
+Bridge has verified all of: the Agent session has a transcript under a configured root, that transcript itself records
+the working directory the Agent ran in, the conversation's workspace still exists, and — for a terminal that is still
+running — that its rendered screen no longer shows the Agent's prompt. A live conversation is never reported resumable,
+and a terminal whose screen cannot be read is neither writable nor resumable.
+
+| Route | Body | Result |
+| --- | --- | --- |
+| POST /v1/sessions/:id/resume | `{operation_id?}` | `{operation_id, accepted}` |
+
+This requires `conversationControl` and `conversationStart` for the conversation's workspace. The caller names only
+the conversation: the Agent, its session id and the working directory all come from the Bridge's own binding and the
+Agent's transcript, never from the request, so a device cannot choose what command runs or where. The directory is the
+one the Agent recorded itself, not the daemon's terminal `cwd`, which tracks `cd` and is absent once the terminal is
+gone. The Bridge starts `<agent> --resume <session-id>` (Claude, with the owner's fixed flags) or
+`codex resume <session-id>` in a new terminal of that workspace through the same `surface.create`/`workspace.run`
+path as a new conversation, and the phrase is deduplicated by the operation identity, so a retry cannot open a second
+terminal. A conversation that is not resumable is `read_only`; an unconfirmed start is `outcome_unknown` and is never
+retried under the same identity.
+
+A desktop cmux has no resume RPC, so the Bridge performs the start itself with `surface.create`; a cmux-tui
+daemon runs `mobile.chat.resume` and keeps its own deduplication key. One limitation remains on the desktop:
+cmux records the Agent's terminal only when its hook reports there, and a terminal the Bridge opened is not
+rewritten into that record by the resumed process. Until cmux updates the binding, its own `mobile.chat.send`
+answers `not_found` ("The agent's terminal moved") for both the old and the new surface, so a conversation
+reopened this way is readable but still not writable from the phone. Opening it once on the Mac, or waiting for
+the next Agent hook after a turn started in that terminal, does not change that record in cmux 0.65.2.
+
+## Switching models
+
+The newest history page carries `agentModel` (`{model, effort?}`), the model the transcript last reported: for Claude
+Code the model of its latest main-thread reply or the label its `/model` command printed (subagent replies are skipped),
+for Codex the `model` and `effort` of its latest `turn_context`. Codex records a switch only with its next turn, so the
+phone shows the reader's own choice until the transcript reports a different model. Older pages omit the field.
+
+`GET /v1/sessions/:id/models` reads names only from the owner's files: Claude's aliases (`default`, `opus`, `sonnet`,
+`haiku`, `fable`) plus the `modelPicker.options` in `~/.claude/settings.json`, and the `visibility: "list"` models of
+`~/.codex/models_cache.json`. Credentials in those files are never read into a response. At most 64 choices.
+
+`POST /v1/sessions/:id/model` takes `{model, operation_id, confirm?}` and requires `conversationControl`. The name must be one
+token of `[A-Za-z0-9._:/@+[]-]`, at most 128 bytes and not starting with `-` (`invalid_model`); it is never shell input.
+The binding is verified as for a send, and an agent whose turn is still running is refused (`agent_busy`), since it
+would take the command as a prompt. The operation is journaled like a send and never retried.
+
+- Claude Code: the Bridge sends `/model <name>` through `mobile.chat.send`. Claude applies it at once and also saves it as
+  the default for new sessions (`persists_default: true`); its session-only choice exists only inside its own picker.
+  A long conversation makes Claude Code stop at "Switch model?" (the whole history is read again). The Bridge reads the
+  screen after the command: with `"confirm": true` in the request it takes the first option, otherwise it closes the
+  menu with Escape and answers `model_confirm_required` (409, nothing changed) so the phone can ask the reader and
+  send the request again with `confirm`. A menu that stays open is `outcome_unknown`. While any numbered menu is on a
+  daemon terminal's screen the Agent still counts as present, so the conversation is not offered for reopening.
+- Codex takes no model argument. The Bridge opens `/model`, reads the rendered picker, moves the highlight with arrow
+  keys to the entry whose label matches the requested slug or its catalog label, then to the reasoning level the
+  session's transcript last recorded (the picker's default otherwise), and confirms with `s`, which applies the choice to
+  this session only and leaves `~/.codex/config.toml` unchanged. Every move is checked on screen before the next key.
+  A model the picker does not list is `model_unavailable`, a picker that does not follow is `model_switch_failed`; both
+  close the picker with Escape, only while it is still on screen, before anything applies. A picker still open after the
+  final key is `outcome_unknown`. On a cmux-tui daemon this runs inside the adapter as `mobile.chat.model` with
+  revision-bound `terminal.input.write` effects; on desktop cmux it uses `surface.read_text` and `mobile.terminal.input`,
+  rechecking `surface.input_state` before every write, so a terminal rebound mid-switch receives nothing more.
 
 ## Terminal mirror resources
 
@@ -102,6 +196,17 @@ Ordinary history preserves the upstream 2,048-character input-detail and
 16,384-character body/output/diff budgets. The inline card wraps all received text
 and uses the conversation's vertical scroll. `View full record` opens an explicit
 paged read of the underlying committed transcript field.
+
+`GET /v2/sessions/:id/tasks/:task_id` reads what one background task produced. An
+asynchronous Agent's own conversation is returned as a normal history snapshot
+(`kind: agent`); a detached command's output is returned as `kind: output` text,
+paged from the beginning by byte offset (default and maximum 65,536 bytes per
+page, at most 262,144). Pages end on a UTF-8 character boundary, `next_offset` is
+absent at the end of the record, and `total_bytes` reports the size. `running`
+says whether the conversation still counts the task as running. A task whose
+record has been removed from the Mac answers `task_unavailable`; the task id is
+validated as an identifier and never used as a path. Subscribing to the same path
+reports each change while the task writes.
 
 `GET /v2/sessions/:id/tool-detail` requires `message_id`, the current history
 `generation`, and a supported `field`: `input`/`output` for a tool or terminal

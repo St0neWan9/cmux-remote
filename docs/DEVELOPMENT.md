@@ -42,7 +42,7 @@ Immediate Bridge restart after an active HTTPS connection originally failed with
 
 The independent Mac containing app and public sidebar extension compile with the
 Swift 6 toolchain on Apple Silicon. Deep/strict code-signature checks pass and
-`pluginkit` registers one `com.st0newan9.cmux-remote.mac.sidebar` extension under
+`pluginkit` registers one `cmux-remote.desktop.sidebar` extension under
 the official production extension point. Official cmux was not modified,
 restarted, or re-signed; its selected sidebar was not changed.
 
@@ -180,11 +180,22 @@ clears on an observed state change, a new user message, or a phone send.
 
 ## Conversation overlap rendering
 
-The header keeps a white page background. A bounded SwiftUI layer shader blurs
-and fades message pixels beneath the floating controls; it does not add a tinted
-backdrop. The iOS target compiles `ConversationHeader.metal` into its default
-shader library. `scripts/build-ios.sh` checks the Metal compiler and downloads
-Apple's official Metal Toolchain component if the active Xcode lacks it.
+The header and composer float over a white page with no fill of their own. Each
+timeline row carries a layer effect (`HeaderContentEffect`) whose Metal stitchable
+shaders (`ConversationHeader.metal`) blur the ink entering the top and bottom
+bands and fade it toward the page, so the page stays white and only the ink under
+the bars is softened.
+
+## Reply text selection
+
+Prose is SwiftUI text, so a reply copies with the pages' own controls rather than
+in-place selection. A reply's footer offers Copy, Share, Quote and Select Text;
+Select Text opens the text on its own page (`SelectTextPage`) in a `UITextView`,
+where the system's handles, magnifier and edit menu can take any part of it. The
+reader's own message and a tool's text offer the same Copy / Select Text pair
+from a long press. In-place selection is deliberately not used: the per-row layer
+effect rasterizes the row, and a rasterized row draws the selection interaction as
+a placeholder.
 
 ## Mac B LAN verification — 2026-10-12
 
@@ -237,8 +248,9 @@ secrets configured, and this app's Apple record/access remains to be verified.
 
 ## First signed iPhone package — 2026-10-12
 
-The owner account registered `com.st0newan9.cmux-remote` and created the separate
-App Store Connect record **Cmux Remote Companion**, Apple ID `6821932840`.
+The owner account registered the app's first bundle ID and created a separate
+App Store Connect record for it; both are retired, see *Signing moved to the
+maintainer's individual team* below.
 The phone's invariant display name is **Cmux Remote** in English and Simplified
 Chinese. Its new opaque 1024-pixel icon incorporates cmux's cyan-to-violet
 chevron reference; the generation prompts and upstream provenance are recorded
@@ -280,3 +292,14 @@ profile and deep/strict code-signature guard. The CI run did not upload that
 second build. Account screenshots and signed packages stay under `.build/`,
 outside Git. Physical iPhone installation and paired LAN use remain separate
 acceptance steps.
+
+## Signing moved to the maintainer's individual team — 2026-10-26
+
+The iPhone app now ships under the maintainer's individual team `7G42499LWB` with
+bundle ID `cmux-remote.mobile` and its own App Store Connect record (**Cmux Remote
+for Mobile**). The account it shipped under before that — its record, team and
+Apple Distribution identity — is retired: no workflow, script or local check uses
+it. The current account's API key lives at
+`~/.cmux-remote-release/huiyuanjia/notary.json`, which `scripts/testflight-status.py`
+reads; an App Store Connect key only lists its own account's apps, so a key from
+the retired account reports an empty build list rather than an error.

@@ -11,22 +11,19 @@ struct SessionSidebarView: View {
     @Binding var query: String
     let select: (HostedSession) -> Void
     let showConnection: (String) -> Void
-    let showFeed: (String) -> Void
     let addDevice: () -> Void
-    let refresh: () -> Void
     @State private var showSearch = false
     @State private var expanded: Set<String>
     @State private var initializedExpansion: Bool
-    init(sections: [SessionHostSection], hosts: [SidebarHost], query: Binding<String>, recent: [HostedSession], sortMode: Binding<SessionSortMode>, select: @escaping (HostedSession) -> Void, showConnection: @escaping (String) -> Void, showFeed: @escaping (String) -> Void, addDevice: @escaping () -> Void, refresh: @escaping () -> Void) {
+    init(sections: [SessionHostSection], hosts: [SidebarHost], query: Binding<String>, recent: [HostedSession], sortMode: Binding<SessionSortMode>, select: @escaping (HostedSession) -> Void, showConnection: @escaping (String) -> Void, addDevice: @escaping () -> Void) {
         self.sections = sections; self.hosts = hosts; self.recent = recent; _sortMode = sortMode; _query = query
-        self.select = select; self.showConnection = showConnection; self.showFeed = showFeed; self.addDevice = addDevice; self.refresh = refresh
+        self.select = select; self.showConnection = showConnection; self.addDevice = addDevice
         let first = sections.first.flatMap { section in section.groups.first.map { section.hostID + "/" + $0.id } }
         _expanded = State(initialValue: Set(first.map { [$0] } ?? []))
         _initializedExpansion = State(initialValue: first != nil)
     }
     var body: some View {
         let multiple = hosts.count > 1
-        let feedHosts = hosts.filter(\.canReadFeed)
         VStack(spacing: 0) {
             HStack(spacing: 12) {
                 Text(String(localized: "app.title")).font(.title2.weight(.bold)).frame(maxWidth: .infinity, alignment: .leading)
@@ -54,6 +51,7 @@ struct SessionSidebarView: View {
                                         if multiple { Text(hosted.hostName).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
                                     }.frame(maxWidth: .infinity, alignment: .leading)
                                     if hosted.session.state.hasPrefix("working") { WorkingIndicator(size: 13) }
+                                    else if hosted.session.resumable { Image(systemName: "arrow.clockwise.circle").font(.caption).foregroundStyle(.secondary) }
                                     else if !hosted.session.writable { Image(systemName: "lock").font(.caption).foregroundStyle(.secondary) }
                                 }.frame(minHeight: 44).contentShape(Rectangle())
                             }.buttonStyle(.plain).accessibilityIdentifier("sidebar.session." + hosted.hostID + "." + hosted.session.id)
@@ -65,14 +63,6 @@ struct SessionSidebarView: View {
                         }
                     }
                     if sections.isEmpty { Text(String(localized: "sessions.no_matches")).foregroundStyle(.secondary) }
-                    if feedHosts.count == 1, let only = feedHosts.first {
-                        Button { showFeed(only.id) } label: { Label(String(localized: "feed.title"), systemImage: "checkmark.bubble") }.buttonStyle(FloatingButtonStyle())
-                    } else if feedHosts.count > 1 {
-                        Menu {
-                            ForEach(feedHosts) { host in Button(host.name) { showFeed(host.id) } }
-                        } label: { Label(String(localized: "feed.title"), systemImage: "checkmark.bubble") }.buttonStyle(FloatingButtonStyle())
-                    }
-                    Button(action: refresh) { Label(String(localized: "chat.refresh"), systemImage: "arrow.clockwise") }.buttonStyle(FloatingButtonStyle())
                 }.padding(.horizontal, MobileDesign.pageInset).padding(.top, 16).padding(.bottom, 28)
             }.onChange(of: query) { _, value in
                 if !value.isEmpty { expanded.formUnion(sections.flatMap { section in section.groups.map { section.hostID + "/" + $0.id } }) }
@@ -84,8 +74,7 @@ struct SessionSidebarView: View {
                             Image(systemName: host.failed ? "exclamationmark.triangle" : "laptopcomputer").font(.system(size: 20))
                                 .foregroundStyle(host.failed ? Color.red : Color.primary)
                             Text(host.name).font(.subheadline.weight(.medium)).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
-                            Image(systemName: "gearshape").font(.system(size: 19)).frame(width: 40, height: 40)
-                                .background(Color.white, in: Circle()).shadow(color: .black.opacity(0.07), radius: 12, y: 3)
+                            Image(systemName: "gearshape").font(.system(size: 19)).modifier(FloatingGlassCircle(size: 40))
                         }.frame(minHeight: 48).contentShape(Rectangle())
                     }.buttonStyle(.plain).accessibilityIdentifier("sidebar.connection." + host.id)
                 }
@@ -119,6 +108,7 @@ struct SessionSidebarView: View {
                         HStack {
                             Text(session.title).lineLimit(2).frame(maxWidth: .infinity, alignment: .leading)
                             if session.state.hasPrefix("working") { WorkingIndicator(size: 13) }
+                            else if session.resumable { Image(systemName: "arrow.clockwise.circle").font(.caption).foregroundStyle(.secondary) }
                             else if !session.writable { Image(systemName: "lock").font(.caption).foregroundStyle(.secondary) }
                         }.frame(minHeight: 44).contentShape(Rectangle())
                     }.buttonStyle(.plain).padding(.leading, 34).accessibilityIdentifier("sidebar.session." + section.hostID + "." + session.id)

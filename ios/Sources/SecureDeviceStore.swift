@@ -9,9 +9,10 @@ struct SecureDeviceStore {
         #if targetEnvironment(simulator)
         return try? Data(contentsOf: file(account))
         #else
-        let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: account, kSecReturnData as String: true]
+        var lookup = query(account); lookup[kSecReturnData as String] = true
         var result: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess else { return nil }; return result as? Data
+        guard SecItemCopyMatching(lookup as CFDictionary, &result) == errSecSuccess else { return nil }
+        return result as? Data
         #endif
     }
     func save(_ data: Data, account: String) throws {
@@ -20,10 +21,10 @@ struct SecureDeviceStore {
         try FileManager.default.createDirectory(at: path.deletingLastPathComponent(), withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         try data.write(to: path, options: .atomic); try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: path.path)
         #else
-        let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: account]
-        let status = SecItemUpdate(query as CFDictionary, [kSecValueData as String: data] as CFDictionary)
+        let match = query(account)
+        let status = SecItemUpdate(match as CFDictionary, [kSecValueData as String: data] as CFDictionary)
         if status == errSecItemNotFound {
-            var insertion = query; insertion[kSecValueData as String] = data; insertion[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+            var insertion = match; insertion[kSecValueData as String] = data; insertion[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
             guard SecItemAdd(insertion as CFDictionary, nil) == errSecSuccess else { throw BridgeError("keychain_failed", "Device identity could not be saved.") }
         } else if status != errSecSuccess { throw BridgeError("keychain_failed", "Device identity could not be saved.") }
         #endif
@@ -32,10 +33,17 @@ struct SecureDeviceStore {
         #if targetEnvironment(simulator)
         try? FileManager.default.removeItem(at: file(account))
         #else
-        SecItemDelete([kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: account] as CFDictionary)
+        SecItemDelete(query(account) as CFDictionary)
         #endif
     }
     #if targetEnvironment(simulator)
-    private func file(_ account: String) -> URL { FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("ProtectedConnection/" + service + "/" + account + ".json") }
+    private func file(_ account: String) -> URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("ProtectedConnection/" + service + "/" + account + ".json")
+    }
+    #else
+    private func query(_ account: String) -> [String: Any] {
+        [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: account]
+    }
     #endif
 }

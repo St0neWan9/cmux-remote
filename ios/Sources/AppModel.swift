@@ -15,14 +15,25 @@ final class AppModel {
     }
     var sessions: [SessionDescriptor] { hostedSessions.map(\.session) }
     var hostedSessions: [HostedSession] = []
+    /// Each Mac's items waiting for a reply, kept current while the app is in the foreground.
+    var pending: [String: PendingFeed] = [:]
     var workspaces: [WorkspaceSummary] = []
     /// Workspace ID to the Mac that owns it, for labels when several Macs are connected.
     var workspaceHosts: [String: String] = [:]
+    /// Approved workspaces on Macs that let this device start sessions.
+    var startTargets: [StartTarget] = []
     var hostErrors: [String: String] = [:]
     /// Each Mac's link as the client reports it; a Mac never dialed yet has no entry.
     var linkStates: [String: LinkState] = [:]
     /// When the app last left the foreground, so a short switch does not force every link to dial again.
     @ObservationIgnored var backgroundedAt: Date?
+    /// Paces automatic redials of lost Macs; it outlives one supervision pass so a person's retry can reset it.
+    @ObservationIgnored let reconnectSchedule = ReconnectSchedule()
+    /// Each Mac's model choices per agent, shared by its conversations.
+    @ObservationIgnored let modelChoices = ModelChoiceCache()
+    /// Macs the schedule keeps retrying in the background: the pages stop showing their dial and their failure,
+    /// until one of them connects or a person asks for a retry.
+    var quietHosts: Set<String> = []
     var error: String?
     var loading = false
     var host = ""
@@ -32,16 +43,23 @@ final class AppModel {
     var relayOrigins: [String] = []
     var relayError: String?
     var relayLoading = false
-    /// The pairing screen over the conversation list while another Mac is added.
+    /// The pairing screen pushed over the conversation list while another Mac is added.
     var addingDevice = false
+    /// Whether the sidebar is open. It lives here so a pushed page keeps the drawer open behind it, and so
+    /// returning from one lands on the drawer rather than the bare list.
+    var sidebarOpen = false
     var pendingEnrollment: (any DeviceEnrolling)?
     var enrollmentState = ""
     private let discovery: BridgeDiscovery
     private let store: PairingStore
+    /// Conversations read before, kept on disk so reopening one is immediate.
+    private let conversations = ConversationCache()
+    /// Every page a conversation was read with, kept on the phone so reading back never asks the Mac again.
+    let conversationStore = ConversationStore()
     private let makeSpeechInput: @MainActor () -> any SpeechInputServing
     private let pendingSends: PendingSendStore
     private let identityKey: @MainActor () throws -> Data
-    private let makeEnrollment: @MainActor (SignedValue<EnrollmentBootstrap>, Data, BridgeEndpoint?) throws -> any DeviceEnrolling
+    private let makeEnrollment: @MainActor (SignedValue<EnrollmentBootstrap>, Data, BridgeEndpoint?, [ClientCapability]) throws -> any DeviceEnrolling
     private let enrollmentTicks: @MainActor () -> (stream: AsyncStream<Void>, stop: @MainActor () -> Void)
     private let fetchSessions: @Sendable (RemoteClient) async throws -> [SessionDescriptor]
     private let fetchWorkspaces: @Sendable (RemoteClient) async throws -> [WorkspaceSummary]
@@ -50,6 +68,8 @@ final class AppModel {
     private let directory: @Sendable (String) async throws -> [SignedValue<EnrollmentBootstrap>]
     private var enrollmentTask: Task<Void, Never>?
     @ObservationIgnored private var conversationModels: [String: ConversationModel] = [:]
+    @ObservationIgnored private let runningSync = RunningSessionSync()
+    @ObservationIgnored private var followingSessions = false
     private var restored = false
     private var enrollmentActive = true
     private var enrollmentGeneration = UUID()
@@ -57,7 +77,7 @@ final class AppModel {
     init(discovery: BridgeDiscovery = BridgeDiscovery(), store: PairingStore = PairingStore(), pendingSends: PendingSendStore = PendingSendStore(),
          makeSpeechInput: @escaping @MainActor () -> any SpeechInputServing = { UnavailableSpeechInput() },
          identityKey: @escaping @MainActor () throws -> Data = { try DeviceIdentityStore().privateKey() },
-         makeEnrollment: @escaping @MainActor (SignedValue<EnrollmentBootstrap>, Data, BridgeEndpoint?) throws -> any DeviceEnrolling = { bootstrap, key, endpoint in try EnrollmentClient(bootstrap: bootstrap, privateKey: key, name: "cmux iPhone", kind: "iphone", endpoint: endpoint) },
+         makeEnrollment: @escaping @MainActor (SignedValue<EnrollmentBootstrap>, Data, BridgeEndpoint?, [ClientCapability]) throws -> any DeviceEnrolling = { bootstrap, key, endpoint, capabilities in try EnrollmentClient(bootstrap: bootstrap, privateKey: key, name: "cmux iPhone", kind: "iphone", capabilities: capabilities, endpoint: endpoint) },
          fetchSessions: @escaping @Sendable (RemoteClient) async throws -> [SessionDescriptor] = { try await $0.get("/v1/sessions", as: [SessionDescriptor].self) },
          fetchWorkspaces: @escaping @Sendable (RemoteClient) async throws -> [WorkspaceSummary] = { client in
              let value = try await client.get("/v1/workspaces", as: JSONValue.self)
@@ -81,13 +101,13 @@ final class AppModel {
         #endif
         relayOrigins = store.relayOrigins()
         for value in store.loadConnections() {
-            guard let remote = try? RemoteClient(connection: value) else { continue }
+            guard let remote = try? RemoteClient(connection: value, trace: diagLinkTrace(host: value.host.id)) else { continue }
             links.append(HostLink(id: value.host.id, name: value.host.name, client: remote, connection: value))
             learnRelay(value)
         }
         host = links.first?.name ?? ""
         if links.isEmpty {
-            if store.legacyEnabled(), let legacy = store.load() { host = legacy.host; links = [HostLink(id: "legacy", name: legacy.host, client: RemoteClient(pairing: legacy), connection: nil)] }
+            if store.legacyEnabled(), let legacy = store.load() { host = legacy.host; links = [HostLink(id: "legacy", name: legacy.host, client: RemoteClient(pairing: legacy, trace: diagLinkTrace(host: "legacy")), connection: nil)] }
             else if store.load() != nil { error = String(localized: "pair.legacy_migration") }
         }
     }
@@ -126,6 +146,19 @@ final class AppModel {
         catch { self.error = ErrorPresentation().message(error) }
     }
     func discover() async {
+        #if DEBUG
+        // Screenshot and UI runs need a deterministic list: the real one names whatever Macs are on the
+        // network, which must not end up in a store listing.
+        if let path = ProcessInfo.processInfo.environment["CMUX_REMOTE_TEST_NEARBY_PATH"],
+           let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
+           let entries = try? JSONDecoder().decode([TestNearbyEntry].self, from: data) {
+            discovered = entries.map { entry in
+                let host = HostIdentity(id: entry.id, publicKey: entry.id, certificateSHA256: entry.id, name: entry.name)
+                return DiscoveredBridge(host: host, service: .hostPort(host: .ipv4(.loopback), port: 1))
+            }
+            return
+        }
+        #endif
         defer { discovery.stop() }
         for await values in discovery.start() {
             guard !Task.isCancelled else { break }; discovered = values
@@ -135,7 +168,7 @@ final class AppModel {
                     let endpoint = try await discovery.resolve(peer)
                     let relocated = try saved.relocated(to: endpoint, advertisedHost: peer.host)
                     if relocated.endpoint != saved.endpoint {
-                        let candidate = try RemoteClient(connection: relocated)
+                        let candidate = try RemoteClient(connection: relocated, trace: diagLinkTrace(host: relocated.host.id))
                         do { _ = try await candidate.get("/v1/status", as: JSONValue.self) }
                         catch { candidate.close(); throw error }
                         guard !Task.isCancelled, let current = links.first(where: { $0.id == link.id }), current.client === link.client,
@@ -177,9 +210,18 @@ final class AppModel {
         guard enrollmentGeneration == generation else { return }
         error = nil; loading = true
         do {
-            let enrollment = try makeEnrollment(bootstrap, identityKey(), endpoint)
+            var enrollment = try makeEnrollment(bootstrap, identityKey(), endpoint, EnrollmentClient.phoneCapabilities)
             pendingEnrollment = enrollment
-            let status = try await enrollment.submit()
+            let status: EnrollmentStatus
+            do { status = try await enrollment.submit() }
+            catch let failure as BridgeError where failure.code == "outcome_unknown" && enrollment.request.value.scope.capabilities.contains(.conversationStart) {
+                // An older Bridge closes the link on a capability it cannot decode; ask again without starting sessions.
+                guard enrollmentGeneration == generation, pendingEnrollment === enrollment else { enrollment.close(); return }
+                enrollment.close()
+                enrollment = try makeEnrollment(bootstrap, identityKey(), endpoint, EnrollmentClient.previousPhoneCapabilities)
+                pendingEnrollment = enrollment
+                status = try await enrollment.submit()
+            }
             guard enrollmentGeneration == generation, pendingEnrollment === enrollment else { enrollment.close(); return }
             enrollmentState = status.state; loading = false
             startEnrollmentMonitor()
@@ -203,7 +245,7 @@ final class AppModel {
                         guard !Task.isCancelled, pendingEnrollment === enrollment else { break }
                         enrollmentState = status.state; error = nil
                         if status.state == "approved" {
-                            let value = try enrollment.connection(from: status); let candidate = try RemoteClient(connection: value)
+                            let value = try enrollment.connection(from: status); let candidate = try RemoteClient(connection: value, trace: diagLinkTrace(host: value.host.id))
                             do {
                                 _ = try await candidate.get("/v1/status", as: JSONValue.self)
                                 guard !Task.isCancelled, pendingEnrollment === enrollment else { candidate.close(); break }
@@ -217,9 +259,7 @@ final class AppModel {
                     } catch {
                         guard !Task.isCancelled, pendingEnrollment === enrollment else { break }
                         self.error = ErrorPresentation().message(error)
-                        if let network = error as? URLError,
-                           [.notConnectedToInternet, .networkConnectionLost, .timedOut, .cannotFindHost, .cannotConnectToHost, .dnsLookupFailed].contains(network.code),
-                           enrollment.request.value.expiresAt > Int(Date().timeIntervalSince1970) { continue }
+                        if EnrollmentPollRetry().shouldRetry(error, expiresAt: enrollment.request.value.expiresAt, now: Int(Date().timeIntervalSince1970)) { continue }
                         break
                     }
                 }
@@ -235,7 +275,7 @@ final class AppModel {
     /// Legacy is an explicit advanced fallback; it is never promoted to a new device identity.
     func pair(_ pairing: PairingConfiguration) async {
         loading = true; error = nil; defer { loading = false }
-        let candidate = RemoteClient(pairing: pairing)
+        let candidate = RemoteClient(pairing: pairing, trace: diagLinkTrace(host: "legacy"))
         do {
             _ = try await candidate.get("/v1/status", as: JSONValue.self); try store.save(pairing); try store.enableLegacy()
             install(HostLink(id: "legacy", name: pairing.host, client: candidate, connection: nil)); addingDevice = false
@@ -274,16 +314,10 @@ final class AppModel {
             guard links.contains(where: { $0.id == link.id && $0.client === link.client }), let result = results[link.id] else { continue }
             switch result {
             case .success(let (sessions, workspaces)):
-                // Most recent activity first; Bridges without activity times fall back to live-then-title order.
-                let ordered = sessions.sorted {
-                    let lhs = $0.updatedAt ?? .distantPast, rhs = $1.updatedAt ?? .distantPast
-                    if lhs != rhs { return lhs > rhs }
-                    if $0.writable != $1.writable { return $0.writable }
-                    return $0.title.localizedStandardCompare($1.title) == .orderedAscending
-                }
-                perHost[link.id] = (ordered, workspaces ?? perHost[link.id]?.workspaces ?? []); hostErrors[link.id] = nil
+                perHost[link.id] = (ordered(sessions), workspaces ?? perHost[link.id]?.workspaces ?? []); hostErrors[link.id] = nil
                 // A read that just succeeded proves the link, including for a transport that reports no states.
                 if linkStates[link.id] != nil { linkStates[link.id] = .connected }
+                quietHosts.remove(link.id)
             case .failure(let failure):
                 // The Mac keeps its own error, so several Macs still say which one is down; the bar retries it.
                 hostErrors[link.id] = ErrorPresentation().message(failure)
@@ -296,24 +330,124 @@ final class AppModel {
             try? store.saveConnection(updated); links[index].connection = updated; learnRelay(updated)
         }
     }
+    /// Most recent activity first; Bridges without activity times fall back to live-then-title order.
+    private func ordered(_ sessions: [SessionDescriptor]) -> [SessionDescriptor] {
+        sessions.sorted {
+            let lhs = $0.updatedAt ?? .distantPast, rhs = $1.updatedAt ?? .distantPast
+            if lhs != rhs { return lhs > rhs }
+            if $0.writable != $1.writable { return $0.writable }
+            return $0.title.localizedStandardCompare($1.title) == .orderedAscending
+        }
+    }
+    /// Runs while the app is in the foreground: follows each Mac's session list, so running states stay current,
+    /// and keeps conversations running off screen up to date. A list change is read at most once per interval.
+    func followSessions(every interval: Duration = .seconds(8)) async {
+        followingSessions = true; syncRunning()
+        defer { followingSessions = false; runningSync.stop() }
+        let followed = links.filter { $0.client.allows(.conversationRead) }.map { ($0.id, $0.client) }
+        let feeds = links.filter { $0.client.allows(.feedRead) }.map { ($0.id, $0.client) }
+        await withTaskGroup(of: Void.self) { group in
+            // The reminder above the list counts items as they arrive; each change is read at once, since a pending
+            // question is waiting on the reader.
+            for (id, client) in feeds {
+                group.addTask { [weak self] in
+                    for await _ in client.changes(paths: ["/v1/feed"]) {
+                        guard !Task.isCancelled else { return }
+                        await self?.refreshPending(hostID: id, client: client)
+                    }
+                }
+            }
+            for (id, client) in followed {
+                group.addTask { [weak self] in
+                    for await _ in client.changes(paths: ["/v1/sessions"]) {
+                        guard !Task.isCancelled else { return }
+                        try? await Task.sleep(for: interval)
+                        guard !Task.isCancelled else { return }
+                        await self?.refreshSessions(hostID: id, client: client)
+                    }
+                }
+            }
+        }
+    }
+    /// A background wake: dials each Mac, reads the lists, then the conversations that are running or changed
+    /// since this phone stored them, so switching to one later shows what it said meanwhile.
+    func syncInBackground() async {
+        restorePairing()
+        guard BackgroundSync.enabled, !links.isEmpty else { return }
+        let started = Date()
+        let clients = links.map(\.client)
+        await withTaskGroup(of: Void.self) { group in for client in clients { group.addTask { await client.reconnect() } } }
+        guard !Task.isCancelled else { return }
+        await refresh()
+        var targets: [RunningSessionSync.Target] = []
+        let recent = hostedSessions.sorted { ($0.session.updatedAt ?? .distantPast) > ($1.session.updatedAt ?? .distantPast) }.prefix(12)
+        for hosted in recent {
+            guard let client = link(for: hosted.hostID)?.client else { continue }
+            let session = hosted.session, scope = client.operationRecoveryScope
+            let stored = await conversations.storedAt(scope: scope, sessionID: session.id)
+            var target = RunningSessionSync.Target(key: scope + ":" + session.id, running: session.state.hasPrefix("working"),
+                                                   model: { [unowned self] in conversation(session: session, client: client) })
+            if let updated = session.updatedAt { target.changedSinceStored = updated > (stored ?? .distantPast) }
+            targets.append(target)
+        }
+        let read = await runningSync.pass(targets)
+        diagLog(.info, category: "sync", "background pass read \(read) conversations in \(Int(Date().timeIntervalSince(started) * 1000))ms")
+    }
+    private func refreshPending(hostID: String, client: RemoteClient) async {
+        guard let items = try? await client.get("/v1/feed", as: JSONValue.self)["items"].array,
+              links.contains(where: { $0.id == hostID && $0.client === client }) else { return }
+        let next = PendingFeed(items: items)
+        if pending[hostID] != next { pending[hostID] = next }
+    }
+    /// Reads one Mac's sessions only; workspaces and relay hints wait for a full refresh.
+    private func refreshSessions(hostID: String, client: RemoteClient) async {
+        guard let sessions = try? await fetchSessions(client),
+              links.contains(where: { $0.id == hostID && $0.client === client }) else { return }
+        perHost[hostID] = (ordered(sessions), perHost[hostID]?.workspaces ?? []); hostErrors[hostID] = nil
+        publish()
+    }
+    private func syncRunning() {
+        guard followingSessions else { return }
+        runningSync.update(hostedSessions.compactMap { hosted in
+            guard let client = link(for: hosted.hostID)?.client else { return nil }
+            let session = hosted.session
+            return RunningSessionSync.Target(key: client.operationRecoveryScope + ":" + session.id, running: session.state.hasPrefix("working"),
+                                             model: { [unowned self] in conversation(session: session, client: client) })
+        })
+    }
     /// Rebuilds the combined lists in Mac order from each Mac's last successful read.
     private func publish() {
         let current = links.filter { perHost[$0.id] != nil }
         hostedSessions = current.flatMap { link in perHost[link.id]!.sessions.map { HostedSession(hostID: link.id, hostName: link.name, session: $0) } }
         workspaces = current.flatMap { perHost[$0.id]!.workspaces }
         workspaceHosts = Dictionary(current.flatMap { link in perHost[link.id]!.workspaces.map { ($0.id, link.name) } }, uniquingKeysWith: { first, _ in first })
+        startTargets = current.filter { $0.client.allows(.conversationStart) }.flatMap { link in
+            perHost[link.id]!.workspaces.map { StartTarget(hostID: link.id, hostName: link.name, workspace: $0, client: link.client) }
+        }
         error = links.compactMap { link in hostErrors[link.id].map { links.count > 1 ? link.name + "：" + $0 : $0 } }.first
+        syncRunning()
     }
     func link(for hostID: String) -> HostLink? { links.first { $0.id == hostID } }
+    /// The workspaces one Mac shares, from its last successful read.
+    func workspaces(of hostID: String) -> [WorkspaceSummary] { perHost[hostID]?.workspaces ?? [] }
     /// Own in-flight and unresolved sends across pushed-view navigation.
     func conversation(session: SessionDescriptor, client: RemoteClient) -> ConversationModel {
         let key = client.operationRecoveryScope + ":" + session.id
-        if let existing = conversationModels[key] { return existing }
+        // The list was just read, so a page opened again starts from its state rather than the one it last saw.
+        if let existing = conversationModels[key] { existing.updateSession(session); return existing }
         if conversationModels.count >= 32 { conversationModels = conversationModels.filter { $0.value.busy || $0.value.pendingSend != nil } }
         let store = pendingSends; let scope = client.operationRecoveryScope; let id = session.id
+        // The archive route reads the whole transcript; a Bridge without it answers 404 and the conversation
+        // keeps the windowed history.
+        let archive = ArchiveChain { cursor, limit in
+            try await client.get("/v1/sessions/\(id)/archive",
+                                 query: cursor.map { ["cursor": $0, "limit": String(limit)] } ?? ["tail": String(limit)],
+                                 as: ConversationArchivePage.self)
+        }
         let model = ConversationModel(session: session, client: client, speechInput: makeSpeechInput(),
             loadRecovery: { try await store.load(scope: scope, sessionID: id) },
-            saveRecovery: { try await store.save($0, scope: scope, sessionID: id) })
+            saveRecovery: { try await store.save($0, scope: scope, sessionID: id) },
+            cache: conversations, store: conversationStore, archive: archive, modelCache: modelChoices)
         conversationModels[key] = model
         return model
     }
@@ -322,9 +456,19 @@ final class AppModel {
         guard let index = links.firstIndex(where: { $0.id == hostID }) else { return }
         let removed = links.remove(at: index), scope = removed.client.operationRecoveryScope + ":"
         for (key, model) in conversationModels where key.hasPrefix(scope) { model.suspendReads(); model.speech.cancel(); conversationModels[key] = nil }
-        removed.client.close(); perHost[hostID] = nil; hostErrors[hostID] = nil; refreshGeneration = UUID(); loading = false
+        removed.client.close(); perHost[hostID] = nil; hostErrors[hostID] = nil; pending[hostID] = nil; refreshGeneration = UUID(); loading = false
+        // A removed Mac's conversations are unreadable; their stored copies go with it.
+        Task { await conversations.remove(scope: removed.client.operationRecoveryScope) }
         if removed.connection != nil { store.removeConnection(hostID: hostID) } else { store.remove(); store.disableLegacy() }
         host = links.first?.name ?? ""; publish()
         if links.isEmpty { enrollmentGeneration = UUID(); stopEnrollmentMonitor() }
     }
 }
+
+#if DEBUG
+/// One entry of the test-only nearby list read from `CMUX_REMOTE_TEST_NEARBY_PATH`.
+struct TestNearbyEntry: Decodable {
+    let id: String
+    let name: String
+}
+#endif

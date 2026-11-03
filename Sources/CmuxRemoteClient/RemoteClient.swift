@@ -10,21 +10,37 @@ public final class RemoteClient: Sendable {
     public let canReplyFeed: Bool
     private let capabilities: Set<ClientCapability>
     private let legacy: Bool
+    private let trace: @Sendable (String) -> Void
+    /// One Bridge subscription per path, shared by every page and follower watching it.
+    private let hub: PathWatchHub
     public func allows(_ capability: ClientCapability) -> Bool { capabilities.contains(capability) }
     /// Explicit legacy mode; the owner must separately enable it on the Bridge.
-    public init(pairing: PairingConfiguration) {
-        legacy = true
+    ///
+    /// `trace` receives one short line per dial, path outcome, link loss, failed or timed-out request and ended
+    /// subscription. Lines never carry keys, grants, proofs, permits, bodies or query values.
+    public init(pairing: PairingConfiguration, trace: @escaping @Sendable (String) -> Void = { _ in }) {
+        legacy = true; self.trace = trace
         operationRecoveryScope = IdentityCryptography().digest(Data((pairing.certificateSHA256 + ":" + pairing.token).utf8))
-        runtime = RemoteClientRuntime(pairing: pairing, connection: nil); canControlConversations = true; canReplyFeed = true; capabilities = Set(ClientCapability.allCases)
+        runtime = RemoteClientRuntime(pairing: pairing, connection: nil, trace: trace); canControlConversations = true; canReplyFeed = true; capabilities = Set(ClientCapability.allCases)
+        hub = Self.hub(runtime: runtime, trace: trace)
     }
-    public init(connection: AuthorizedConnection) throws {
-        try connection.validate(); legacy = false
+    public init(connection: AuthorizedConnection, trace: @escaping @Sendable (String) -> Void = { _ in }) throws {
+        try connection.validate(); legacy = false; self.trace = trace
         operationRecoveryScope = IdentityCryptography().digest(try JSONEncoder().encode([connection.host.id, connection.grant.value.clientID]))
         let pairing = try PairingConfiguration(host: connection.endpoint.host, port: connection.endpoint.port, token: String(repeating: "0", count: 32), certificateSHA256: connection.host.certificateSHA256)
-        runtime = RemoteClientRuntime(pairing: pairing, connection: connection)
+        runtime = RemoteClientRuntime(pairing: pairing, connection: connection, trace: trace)
         capabilities = Set(connection.grant.value.scope.capabilities)
         canControlConversations = connection.grant.value.scope.capabilities.contains(.conversationControl)
         canReplyFeed = connection.grant.value.scope.capabilities.contains(.feedReply)
+        hub = Self.hub(runtime: runtime, trace: trace)
+    }
+    /// Keeps one path subscribed across link loss without dialing a link that is down; see `PathResubscription`.
+    private static func hub(runtime: RemoteClientRuntime, trace: @escaping @Sendable (String) -> Void) -> PathWatchHub {
+        let states = runtime.linkStates
+        let loop = PathResubscription(subscribe: { try await runtime.subscribe($0) },
+                                      linkDown: { states.latest == .disconnected }, linkUp: { await states.connected() },
+                                      discardEpoch: { await runtime.discardEpoch() }, trace: trace)
+        return PathWatchHub { path, changed in await loop.run(path, changed: changed) }
     }
     public func get<T: Decodable & Sendable>(_ path: String, query: [String: String] = [:], as type: T.Type) async throws -> T { try await runtime.request(path, method: "GET", query: query, body: nil, as: type) }
     public func post<B: Encodable & Sendable, T: Decodable & Sendable>(_ path: String, body: B, as type: T.Type) async throws -> T { try await runtime.request(path, method: "POST", query: [:], body: JSONEncoder().encode(body), as: type) }
@@ -34,39 +50,19 @@ public final class RemoteClient: Sendable {
     public func changes(paths: [String]) -> AsyncStream<Void> {
         let output = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
         guard !paths.isEmpty, paths.count <= 4, Set(paths).count == paths.count else { output.continuation.finish(); return output.stream }
-        let runtime = runtime, legacy = legacy
+        let legacy = legacy, hub = hub, id = UUID(), continuation = output.continuation
         let task = Task {
             if legacy {
                 while !Task.isCancelled {
-                    output.continuation.yield(())
+                    continuation.yield(())
                     do { try await Task.sleep(for: .seconds(2)) } catch { break }
                 }
-                output.continuation.finish(); return
+                continuation.finish(); return
             }
-            await withTaskGroup(of: Void.self) { group in
-                for path in paths {
-                    group.addTask {
-                        var attempt = 0
-                        while !Task.isCancelled {
-                            do {
-                                let subscription = try await runtime.subscribe(path)
-                                for try await _ in subscription { guard !Task.isCancelled else { return }; attempt = 0; output.continuation.yield(()) }
-                            } catch {
-                                guard !Task.isCancelled else { return }
-                                output.continuation.yield(())
-                                if let failure = error as? BridgeError, ["unauthorized", "scope_denied", "invalid_identity", "invalid_signature", "host_changed"].contains(failure.code) { return }
-                            }
-                            attempt = min(attempt + 1, 5)
-                            // Reconnection backoff is an intended, cancellable delay.
-                            do { try await Task.sleep(for: .seconds(1 << attempt)) } catch { return }
-                        }
-                    }
-                }
-                await group.waitForAll()
-            }
-            output.continuation.finish()
+            await hub.add(id, paths: Set(paths), changed: { continuation.yield(()) }, finished: { continuation.finish() })
         }
-        output.continuation.onTermination = { _ in task.cancel() }
+        // Removal waits for the registration, so a stream dropped at once still releases its subscriptions.
+        output.continuation.onTermination = { _ in task.cancel(); Task { await task.value; await hub.remove(id) } }
         return output.stream
     }
     /// Refreshes host-certified cloud reachability without expanding the saved grant.

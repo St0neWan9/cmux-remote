@@ -6,7 +6,13 @@ struct ErrorPresentation {
     func isConnectivity(_ error: any Error) -> Bool {
         if error is URLError { return true }
         if (error as NSError).domain == NSPOSIXErrorDomain { return true }
-        return ["relay_unavailable", "connection_failed"].contains((error as? BridgeError)?.code ?? "")
+        // These Bridge and relay codes are transient connection failures, not application errors.
+        // They resolve on the next reconnect without user action, so the connection bar handles them.
+        // Protocol-level and transient relay/bridge codes: these resolve on reconnect.
+        return ["relay_unavailable", "connection_failed",
+                "bridge_offline", "bridge_starting", "bridge_replaced",
+                "invalid_proof", "replayed_request", "relay_configuration",
+                "capacity", "link_busy"].contains((error as? BridgeError)?.code ?? "")
     }
     func message(_ error: any Error) -> String {
         if let network = error as? URLError {
@@ -19,7 +25,8 @@ struct ErrorPresentation {
         case "invalid_endpoint": return String(localized: "error.relay_origin")
         case "unauthorized", "scope_denied": return String(localized: "error.authorization")
         case "enrollment_closed", "enrollment_expired", "request_not_found", "request_finished": return String(localized: "error.enrollment")
-        case "host_changed", "invalid_identity", "invalid_signature", "invalid_grant", "invalid_proof", "replayed_request": return String(localized: "error.identity")
+        case "host_changed", "invalid_identity", "invalid_signature", "invalid_grant": return String(localized: "error.identity")
+        case "invalid_proof", "replayed_request": return String(localized: "error.epoch")
         case "draft_storage_failed": return String(localized: "error.draft_storage")
         case "keychain_failed": return String(localized: "error.keychain")
         case "outcome_unknown": return String(localized: "error.outcome_unknown")
@@ -31,6 +38,7 @@ struct ErrorPresentation {
         case "invalid_input", "too_large": return String(localized: "error.input_value")
         case "project_unavailable": return String(localized: "error.project")
         case "session_not_found": return String(localized: "error.read_only")
+        case "task_unavailable": return String(localized: "error.task_unavailable")
         case "operation_conflict": return String(localized: "error.operation_conflict")
         case "receipt_capacity": return String(localized: "error.receipt_capacity")
         case "receipt_storage", "invalid_state": return String(localized: "error.receipt_storage")
@@ -43,7 +51,20 @@ struct ErrorPresentation {
         case "invalid_image": return String(localized: "error.image")
         case "image_load_failed": return String(localized: "error.image_load")
         case "request_expired": return String(localized: "error.expired")
-        default: return String(localized: "error.connection")
+        case "launch_unsupported": return String(localized: "error.launch_unsupported")
+        case "prompt_required": return String(localized: "error.prompt_required")
+        case "directory_forbidden", "directory_missing": return String(localized: "error.directory")
+        case "invalid_model": return String(localized: "error.invalid_model")
+        case "model_unavailable": return String(localized: "error.model_unavailable")
+        case "model_switch_failed": return String(localized: "error.model_switch_failed")
+        case "agent_busy": return String(localized: "error.agent_busy")
+        default:
+            // Keep the code visible in the banner until all unhandled codes are confirmed handled.
+            if let code {
+                diagLog(.warning, category: "error", "unhandled error code=\(code)")
+                return "[" + code + "] " + String(localized: "error.connection")
+            }
+            return String(localized: "error.connection")
         }
     }
 }

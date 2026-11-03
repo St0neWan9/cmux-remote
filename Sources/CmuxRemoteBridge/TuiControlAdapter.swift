@@ -14,6 +14,7 @@ public actor TuiControlAdapter: CmuxControlling {
     private var pinnedIdentity: String?
     private var knownConversations: Set<String> = []
     private var knownSurfaces: Set<String> = []
+    private var knownWorkspaces: Set<String> = []
     private let prompt = TuiPromptSafety()
     /// The last prompt text the phone wrote per conversation; an interrupted Agent may put it back in its input.
     private var lastSent: [String: String] = [:]
@@ -21,24 +22,31 @@ public actor TuiControlAdapter: CmuxControlling {
     /// The journal position after the last folded hook; nil until the first read and after a failed one.
     private var journalCursor: JSONValue?
     private let restoreChecks: Int
+    private let claudeConfirmation: ClaudeModelConfirmation
     private let journalWindow: UInt64
     private let restoreInterval: Duration
+    private let modelSwitch: CodexModelSwitch
+    /// The gap between the keys of a menu answer, so each arrives as its own keypress.
+    private let keyPause: Duration
     public init(client: any TuiResourceRequesting, transcripts: TuiTranscriptLocator, attachments: TuiAttachmentStore? = nil, decisions: MutationLedger = MutationLedger(), archive: TuiBindingRepository? = nil,
-                restoreChecks: Int = 8, restoreInterval: Duration = .milliseconds(150), journalWindow: UInt64 = 20_000) {
+                restoreChecks: Int = 8, restoreInterval: Duration = .milliseconds(150), journalWindow: UInt64 = 20_000, keyPause: Duration = .milliseconds(250)) {
         self.client = client; self.transcripts = transcripts; self.attachments = attachments; self.decisions = decisions; self.archive = archive
-        self.restoreChecks = restoreChecks; self.restoreInterval = restoreInterval; self.journalWindow = journalWindow
+        self.restoreChecks = restoreChecks; self.restoreInterval = restoreInterval; self.journalWindow = journalWindow; self.keyPause = keyPause
+        modelSwitch = CodexModelSwitch(interval: restoreInterval)
+        claudeConfirmation = ClaudeModelConfirmation(interval: restoreInterval)
     }
     public func identity() -> String? { pinnedIdentity }
     public func ownsDecision(_ id: String) -> Bool { pending[id] != nil }
     public func ownsConversation(_ id: String) -> Bool { knownConversations.contains(id) }
     public func ownsSurface(_ id: String) -> Bool { knownSurfaces.contains(id.lowercased()) }
+    public func ownsWorkspace(_ id: String) -> Bool { knownWorkspaces.contains(id.lowercased()) }
     public func request(_ method: String, params: [String: JSONValue]) async throws -> JSONValue {
         switch method {
         case "system.ping":
             _ = try await snapshot(); return .object(["backend": .string("cmux-tui")])
         case "system.capabilities":
             return .object(["backend": .string("cmux-tui"), "protocol": .string("cmux.protocol/2"), "attachments": .bool(attachments != nil), "feed_decisions": .bool(true), "native_mirror": .bool(false)])
-        case "workspace.list": return .object(["workspaces": .array(try await snapshot().workspaces)])
+        case "workspace.list": return .object(["workspaces": .array(try await snapshot().occupiedWorkspaces)])
         case "vault.sessions", "chat.sessions.dump":
             let current = try await snapshot()
             let liveIDs = Set(current.bindings.map(\.id))
@@ -48,8 +56,30 @@ public actor TuiControlAdapter: CmuxControlling {
             var rows: [JSONValue] = []
             for binding in bindings {
                 var row = descriptor(binding)
-                if !liveIDs.contains(binding.id) { row["state"] = .string("ended"); row["status"] = .string("ended") }
-                else if let state = activity[binding.providerSession] { row["state"] = .string(state); row["status"] = .string(state) }
+                // An Agent the daemon has not re-registered after a resume, on a terminal that is still running, is a
+                // live conversation rather than a finished one; only a terminal that is gone makes it historical.
+                var revived = false, promptKnown: Bool?
+                if !liveIDs.contains(binding.id) {
+                    // A running terminal only means the Agent is still there when its own prompt is on screen; the
+                    // shell that replaced it would accept the phone's text as a command, so that case is resumable.
+                    let running = current.runningTerminals.contains(binding.surfaceID)
+                    let promptKnown = running ? await showsAgentPrompt(current, binding: binding) : nil
+                    revived = running && promptKnown == true
+                    if !revived { row["state"] = .string("ended"); row["status"] = .string("ended") }
+                }
+                if liveIDs.contains(binding.id) || revived, let state = activity[binding.providerSession] { row["state"] = .string(state); row["status"] = .string(state) }
+                else if revived { row["state"] = .string("idle"); row["status"] = .string("idle") }
+                // A conversation that can be reopened says so, so the phone offers to resume instead of a lock.
+                if !liveIDs.contains(binding.id), !revived {
+                    let resumable = await resumableBinding(id: binding.id, in: current, promptKnown: promptKnown)
+                    if resumable != nil { row["resumable"] = .bool(true) }
+                }
+                // An interrupted Claude turn sends no Stop hook, so its hooks still say working; Claude Code marks
+                // itself idle in the terminal title with `✳` (a turn in progress shows a spinner glyph instead).
+                if liveIDs.contains(binding.id), binding.provider == "claude", row["state"]?.string == "working",
+                   current.terminalTitles[binding.terminal]?.hasPrefix("✳") == true {
+                    row["state"] = .string("idle"); row["status"] = .string("idle")
+                }
                 if let path = paths[binding.id] {
                     row["file"] = .string(path)
                 }
@@ -60,46 +90,121 @@ public actor TuiControlAdapter: CmuxControlling {
             let current = try await snapshot(); var next: [String: TuiPendingDecision] = [:]
             for binding in current.bindings where binding.state == "needs_input" {
                 let screen = try await client.resource("terminal.screen.read", params: current.selectors(binding), idempotencyKey: nil)
-                if let decision = TuiDecisionParser().permission(snapshot: current, binding: binding, screen: screen),
+                if let decision = TuiDecisionParser().permission(snapshot: current, binding: binding, screen: screen, ask: pendingAsk(binding, screen: screen)),
                    let operation = UUID(uuidString: String(decision.id.dropFirst("tui-decision:".count))),
                    try await decisions.scopedOperation(clientID: "tui_decision", operationID: operation) == nil { next[decision.id] = decision }
             }
             pending = next
             return .object(["items": .array(next.values.sorted { $0.id < $1.id }.map(\.payload))])
         case "feed.permission.reply":
-            guard let id = params["request_id"]?.string, let original = pending[id], let mode = params["mode"]?.string, ["once", "deny"].contains(mode),
-                  let operation = UUID(uuidString: String(id.dropFirst("tui-decision:".count))) else { throw BridgeError("request_expired", "This daemon permission request is no longer available.", status: 409) }
-            let current = try await snapshot()
-            guard current.generation == original.generation, let binding = current.bindings.first(where: { $0.id == original.binding.id }), binding == original.binding else { throw stale() }
-            let screen = try await client.resource("terminal.screen.read", params: current.selectors(binding), idempotencyKey: nil)
-            guard let fresh = TuiDecisionParser().permission(snapshot: current, binding: binding, screen: screen), fresh.id == original.id else { throw BridgeError("request_expired", "The permission screen changed before the decision.", status: 409) }
-            let fingerprint = try MutationLedger.fingerprint(action: "tui-permission", resource: id, payload: .string(mode))
-            if let prior = try await decisions.begin(clientID: "tui_decision", operationID: operation, fingerprint: fingerprint, workspaceID: binding.workspaceID, capability: .feedReply) {
-                guard prior.receipt != nil else { throw BridgeError("outcome_unknown", "The previous decision is not confirmed; inspect the Agent.", status: 409) }
-                return .object(["delivered": .bool(true)])
+            guard let id = params["request_id"]?.string, let original = pending[id], let mode = params["mode"]?.string, ["once", "deny"].contains(mode) else {
+                throw BridgeError("request_expired", "This daemon permission request is no longer available.", status: 409)
             }
-            var fields = current.selectors(binding); fields["keys"] = .array((mode == "once" ? fresh.allowKeys : ["escape"]).map(JSONValue.string)); fields["expected_revision"] = .string(current.revision)
-            try await effect("terminal.input.keys", fields: fields, key: "cmux-remote:decision:" + operation.uuidString.lowercased(), generation: current.generation)
-            _ = try await decisions.complete(clientID: "tui_decision", operationID: operation); pending[id] = nil
-            return .object(["delivered": .bool(true)])
+            let keys = mode == "once" ? original.allowKeys : ["escape"]
+            return try await answer(id, original, keys: keys, action: "tui-permission", payload: .string(mode))
+        case "feed.question.reply" where params["request_id"]?.string.flatMap({ pending[$0]?.ask }) != nil:
+            // The Agent's AskUserQuestion menu: one answer per question becomes the digits and moves that give it.
+            guard let id = params["request_id"]?.string, let original = pending[id], let ask = original.ask,
+                  let selections = params["selections"]?.array, selections.allSatisfy({ $0.string != nil }) else {
+                throw BridgeError("request_expired", "This question is no longer available.", status: 409)
+            }
+            guard let keys = ask.keys(for: selections.compactMap(\.string)) else {
+                throw BridgeError("invalid_input", "Answer every question with one of its own options.")
+            }
+            return try await answer(id, original, keys: keys, action: "tui-ask", payload: .array(selections))
+        case "feed.question.reply":
+            // A notice that only waits for Enter or Escape. The phone sends the label it chose; the key comes from
+            // the decision the Bridge parsed, so no screen text can become input.
+            guard let id = params["request_id"]?.string, let original = pending[id], original.kind == .question,
+                  let selections = params["selections"]?.array, selections.count == 1, let chosen = selections[0].string else {
+                throw BridgeError("request_expired", "This daemon prompt is no longer available.", status: 409)
+            }
+            let label = original.choices.first { $0.key == chosen }?.label ?? chosen
+            guard let choice = original.choices.first(where: { $0.label == label }) else {
+                throw BridgeError("invalid_input", "Choose one of the prompt's own options.")
+            }
+            return try await answer(id, original, keys: [choice.key], action: "tui-question", payload: .string(choice.key))
         case "conversation.image.read":
             guard let id = params["session_id"]?.string, knownConversations.contains(id), let path = params["path"]?.string else { throw stale() }
             let data = try attachments?.image(conversation: id, path: path)
             return .object(["data_b64": data.map { .string($0.base64EncodedString()) } ?? .null])
         case "surface.read_text", "surface.input_state":
             let current = try await snapshot()
-            guard let id = params["surface_id"]?.string?.lowercased(), let binding = current.bindings.first(where: { $0.surfaceID == id }),
+            guard let id = params["surface_id"]?.string?.lowercased(), let binding = activeBinding(surfaceID: id, in: current),
                   params["workspace_id"]?.string.map({ $0.lowercased() == binding.workspaceID }) != false else { throw stale() }
             let screen = try await client.resource("terminal.screen.read", params: current.selectors(binding), idempotencyKey: nil)
             guard let text = screen["text"].string, text.utf8.count <= 1_048_576 else { throw BridgeError("invalid_response", "The daemon screen is invalid.", status: 502) }
             if method == "surface.read_text" { return .object(["text": .string(text)]) }
             return .object(["workspace_id": .string(binding.workspaceID), "surface_id": .string(binding.surfaceID), "agent": .bool(true), "terminal": .bool(true), "blocks_typing": .bool(!prompt.isEmpty(try await terminalState(current, binding: binding), provider: binding.provider)), "lifecycle": .string(binding.state)])
+        case "surface.create":
+            // Session starting: a new terminal tab in the workspace's active pane running a fixed agent command.
+            // The daemon keeps the session's focused workspace and pane; only that pane's visible tab changes.
+            guard params["type"]?.string == "terminal", let workspaceID = params["workspace_id"]?.string?.lowercased(),
+                  let cwd = params["working_directory"]?.string, cwd.hasPrefix("/"),
+                  let agent = params["launch_agent"]?.string.flatMap(LaunchAgent.init(rawValue:)),
+                  let key = params["operation_key"]?.string, !key.isEmpty, key.utf8.count <= 128 else { throw BridgeError("invalid_input", "Invalid daemon terminal request.") }
+            let commandLine = AgentCommandLine()
+            let prompt = try commandLine.validatedPrompt(params["launch_prompt"]?.string)
+            let current = try await snapshot()
+            guard let workspace = current.rawWorkspaces[workspaceID] else { throw stale() }
+            var request = current.selectors()
+            request["workspace"] = .string(workspace); request["cwd"] = .string(cwd); request["name"] = .string(agent.rawValue)
+            // The daemon's `-lc` skips the interactive startup files where agents are often put on PATH. The owner's
+            // interactive shell runs the agent as a typed command would, then stays open as a login shell.
+            let shell = Self.loginShell()
+            request["argv"] = .array([.string(shell), .string("-ic"), .string(commandLine.line(agent, prompt: prompt) + "; exec " + commandLine.quoted(shell) + " -l")])
+            request["correlation_key"] = .string(key)
+            let created = try await client.resource("workspace.run", params: request, idempotencyKey: key)
+            guard let terminal = created["value"]["terminal_id"].string, (try? TuiResourceIdentity().validate(terminal, prefix: "term")) != nil else {
+                throw BridgeError("outcome_unknown", "The daemon did not confirm the new terminal.", status: 409)
+            }
+            let surface = TuiResourceIdentity().uuid(machine: current.machine, session: current.session, resource: terminal)
+            knownSurfaces.insert(surface)
+            return .object(["surface_id": .string(surface)])
+        case "mobile.chat.resume":
+            // Reopening one Agent session in a new terminal: the conversation, its provider session and the directory
+            // all come from this Bridge's own binding and the Agent's transcript, never from the caller.
+            guard let id = params["session_id"]?.string, let key = params["operation_key"]?.string, !key.isEmpty, key.utf8.count <= 128 else {
+                throw BridgeError("invalid_input", "A conversation and a stable operation identity are required.")
+            }
+            let current = try await snapshot()
+            guard let found = await resumableBinding(id: id, in: current) else { throw stale() }
+            let binding = found.binding
+            guard let agent = LaunchAgent(rawValue: binding.provider) else { throw stale() }
+            let line = agent.resumeCommand(sessionID: binding.providerSession)
+            // The conversation's own terminal is still open on a shell, so the resume belongs in it: opening a new tab
+            // would take the pane's focus away from the window the owner was using, and the new tab would become the
+            // one the conversation is attributed to. Only a terminal that is gone needs a new one.
+            if let surface = binding.surfaceID as String?, current.runningTerminals.contains(surface) {
+                var request = current.selectors(binding)
+                // A leading space keeps a resumed command out of the shell's history rewriting; the whole line and its
+                // Return arrive in one write so no prompt redraw can eat the first character.
+                request["text"] = .string(" " + line + "\r")
+                request["expected_revision"] = .string(current.revision)
+                try await effect("terminal.input.write", fields: request, key: "cmux-remote:resume:" + key, generation: current.generation)
+                return .object(["surface_id": .string(surface)])
+            }
+            var request = current.selectors()
+            request["workspace"] = .string(binding.workspace); request["cwd"] = .string(found.cwd)
+            // The tab takes the conversation's own title, so the phone keeps showing the conversation it resumed.
+            request["name"] = .string(binding.title)
+            // The daemon's `-lc` skips the interactive startup files where agents are often put on PATH, so the owner's
+            // interactive shell runs the resume as a typed command would, and a login shell stays open after it exits.
+            let shell = Self.loginShell()
+            request["argv"] = .array([.string(shell), .string("-ic"), .string(line + "; exec " + AgentCommandLine().quoted(shell) + " -l")])
+            request["correlation_key"] = .string(key)
+            let created = try await client.resource("workspace.run", params: request, idempotencyKey: key)
+            guard let terminal = created["value"]["terminal_id"].string, (try? TuiResourceIdentity().validate(terminal, prefix: "term")) != nil else {
+                throw BridgeError("outcome_unknown", "The daemon did not confirm the reopened terminal.", status: 409)
+            }
+            knownSurfaces.insert(TuiResourceIdentity().uuid(machine: current.machine, session: current.session, resource: terminal))
+            return .object(["surface_id": .string(TuiResourceIdentity().uuid(machine: current.machine, session: current.session, resource: terminal))])
         case "mobile.chat.send", "mobile.chat.interrupt":
             guard let id = params["session_id"]?.string, let operation = params["operation_id"]?.string, let operationUUID = UUID(uuidString: operation), let operationKey = params["backend_operation_key"]?.string, operationKey.count == 64, operationKey.allSatisfy({ $0.isASCII && $0.isHexDigit }) else {
                 throw BridgeError("invalid_input", "A stable conversation operation identity is required.")
             }
             let current = try await snapshot()
-            guard let binding = current.bindings.first(where: { $0.id == id }),
+            guard let binding = activeBinding(id: id, in: current),
                   params["workspace_id"]?.string?.lowercased() == binding.workspaceID,
                   params["surface_id"]?.string?.lowercased() == binding.surfaceID else { throw stale() }
             if method == "mobile.chat.interrupt" {
@@ -124,7 +229,7 @@ public actor TuiControlAdapter: CmuxControlling {
             // Recheck binding/revision after screen/state reads; never retarget an old session.
             let final = try await snapshot()
             guard final.generation == cleared.generation, final.revision == cleared.revision,
-                  final.bindings.first(where: { $0.id == id }) == binding else { throw stale() }
+                  stillBound(binding, in: final) else { throw stale() }
             var request = final.selectors(binding)
             request["text"] = .string((paste ? "\u{1b}[200~" + content + "\u{1b}[201~" : content) + "\r")
             request["expected_revision"] = .string(final.revision)
@@ -132,8 +237,67 @@ public actor TuiControlAdapter: CmuxControlling {
             if lastSent.count >= 200, lastSent[binding.id] == nil { lastSent.removeAll() }
             lastSent[binding.id] = imagePaths.isEmpty ? text : nil
             return .object(["submitted": .bool(true)])
+        case "mobile.chat.model":
+            // Codex has no model argument, so its picker is walked here; a Claude switch is an ordinary send.
+            guard let id = params["session_id"]?.string, let operationKey = params["backend_operation_key"]?.string, operationKey.count == 64,
+                  operationKey.allSatisfy({ $0.isASCII && $0.isHexDigit }),
+                  (params["candidates"]?.array?.count ?? 0) <= 4 else {
+                throw BridgeError("invalid_input", "A stable model switch identity and a model are required.")
+            }
+            let candidates = params["candidates"]?.array?.compactMap(\.string) ?? []
+            let current = try await snapshot()
+            guard let binding = activeBinding(id: id, in: current),
+                  params["workspace_id"]?.string?.lowercased() == binding.workspaceID,
+                  params["surface_id"]?.string?.lowercased() == binding.surfaceID else { throw stale() }
+            let key = "cmux-remote:model:" + operationKey.lowercased() + ":"
+            let console = AgentConsole(rows: { [self] in try await consoleRows(binding) },
+                                       write: { [self] text, step in try await consoleWrite(binding, text: text, key: key + step) })
+            // The command itself went out as a send; only the question Claude Code may ask about it is answered here.
+            if binding.provider == "claude" {
+                try await claudeConfirmation.settle(on: console, confirm: params["confirm"]?.bool == true)
+                return .object(["switched": .bool(true)])
+            }
+            guard binding.provider == "codex" else { throw unsupported() }
+            _ = try await clearPromptForSend(current, binding: binding, operationKey: operationKey)
+            guard !candidates.isEmpty else { throw BridgeError("invalid_input", "A stable model switch identity and a model are required.") }
+            try await modelSwitch.run(on: console, candidates: candidates, effort: params["effort"]?.string)
+            return .object(["switched": .bool(true)])
+        case "mobile.terminal.rename":
+            // The daemon names a tab, not a terminal: the id comes from the same snapshot that proved the binding.
+            guard let id = params["session_id"]?.string, let title = params["title"]?.string,
+                  let operationKey = params["backend_operation_key"]?.string, operationKey.count == 64,
+                  operationKey.allSatisfy({ $0.isASCII && $0.isHexDigit }) else {
+                throw BridgeError("invalid_input", "A stable rename identity and a title are required.")
+            }
+            let current = try await snapshot()
+            guard let binding = activeBinding(id: id, in: current),
+                  params["workspace_id"]?.string?.lowercased() == binding.workspaceID,
+                  params["surface_id"]?.string?.lowercased() == binding.surfaceID,
+                  let tab = current.tabIDs[binding.terminal] else { throw stale() }
+            // A tab operation names the chain down to the tab, not the terminal the conversation runs in.
+            var request: [String: JSONValue] = ["machine": .string(current.machine), "session": .string(current.session),
+                                                "workspace": .string(binding.workspace), "tab": .string(tab),
+                                                "name": .string(title), "source": .string("user")]
+            if let pane = current.tabPanes[binding.terminal] { request["pane"] = .string(pane) }
+            if let screen = current.tabScreens[binding.terminal] { request["screen"] = .string(screen) }
+            try await effect("tab.rename", fields: request, key: "cmux-remote:rename:" + operationKey.lowercased(), generation: current.generation)
+            return .object(["title": .string(title)])
         default: throw unsupported()
         }
+    }
+    /// The rendered rows of a conversation's terminal, only while the same Agent still holds it.
+    private func consoleRows(_ binding: TuiSessionSnapshot.Binding) async throws -> [String] {
+        let current = try await snapshot()
+        guard stillBound(binding, in: current) else { throw stale() }
+        return try await terminalState(current, binding: binding).rows
+    }
+    /// One fixed write into that terminal, bound to the revision it was checked at.
+    private func consoleWrite(_ binding: TuiSessionSnapshot.Binding, text: String, key: String) async throws {
+        let current = try await snapshot()
+        guard stillBound(binding, in: current) else { throw stale() }
+        var request = current.selectors(binding)
+        request["text"] = .string(text); request["expected_revision"] = .string(current.revision)
+        try await effect("terminal.input.write", fields: request, key: key, generation: current.generation)
     }
     /// Folds agent hooks committed since the last read; an unreadable journal falls back to the daemon's own states.
     private func hookActivity(_ current: TuiSessionSnapshot) async -> [String: String] {
@@ -184,7 +348,7 @@ public actor TuiControlAdapter: CmuxControlling {
             }
             try await Task.sleep(for: restoreInterval)
             current = try await snapshot()
-            guard current.generation == start.generation, current.bindings.first(where: { $0.id == binding.id }) == binding else { throw stale() }
+            guard current.generation == start.generation, stillBound(binding, in: current) else { throw stale() }
             state = try await terminalState(current, binding: binding)
         }
         if prompt.isEmpty(state, provider: binding.provider) { return (current, state) }
@@ -196,7 +360,7 @@ public actor TuiControlAdapter: CmuxControlling {
         let expected = sent.filter { !$0.isWhitespace }
         for check in 0..<restoreChecks {
             if check > 0 { try? await Task.sleep(for: restoreInterval) }
-            guard !Task.isCancelled, let current = try? await snapshot(), current.bindings.first(where: { $0.id == binding.id }) == binding,
+            guard !Task.isCancelled, let current = try? await snapshot(), stillBound(binding, in: current),
                   let state = try? await terminalState(current, binding: binding), let typed = prompt.typedText(state, provider: binding.provider) else { return }
             if typed.isEmpty { continue }
             guard typed.filter({ !$0.isWhitespace }) == expected else { return }
@@ -206,12 +370,66 @@ public actor TuiControlAdapter: CmuxControlling {
             return
         }
     }
-    private func effect(_ operation: String, fields: [String: JSONValue], key: String, generation: String) async throws {
+    /// Re-checks the blocked Agent, the exact screen and the journal, then sends the decision's own keys.
+    ///
+    /// Permission and prompt choices share this: both are one non-retried key write bound to the screen revision
+    /// that produced the request, with a durable intent so no second device, new operation id or restart repeats it.
+    /// The AskUserQuestion a Claude Agent's transcript has pending, read only when the screen shows a menu.
+    ///
+    /// Locating a transcript walks the Agent's history folders, so it waits for the menu's own footer.
+    private func pendingAsk(_ binding: TuiSessionSnapshot.Binding, screen: JSONValue) -> AskUserQuestionRequest? {
+        guard binding.provider == "claude", screen["text"].string?.contains("Enter to select") == true,
+              let path = (try? transcripts.locate([binding]))?[binding.id], let handle = FileHandle(forReadingAtPath: path) else { return nil }
+        defer { try? handle.close() }
+        // The newest megabyte holds the call the Agent is waiting on; a partial first line is dropped.
+        let window: UInt64 = 1 << 20
+        guard let size = try? handle.seekToEnd() else { return nil }
+        try? handle.seek(toOffset: size > window ? size - window : 0)
+        guard var data = try? handle.readToEnd() else { return nil }
+        if size > window, let newline = data.firstIndex(of: UInt8(ascii: "\n")) { data = data[data.index(after: newline)...] }
+        return AskUserQuestionRequest.pending(in: data)
+    }
+    private func answer(_ id: String, _ original: TuiPendingDecision, keys: [String], action: String, payload: JSONValue) async throws -> JSONValue {
+        guard let operation = UUID(uuidString: String(id.dropFirst("tui-decision:".count))) else {
+            throw BridgeError("request_expired", "This daemon request is no longer available.", status: 409)
+        }
+        let current = try await snapshot()
+        guard current.generation == original.generation, let binding = current.bindings.first(where: { $0.id == original.binding.id }), binding == original.binding else { throw stale() }
+        let screen = try await client.resource("terminal.screen.read", params: current.selectors(binding), idempotencyKey: nil)
+        guard let fresh = TuiDecisionParser().permission(snapshot: current, binding: binding, screen: screen, ask: original.ask), fresh.id == original.id else {
+            throw BridgeError("request_expired", "The screen changed before the decision.", status: 409)
+        }
+        let fingerprint = try MutationLedger.fingerprint(action: action, resource: id, payload: payload)
+        if let prior = try await decisions.begin(clientID: "tui_decision", operationID: operation, fingerprint: fingerprint, workspaceID: binding.workspaceID, capability: .feedReply) {
+            guard prior.receipt != nil else { throw BridgeError("outcome_unknown", "The previous decision is not confirmed; inspect the Agent.", status: 409) }
+            return .object(["delivered": .bool(true)])
+        }
+        let key = "cmux-remote:decision:" + operation.uuidString.lowercased()
+        if original.ask == nil {
+            var fields = current.selectors(binding); fields["keys"] = .array(keys.map(JSONValue.string)); fields["expected_revision"] = .string(current.revision)
+            _ = try await effect("terminal.input.keys", fields: fields, key: key, generation: current.generation)
+        } else {
+            // A menu reads keys that arrive together as one pasted string and ignores it, so its answer goes in one
+            // key at a time with a pause between, each under its own idempotency key and the revision the last returned.
+            var revision = current.revision
+            for (index, menuKey) in keys.enumerated() {
+                if index > 0 { try await Task.sleep(for: keyPause) }
+                var fields = current.selectors(binding); fields["keys"] = .array([.string(menuKey)]); fields["expected_revision"] = .string(revision)
+                revision = try await effect("terminal.input.keys", fields: fields, key: key + ":\(index)", generation: current.generation)
+            }
+        }
+        _ = try await decisions.complete(clientID: "tui_decision", operationID: operation); pending[id] = nil
+        return .object(["delivered": .bool(true)])
+    }
+    /// Applies one daemon mutation and returns the revision its receipt reports.
+    @discardableResult
+    private func effect(_ operation: String, fields: [String: JSONValue], key: String, generation: String) async throws -> String {
         let result = try await client.resource(operation, params: fields, idempotencyKey: key)
         guard result["value"].object != nil, result["generation"].string == generation,
               let revision = result["revision"].string, UInt64(revision) != nil, result["replayed"].bool != nil else {
             throw BridgeError("outcome_unknown", "The daemon omitted a valid mutation receipt; inspect before repeating input.", status: 409)
         }
+        return revision
     }
     private func snapshot() async throws -> TuiSessionSnapshot {
         let current = try TuiSessionSnapshot(await client.resource("session.snapshot", params: ["machine": .string("current"), "session": .string("current")], idempotencyKey: nil))
@@ -229,15 +447,89 @@ public actor TuiControlAdapter: CmuxControlling {
         catalog = next
         knownConversations.formUnion(catalog.keys)
         knownSurfaces.formUnion(current.surfaces)
-        guard knownSurfaces.count <= 16_384, knownConversations.count <= 16_384 else { throw BridgeError("too_large", "The daemon resource routing table is full.", status: 413) }
+        knownWorkspaces.formUnion(current.rawWorkspaces.keys)
+        guard knownSurfaces.count <= 16_384, knownConversations.count <= 16_384, knownWorkspaces.count <= 16_384 else { throw BridgeError("too_large", "The daemon resource routing table is full.", status: 413) }
         return current
     }
+    /// The owner's login shell from the account database, falling back to zsh; the daemon never expands `$SHELL`.
+    static func loginShell() -> String {
+        if let entry = getpwuid(getuid()), let raw = entry.pointee.pw_shell {
+            let shell = String(cString: raw)
+            if shell.hasPrefix("/"), FileManager.default.isExecutableFile(atPath: shell) { return shell }
+        }
+        return "/bin/zsh"
+    }
+    /// The last rendered grid per terminal. Replaying VT state is the most expensive read the Bridge does, and a
+    /// terminal the phone polls between changes has the same bytes, so an unchanged screen answers from here.
+    private var terminalStates: [String: (key: String, state: TuiTerminalState)] = [:]
     private func terminalState(_ current: TuiSessionSnapshot, binding: TuiSessionSnapshot.Binding) async throws -> TuiTerminalState {
-        try TuiTerminalState(await client.resource("terminal.state.read", params: current.selectors(binding), idempotencyKey: nil))
+        let payload = try await client.resource("terminal.state.read", params: current.selectors(binding), idempotencyKey: nil)
+        let encoded = payload["state_base64"].string ?? ""
+        let key = IdentityCryptography().digest(Data("\(payload["cols"].int ?? 0):\(payload["rows"].int ?? 0):\(encoded)".utf8))
+        if let cached = terminalStates[binding.id], cached.key == key { return cached.state }
+        let state = try TuiTerminalState(payload)
+        if terminalStates.count >= 256 { terminalStates.removeAll() }
+        terminalStates[binding.id] = (key, state)
+        return state
     }
     private func descriptor(_ binding: TuiSessionSnapshot.Binding) -> [String: JSONValue] {
         ["session_id": .string(binding.id), "agent": .string(binding.provider), "title": .string(binding.title), "cwd": binding.cwd.map(JSONValue.string) ?? .null,
          "workspace_id": .string(binding.workspaceID), "surface_id": .string(binding.surfaceID), "state": .string(binding.state), "status": .string(binding.state)]
+    }
+    /// The live hook binding, or the archived one whose terminal is still running: an Agent that resumed without the
+    /// daemon re-registering it keeps its terminal, so it stays reachable instead of reading as historical.
+    /// A terminal that a live binding already claims is not revived, so a replacement session is never mistaken for
+    /// the conversation that used to run there.
+    private func activeBinding(id: String?, in current: TuiSessionSnapshot) -> TuiSessionSnapshot.Binding? {
+        guard let id else { return nil }
+        let key = id.lowercased()
+        if let live = current.bindings.first(where: { $0.id.lowercased() == key }) { return live }
+        guard let archived = catalog.values.first(where: { $0.id.lowercased() == key }), current.runningTerminals.contains(archived.surfaceID) else { return nil }
+        return current.bindings.contains { $0.surfaceID == archived.surfaceID } ? nil : archived
+    }
+    /// The same rule keyed by the phone's surface id, for reads that name a surface rather than a conversation.
+    private func activeBinding(surfaceID: String?, in current: TuiSessionSnapshot) -> TuiSessionSnapshot.Binding? {
+        guard let id = surfaceID?.lowercased() else { return nil }
+        if let live = current.bindings.first(where: { $0.surfaceID == id }) { return live }
+        guard !current.bindings.contains(where: { $0.surfaceID == id }) else { return nil }
+        return catalog.values.first { $0.surfaceID == id && current.runningTerminals.contains($0.surfaceID) }
+    }
+    /// Whether the terminal's own screen shows this Agent waiting at its prompt, rather than the shell that replaced it
+    /// once the Agent exited. A prompt prefix is enough: an empty prompt, a draft and a dialog all keep it.
+    private func showsAgentPrompt(_ current: TuiSessionSnapshot, binding: TuiSessionSnapshot.Binding) async -> Bool? {
+        // The rendered grid, not the raw screen text, which still carries the escape sequences that place the prompt.
+        guard let state = try? await terminalState(current, binding: binding) else { return nil }
+        let prefix = binding.provider == "claude" ? "❯\u{00a0}" : "› "
+        // A menu the Agent drew over its prompt leaves no prompt line, yet the Agent is still waiting there.
+        if AgentMenuScreen(rows: state.rows).isShown { return true }
+        return state.rows.contains { line in
+            var body = Substring(line.drop(while: { $0 == " " }))
+            if body.hasPrefix("│") { body = body.dropFirst().drop(while: { $0 == " " }) }
+            return body.hasPrefix(prefix)
+        }
+    }
+    /// A conversation whose Agent has exited but whose session can still be reopened: no live binding claims it, its
+    /// workspace outlived the terminal, its own transcript names the directory to reopen it in, and — when the terminal
+    /// is still running — that terminal is not showing the Agent's own prompt. Nothing here is trusted from the phone.
+    private func resumableBinding(id: String?, in current: TuiSessionSnapshot, promptKnown: Bool? = nil) async -> (binding: TuiSessionSnapshot.Binding, cwd: String)? {
+        guard let id, let binding = catalog.values.first(where: { $0.id.lowercased() == id.lowercased() }),
+              !current.bindings.contains(where: { $0.id == binding.id }),
+              current.rawWorkspaces[binding.workspaceID] != nil else { return nil }
+        // A terminal that is gone is resumed from the transcript alone; a running one must not still hold the Agent.
+        if current.runningTerminals.contains(binding.surfaceID) {
+            let prompt: Bool?
+            if let promptKnown { prompt = promptKnown } else { prompt = await showsAgentPrompt(current, binding: binding) }
+            // Only a positively identified shell prompt makes a running terminal resumable: an unreadable screen could
+            // still hold the Agent, and reopening it would run two processes on one session.
+            guard prompt == false else { return nil }
+        }
+        guard let recorded = try? transcripts.recordedCwd(provider: binding.provider, sessionID: binding.providerSession),
+              !recorded.isEmpty else { return nil }
+        return (binding, recorded)
+    }
+    /// Whether the conversation is still the same live one across a re-read; a revived binding must pass this too.
+    private func stillBound(_ binding: TuiSessionSnapshot.Binding, in current: TuiSessionSnapshot) -> Bool {
+        activeBinding(id: binding.id, in: current) == binding
     }
     private func stale() -> BridgeError { BridgeError("stale_binding", "This daemon Agent no longer has its verified terminal/workspace binding.", status: 409) }
     private func unsupported() -> BridgeError { BridgeError("unsupported", "This operation is not supported by the daemon backend.", status: 422) }

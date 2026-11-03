@@ -4,8 +4,8 @@ import CmuxRemoteCore
 
 /// Pairing credentials remain in device-only Keychain storage.
 struct PairingStore {
-    private let service = "com.st0newan9.cmux-remote.pairing"
-    private let protected = SecureDeviceStore(service: "com.st0newan9.cmux-remote.authorized")
+    private let service = "cmux-remote.pairing"
+    private let protected = SecureDeviceStore(service: "cmux-remote.authorized")
     func legacyEnabled() -> Bool { protected.load(account: "explicit-legacy") == Data([1]) }
     func enableLegacy() throws { try protected.save(Data([1]), account: "explicit-legacy") }
     func disableLegacy() { protected.remove(account: "explicit-legacy") }
@@ -38,12 +38,16 @@ struct PairingStore {
         guard let data = try? Data(contentsOf: simulatorFile), let value = try? JSONDecoder().decode(PairingConfiguration.self, from: data) else { return nil }
         return try? PairingConfiguration(host: value.host, port: value.port, token: value.token, certificateSHA256: value.certificateSHA256)
         #else
+        return read(service)
+        #endif
+    }
+    /// The pairing stored under one service name, when it is present and still valid.
+    private func read(_ service: String) -> PairingConfiguration? {
         let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecReturnData as String: true]
         var result: CFTypeRef?
         guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess, let data = result as? Data,
               let value = try? JSONDecoder().decode(PairingConfiguration.self, from: data) else { return nil }
         return try? PairingConfiguration(host: value.host, port: value.port, token: value.token, certificateSHA256: value.certificateSHA256)
-        #endif
     }
     func save(_ value: PairingConfiguration) throws {
         #if targetEnvironment(simulator)
