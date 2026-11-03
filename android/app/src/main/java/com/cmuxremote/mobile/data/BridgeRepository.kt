@@ -221,6 +221,12 @@ class BridgeRepository(val connection: AuthorizedConnection, private val client:
 
     val overRelay: Boolean get() = relayLink != null
 
+    /** Drops a relay link that stopped carrying reads, so the next attempt can dial again. */
+    fun clearRelayLink() {
+        relayLink = null
+        client.clearLink()
+    }
+
     var relayLink: com.cmuxremote.mobile.bridge.LinkClient? = null
         private set
 
