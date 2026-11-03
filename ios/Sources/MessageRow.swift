@@ -12,6 +12,8 @@ struct MessageRow: View {
     var openDetail: ((String, String) -> Void)?
     /// The Feed request that may answer this question, when the agent is still waiting on it.
     var pendingQuestion: ConversationQuestions.Match?
+    /// Whether the last Feed read answered. Until one does, a card without a request cannot claim there is none.
+    var questionsVerified = true
     /// Whether an answer is on its way, so the card does not accept a second tap.
     var answering = false
     /// Sends the chosen labels for this question, in the question's own order.
@@ -127,9 +129,15 @@ struct MessageRow: View {
                     if let selected = value.selectedOptionLabel ?? chosenAnswer {
                         Text(value.options.isEmpty ? selected : String.localizedStringWithFormat(String(localized: "chat.question.answered"), selected))
                             .font(.footnote).foregroundStyle(.secondary)
-                    } else {
+                    } else if questionsVerified {
                         ForEach(value.options) { Text($0.label) }
                         Text(String(localized: "feed.question.unavailable")).font(.footnote).foregroundStyle(.secondary)
+                    } else {
+                        // No read has answered yet, so this card cannot say the request is gone; saying so is what
+                        // made a live question look dead while the link was dropping.
+                        ForEach(value.options) { Text($0.label).foregroundStyle(.secondary) }
+                        Label(String(localized: "feed.question.checking"), systemImage: "arrow.triangle.2.circlepath")
+                            .font(.footnote).foregroundStyle(.secondary)
                     }
                 }
             }.modifier(FloatingSurface())

@@ -89,6 +89,23 @@ final class ConversationRefreshTests: XCTestCase {
         XCTAssertEqual(model.messages.map(\.seq), [900])
         XCTAssertEqual(model.replacementCount, 1, "A replaced transcript was not reported to the page")
     }
+    func testAReplacedTranscriptThatCarriesNothingDoesNotBlankThePage() async throws {
+        // A compaction rewrites the transcript file, and a read taken while it is being rewritten answers with the
+        // new generation and no messages. Replacing the page with that answer was a white screen.
+        let archive = Archive([nil: page([100, 200], cursor: nil)])
+        let model = try makeModel(archive)
+        await model.refresh()
+        XCTAssertEqual(model.messages.map(\.seq), [100, 200])
+        archive.replace([nil: page([], cursor: nil, generation: "G2")])
+        await model.refresh()
+        XCTAssertEqual(model.messages.map(\.seq), [100, 200], "An empty replacement blanked the conversation")
+        XCTAssertEqual(model.replacementCount, 0, "An empty replacement was reported as the new conversation")
+        // The rewritten record arrives with the next read.
+        archive.replace([nil: page([900, 901], cursor: nil, generation: "G2")])
+        await model.refresh()
+        XCTAssertEqual(model.messages.map(\.seq), [900, 901])
+        XCTAssertEqual(model.replacementCount, 1)
+    }
     func testAStoredCopyIsShownEvenBeforeThePreviousVisitsHoldIsLifted() async throws {
         // Coming back to a page runs the restore before the visit re-enables reads; the stored copy is not a read.
         let archive = Archive([nil: page([300], cursor: nil)])
