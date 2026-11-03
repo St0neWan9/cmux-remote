@@ -8,6 +8,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -41,6 +44,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -213,6 +217,8 @@ fun MacTabs(
     workspaceID: String? = null,
     /** Picks a workspace on the Mac that owns it. */
     onWorkspace: ((String, String?) -> Unit)? = null,
+    /** Long-press drag: move [hostID] to [beforeHostID]'s position. */
+    onMoveHost: ((String, String) -> Unit)? = null,
 ) {
     Row(
         modifier = modifier.horizontalScroll(rememberScrollState()),
@@ -228,12 +234,46 @@ fun MacTabs(
                 tag = "sessions.host.all",
             ) { onSelect(null) }
         }
-        hosts.forEach { (id, name) ->
+        val bounds = androidx.compose.runtime.remember {
+            androidx.compose.runtime.mutableStateMapOf<Int, androidx.compose.ui.geometry.Rect>()
+        }
+        val dragX = androidx.compose.runtime.remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
+        val latestHosts = androidx.compose.runtime.rememberUpdatedState(hosts)
+        val latestMove = androidx.compose.runtime.rememberUpdatedState(onMoveHost)
+        hosts.forEachIndexed { index, (id, name) ->
             val workspaces = hostWorkspaces[id].orEmpty()
             val chosen = workspaceID?.let { workspaces[it] }
             val isSelected = hosts.size == 1 || selected == id
             var menu by remember { mutableStateOf(false) }
-            Box {
+            Box(
+                modifier = Modifier
+                    .onGloballyPositioned { coordinates ->
+                        bounds[index] = coordinates.boundsInRoot()
+                    }
+                    .then(
+                        if (onMoveHost != null) {
+                            Modifier.pointerInput(id) {
+                                detectDragGesturesAfterLongPress(
+                                    onDragStart = { offset ->
+                                        bounds[index]?.let { dragX.floatValue = it.left + offset.x }
+                                    },
+                                    onDrag = { change, amount ->
+                                        change.consume()
+                                        dragX.floatValue += amount.x
+                                        val target = bounds.entries
+                                            .firstOrNull { dragX.floatValue in it.value.left..it.value.right }
+                                            ?.key
+                                            ?: return@detectDragGesturesAfterLongPress
+                                        val targetID = latestHosts.value.getOrNull(target)?.first ?: return@detectDragGesturesAfterLongPress
+                                        if (targetID != id) latestMove.value?.invoke(id, targetID)
+                                    },
+                                )
+                            }
+                        } else {
+                            Modifier
+                        },
+                    ),
+            ) {
                 Capsule(
                     text = if (isSelected && chosen != null) name + " · " + chosen else name,
                     selected = isSelected,

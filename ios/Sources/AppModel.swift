@@ -282,6 +282,15 @@ final class AppModel {
         }
         catch { candidate.close(); self.error = ErrorPresentation().message(error) }
     }
+    /// Reorders the Macs behind the filter pills, and saves the same order.
+    func move(hostID: String, beforeHostID: String) {
+        guard let from = links.firstIndex(where: { $0.id == hostID }) else { return }
+        let item = links.remove(at: from)
+        let insert = links.firstIndex { $0.id == beforeHostID } ?? links.count
+        links.insert(item, at: insert)
+        store.moveConnection(hostID: hostID, beforeHostID: beforeHostID)
+        host = links.first?.name ?? host
+    }
     /// A re-approved Mac replaces its old link in place; a new Mac is appended.
     private func install(_ link: HostLink) {
         if let index = links.firstIndex(where: { $0.id == link.id }) { let old = links[index].client; links[index] = link; if old !== link.client { old.close() } }

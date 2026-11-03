@@ -28,6 +28,15 @@ struct PairingStore {
         try write(values)
     }
     func removeConnection(hostID: String) { try? write(loadConnections().filter { $0.host.id != hostID }) }
+    /// Moves one Mac before another, keeping every other entry in place.
+    func moveConnection(hostID: String, beforeHostID: String) {
+        var values = loadConnections()
+        guard let from = values.firstIndex(where: { $0.host.id == hostID }), from != values.count else { return }
+        let item = values.remove(at: from)
+        let insert = values.firstIndex { $0.host.id == beforeHostID } ?? values.count
+        values.insert(item, at: insert)
+        try? write(values)
+    }
     private func write(_ values: [AuthorizedConnection]) throws { try protected.save(JSONEncoder().encode(values), account: "hosts") }
     /// Relay origins are public routing information, not credentials.
     func relayOrigins() -> [String] { UserDefaults.standard.stringArray(forKey: "relayOrigins") ?? [] }
