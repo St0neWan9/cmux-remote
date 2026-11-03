@@ -455,6 +455,7 @@ fun CmuxApp(viewModel: CmuxViewModel) {
                     onToggleGroup = viewModel::toggleCollapsed,
                     onConnection = viewModel::openConnection,
                     onOpenSidebar = { viewModel.setSidebar(true) },
+                    onMoveHost = viewModel::moveHost,
                 )
                 taskDetail?.let { detail ->
                     TaskDetailSheet(

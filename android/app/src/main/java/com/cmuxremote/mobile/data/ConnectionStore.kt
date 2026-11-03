@@ -41,11 +41,20 @@ class ConnectionStore(private val context: Context) {
         return listOf(legacy)
     }
 
-    /** Adds or replaces one Mac, keeping the others. */
+    /** Adds or replaces one Mac in place, so the device pills keep their order. */
     fun saveToList(connection: AuthorizedConnection) {
         connection.validate()
-        val existing = loadAll().filterNot { it.host.id == connection.host.id } + connection
+        val existing = loadAll().toMutableList()
+        val index = existing.indexOfFirst { it.host.id == connection.host.id }
+        if (index >= 0) existing[index] = connection else existing += connection
         saveList(existing)
+    }
+
+    /** Saves a new order for the existing Macs, used by the pill drag. */
+    fun saveOrder(hostIDs: List<String>) {
+        val byID = loadAll().associateBy { it.host.id }
+        val ordered = hostIDs.mapNotNull(byID::get)
+        if (ordered.size == byID.size) saveList(ordered)
     }
 
     fun removeHost(hostID: String) {

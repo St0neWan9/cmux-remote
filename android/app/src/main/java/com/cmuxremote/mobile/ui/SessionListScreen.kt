@@ -137,6 +137,8 @@ data class SessionListActions(
     /** Opens the Feed scoped to one Mac. */
     val onOpenFeedHost: ((String) -> Unit)? = null,
     val onOpenSidebar: () -> Unit = {},
+    /** Long-press drag on a Mac pill: move the first Mac before the second. */
+    val onMoveHost: (String, String) -> Unit = { _, _ -> },
 )
 
 @Composable
@@ -665,6 +667,7 @@ private fun SessionListContent(
                             actions.onHost(hostID)
                             actions.onWorkspace(workspaceID)
                         },
+                        onMoveHost = actions.onMoveHost,
                         onSelect = actions.onHost,
                     )
                 }

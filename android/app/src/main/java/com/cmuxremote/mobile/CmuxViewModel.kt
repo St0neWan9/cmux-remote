@@ -523,6 +523,22 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setStatusFilter(index: Int) { _statusFilter.value = index }
 
+    /** Reorders the Macs behind the filter pills; the saved list keeps the new order. */
+    fun moveHost(hostID: String, beforeHostID: String) {
+        val from = hosts.indexOfFirst { it.id == hostID }
+        val to = hosts.indexOfFirst { it.id == beforeHostID }
+        if (from < 0 || to < 0 || from == to) return
+        val reordered = hosts.toMutableList()
+        val moved = reordered.removeAt(from)
+        reordered.add(to.coerceIn(0, reordered.size), moved)
+        hosts.clear()
+        hosts.addAll(reordered)
+        store.saveOrder(reordered.map { it.id })
+        (_shell.value as? ShellState.Connected)?.let { state ->
+            _shell.value = state.copy(hosts = hosts.map { it.id to it.name })
+        }
+    }
+
     fun setHostFilter(id: String?) {
         _hostFilter.value = id
         // "All Macs" is a clean slate, so a workspace from the previous Mac goes too.
@@ -804,6 +820,8 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
     private val lastConversationReadAt = mutableMapOf<String, Long>()
     /** A single failed read is not an offline Mac; three in a row are. */
     private val conversationFailures = mutableMapOf<String, Int>()
+    /** A Mac whose three failed reads are being confirmed with its own signed probe. */
+    private val offlineChecks = mutableSetOf<String>()
 
     init {
         // A network that comes back needs a redial; the encrypted links do not
@@ -1879,8 +1897,29 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
         val failures = (conversationFailures[hostID] ?: 0) + 1
         conversationFailures[hostID] = failures
         // One lost poll is not news: the iPhone only shows the bar once the link
-        // is actually down, not after every failed read.
-        if (failures >= 3) _reachable.value = false
+        // is actually down, not after every failed read. Three slow reads can
+        // also be a busy transcript, so the Mac's own signed probe decides
+        // before the reader is told it is gone.
+        if (failures < 3 || !offlineChecks.add(hostID)) return
+        val host = hosts.firstOrNull { it.id == hostID } ?: run {
+            offlineChecks.remove(hostID)
+            _reachable.value = false
+            return
+        }
+        viewModelScope.launch {
+            val reached = runCatching {
+                kotlinx.coroutines.withTimeout(8_000) { host.repository.probe() }
+            }.isSuccess
+            offlineChecks.remove(hostID)
+            if (reached) {
+                conversationFailures.remove(hostID)
+                _hostReachable.value = _hostReachable.value + (hostID to true)
+                if (openHostID == hostID) _reachable.value = true
+            } else {
+                _hostReachable.value = _hostReachable.value + (hostID to false)
+                if (openHostID == hostID) _reachable.value = false
+            }
+        }
     }
 
     /**
@@ -2844,6 +2883,7 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
                         }
                     }
                 }
+                openHostID?.let { conversationFailures.remove(it) }
                 _conversation.update { ui ->
                     if (ui?.session?.id != sessionID) {
                         ui
@@ -3151,6 +3191,9 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
             .onSuccess {
+                // Failures are consecutive or they are not: a read that answered
+                // clears the count, so intermittent timeouts never add up.
+                conversationFailures.remove(host.id)
                 _reachable.value = true
                 _probed.value = true
             }
