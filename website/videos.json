@@ -1,3 +1,6 @@
 {
-  "workflow": { "src": null, "poster": null, "captions": null }
+  "workflow": {
+    "en": { "src": "/media/workflow-en.mp4", "poster": "/media/workflow-en.jpg", "captions": null },
+    "zh": { "src": "/media/workflow-zh.mp4", "poster": "/media/workflow-zh.jpg", "captions": null }
+  }
 }
