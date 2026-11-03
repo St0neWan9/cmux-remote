@@ -32,6 +32,8 @@ npm run deploy:dry-run
 npm run deploy
 ```
 
+`worker.js` 只接管 `/media/*`（`run_worker_first`），为视频提供 `Range` 分段响应（206 / 416）；Safari 和 iOS 只播放支持分段请求的视频源。其他路径直接由静态资源返回。
+
 Cloudflare 自动创建 Custom Domain 的 DNS 记录及 HTTPS 证书。重复发布沿用同一个 Worker。独立目录可整体复制部署，不依赖 Codex Sites、ChatGPT 登录或原生应用构建。
 
 ## 视频与界面示意
