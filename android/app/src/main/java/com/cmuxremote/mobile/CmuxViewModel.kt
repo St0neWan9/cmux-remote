@@ -1243,8 +1243,18 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
         connection.validate()
         // Do not install a grant the Mac does not answer on: the owner may have
         // approved a Mac whose address this phone cannot reach.
-        val probe = runCatching {
-            kotlinx.coroutines.withTimeout(8_000) { BridgeRepository.open(connection).probe() }
+        val probeRepository = BridgeRepository.open(connection)
+        var probe = runCatching {
+            kotlinx.coroutines.withTimeout(8_000) { probeRepository.probe() }
+        }
+        // A phone pairing over the relay alone has no LAN path to probe; dial the
+        // same relay transport the saved connection will use and ask again.
+        if (probe.isFailure && connection.endpoint.relay != null && !connection.isLegacy) {
+            probe = runCatching {
+                val relayed = dialRelay(connection, probeRepository) ?: throw java.io.IOException("relay")
+                probeRepository.useRelayLink(relayed.link, relayed.epoch)
+                kotlinx.coroutines.withTimeout(8_000) { probeRepository.probe() }
+            }
         }
         probe.exceptionOrNull()?.let { error ->
             com.cmuxremote.mobile.data.Diagnostics.log(
@@ -1559,10 +1569,28 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
                         // An empty session list is a normal state, not a failed read.
                         // A Mac without conversationRead is not asked at all; its last
                         // known list is kept rather than being replaced with "empty".
-                        val read: Result<List<SessionDescriptor>> = if (canRead) {
+                        var read: Result<List<SessionDescriptor>> = if (canRead) {
                             runCatching { host.repository.sessions() }
                         } else {
                             Result.success(previousByHost[host.id].orEmpty())
+                        }
+                        // A saved relay link can die while the app keeps running (the
+                        // relay socket drops, the phone leaves Wi-Fi). Drop the dead link,
+                        // try the LAN once, then dial the relay again and retry the read.
+                        if (read.isFailure && host.connection.endpoint.relay != null && !host.connection.isLegacy) {
+                            if (host.repository.overRelay) host.repository.clearRelayLink()
+                            val direct = runCatching { host.repository.sessions() }
+                            read = if (direct.isSuccess) {
+                                direct
+                            } else {
+                                val relayed = dialRelay(host.connection, host.repository)
+                                if (relayed != null) {
+                                    host.repository.useRelayLink(relayed.link, relayed.epoch)
+                                    runCatching { host.repository.sessions() }
+                                } else {
+                                    direct
+                                }
+                            }
                         }
                         val workList = if (canWorkspace) {
                             runCatching { host.repository.workspaces().toMap() }.getOrDefault(emptyMap())
