@@ -354,7 +354,6 @@ fun ConversationScreen(
             working = state.session.working,
             canSend = canControl && state.session.writable,
             sending = state.sending,
-            hasBackgroundTasks = state.backgroundTasks.any { it.running },
             // The timeline carries the error row; a second copy under the composer
             // made every failure appear twice.
             error = null,
@@ -1341,7 +1340,6 @@ fun ComposerArea(
     working: Boolean,
     canSend: Boolean,
     sending: Boolean,
-    hasBackgroundTasks: Boolean,
     error: String?,
     modifier: Modifier = Modifier,
     /** A prepared image counts as a draft even when the text is empty. */
@@ -1371,16 +1369,6 @@ fun ComposerArea(
             .padding(horizontal = if (expanded) 0.dp else 18.dp, vertical = 10.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        if (hasBackgroundTasks) {
-            Row(
-                modifier = Modifier.background(MobileDesign.Soft, CircleShape).padding(horizontal = 12.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                WorkingIndicator(size = 11.dp)
-                Text(stringResource(R.string.chat_background_tasks_running), color = MobileDesign.Muted, style = MaterialTheme.typography.labelMedium)
-            }
-        }
         if (!canSend) {
             Text(stringResource(R.string.chat_read_only_notice), color = MobileDesign.Muted, style = MaterialTheme.typography.labelMedium)
         }
