@@ -110,9 +110,9 @@ class ComponentSemanticsTest {
                 )
             }
         }
-        compose.onNodeWithTag("chat.background_tasks").assertIsDisplayed()
+        compose.onNodeWithTag("chat.background").assertIsDisplayed()
         compose.onNodeWithText("Shell").assertDoesNotExist()
-        compose.onNodeWithTag("chat.background_tasks.open").performClick()
+        compose.onNodeWithTag("chat.background").performClick()
         compose.waitForIdle()
         compose.onNodeWithText("Shell").assertIsDisplayed()
     }
@@ -147,7 +147,6 @@ class ComponentSemanticsTest {
                     working = false,
                     canSend = true,
                     sending = false,
-                    hasBackgroundTasks = false,
                     error = null,
                 )
             }
