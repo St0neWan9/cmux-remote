@@ -404,6 +404,9 @@ class ConversationStore(context: Context, private val limits: Limits = Limits())
         put("text", JsonPrimitive(message.text))
         message.toolName?.let { put("tool_name", JsonPrimitive(it)) }
         message.status?.let { put("status", JsonPrimitive(it)) }
+        message.event?.let { put("event", JsonPrimitive(it)) }
+        message.summary?.let { put("summary", JsonPrimitive(it)) }
+        message.completedAt?.let { put("completed_at", JsonPrimitive(it.toString())) }
         message.filePath?.let { put("file_path", JsonPrimitive(it)) }
         message.diff?.let { put("diff", JsonPrimitive(it)) }
         message.prompt?.let { put("prompt", JsonPrimitive(it)) }
@@ -427,6 +430,9 @@ class ConversationStore(context: Context, private val limits: Limits = Limits())
             text = json.string("text") ?: "",
             toolName = json.string("tool_name"),
             status = json.string("status"),
+            event = json.string("event"),
+            summary = json.string("summary"),
+            completedAt = json.string("completed_at")?.let { runCatching { java.time.Instant.parse(it) }.getOrNull() },
             filePath = json.string("file_path"),
             diff = json.string("diff"),
             prompt = json.string("prompt"),
