@@ -71,7 +71,6 @@ fun TabletopScreen(
                 working = state.session.working,
                 canSend = state.session.writable,
                 sending = state.sending,
-                hasBackgroundTasks = false,
                 error = state.error,
             )
         }
