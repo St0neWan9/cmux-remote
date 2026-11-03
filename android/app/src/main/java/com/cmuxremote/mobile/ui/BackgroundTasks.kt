@@ -18,6 +18,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.KeyboardArrowUp
+import androidx.compose.material.icons.rounded.KeyboardArrowDown
+import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
@@ -43,8 +47,10 @@ import com.cmuxremote.mobile.ui.theme.MobileDesign
 data class BackgroundTask(val id: String, val tool: String, val status: String, val running: Boolean)
 
 /**
- * The detached tasks of the current conversation, as a horizontally scrolling row of
- * pill chips. A running task shows an accent spinner, a settled one a muted dot.
+ * The tasks the agent detached and has not finished, above the input box.
+ *
+ * One quiet line keeps them out of the way; tapping it names each task. The
+ * running state is in the task's own summary, so the bar itself does not spin.
  */
 @Composable
 fun BackgroundTasksRow(
@@ -58,60 +64,66 @@ fun BackgroundTasksRow(
         modifier = modifier
             .fillMaxWidth()
             .animateContentSize(animationSpec = androidx.compose.animation.core.tween(180, easing = androidx.compose.animation.core.FastOutSlowInEasing))
-            .padding(horizontal = 16.dp, vertical = 4.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
+            .padding(horizontal = 12.dp, vertical = 2.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        // One summary line, with the gear opening the individual tasks, as on the iPhone.
         Row(
-            modifier = Modifier.fillMaxWidth().testTag("chat.background_tasks"),
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("chat.background")
+                .clickable { expanded = !expanded },
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(7.dp),
         ) {
-            if (tasks.any { it.running }) WorkingIndicator(size = 11.dp)
             Text(
                 text = stringResource(R.string.chat_background_tasks_count, tasks.size),
                 color = MobileDesign.Muted,
                 style = MaterialTheme.typography.labelMedium,
                 modifier = Modifier.weight(1f),
             )
-            Box(
-                modifier = Modifier.size(44.dp).testTag("chat.background_tasks.open").clickable { expanded = !expanded },
-                contentAlignment = Alignment.Center,
-            ) {
-                androidx.compose.material3.Icon(
-                    androidx.compose.material.icons.Icons.Rounded.Settings,
-                    contentDescription = stringResource(R.string.chat_background_tasks_open),
-                    tint = MobileDesign.Muted,
-                    modifier = Modifier.size(17.dp),
-                )
-            }
+            androidx.compose.material3.Icon(
+                if (expanded) Icons.Rounded.KeyboardArrowUp
+                else Icons.Rounded.KeyboardArrowDown,
+                contentDescription = null,
+                tint = MobileDesign.Muted,
+                modifier = Modifier.size(14.dp),
+            )
         }
         androidx.compose.animation.AnimatedVisibility(visible = expanded) {
-            Row(
-                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(start = 2.dp).testTag("chat.background.list"),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 tasks.forEach { task ->
                     Row(
                         modifier = Modifier
-                            .background(MobileDesign.Soft, CircleShape)
-                            .clickable { onOpen(task) }
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                            .fillMaxWidth()
+                            .testTag("chat.background.task")
+                            .clickable { onOpen(task) },
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(7.dp),
                     ) {
-                        if (task.running) {
-                            WorkingIndicator(size = 10.dp)
-                        } else {
-                            Spacer(Modifier.size(7.dp).background(MobileDesign.Muted, CircleShape))
-                        }
+                        Text("•", color = MobileDesign.Muted, style = MaterialTheme.typography.labelMedium)
                         Text(
                             text = task.tool,
-                            color = MobileDesign.Ink,
+                            color = MobileDesign.Muted,
                             style = MaterialTheme.typography.labelMedium,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            text = task.status,
+                            color = MobileDesign.Muted,
+                            style = MaterialTheme.typography.labelMedium,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
+                        )
+                        androidx.compose.material3.Icon(
+                            Icons.Rounded.ChevronRight,
+                            contentDescription = null,
+                            tint = MobileDesign.Muted,
+                            modifier = Modifier.size(12.dp),
                         )
                     }
                 }

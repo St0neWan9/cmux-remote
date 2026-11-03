@@ -59,7 +59,6 @@ class ScreenshotSmokeTest {
                     working = false,
                     canSend = true,
                     sending = false,
-                    hasBackgroundTasks = false,
                     error = null,
                 )
             }
