@@ -8,6 +8,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,6 +18,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -206,7 +209,7 @@ fun ConversationScreen(
                     } else {
                         Icon(Icons.Rounded.WifiOff, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(15.dp))
                         Text(
-                            text = listOfNotNull(stringResource(R.string.chat_connection_lost), hostName).joinToString(" · "),
+                            text = stringResource(R.string.chat_connection_lost),
                             color = MobileDesign.Muted,
                             style = MaterialTheme.typography.labelMedium,
                         )
@@ -270,66 +273,6 @@ fun ConversationScreen(
                 modifier = Modifier.padding(horizontal = 14.dp),
             )
         }
-        if (pendingImages.isNotEmpty()) {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 6.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                pendingImages.forEachIndexed { index, (name, base64) ->
-                    val describe = stringResource(R.string.common_remove)
-                    val bitmap = remember(base64) {
-                        runCatching {
-                            val bytes = android.util.Base64.decode(base64, android.util.Base64.DEFAULT)
-                            android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-                        }.getOrNull()
-                    }
-                    Box(
-                        modifier = Modifier
-                            .size(76.dp)
-                            .testTag("image.draft." + base64.hashCode().toString(16))
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(MobileDesign.Soft)
-                            .then(
-                                if (bitmap != null) Modifier.clickable { previewImage = bitmap } else Modifier,
-                            ),
-                    ) {
-                        if (bitmap != null) {
-                            androidx.compose.foundation.Image(
-                                bitmap = bitmap.asImageBitmap(),
-                                contentDescription = name,
-                                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
-                                modifier = Modifier.fillMaxSize(),
-                            )
-                        } else {
-                            Text(
-                                text = name,
-                                color = MobileDesign.Muted,
-                                style = MaterialTheme.typography.labelMedium,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.padding(6.dp),
-                            )
-                        }
-                        Box(
-                            modifier = Modifier
-                                .align(Alignment.TopEnd)
-                                .size(18.dp)
-                                .background(MobileDesign.Ink, CircleShape)
-                                .clickable { onRemoveImage(index) }
-                                .semantics { contentDescription = describe },
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Icon(
-                                Icons.Rounded.Close,
-                                contentDescription = describe,
-                                tint = MobileDesign.Canvas,
-                                modifier = Modifier.size(11.dp),
-                            )
-                        }
-                    }
-                }
-            }
-        }
         if (pendingSend && !busy) {
             PendingSendBanner(
                 onCheck = onCheckPending,
@@ -346,6 +289,19 @@ fun ConversationScreen(
                 onCancel = onCancelSpeech,
             )
         }
+        // A short window (split screen, landscape) must still leave room for the
+        // field and its action row above the keyboard: derive the growth limit
+        // from what is actually visible, not half the full screen.
+        val density = androidx.compose.ui.platform.LocalDensity.current
+        val imeBottom = androidx.compose.foundation.layout.WindowInsets.ime.getBottom(density)
+        // The configuration height is the app window (split screen included), not
+        // the whole display; subtract what the keyboard covers.
+        val windowDp = LocalContext.current.resources.configuration.screenHeightDp.toFloat()
+        val visibleDp = (windowDp - imeBottom / density.density).coerceAtLeast(0f)
+        val composerLines = ((visibleDp * 0.32f - 110f) / 22f).toInt().coerceIn(1, 6)
+        // A split screen or landscape phone can leave less room above the keyboard
+        // than the two-row composer needs; keep the single-line bar there.
+        val compactComposer = visibleDp < 240f
         ComposerArea(
             draft = state.draft,
             onDraftChange = onDraft,
@@ -358,9 +314,21 @@ fun ConversationScreen(
             // made every failure appear twice.
             error = null,
             hasImages = pendingImages.isNotEmpty(),
+            // Drafts sit inside the rounded field, as they do on the iPhone.
+            draftImages = if (pendingImages.isEmpty()) {
+                null
+            } else {
+                {
+                    DraftImageStrip(
+                        images = pendingImages,
+                        onRemove = onRemoveImage,
+                        onPreview = { previewImage = it },
+                    )
+                }
+            },
             sendBlocked = pendingSend || imagePreparing > 0 || busy,
-            expandedMaxLines = ((LocalContext.current.resources.configuration.screenHeightDp * 0.5f - 120) / 22f)
-                .toInt().coerceAtLeast(3),
+            expandedMaxLines = composerLines,
+            compactHeight = compactComposer,
             onPickImages = onPickImages,
             onPickImageFile = onPickImageFile,
             onOpenProject = onOpenProject,
@@ -700,7 +668,12 @@ fun ConversationTimeline(
     }
     // The pull is the reader asking, not the system's refresh control: the page's
     // own top row carries the spinner, so this container draws no second one.
+    // Only a pull the reader made spins the control; a page fetched because the
+    // list happened to open near its top must not show it.
+    var pulled by remember { mutableStateOf(false) }
+    LaunchedEffect(state.loadingOlder) { if (!state.loadingOlder) pulled = false }
     val pull: () -> Unit = {
+        pulled = true
         when {
             // Pulling while the link is down asks for the link, not for older pages.
             offline -> onRetryConnection?.invoke() ?: onRefreshConversation?.invoke()
@@ -724,7 +697,7 @@ fun ConversationTimeline(
     }
     Box(modifier.fillMaxWidth()) {
     PullToRefreshBox(
-        isRefreshing = state.loadingOlder,
+        isRefreshing = state.loadingOlder && pulled,
         onRefresh = pull,
         modifier = Modifier.fillMaxSize(),
     ) {
@@ -739,41 +712,6 @@ fun ConversationTimeline(
         // iPhone; a long one scrolls normally.
         verticalArrangement = Arrangement.spacedBy(8.dp, Alignment.Bottom),
     ) {
-        // A prompt that is still being sent stays pinned at the top, so the reply
-        // that grows underneath it never pushes it out of view.
-        if (state.outgoing != null) {
-            stickyHeader(key = "pinned-outgoing") {
-                Column(
-                    Modifier.fillMaxWidth().background(MobileDesign.Canvas),
-                    horizontalAlignment = Alignment.End,
-                ) {
-                    UserBubble(displayedPrompt(state.outgoing), onCopyText, onSelectText)
-                    Text(
-                        text = when {
-                            state.outgoingFailed -> stringResource(R.string.chat_outgoing_failed)
-                            state.outgoingUnconfirmed -> stringResource(R.string.chat_outgoing_unconfirmed)
-                            state.sending -> stringResource(R.string.chat_outgoing_sending)
-                            else -> stringResource(R.string.chat_outgoing_sent)
-                        },
-                        color = when {
-                            state.outgoingFailed -> MaterialTheme.colorScheme.error
-                            state.outgoingUnconfirmed -> MobileDesign.Warning
-                            else -> MobileDesign.Muted
-                        },
-                        style = MaterialTheme.typography.labelMedium,
-                        modifier = Modifier.padding(top = 4.dp, end = 6.dp),
-                    )
-                    if (state.outgoingImages > 0) {
-                        Text(
-                            stringResource(R.string.chat_outgoing_images, state.outgoingImages),
-                            color = MobileDesign.Muted,
-                            style = MaterialTheme.typography.labelMedium,
-                            modifier = Modifier.padding(end = 6.dp),
-                        )
-                    }
-                }
-            }
-        }
         if (!state.loading && state.messages.isEmpty() && state.error == null) {
             item {
                 Column(
@@ -934,21 +872,10 @@ fun ConversationTimeline(
         if (looseImages.isNotEmpty()) {
             item(key = "loose-images") { MessageImages(looseImages, onOpenImage) }
         }
-        if (state.preview != null) {
-            item {
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(stringResource(R.string.chat_live_preview), color = MobileDesign.Muted, style = MaterialTheme.typography.labelMedium)
-                    Text(state.preview, color = MobileDesign.Ink, style = MaterialTheme.typography.bodyMedium)
-                }
-            }
-        }
-        item(key = "latest-marker") { Spacer(Modifier.height(1.dp)) }
-        // The iPhone reserves 18pt under the last line before the composer.
-        item(key = "latest-foot") { Spacer(Modifier.height(18.dp)) }
         if (state.session.working) {
             item {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    WorkingIndicator()
+                    WorkingIndicator(size = 12.dp)
                     if (state.turnStartedAt != null) {
                         LiveRunLabel(since = state.turnStartedAt, compacting = state.compacting, showsMark = false)
                     } else {
@@ -964,6 +891,52 @@ fun ConversationTimeline(
                 }
             }
         }
+        if (state.preview != null) {
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(stringResource(R.string.chat_live_preview), color = MobileDesign.Muted, style = MaterialTheme.typography.labelMedium)
+                    Text(state.preview, color = MobileDesign.Ink, style = MaterialTheme.typography.bodyMedium)
+                }
+            }
+        }
+        // A prompt on its way belongs at the end of the conversation, continuing it,
+        // not floating above older messages: iOS appends it after the visible tail.
+        if (state.outgoing != null) {
+            item(key = "outgoing") {
+                Column(
+                    Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.End,
+                ) {
+                    UserBubble(displayedPrompt(state.outgoing), onCopyText, onSelectText)
+                    Text(
+                        text = when {
+                            state.outgoingFailed -> stringResource(R.string.chat_outgoing_failed)
+                            state.outgoingUnconfirmed -> stringResource(R.string.chat_outgoing_unconfirmed)
+                            state.sending -> stringResource(R.string.chat_outgoing_sending)
+                            else -> stringResource(R.string.chat_outgoing_sent)
+                        },
+                        color = when {
+                            state.outgoingFailed -> MaterialTheme.colorScheme.error
+                            state.outgoingUnconfirmed -> MobileDesign.Warning
+                            else -> MobileDesign.Muted
+                        },
+                        style = MaterialTheme.typography.labelMedium,
+                        modifier = Modifier.padding(top = 4.dp, end = 6.dp),
+                    )
+                    if (state.outgoingImages > 0) {
+                        Text(
+                            stringResource(R.string.chat_outgoing_images, state.outgoingImages),
+                            color = MobileDesign.Muted,
+                            style = MaterialTheme.typography.labelMedium,
+                            modifier = Modifier.padding(end = 6.dp),
+                        )
+                    }
+                }
+            }
+        }
+        item(key = "latest-marker") { Spacer(Modifier.height(1.dp)) }
+        // The iPhone reserves 18pt under the last line before the composer.
+        item(key = "latest-foot") { Spacer(Modifier.height(18.dp)) }
         // A lost link belongs to the status bar; the page keeps only its own errors.
         if (state.error != null && !offline) {
             item {
@@ -1065,10 +1038,18 @@ private fun MessageRow(message: ChatMessage) {
         message.kind == "prose" || message.kind == "thought" ->
             Text(message.text, color = MobileDesign.Ink, style = MaterialTheme.typography.bodyLarge)
         message.kind == "tool_use" -> ToolRow(
-            title = message.toolName ?: message.text.ifBlank { stringResource(R.string.chat_tool_call) },
+            // The agent's own description, never the raw command, in the loose row too.
+            title = message.summary?.takeIf { it.isNotBlank() }
+                ?: message.toolName
+                ?: message.text.ifBlank { stringResource(R.string.chat_tool_call) },
             status = message.status,
         )
-        message.kind == "terminal" -> CodeCard(title = message.text.ifBlank { stringResource(R.string.chat_command) }, body = null)
+        message.kind == "terminal" -> CodeCard(
+            title = message.summary?.takeIf { it.isNotBlank() }
+                ?: message.command
+                ?: message.text.ifBlank { stringResource(R.string.chat_command) },
+            body = null,
+        )
         message.kind == "file_edit" -> CodeCard(title = message.filePath ?: stringResource(R.string.chat_file_change), body = message.diff)
         message.kind == "question" -> QuestionCard(prompt = message.prompt ?: message.text, options = message.options, selected = message.selectedOption)
         message.kind == "permission_request" -> com.cmuxremote.mobile.ui.components.FloatingSurface(
@@ -1331,6 +1312,76 @@ private fun QuestionCard(
     }
 }
 
+/** Prepared images, drawn inside the composer's rounded field as on the iPhone. */
+@Composable
+private fun DraftImageStrip(
+    images: List<Pair<String, String>>,
+    onRemove: (Int) -> Unit,
+    onPreview: (android.graphics.Bitmap) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .padding(vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        images.forEachIndexed { index, (name, base64) ->
+            val describe = stringResource(R.string.common_remove)
+            val bitmap = remember(base64) {
+                runCatching {
+                    val bytes = android.util.Base64.decode(base64, android.util.Base64.DEFAULT)
+                    android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                }.getOrNull()
+            }
+            Box(
+                modifier = Modifier
+                    .size(76.dp)
+                    .testTag("image.draft." + base64.hashCode().toString(16))
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(MobileDesign.Soft)
+                    .then(
+                        if (bitmap != null) Modifier.clickable { onPreview(bitmap) } else Modifier,
+                    ),
+            ) {
+                if (bitmap != null) {
+                    androidx.compose.foundation.Image(
+                        bitmap = bitmap.asImageBitmap(),
+                        contentDescription = name,
+                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                } else {
+                    Text(
+                        text = name,
+                        color = MobileDesign.Muted,
+                        style = MaterialTheme.typography.labelMedium,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(6.dp),
+                    )
+                }
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .size(18.dp)
+                        .background(MobileDesign.Ink, CircleShape)
+                        .clickable { onRemove(index) }
+                        .semantics { contentDescription = describe },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.Rounded.Close,
+                        contentDescription = describe,
+                        tint = MobileDesign.Canvas,
+                        modifier = Modifier.size(11.dp),
+                    )
+                }
+            }
+        }
+    }
+}
+
 @Composable
 fun ComposerArea(
     draft: String,
@@ -1344,10 +1395,14 @@ fun ComposerArea(
     modifier: Modifier = Modifier,
     /** A prepared image counts as a draft even when the text is empty. */
     hasImages: Boolean = false,
+    /** Thumbnails drawn inside the field, above the text, as iOS does. */
+    draftImages: (@Composable () -> Unit)? = null,
     /** A pending receipt or an image still being prepared blocks another send. */
     sendBlocked: Boolean = false,
     /** Lines the composer may grow to on focus. */
     expandedMaxLines: Int = 4,
+    /** Too little height above the keyboard for the two-row layout. */
+    compactHeight: Boolean = false,
     onPickImages: (() -> Unit)? = null,
     onPickImageFile: (() -> Unit)? = null,
     onOpenProject: (() -> Unit)? = null,
@@ -1361,12 +1416,13 @@ fun ComposerArea(
     var focused by remember { mutableStateOf(false) }
     // A focused bar, an image draft or a multi-line draft takes the two-row layout.
     val expanded = focused || hasImages || draft.contains('\n')
+    val twoPart = expanded && !compactHeight
     val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
     Column(
         modifier = modifier
             .fillMaxWidth()
             .testTag("voice.draft")
-            .padding(horizontal = if (expanded) 0.dp else 18.dp, vertical = 10.dp),
+            .padding(horizontal = if (twoPart) 12.dp else 18.dp, vertical = 10.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         if (!canSend) {
@@ -1420,31 +1476,37 @@ fun ComposerArea(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .shadow(6.dp, RoundedCornerShape(if (expanded) 26.dp else 30.dp), clip = false)
-                .background(MobileDesign.Canvas, RoundedCornerShape(if (expanded) 26.dp else 30.dp))
-                .border(0.5.dp, MobileDesign.Line, RoundedCornerShape(if (expanded) 26.dp else 30.dp))
+                .shadow(6.dp, RoundedCornerShape(if (twoPart) 26.dp else 30.dp), clip = false)
+                .background(MobileDesign.Canvas, RoundedCornerShape(if (twoPart) 26.dp else 30.dp))
+                .border(0.5.dp, MobileDesign.Line, RoundedCornerShape(if (twoPart) 26.dp else 30.dp))
                 .padding(
-                    horizontal = if (expanded) 10.dp else 6.dp,
-                    vertical = if (expanded) 7.dp else 5.dp,
+                    horizontal = if (twoPart) 10.dp else 6.dp,
+                    vertical = if (twoPart) 7.dp else 5.dp,
                 ),
         ) {
-            ComposerLayout(expanded = expanded, modifier = Modifier.fillMaxWidth()) {
-                attach(expanded)
-                ComposerField(
-                    draft = draft,
-                    onDraftChange = onDraftChange,
-                    enabled = canSend,
-                    expanded = expanded,
-                    expandedMaxLines = expandedMaxLines,
-                    modifier = Modifier,
-                    onFocusChanged = { focused = it },
-                )
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(if (expanded) 10.dp else 6.dp),
-                ) {
-                    voice(expanded)
-                    send(expanded)
+            Column {
+                if (draftImages != null) {
+                    draftImages()
+                    androidx.compose.foundation.layout.Spacer(Modifier.height(4.dp))
+                }
+                ComposerLayout(expanded = twoPart, modifier = Modifier.fillMaxWidth()) {
+                    attach(twoPart)
+                    ComposerField(
+                        draft = draft,
+                        onDraftChange = onDraftChange,
+                        enabled = canSend,
+                        expanded = twoPart,
+                        expandedMaxLines = expandedMaxLines,
+                        modifier = Modifier,
+                        onFocusChanged = { focused = it },
+                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(if (twoPart) 10.dp else 6.dp),
+                    ) {
+                        voice(twoPart)
+                        send(twoPart)
+                    }
                 }
             }
         }

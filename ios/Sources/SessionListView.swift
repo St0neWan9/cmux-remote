@@ -52,7 +52,8 @@ struct SessionListView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: MobileDesign.sectionGap) {
                     HostFilterTabs(hosts: links.map { HostFilterTabs.Host(id: $0.id, name: $0.name, state: model.linkStates[$0.id], failed: model.hostErrors[$0.id] != nil, quiet: model.quietHosts.contains($0.id), workspaces: model.workspaces(of: $0.id)) },
-                                   selection: $hostFilter, workspaceID: $workspaceID)
+                                   selection: $hostFilter, workspaceID: $workspaceID,
+                                   move: { hostID, beforeID in model.move(hostID: hostID, beforeHostID: beforeID) })
                     PendingReminder(feed: PendingFeed.combined(pendingHosts(shownLinks).map { PendingFeed(count: $0.count, firstTitle: model.pending[$0.id]?.firstTitle) }),
                                     hosts: pendingHosts(shownLinks).filter { $0.count > 0 }) { id in feedHostID = id; showFeed = true }
                     // The status filter sits on the list it filters, under the Macs and what they wait on.

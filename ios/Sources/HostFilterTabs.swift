@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 import CmuxRemoteCore
 import CmuxRemoteClient
 
@@ -15,6 +16,9 @@ struct HostFilterTabs: View {
     @Binding var selection: String?
     /// nil shows every workspace.
     @Binding var workspaceID: String?
+    /// Long-press drag: move the first Mac before the second.
+    var move: ((String, String) -> Void)?
+    @State private var dragging: String?
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
@@ -23,7 +27,14 @@ struct HostFilterTabs: View {
                     Button { selection = nil; workspaceID = nil } label: { capsule(selected: selection == nil) { Text(String(localized: "sessions.all_hosts")) } }
                         .buttonStyle(.plain).accessibilityIdentifier("sessions.host.all").accessibilityAddTraits(selection == nil ? .isSelected : [])
                 }
-                ForEach(hosts) { host in hostTab(host) }
+                ForEach(hosts) { host in
+                    hostTab(host)
+                        .onDrag {
+                            dragging = host.id
+                            return NSItemProvider(object: host.id as NSString)
+                        }
+                        .onDrop(of: [UTType.text], delegate: HostMoveDrop(hostID: host.id, dragging: $dragging, move: move))
+                }
             }.padding(.vertical, 4)
         }.accessibilityIdentifier("sessions.hosts")
     }
@@ -53,6 +64,17 @@ struct HostFilterTabs: View {
             Button { if hosts.count > 1 { selection = host.id } } label: { capsule(selected: selected) { label } }
                 .buttonStyle(.plain).accessibilityIdentifier("sessions.host." + host.id).accessibilityValue(statusText(host)).accessibilityAddTraits(selected ? .isSelected : [])
         }
+    }
+    private struct HostMoveDrop: DropDelegate {
+        let hostID: String
+        @Binding var dragging: String?
+        let move: ((String, String) -> Void)?
+        func dropEntered(info: DropInfo) {
+            guard let dragging, dragging != hostID, let move else { return }
+            move(dragging, hostID)
+        }
+        func dropUpdated(info: DropInfo) -> DropProposal? { DropProposal(operation: .move) }
+        func performDrop(info: DropInfo) -> Bool { dragging = nil; return true }
     }
     private func capsule(selected: Bool, @ViewBuilder label: () -> some View) -> some View {
         label().font(.subheadline.weight(selected ? .medium : .regular))
