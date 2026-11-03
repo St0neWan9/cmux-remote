@@ -1,15 +1,17 @@
 # iOS 设计系统
 
-Cmux Remote 使用全白画布和悬浮控件，沿用已确定的 Codex 手机端视觉方向。本规范与 Mac 的原生窗口规范独立；页面使用共同组件，避免各自定义颜色、间距和按钮。
+颜色、状态和基础尺度遵循 [共同产品规范](../DESIGN.md) 与 [共享令牌](../design/tokens.json)。本页保留 iPhone 原生导航和布局适配。保留白色会话阅读面、中性背景和浅灰用户气泡；品牌蓝只用于发送、配对、可交互文字与当前选择，Agent 正文保持中性色。
+
+0.3 迁移目标：浅色主蓝 `#2563eb` / 深色 `#8bb4ff`，选中表面浅色 `#dbeafe` / 深色 `#203c67`，产品卡片目标更新为 Bento 的 16pt（0.4）。下表同时记录现有实现，旧数值与旧验收不能证明新规范已落地。本轮未修改 Swift UI。
 
 ## 设计令牌
 
 | 项目 | 规范 | 实现 |
 | --- | --- | --- |
-| 画布 | 整页纯白，包括状态栏和安全区域 | `WhitePage`；会话保留独立的透明头部 |
+| 画布 | 目标为中性产品背景与白色会话阅读面，安全区域随页面表面一致 | 现有 `WhitePage` 全白，迁移时引用共享表面 |
 | 内容区域 | 两侧各 20 pt；所有卡片在这个区域内占满宽度 | `MobileDesign.pageInset`、`FloatingSurface` |
 | 间距 | 分组 24 pt、行内 12 pt、卡片内 16 pt | `MobileDesign` |
-| 卡片 | 白色、22 pt 圆角、轻描边和柔和阴影 | `FloatingSurface` |
+| 卡片 | 目标为内容白/分组中性灰、16 pt 圆角、共享描边；现有 22pt 待迁移 | `FloatingSurface` |
 | 工具展开卡片 | 极浅灰内容底；正文始终左对齐、长行换行 | `ToolDetailCard`、`ToolCodeBlock` |
 | 文字 | 系统动态字体；标题 headline、正文 body/callout、元数据 caption | 不缩小文字来掩盖溢出 |
 | 主操作 | 蓝底白字胶囊 | `FloatingButtonStyle(prominent: true)` |
