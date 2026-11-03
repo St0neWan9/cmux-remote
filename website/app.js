@@ -43,8 +43,11 @@ async function loadVideos() {
     const response = await fetch('/videos.json');
     if (!response.ok) return;
     const videos = await response.json();
+    // A slot may hold one recording or one per page language ({ en: {...}, zh: {...} }).
+    const language = document.documentElement.lang.startsWith('zh') ? 'zh' : 'en';
     document.querySelectorAll('[data-video-slot]').forEach(slot => {
-      const entry = videos[slot.dataset.videoSlot];
+      const configured = videos[slot.dataset.videoSlot];
+      const entry = configured?.[language] ?? configured;
       if (!entry?.src) return;
       const video = document.createElement('video');
       video.controls = true;

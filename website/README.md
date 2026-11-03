@@ -36,7 +36,7 @@ Cloudflare 自动创建 Custom Domain 的 DNS 记录及 HTTPS 证书。重复发
 
 ## 视频与界面示意
 
-`videos.json` 中的 `workflow` 是完整开发流程的视频位置。当前明确显示“演示待补充”，无虚假播放按钮。素材放到 `media/` 并填写 `src`，可选填写 `poster` 和中文 WebVTT `captions`。加载失败恢复占位。
+`videos.json` 中的 `workflow` 是完整开发流程的视频位置，按页面语言分别配置 `en` / `zh` 的 `src`、`poster`，可选 WebVTT `captions`。现已接入一次真实运行的中英文录制（录制方式见 `media/README.md`）。源为空或加载失败时恢复“演示待补充”占位，无虚假播放按钮。
 
 设备与会话均为 HTML 示意，非真实截图或实时数据；Mac / iPhone 同框宽度比保持约 4.366:1。需要大号手机内容时使用独立的会话细节组件。
 
