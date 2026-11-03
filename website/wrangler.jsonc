@@ -3,6 +3,7 @@
   "name": "cmux-remote-website",
   "account_id": "56c0f17ebb6824c44382d97f0d1f45d3",
   "compatibility_date": "2026-10-14",
+  "main": "worker.js",
   "workers_dev": true,
   "routes": [
     {
@@ -13,6 +14,8 @@
   "assets": {
     "directory": "./dist",
     "html_handling": "auto-trailing-slash",
-    "not_found_handling": "404-page"
+    "not_found_handling": "404-page",
+    "binding": "ASSETS",
+    "run_worker_first": ["/media/*"]
   }
 }
