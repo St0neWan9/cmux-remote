@@ -6,8 +6,24 @@ public struct CLIControlClient: CmuxControlling {
     private let executable: URL
     private let socketPath: String
     private let environment: [String: String]?
-    public init(executable: URL, socketPath: String, environment: [String: String]? = nil) { self.executable = executable; self.socketPath = socketPath; self.environment = environment }
+    /// How quickly a failed read must have failed for it to be worth one retry. A slower failure is a real
+    /// stall, and repeating it would push the request past the link's no-progress window.
+    private let retryWindow: Duration
+    public init(executable: URL, socketPath: String, environment: [String: String]? = nil, retryWindow: Duration = .seconds(6)) {
+        self.executable = executable; self.socketPath = socketPath; self.environment = environment; self.retryWindow = retryWindow
+    }
     public func request(_ method: String, params: [String: JSONValue]) async throws -> JSONValue {
+        // A cmux stall under system load makes the official CLI fail fast. One bounded retry absorbs
+        // that transient for reads; it only runs after a quick failure so the whole request, at worst
+        // six plus half a second plus twelve seconds, stays inside the link's twenty-second no-progress window.
+        let started = ContinuousClock.now
+        do { return try await attempt(method, params: params) }
+        catch let error as BridgeError where error.code == "socket_unavailable" && started.duration(to: .now) < retryWindow {
+            try await Task.sleep(for: .milliseconds(500))
+            return try await attempt(method, params: params)
+        }
+    }
+    private func attempt(_ method: String, params: [String: JSONValue]) async throws -> JSONValue {
         let input = try JSONEncoder().encode(JSONValue.object(params))
         guard input.count <= 1_048_576 else { throw BridgeError("too_large", "The request is too large.", status: 413) }
         let executable = executable; let socketPath = socketPath; let environment = environment
@@ -37,7 +53,7 @@ public struct CLIControlClient: CmuxControlling {
             } onCancel: { if process.isRunning { process.terminate() } }
             let data = await stdout; _ = await stderr
             guard status == 0 else {
-                let mutation = ["mobile.chat.send", "mobile.chat.interrupt", "mobile.terminal.input", "workspace.create", "workspace.select", "workspace.group.create", "workspace.group.add", "workspace.reorder_many", "surface.create", "surface.split", "surface.action", "surface.move", "surface.split_off", "surface.reorder", "surface.close", "feed.permission.reply", "feed.question.reply", "feed.exit_plan.reply"].contains(method)
+                let mutation = ["mobile.chat.send", "mobile.chat.interrupt", "mobile.terminal.input", "mobile.terminal.rename", "workspace.create", "workspace.select", "workspace.group.create", "workspace.group.add", "workspace.reorder_many", "surface.create", "surface.split", "surface.action", "surface.move", "surface.split_off", "surface.reorder", "surface.close", "feed.permission.reply", "feed.question.reply", "feed.exit_plan.reply"].contains(method)
                 throw BridgeError(mutation ? "outcome_unknown" : "socket_unavailable", mutation ? "Inspect the task before repeating this operation." : "Open cmux and check the official CLI's socket access.", status: 503)
             }
             guard data.count <= 8_388_608, let value = try? JSONDecoder().decode(JSONValue.self, from: data) else { throw BridgeError("invalid_response", "The official CLI returned an invalid response.", status: 502) }

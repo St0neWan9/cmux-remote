@@ -53,6 +53,29 @@ import CmuxRemoteCore
         } catch { await relay.stop(); await fixture.stop(); throw error }
     }
 
+    /// A replaced Durable Object still carries frames but no longer knows this Bridge; only the room's own
+    /// answer proves registration survived, so silence must end the link.
+    @Test(.timeLimit(.minutes(1)))
+    func aRoomThatStopsAnsweringLivenessPingsIsRedialed() async throws {
+        let fixture = try await LinkIntegrationFixture.create()
+        // Answers two pings, then goes quiet the way a replaced room does.
+        let socket = ScriptedRelaySocket(stopsAnsweringAfter: 2), dialer = Dialer([socket, ScriptedRelaySocket()])
+        let relay = try relay(fixture, dialer)
+        let pings = AsyncStream<String>.makeStream()
+        let observing = Task { for await envelope in socket.sent where envelope.kind == "ping" { pings.continuation.yield(envelope.kind) } }
+        do {
+            try await relay.start()
+            var dials = dialer.dials.stream.makeAsyncIterator(); #expect(await dials.next() == 1)
+            try socket.push(RelayEnvelope(kind: "ready"))
+            var seen = pings.stream.makeAsyncIterator()
+            #expect(await seen.next() == "ping"); #expect(await seen.next() == "ping")
+            #expect(await relay.status()["state"].string == "connected")
+            // Without a pong the room no longer holds this registration, so the Bridge redials.
+            #expect(await dials.next() == 2)
+            observing.cancel(); await relay.stop(); await fixture.stop()
+        } catch { observing.cancel(); await relay.stop(); await fixture.stop(); throw error }
+    }
+
     @Test(.timeLimit(.minutes(1)))
     func aConnectionSynchronizesTheRegistryOnce() async throws {
         let fixture = try await LinkIntegrationFixture.create()
@@ -64,8 +87,8 @@ import CmuxRemoteCore
             #expect(await sent.next()?.kind == "registry")
             try socket.push(RelayEnvelope(kind: "ready"))
             var connected = ready.stream.makeAsyncIterator(); #expect(await connected.next() != nil)
-            // Anything else the Bridge sends within a while would be a second, billable synchronization.
-            let extra = Task { await sent.next()?.kind }
+            // Another registry send within a while would be a second, billable synchronization.
+            let extra = Task { () -> String? in while let envelope = await sent.next() { if envelope.kind == "registry" { return envelope.kind } }; return nil }
             try await Task.sleep(for: .milliseconds(500)); extra.cancel()
             #expect(await extra.value == nil)
             await relay.stop(); await fixture.stop()

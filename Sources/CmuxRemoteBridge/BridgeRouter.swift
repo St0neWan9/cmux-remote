@@ -7,10 +7,12 @@ public struct BridgeRouter: Sendable {
     private let legacyToken: String?
     private let authority: ConnectionAuthority?
     private let mirrors: RemoteMirrorService?
+    private let launcher: SessionLauncher?
     /// An explicitly selected legacy router, retained for migration and fixtures.
-    public init(service: SessionService, token: String) { self.service = service; legacyToken = token; authority = nil; mirrors = nil }
-    public init(service: SessionService, authority: ConnectionAuthority, legacyToken: String? = nil, mirrors: RemoteMirrorService? = nil) {
-        self.service = service; self.authority = authority; self.legacyToken = legacyToken; self.mirrors = mirrors
+    /// A fixture's launcher acts with owner authority, since the legacy token is the owner's own.
+    public init(service: SessionService, token: String, launcher: SessionLauncher? = nil) { self.service = service; legacyToken = token; authority = nil; mirrors = nil; self.launcher = launcher }
+    public init(service: SessionService, authority: ConnectionAuthority, legacyToken: String? = nil, mirrors: RemoteMirrorService? = nil, launcher: SessionLauncher? = nil) {
+        self.service = service; self.authority = authority; self.legacyToken = legacyToken; self.mirrors = mirrors; self.launcher = launcher
     }
     public func respond(method: String, uri: String, authorization: String?, body: Data) async -> (Int, Data) {
         let response = await respondResource(method: method, uri: uri, authorization: authorization, body: body)
@@ -35,11 +37,16 @@ public struct BridgeRouter: Sendable {
         guard client.id == clientID else { throw BridgeError("unauthorized", "The subscription belongs to another device.", status: 401) }
         return client.id
     }
-    private func isSubscriptionURI(_ uri: String) -> Bool {
-        guard let components = URLComponents(string: uri), components.scheme == nil, components.host == nil else { return false }
-        let path = components.path.split(separator: "/").map(String.init)
-        if path == ["v2", "sessions"] || path == ["v2", "feed"] { return true }
-        return path.count == 4 && path[0...1] == ["v2", "sessions"] && ["history", "preview"].contains(path[3])
+    private func isSubscriptionURI(_ uri: String) -> Bool { LinkSubscriptionResource(uri: uri) != nil }
+    /// What one subscription tick would answer, when that is provable without running the handler; nil
+    /// means run it. The device's grant and the session's workspace are checked here as on the handler
+    /// path, so a refusal is never hidden behind a skipped tick: a failed check runs the handler, which
+    /// answers the refusal exactly as before.
+    func subscriptionStamp(uri: String, clientID: String) async -> String? {
+        guard let authority, let resource = LinkSubscriptionResource(uri: uri),
+              let current = await service.subscriptionStamp(resource),
+              (try? await authority.require(clientID, capability: .conversationRead, workspace: current.workspace)) != nil else { return nil }
+        return current.stamp
     }
     func respondResource(method: String, uri: String, authorization: String?, body: Data, subscriptionClientID: String? = nil) async -> HTTPResourceResponse {
         do {
@@ -106,6 +113,21 @@ public struct BridgeRouter: Sendable {
                 }
                 throw BridgeError("not_found", "Unknown terminal mirror operation.", status: 404)
             }
+            // Starting a session: folders inside one approved workspace, then a fixed agent command in a new terminal.
+            if path.count >= 4, path.count <= 5, path[0...1] == ["v1", "workspaces"], ["directories", "sessions"].contains(path[3]) {
+                // A production router always has an authority, so a legacy token never starts sessions there.
+                let owner = authority == nil ? SessionAccess(clientID: "owner") { _, _ in } : nil
+                guard let access = access ?? owner, let launcher else { throw BridgeError("launch_unsupported", "Starting sessions requires scoped v2 enrollment and a current Bridge.", status: 422) }
+                let workspace = path[2]
+                switch (method, path[3], path.count) {
+                case ("GET", "directories", 4): return HTTPResourceResponse.json(try encode(await launcher.directories(workspaceID: workspace, access: access)))
+                case ("GET", "directories", 5): return HTTPResourceResponse.json(try encode(await launcher.listing(workspaceID: workspace, rootID: path[4], path: query["path"] ?? "", access: access)))
+                case ("POST", "sessions", 4):
+                    let request = try JSONDecoder().decode(StartSessionRequest.self, from: body)
+                    return HTTPResourceResponse.json(try encode(await launcher.start(workspaceID: workspace, request: request, access: access)))
+                default: throw BridgeError("not_found", "This resource is not available.", status: 404)
+                }
+            }
             if method == "GET", path == ["v1", "status"] {
                 if let client, let authority {
                     let approved = try await authority.require(client.id, capability: .workspaceRead)
@@ -135,7 +157,17 @@ public struct BridgeRouter: Sendable {
                     feed = .object(["items": .array((feed["items"].array ?? []).filter { allowed($0["workspace_id"].string, current) })])
                 }
                 data = try encode(feed)
-            } else if path.count == 4, path[0...1] == ["v1", "sessions"] {
+            } else if method == "GET", path.count == 5, path[0...1] == ["v1", "sessions"], path[3] == "tasks" {
+                let id = path[2], taskID = path[4]
+                if let client {
+                    let sessions = try await service.sessions()
+                    guard let session = sessions.first(where: { $0.id == id }), let workspace = session.workspaceID else { throw BridgeError("scope_denied", "This session is outside this device's workspaces.", status: 403) }
+                    try await require(client, .conversationRead, workspace: workspace)
+                }
+                data = try encode(await service.backgroundTask(id: id, taskID: taskID, offset: query["offset"].flatMap(Int.init) ?? 0,
+                                                               limit: query["limit"].flatMap(Int.init) ?? 65_536, beforeSeq: query["before_seq"].flatMap(Int.init),
+                                                               discovered: client != nil, access: access))
+            } else if path.count == 4, path[0...1] == ["v1", "sessions"], path[3] != "archive" {
                 let id = path[2]
                 let capability: ClientCapability = method == "POST" ? .conversationControl : (["changes", "diff", "file"].contains(path[3]) ? .projectRead : .conversationRead)
                 if method == "POST" {
@@ -146,26 +178,45 @@ public struct BridgeRouter: Sendable {
                     try await require(client, capability, workspace: workspace)
                 }
                 switch (method, path[3]) {
-                case ("GET", "history"): data = try encode(await service.history(id: id, beforeSeq: query["before_seq"].flatMap(Int.init), limit: query["limit"].flatMap(Int.init) ?? 100, access: access))
+                case ("GET", "history"): data = try encode(await service.history(id: id, beforeSeq: query["before_seq"].flatMap(Int.init), limit: query["limit"].flatMap(Int.init) ?? 100, discovered: client != nil, access: access))
                 case ("GET", "tool-detail"):
                     guard let messageID = query["message_id"], let generation = query["generation"], let field = query["field"] else { throw BridgeError("invalid_input", "A tool record, generation and field are required.") }
                     if let offset = query["offset"], Int(offset) == nil { throw BridgeError("invalid_input", "The text offset is invalid.") }
                     if let limit = query["limit"], Int(limit) == nil { throw BridgeError("invalid_input", "The text page size is invalid.") }
                     data = try encode(await service.toolText(id: id, messageID: messageID, generation: generation, field: field,
-                                                            offset: query["offset"].flatMap(Int.init) ?? 0, contentID: query["content_id"], limit: query["limit"].flatMap(Int.init) ?? 16_384, access: access))
+                                                            offset: query["offset"].flatMap(Int.init) ?? 0, contentID: query["content_id"], limit: query["limit"].flatMap(Int.init) ?? 16_384, discovered: client != nil, access: access))
                 case ("GET", "image"):
                     guard let reference = query["reference_id"], let generation = query["generation"], reference.range(of: "^[0-9a-f]{64}$", options: .regularExpression) != nil else { throw BridgeError("invalid_input", "A recorded image reference and generation are required.") }
-                    data = try await service.image(id: id, referenceID: reference, generation: generation, access: access); image = true
-                case ("GET", "preview"): data = try encode(await service.preview(id: id, access: access))
-                case ("GET", "changes"): data = try encode(await service.changes(id: id, access: access))
-                case ("GET", "diff"): data = try encode(await service.diff(id: id, path: query["path"], access: access))
+                    data = try await service.image(id: id, referenceID: reference, generation: generation, discovered: client != nil, access: access); image = true
+                // The scope check above just ran discovery; every read below resolves this id from it rather than again.
+                case ("GET", "preview"): data = try encode(await service.preview(id: id, discovered: client != nil, access: access))
+                case ("GET", "changes"): data = try encode(await service.changes(id: id, discovered: client != nil, access: access))
+                case ("GET", "diff"): data = try encode(await service.diff(id: id, path: query["path"], discovered: client != nil, access: access))
                 case ("GET", "file"):
                     guard let relative = query["path"] else { throw BridgeError("invalid_input", "A relative file path is required.") }
-                    data = try encode(await service.file(id: id, path: relative, access: access))
+                    data = try encode(await service.file(id: id, path: relative, discovered: client != nil, access: access))
                 case ("POST", "send"): data = try encode(await service.send(id: id, request: JSONDecoder().decode(SendRequest.self, from: body), access: access))
                 case ("POST", "interrupt"): data = try encode(await service.interrupt(id: id, request: JSONDecoder().decode(InterruptRequest.self, from: body), access: access))
+                case ("GET", "models"): data = try encode(await service.models(id: id, discovered: client != nil, access: access))
+                case ("POST", "model"): data = try encode(await service.switchModel(id: id, request: JSONDecoder().decode(ModelSwitchRequest.self, from: body), access: access))
+                case ("POST", "title"): data = try encode(await service.rename(id: id, request: JSONDecoder().decode(SessionRenameRequest.self, from: body), access: access))
+                // Reopening a conversation starts an Agent in its workspace, so it is a start-class action, not control.
+                case ("POST", "resume"):
+                    try await require(client, .conversationStart)
+                    data = try encode(await service.resume(id: id, request: JSONDecoder().decode(ResumeRequest.self, from: body), access: access))
                 default: throw BridgeError("not_found", "This resource is not available.", status: 404)
                 }
+            } else if method == "GET", path.count == 4, path[0...1] == ["v1", "sessions"], path[3] == "archive" {
+                // The complete archive authorizes exactly like history: the id is resolved against a
+                // fresh discovery, then the session's workspace must carry conversationRead.
+                let id = path[2]
+                if let client {
+                    let sessions = try await service.sessions()
+                    guard let session = sessions.first(where: { $0.id == id }), let workspace = session.workspaceID else { throw BridgeError("scope_denied", "This session is outside this device's approved workspaces.", status: 403) }
+                    try await require(client, .conversationRead, workspace: workspace)
+                }
+                data = try encode(await service.archive(id: id, tail: query["tail"].flatMap(Int.init), cursor: query["cursor"],
+                                                        limit: query["limit"].flatMap(Int.init) ?? 100, discovered: client != nil, access: access))
             } else if method == "POST", path.count == 4, path[0...1] == ["v1", "feed"], path[3] == "reply" {
                 // Stored receipts authorize their original scope inside the service;
                 // fresh decisions still require a currently pending, scoped target.
@@ -175,6 +226,9 @@ public struct BridgeRouter: Sendable {
             return HTTPResourceResponse(status: 200, data: data, contentType: image ? "image/jpeg" : "application/json; charset=utf-8")
         } catch {
             let failure = (error as? BridgeError) ?? BridgeError("invalid_request", "The request could not be processed.")
+            // A refused mutation is the one failure worth a log line: the phone shows its code, but which request
+            // produced it, and at which stage, is only visible here.
+            if method == "POST" { BridgeLog.shared.warning("mutation", "POST \(uri) refused code=\(failure.code) status=\(failure.status) message=\(failure.message)") }
             return HTTPResourceResponse(status: failure.status, data: (try? encode(["error": failure])) ?? Data(), contentType: "application/json; charset=utf-8")
         }
     }
@@ -182,7 +236,11 @@ public struct BridgeRouter: Sendable {
     private func require(_ client: EnrolledClient?, _ capability: ClientCapability, workspace: String? = nil) async throws {
         if let client, let authority { _ = try await authority.require(client.id, capability: capability, workspace: workspace) }
     }
-    private func encode<T: Encodable>(_ value: T) throws -> Data { let encoder = JSONEncoder(); encoder.dateEncodingStrategy = .iso8601; return try encoder.encode(value) }
+    /// Sorted keys make equal answers byte-equal: subscriptions compare bytes, and two equal dictionaries
+    /// (the feed's daemon objects) otherwise encode their keys in different orders.
+    private func encode<T: Encodable>(_ value: T) throws -> Data {
+        let encoder = JSONEncoder(); encoder.dateEncodingStrategy = .iso8601; encoder.outputFormatting = [.sortedKeys]; return try encoder.encode(value)
+    }
     private func constantTimeEqual(_ a: String, _ b: String) -> Bool {
         let left = Array(a.utf8); let right = Array(b.utf8); var difference = left.count ^ right.count
         for index in 0..<max(left.count, right.count) { difference |= Int((index < left.count ? left[index] : 0) ^ (index < right.count ? right[index] : 0)) }; return difference == 0

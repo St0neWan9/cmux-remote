@@ -12,6 +12,7 @@ struct MacCapabilityPresentation {
         case .feedReply: return String(localized: "mac.capability.reply", bundle: .interface)
         case .terminalRead: return String(localized: "mac.capability.terminals", bundle: .interface)
         case .terminalInput: return String(localized: "mac.capability.input", bundle: .interface)
+        case .conversationStart: return String(localized: "mac.capability.start", bundle: .interface)
         }
     }
 }

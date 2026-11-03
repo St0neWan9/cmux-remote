@@ -24,9 +24,172 @@ import CmuxRemoteCore
         #expect(UUID(uuidString: first) != nil)
         #expect(try await bridge.request("workspace.list", params: [:])["workspaces"].array![0]["id"].string == first)
         let records = try await service(bridge).sessions(); #expect(records.count == 1); let record = try #require(records.first); #expect(record.id.hasPrefix("tui:"))
-        await source.setAgentField("source", .string("socket"))
+        // A daemon record that is not hook provenance does not bind, and with its terminal gone it is historical.
+        await source.setAgentField("source", .string("socket")); await source.stopTerminal()
         let after = try await service(bridge).sessions(); #expect(after.count == 1 && after[0].state == "ended")
         #expect(try await service(adapter(source)).sessions().isEmpty)
+    }
+    @Test func anAgentTheDaemonForgotOnARunningTerminalStaysWritable() async throws {
+        let root = try temporary(); defer { try? FileManager.default.removeItem(at: root) }
+        let source = TuiResourceFixture(), bridge = adapter(source, root: root), session = service(bridge, root: root)
+        let id = try #require(try await session.sessions().first?.id)
+        #expect(try await session.sessions().first?.writable == true)
+        // The Agent resumed into the same terminal and the daemon dropped its hook row; the conversation reads as
+        // idle rather than ended, and a send still reaches that terminal.
+        await source.clearAgents()
+        let resumed = service(adapter(source, root: root), root: root)
+        let revived = try #require(try await resumed.sessions().first)
+        #expect(revived.id == id); #expect(revived.state == "idle"); #expect(revived.writable)
+        _ = try await resumed.send(id: id, request: .init(text: "after the resume"))
+        #expect(await source.effects.count == 1)
+        #expect(await source.effects.first?.1["terminal"]?.string == TuiResourceFixture.terminal)
+    }
+    @Test func aConversationIsIdentifiedByItsAgentNotItsTerminal() async throws {
+        let root = try temporary(); defer { try? FileManager.default.removeItem(at: root) }
+        let identity = TuiResourceIdentity()
+        let machine = TuiResourceFixture.machine, session = TuiResourceFixture.session
+        let first = identity.conversation(machine: machine, session: session, provider: "claude", providerSession: TuiResourceFixture.providerID)
+        let other = identity.conversation(machine: machine, session: session, provider: "claude", providerSession: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+        #expect(first == identity.conversation(machine: machine, session: session, provider: "claude", providerSession: TuiResourceFixture.providerID.uppercased()))
+        #expect(first != other)
+        // An archive written before this rule is re-keyed on load, so the same Agent keeps one identity.
+        let stale = TuiSessionSnapshot.Binding(id: "tui:" + UUID().uuidString.lowercased(), provider: "claude", providerSession: TuiResourceFixture.providerID.lowercased(),
+                                              terminal: TuiResourceFixture.terminal, workspace: TuiResourceFixture.workspace, surfaceID: "surface", workspaceID: "workspace", title: "Old", cwd: "/tmp", state: "idle")
+        try TuiBindingRepository(directory: root).save(identity: "\(TuiResourceFixture.machine):\(TuiResourceFixture.session)", rows: [stale])
+        let repository = TuiBindingRepository(directory: root)
+        let daemonIdentity = "\(TuiResourceFixture.machine):\(TuiResourceFixture.session)"
+        let loaded = try repository.load(identity: daemonIdentity)
+        #expect(loaded.first?.id == first)
+        // The re-keyed archive is written back, so a restart reads the current rule rather than migrating again.
+        #expect(try repository.load(identity: daemonIdentity).first?.id == first)
+    }
+    @Test func aConversationWhoseSurfaceIsGoneCanBeReopenedFromItsOwnTranscript() async throws {
+        let root = try temporary(); defer { try? FileManager.default.removeItem(at: root) }
+        let folder = root.appendingPathComponent(".claude/projects/-project")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let session = TuiResourceFixture.providerID
+        try Data((#"{"type":"user","cwd":"/project"}"# + "\n").utf8).write(to: folder.appendingPathComponent(session + ".jsonl"))
+        let source = TuiResourceFixture(), bridge = adapter(source, root: root), live = service(bridge, root: root)
+        let id = try #require(try await live.sessions().first?.id)
+        // A live conversation is not offered for reopening; only one whose terminal is gone is.
+        #expect(try await live.sessions().first?.resumable == false)
+        // The Agent's terminal is closed; the workspace outlived it, so the conversation can be reopened.
+        await source.removeTerminal()
+        let reopened = service(adapter(source, root: root), root: root)
+        let record = try #require(try await reopened.sessions().first)
+        #expect(record.id == id); #expect(record.resumable); #expect(!record.writable)
+        _ = try await reopened.resume(id: id, request: ResumeRequest())
+        let effects = await source.effects
+        #expect(effects.count == 1); #expect(effects[0].0 == "workspace.run")
+        let argv = effects[0].1["argv"]?.array?.compactMap { $0.string } ?? []
+        #expect(argv.count == 3 && argv[1] == "-ic")
+        // The Agent's own session id and directory, never a caller's choice.
+        #expect(argv[2].contains("--resume " + session.lowercased()))
+        #expect(argv[2].hasPrefix(LaunchAgent.claude.command))
+        #expect(effects[0].1["cwd"]?.string == "/project")
+    }
+    @Test func anAgentThatExitedLeavesARunningTerminalResumableRatherThanWritable() async throws {
+        let root = try temporary(); defer { try? FileManager.default.removeItem(at: root) }
+        let folder = root.appendingPathComponent(".claude/projects/-project")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let session = TuiResourceFixture.providerID
+        try Data((#"{"type":"user","cwd":"/project"}"# + "\n").utf8).write(to: folder.appendingPathComponent(session + ".jsonl"))
+        let source = TuiResourceFixture(), live = service(adapter(source, root: root), root: root)
+        let id = try #require(try await live.sessions().first?.id)
+        // The Agent exited and the shell that replaced it is on screen; the terminal itself is still running.
+        await source.clearAgents()
+        // The shell that replaced the Agent, as the daemon renders it.
+        await source.configure(replay: "\u{1b}[?2004h\u{1b}[Hvaluz@Studio [10:09] [~/project]\r\n-> %")
+        let reopened = service(adapter(source, root: root), root: root)
+        let record = try #require(try await reopened.sessions().first)
+        #expect(record.id == id); #expect(record.resumable); #expect(!record.writable); #expect(record.state == "ended")
+        _ = try await reopened.resume(id: id, request: ResumeRequest())
+        // The terminal is still open, so the resume is typed into it rather than opening a tab beside it.
+        let effects = await source.effects
+        #expect(effects.map(\.0) == ["terminal.input.write"])
+        #expect(effects.first?.1["text"]?.string?.contains(session.lowercased()) == true)
+    }
+    @Test func aRunningTerminalStillShowingTheAgentPromptStaysWritable() async throws {
+        let root = try temporary(); defer { try? FileManager.default.removeItem(at: root) }
+        let source = TuiResourceFixture(), session = service(adapter(source, root: root), root: root)
+        let id = try #require(try await session.sessions().first?.id)
+        // The daemon lost the hook row, but the Agent is still sitting at its own prompt.
+        await source.clearAgents()
+        await source.configure(replay: "\u{1b}[?2004h\u{1b}[H❯\u{00a0}\u{1b}[2mTry a task\u{1b}[22m")
+        let after = try #require(try await service(adapter(source, root: root), root: root).sessions().first)
+        #expect(after.id == id); #expect(after.writable); #expect(!after.resumable)
+    }
+    @Test func aRunningTerminalShowingAnAgentMenuInsteadOfItsPromptIsNotOfferedForReopening() async throws {
+        let root = try temporary(); defer { try? FileManager.default.removeItem(at: root) }
+        let folder = root.appendingPathComponent(".claude/projects/-project")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try Data((#"{"type":"user","cwd":"/project"}"# + "\n").utf8).write(to: folder.appendingPathComponent(TuiResourceFixture.providerID + ".jsonl"))
+        let source = TuiResourceFixture(), session = service(adapter(source, root: root), root: root)
+        let id = try #require(try await session.sessions().first?.id)
+        // "Switch model?" replaces the prompt line; its cursor is followed by an ordinary space, not the prompt's.
+        await source.clearAgents()
+        await source.configure(replay: "\u{1b}[?2004h\u{1b}[H   Switch model?\r\n\r\n   \u{1b}[34m❯ 1. Yes, switch to Sonnet 5.5\u{1b}[0m\r\n     2. No, go back")
+        let after = try #require(try await service(adapter(source, root: root), root: root).sessions().first)
+        #expect(after.id == id); #expect(after.writable); #expect(!after.resumable); #expect(after.state != "ended")
+    }
+    @Test func anUnreadableScreenIsNeitherWritableNorResumable() async throws {
+        let root = try temporary(); defer { try? FileManager.default.removeItem(at: root) }
+        let source = TuiResourceFixture(), session = service(adapter(source, root: root), root: root)
+        _ = try #require(try await session.sessions().first?.id)
+        await source.clearAgents()
+        // An unreadable grid and no transcript: the Bridge cannot prove the terminal is a shell, so it offers nothing.
+        await source.configure(replay: "\u{1b}[Hunknown UI")
+        let after = try #require(try await service(adapter(source, root: root), root: root).sessions().first)
+        #expect(!after.writable); #expect(!after.resumable)
+    }
+    @Test func reopeningAnExitedAgentUsesItsOwnTerminalInsteadOfOpeningATab() async throws {
+        let root = try temporary(); defer { try? FileManager.default.removeItem(at: root) }
+        let folder = root.appendingPathComponent(".claude/projects/-project")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let session = TuiResourceFixture.providerID
+        try Data((#"{"type":"user","cwd":"/project"}"# + "\n").utf8).write(to: folder.appendingPathComponent(session + ".jsonl"))
+        let source = TuiResourceFixture(), live = service(adapter(source, root: root), root: root)
+        let id = try #require(try await live.sessions().first?.id)
+        // The Agent exited and the terminal sits at a shell, still open: reopening belongs in that same terminal.
+        await source.clearAgents()
+        await source.configure(replay: "\u{1b}[?2004h\u{1b}[Hvaluz@Studio [10:09] [~/project]\r\n-> %")
+        let reopened = service(adapter(source, root: root), root: root)
+        _ = try await reopened.resume(id: id, request: ResumeRequest())
+        let effects = await source.effects
+        #expect(effects.map(\.0) == ["terminal.input.write"], "Reopening opened a new terminal: \(effects.map(\.0))")
+        let text = try #require(effects.first?.1["text"]?.string)
+        #expect(text.hasPrefix(" "), "The command must not start at the prompt's first column")
+        #expect(text.contains("--resume " + session.lowercased()))
+        #expect(text.hasSuffix("\r"))
+    }
+    @Test func aConversationWhoseTerminalIsGoneStillOpensOneNamedAfterIt() async throws {
+        let root = try temporary(); defer { try? FileManager.default.removeItem(at: root) }
+        let folder = root.appendingPathComponent(".claude/projects/-project")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try Data((#"{"type":"user","cwd":"/project"}"# + "\n").utf8).write(to: folder.appendingPathComponent(TuiResourceFixture.providerID + ".jsonl"))
+        let source = TuiResourceFixture(), live = service(adapter(source, root: root), root: root)
+        let id = try #require(try await live.sessions().first?.id)
+        let title = try #require(try await live.sessions().first?.title)
+        await source.removeTerminal()
+        let reopened = service(adapter(source, root: root), root: root)
+        _ = try await reopened.resume(id: id, request: ResumeRequest())
+        let effects = await source.effects
+        #expect(effects.map(\.0) == ["workspace.run"])
+        // A new tab that is named after the Agent rather than the conversation makes the phone lose the entry.
+        #expect(effects.first?.1["name"]?.string == title)
+        #expect(effects.first?.1["name"]?.string != "claude")
+    }
+    @Test func aConversationWithoutAReservableSessionCannotBeReopened() async throws {
+        let root = try temporary(); defer { try? FileManager.default.removeItem(at: root) }
+        let source = TuiResourceFixture(), bridge = adapter(source, root: root), live = service(bridge, root: root)
+        let id = try #require(try await live.sessions().first?.id)
+        await source.removeTerminal()
+        // No transcript, so no directory the Agent itself recorded: reopening would guess.
+        let reopened = service(adapter(source, root: root), root: root)
+        let record = try #require(try await reopened.sessions().first)
+        #expect(!record.resumable)
+        await #expect(throws: BridgeError.self) { _ = try await reopened.resume(id: id, request: ResumeRequest()) }
+        #expect(await source.effects.isEmpty)
     }
     @Test func ambiguousWorkspaceAndReplacedDaemonCannotBecomeWritable() async throws {
         let source = TuiResourceFixture(); await source.makeAmbiguous()
@@ -146,7 +309,7 @@ import CmuxRemoteCore
         let source = TuiResourceFixture(), bridge = adapter(source, root: root), session = service(bridge, root: root)
         let id = try #require(try await session.sessions().first?.id)
         #expect(try await session.history(id: id, beforeSeq: nil, limit: 20).messages.count == 1)
-        await source.clearAgents()
+        await source.clearAgents(); await source.stopTerminal()
         let restarted = service(adapter(source, root: root), root: root)
         let historical = try #require(try await restarted.sessions().first)
         #expect(historical.id == id && !historical.writable)

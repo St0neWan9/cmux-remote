@@ -14,7 +14,10 @@ struct HistoricalImageView: View {
         WhitePage(title: model.reference.name) {
             VStack(spacing: MobileDesign.sectionGap) {
                 if let image {
-                    Image(uiImage: image).resizable().scaledToFit().frame(maxWidth: .infinity, maxHeight: .infinity).accessibilityLabel(model.reference.name)
+                    // The preview answers the gestures a photo viewer is expected to take: pinch to zoom,
+                    // drag to look around, double tap to fill the page and back.
+                    ZoomableImage(image: image, accessibilityName: model.reference.name)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                     ActionRow {
                         Button { UIPasteboard.general.image = image } label: { Label(String(localized: "project.copy"), systemImage: "doc.on.doc") }
                         ShareLink(item: Image(uiImage: image), preview: SharePreview(model.reference.name, image: Image(uiImage: image))) { Label(String(localized: "project.share"), systemImage: "square.and.arrow.up") }

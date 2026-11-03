@@ -20,6 +20,15 @@ struct BackgroundTaskTracker {
         let deadline: Date?
         func isRunning(at now: Date) -> Bool { deadline.map { now < $0 } ?? true }
     }
+    /// A launch a failure notice ended, and when it said so.
+    ///
+    /// A background agent that dies on an API error is retried under the same task, and the retry writes no
+    /// new launch row: the notice is the last thing the conversation says about it. Its own sidecar record
+    /// is what keeps changing, so the moment the notice arrived is kept to tell a retry from a stale record.
+    struct Settled: Sendable, Equatable {
+        let launch: Launch
+        let at: Date?
+    }
     /// A Monitor without `timeout_ms` uses the tool's default, and none outlives the tool's ceiling.
     static let monitorDefaultTimeout: TimeInterval = 300
     static let monitorMaximumTimeout: TimeInterval = 3_600
@@ -36,42 +45,94 @@ struct BackgroundTaskTracker {
     func running(in lines: [String], at now: Date) -> [BackgroundAgentTask] {
         launches(in: lines).filter { $0.isRunning(at: now) }.map(\.task)
     }
-    /// Every detached call no completion, stop or notice has ended, with the deadline it declares.
-    func launches(in lines: [String]) -> [Launch] {
+    /// What the lines read so far established; a later chunk continues from it, so appended records are
+    /// scanned once instead of walking the whole conversation again.
+    struct State: Sendable {
         var launched: [String: Launch] = [:]
+        /// Every launch a failure notice ended, kept in case the agent retried it. Completion notices are final.
+        var failed: [String: Settled] = [:]
         /// The task id each launch reported, which is how `TaskStop` names it.
         var toolUseByTaskID: [String: String] = [:]
+        /// The same pairing the other way, so a failed launch can name its sidecar record.
+        var taskIDByToolUse: [String: String] = [:]
+        /// Agent calls without the flag: Claude Code now starts every subagent asynchronously, and only the
+        /// launch result ("Async agent launched …") says so. They count once that result arrives.
+        var asyncCandidates: [String: Launch] = [:]
+    }
+    /// Every detached call no completion, stop or notice has ended, with the deadline it declares.
+    func launches(in lines: [String]) -> [Launch] {
+        var state = State()
+        consume(lines, into: &state)
+        return state.launched.values.sorted { $0.task.id < $1.task.id }
+    }
+    /// Folds one chunk of records into `state`; chunks must arrive in record order.
+    func consume(_ lines: [String], into state: inout State) {
         for line in lines {
             // Every refresh walks the whole record, so a cheap substring test keeps the JSON parse for
             // the few rows that can carry a signal. Nothing else in a record can start or finish a task.
             guard Self.carriesASignal(line) else { continue }
             guard let data = line.data(using: .utf8), let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
+            // A request blob replays rows that were already folded in, including a launch whose completion came
+            // later in the record; reading it again would revive a finished task. Only records count.
+            guard Self.isRecord(value["type"] as? String) else { continue }
             let stamp = Self.timestamp(value["timestamp"] as? String)
             for call in Self.toolCalls(in: value) {
                 guard let id = call["id"] as? String else { continue }
                 let input = call["input"] as? [String: Any] ?? [:]
                 if call["name"] as? String == "TaskStop" {
                     for taskID in [input["task_id"], input["shell_id"]].compactMap({ $0 as? String }) {
-                        if let launch = toolUseByTaskID[taskID] { launched[launch] = nil }
+                        if let launch = state.toolUseByTaskID[taskID] {
+                            state.launched[launch] = nil; state.failed[launch] = nil
+                            state.taskIDByToolUse[launch] = nil
+                        }
                     }
                     continue
                 }
-                guard Self.runsInBackground(call) else { continue }
                 let summary = (input["description"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
                     ?? (input["command"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
                     ?? (call["name"] as? String) ?? ""
-                launched[id] = Launch(task: BackgroundAgentTask(id: id, tool: call["name"] as? String ?? "Task", summary: Self.shorten(summary)),
-                                      deadline: call["name"] as? String == "Monitor" ? Self.monitorDeadline(input, launchedAt: stamp) : nil)
+                let launch = Launch(task: BackgroundAgentTask(id: id, tool: call["name"] as? String ?? "Task", summary: Self.shorten(summary)),
+                                    deadline: call["name"] as? String == "Monitor" ? Self.monitorDeadline(input, launchedAt: stamp) : nil)
+                if Self.runsInBackground(call) { state.failed[id] = nil; state.launched[id] = launch }
+                else if call["name"] as? String == "Agent" { state.asyncCandidates[id] = launch }
             }
-            for (toolUseID, text) in Self.toolResults(in: value) where launched[toolUseID] != nil {
-                if let taskID = Self.matches(#"(?:with ID: |Monitor started \(task |agentId: )([A-Za-z0-9_-]+)"#, in: text).first {
-                    toolUseByTaskID[taskID] = toolUseID
+            for (toolUseID, text) in Self.toolResults(in: value) {
+                guard let candidate = state.asyncCandidates.removeValue(forKey: toolUseID), text.contains("Async agent launched") else { continue }
+                state.launched[toolUseID] = candidate
+            }
+            for (toolUseID, text) in Self.toolResults(in: value) where state.launched[toolUseID] != nil {
+                if let taskID = Self.matches(#"(?:with ID: |Task ID: |Monitor started \(task |agentId: )([A-Za-z0-9_-]+)"#, in: text).first {
+                    state.toolUseByTaskID[taskID] = toolUseID
+                    state.taskIDByToolUse[toolUseID] = taskID
+                }
+                // A Workflow's launch result names the run in a line of its own; the call's own input is a script,
+                // which reads as nothing like the work it started.
+                if var launch = state.launched[toolUseID], let range = text.range(of: "Summary: ") {
+                    let line = text[range.upperBound...].prefix { $0 != "\n" }.trimmingCharacters(in: .whitespaces)
+                    if !line.isEmpty {
+                        launch = Launch(task: BackgroundAgentTask(id: launch.task.id, tool: launch.task.tool, summary: Self.shorten(line)), deadline: launch.deadline)
+                        state.launched[toolUseID] = launch
+                    }
                 }
             }
-            // A completion notice names the tool call it finishes.
-            for id in Self.completedToolUseIDs(in: value) { launched[id] = nil }
+            // A completion notice names the tool call it finishes. A failure ends it only until the agent
+            // retries, so it is kept apart rather than dropped.
+            for notice in Self.notices(in: value) {
+                // A notice may name the tool call or only the task id the launch reported; both end the same task.
+                let key = state.launched[notice.id] != nil ? notice.id : state.toolUseByTaskID[notice.id]
+                if let key, let launch = state.launched.removeValue(forKey: key) {
+                    if notice.failed { state.failed[key] = Settled(launch: launch, at: stamp) }
+                    else { state.failed[key] = nil; state.taskIDByToolUse[key] = nil }
+                } else if !notice.failed {
+                    state.failed[notice.id] = nil
+                }
+            }
         }
-        return launched.values.sorted { $0.task.id < $1.task.id }
+    }
+    /// The record kinds a task signal can come from; request payload copies replay earlier rows.
+    private static func isRecord(_ type: String?) -> Bool {
+        guard let type else { return false }
+        return ["user", "assistant", "queue-operation", "attachment"].contains(type)
     }
     /// When a Monitor stops on its own: launch time plus its declared timeout, never past the ceiling.
     private static func monitorDeadline(_ input: [String: Any], launchedAt: Date?) -> Date? {
@@ -97,9 +158,12 @@ struct BackgroundTaskTracker {
     ///
     /// A tool that always detaches says so by name rather than by a flag, so its name is part of the test.
     private static func carriesASignal(_ line: String) -> Bool {
-        if line.contains("task-notification") || line.contains("run_in_background") || line.contains("\"TaskStop\"") { return true }
+        if line.contains("task-notification") || line.contains("run_in_background") || line.contains("\"TaskStop\"") || line.contains("\"Agent\"") { return true }
         // A launch result reports the task id that a later `TaskStop` names.
         if line.contains("running in background with ID") || line.contains("Monitor started (task") || line.contains("agentId:") { return true }
+        // A Workflow's launch result says "Workflow launched in background. Task ID: …"; the row names no tool, so
+        // the signal has to be read from the sentence itself.
+        if line.contains("launched in background") || line.contains("Task ID:") { return true }
         return alwaysDetached.contains { line.contains("\"" + $0 + "\"") }
     }
     /// Every `tool_use` block on one transcript record.
@@ -115,15 +179,20 @@ struct BackgroundTaskTracker {
         let input = call["input"] as? [String: Any] ?? [:]
         return input["run_in_background"] as? Bool == true || input["runInBackground"] as? Bool == true
     }
-    /// The tool-call ids a `<task-notification>` block finishes.
+    /// The tool-call ids a `<task-notification>` block finishes, and whether it ended in failure.
     ///
     /// The block reaches the record in more than one shape: a queue row's own `content`, an
     /// `attachment`'s `prompt`, and a `tool_result`'s content inside a user message. All are searched so
     /// a finished task is never left looking like it is still running.
-    private static func completedToolUseIDs(in value: [String: Any]) -> [String] {
-        let texts = Self.noticeTexts(in: value)
-        let matches = texts.flatMap { $0.contains("<task-notification>") ? Self.matches(#"<tool-use-id>([^<]+)</tool-use-id>"#, in: $0) : [] }
-        return matches
+    private static func notices(in value: [String: Any]) -> [(id: String, failed: Bool)] {
+        Self.noticeTexts(in: value).flatMap { text -> [(id: String, failed: Bool)] in
+            guard text.contains("<task-notification>") else { return [] }
+            let failed = text.contains("<status>failed</status>")
+            // A notice names the tool call when it has one. Notice that only names the task ids are still
+            // paired: the launch result printed the same id, so it resolves through the task-id map.
+            return Self.matches(#"<tool-use-id>([^<]+)</tool-use-id>"#, in: text).map { (id: $0, failed: failed) }
+                + Self.matches(#"<task-id>([^<]+)</task-id>"#, in: text).map { (id: $0, failed: failed) }
+        }
     }
     /// Every string on one record that could carry a completion notice.
     private static func noticeTexts(in value: [String: Any]) -> [String] {

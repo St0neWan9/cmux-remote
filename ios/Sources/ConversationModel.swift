@@ -9,6 +9,8 @@ final class ConversationModel {
     var session: SessionDescriptor
     let client: RemoteClient
     var canSend: Bool { session.writable && client.canControlConversations }
+    /// Reopening starts a process in the workspace, so it needs the start grant as well as control.
+    var canResume: Bool { session.resumable && client.allows(.conversationStart) }
     var messages: [ChatMessage] = []
     var images: [ConversationImageReference] = []
     var timelineItems: [ConversationTimelineItem] = []
@@ -36,6 +38,29 @@ final class ConversationModel {
     var compacting = false
     /// Tasks the agent detached and has not finished. They outlive the turn that started them.
     private(set) var backgroundTasks: [BackgroundAgentTask] = []
+    /// Questions the agent is blocked on and the phone may answer, keyed by the prompt the card shows.
+    ///
+    /// The transcript holds the question the agent asked; the Feed holds the request that may be answered.
+    /// A card is answered only where both exist and name the same conversation and prompt.
+    private(set) var pendingQuestions: [String: ConversationQuestions.Match] = [:]
+    /// Whether answering is in flight, so a card does not accept a second tap.
+    var answeringQuestion = false
+    /// Answers given from this phone during the session, keyed by the prompt's own words.
+    ///
+    /// The transcript records the question but not the choice, so until the next history read carries it the
+    /// card would show no answer; this keeps the reader's own choice visible where they made it.
+    private(set) var answeredQuestions: [String: String] = [:]
+    /// The model the transcript last reported.
+    private(set) var agentModel: AgentModelState?
+    /// A switch this phone made that the transcript has not reported yet, with the report it was made over.
+    /// Codex records a new model only with its next turn, so until then the page shows the reader's choice.
+    private var switchedModel: (label: String, over: AgentModelState?)?
+    var modelLabel: String? { switchedModel?.label ?? agentModel?.model }
+    /// What the agent's configuration on the Mac offers; nil until read, and from a Bridge that cannot switch.
+    private(set) var modelChoices: ModelChoiceList?
+    /// A switch Claude Code asked to confirm and the Bridge declined for the reader; the page asks, then switches again.
+    var modelAwaitingConfirmation: (name: String, label: String)?
+    var canSwitchModel: Bool { canSend && modelChoices != nil && ["claude", "codex"].contains(session.agent) }
     var error: String?
     var draft = ""
     let imageDraft = ImageDraftModel()
@@ -55,9 +80,49 @@ final class ConversationModel {
     private let readSessions: @Sendable () async throws -> [SessionDescriptor]
     private let readHistory: @Sendable (Int?) async throws -> ConversationSnapshot
     private let readPreview: @Sendable () async throws -> PreviewSnapshot
+    /// Reads only the newest messages; nil reads the full newest page every time.
+    private let readTail: (@Sendable (Int) async throws -> ConversationSnapshot)?
+    /// When the newest full page was last read. A refresh soon after reads only the tail: over the relay each
+    /// full page is the slowest read, and a running turn changes it every few seconds.
+    private var fullReadAt: Date?
+    private let tailLimit = 30
+    private let fullReadInterval: TimeInterval = 60
+    /// The last read of this conversation, shown on open while the fresh one is on its way.
+    private let cache: ConversationCache?
+    /// The conversation kept across openings; nil in fixtures that supply their own readers.
+    private let store: ConversationStore?
+    /// Reads the whole transcript instead of the Bridge's window, once the Bridge offers it.
+    /// Cleared when the Bridge answers 404: the session then keeps the windowed route for good.
+    private var archive: ArchiveChain?
+    /// Walks the rest of the conversation into the store once the page is open, so reading back never waits on
+    /// the Mac again. Bounded, cancellable, and never touches what the page shows.
+    private var backfill: Task<Void, Never>?
+    /// Reads the requests waiting for the agent, of which this conversation's questions are the ones it owns.
+    private let readFeed: @Sendable () async throws -> [JSONValue]
+    /// Answers one of those requests.
+    private let replyFeed: @Sendable (String, JSONValue) async throws -> MutationReceipt
+    private let readModels: @Sendable () async throws -> ModelChoiceList
+    /// The Mac's model lists, shared with every other conversation on it.
+    private let modelCache: ModelChoiceCache?
+    /// A model-list read in flight, so opening the page twice in a row does not read it twice.
+    private var modelsLoading = false
+    private let postModel: @Sendable (ModelSwitchRequest) async throws -> MutationReceipt
+    private let renameSession: @Sendable (SessionRenameRequest) async throws -> MutationReceipt
+    /// The title this page shows after a rename, until the next read brings the same name from cmux.
+    private var renamedTitle: String?
+    /// When this page last read the Mac's session list for its own descriptor.
+    private var descriptorsReadAt: Date?
+    /// When this page last read the Feed for the questions it owns, and how often it does.
+    private var questionsReadAt: Date?
+    private let questionsInterval: TimeInterval = 8
+    private let descriptorsInterval: TimeInterval = 5
     private let refreshReads = ReadRequestOwner()
     private let olderReads = ReadRequestOwner()
     private var readsEnabled = true
+    /// Whether the conversation is on screen and following its own changes.
+    private var observing = false
+    /// The off-screen follower, replaced by the conversation's own observer while it is on screen.
+    private var follower: Task<Void, Never>?
     private(set) var loadingOlder = false
     var busy = false
     var hasMore = false
@@ -65,6 +130,20 @@ final class ConversationModel {
     var clipped = false
     private var generation: String?
     var historyGeneration: String? { generation }
+    /// Bumped when a read replaced the conversation instead of extending it.
+    ///
+    /// The rows the page was showing are gone, and the scroll offset it holds means nothing among the new ones:
+    /// left where it is, the page can rest past the end of a shorter transcript — blank until the reader asks
+    /// for the latest. The page moves to the new end when this changes.
+    private(set) var replacementCount = 0
+    /// Everything the timeline's id lookups depend on. It changes when a message, a reply or an image appears or
+    /// the conversation is replaced, and not when the page merely re-evaluates, which is what makes caching them safe.
+    var timelineIndexKey: String {
+        let last = responses.last
+        return [generation ?? "-", String(timelineItems.count), String(responses.count), String(images.count),
+                timelineItems.first?.id ?? "-", timelineItems.last?.id ?? "-",
+                last?.lastMessageID ?? "-", last?.completed == true ? "1" : "0"].joined(separator: ":")
+    }
     init(session: SessionDescriptor, client: RemoteClient, speechInput: (any SpeechInputServing)? = nil,
          loadRecovery: (@Sendable () async throws -> SendRequest?)? = nil,
          saveRecovery: (@Sendable (SendRequest?) async throws -> Void)? = nil,
@@ -72,8 +151,15 @@ final class ConversationModel {
          getOperation: (@Sendable (UUID) async throws -> OperationStatus)? = nil,
          readSessions: (@Sendable () async throws -> [SessionDescriptor])? = nil,
          readHistory: (@Sendable (Int?) async throws -> ConversationSnapshot)? = nil,
-         readPreview: (@Sendable () async throws -> PreviewSnapshot)? = nil) {
-        self.session = session; self.client = client; speech = SpeechDraftModel(input: speechInput ?? UnavailableSpeechInput())
+         readPreview: (@Sendable () async throws -> PreviewSnapshot)? = nil,
+         readTail: (@Sendable (Int) async throws -> ConversationSnapshot)? = nil,
+         readFeed: (@Sendable () async throws -> [JSONValue])? = nil,
+         replyFeed: (@Sendable (String, JSONValue) async throws -> MutationReceipt)? = nil,
+         readModels: (@Sendable () async throws -> ModelChoiceList)? = nil,
+         postModel: (@Sendable (ModelSwitchRequest) async throws -> MutationReceipt)? = nil,
+         renameSession: (@Sendable (SessionRenameRequest) async throws -> MutationReceipt)? = nil,
+         cache: ConversationCache? = nil, store: ConversationStore? = nil, archive: ArchiveChain? = nil, modelCache: ModelChoiceCache? = nil) {
+        self.session = session; self.client = client; self.modelCache = modelCache; speech = SpeechDraftModel(input: speechInput ?? UnavailableSpeechInput())
         let id = session.id
         let recovery = PendingSendStore(); let scope = client.operationRecoveryScope
         self.loadRecovery = loadRecovery ?? { try await recovery.load(scope: scope, sessionID: id) }
@@ -81,8 +167,78 @@ final class ConversationModel {
         self.sendRequest = sendRequest ?? { try await client.post("/v1/sessions/\(id)/send", body: $0, as: MutationReceipt.self) }
         self.getOperation = getOperation ?? { try await client.get("/v1/operations/\($0.uuidString)", as: OperationStatus.self) }
         self.readSessions = readSessions ?? { try await client.get("/v1/sessions", as: [SessionDescriptor].self) }
-        self.readHistory = readHistory ?? { before in try await client.get("/v1/sessions/\(id)/history", query: before.map { ["before_seq": String($0)] } ?? [:], as: ConversationSnapshot.self) }
+        // An earlier page is read smaller than the page the conversation opens with: each one is laid out whole
+        // when it is prepended, and the visible stretch of a scroll is a fraction of a hundred messages.
+        self.readHistory = readHistory ?? { before in
+            try await client.get("/v1/sessions/\(id)/history",
+                                 query: before.map { ["before_seq": String($0), "limit": "40"] } ?? [:], as: ConversationSnapshot.self)
+        }
         self.readPreview = readPreview ?? { try await client.get("/v1/sessions/\(id)/preview", as: PreviewSnapshot.self) }
+        // A substituted history reader is used as given, so its reads are not split behind its back.
+        if let readTail { self.readTail = readTail }
+        else if readHistory == nil {
+            self.readTail = { limit in try await client.get("/v1/sessions/\(id)/history", query: ["limit": String(limit)], as: ConversationSnapshot.self) }
+        } else { self.readTail = nil }
+        // Questions live in the Feed, beside the transcript: the card the agent asked and the request that answers it.
+        self.readFeed = readFeed ?? { try await client.get("/v1/feed", as: JSONValue.self)["items"].array ?? [] }
+        self.replyFeed = replyFeed ?? { requestID, body in try await client.post("/v1/feed/\(requestID)/reply", body: body, as: MutationReceipt.self) }
+        self.readModels = readModels ?? { try await client.get("/v1/sessions/\(id)/models", as: ModelChoiceList.self) }
+        self.postModel = postModel ?? { try await client.post("/v1/sessions/\(id)/model", body: $0, as: MutationReceipt.self) }
+        self.renameSession = renameSession ?? { try await client.post("/v1/sessions/\(id)/title", body: $0, as: MutationReceipt.self) }
+        self.cache = cache; self.store = store; self.archive = archive
+    }
+    /// Shows what was read last, so opening a conversation never starts blank.
+    ///
+    /// This displays stored content rather than deciding anything: the refresh that follows replaces it
+    /// whether or not the conversation changed, and a stored generation the Bridge has replaced is ignored.
+    func restoreStored() async {
+        guard messages.isEmpty, generation == nil else { return }
+        // A stored conversation is shown whole: every page read so far, not just the newest one.
+        if let store, let stored = await store.restore(scope: client.operationRecoveryScope, sessionID: session.id) {
+            // Showing the stored copy is not a read: a page reopened while the previous visit's suspension is still
+            // in effect used to throw it away and sit blank until the first network read landed.
+            guard !Task.isCancelled, messages.isEmpty, generation == nil else { return }
+            generation = stored.generation; hasMore = stored.hasMore
+            applyStored(stored, live: nil)
+            diagLog(.info, category: "open", "restored from store messages=\(messages.count)")
+            return
+        }
+        guard let cache else { return }
+        let started = ContinuousClock.now
+        guard let entry = await cache.load(scope: client.operationRecoveryScope, sessionID: session.id) else { return }
+        let loaded = ContinuousClock.now
+        // The read may have landed while the stored copy was being read; the fresh one wins.
+        guard !Task.isCancelled, messages.isEmpty, generation == nil else { return }
+        generation = entry.snapshot.generation; hasMore = entry.snapshot.hasMore
+        applyStored(entry.snapshot, live: entry.preview)
+        // Opening a long conversation should be instant; when it is not, this says whether the stored copy or its
+        // layout was the cost.
+        diagLog(.info, category: "open", "restored messages=\(messages.count) items=\(timelineItems.count) load=\(loaded - started) apply=\(ContinuousClock.now - loaded)")
+    }
+    /// Displays a stored copy as it was written; merging belongs to reads that arrive from the link.
+    private func applyStored(_ history: ConversationSnapshot, live: PreviewSnapshot?) {
+        clipped = history.clipped
+        messages = history.messages
+        images = history.images ?? []
+        responses = history.responses ?? []
+        backgroundTasks = history.backgroundTasks ?? []
+        agentModel = history.agentModel
+        recordedRunSeconds = history.recordedRunSeconds; recordedTurnCount = history.recordedTurnCount ?? 0
+        currentTurnStartedAt = history.currentTurnStartedAt; currentTurnCompleted = history.currentTurnCompleted ?? false
+        timelineItems = ConversationTimeline().items(from: messages)
+        let committed = messages.reversed().compactMap { message -> String? in
+            if message.role == .agent, case .prose(let value) = message.kind { return value.text }; return nil
+        }.first
+        preview = live?.text == committed ? nil : live?.text; compacting = live?.compacting ?? false
+        if stopRequested, messages.last(where: { $0.role == .user })?.id != interruptedUserID { stopRequested = false }
+    }
+    /// Stores the read that just landed, so the next open of this conversation is immediate.
+    private func store(_ history: ConversationSnapshot, live: PreviewSnapshot?) {
+        let scope = client.operationRecoveryScope, id = session.id
+        if let store { Task { await store.save(history, scope: scope, sessionID: id, complete: !history.hasMore) } }
+        guard let cache else { return }
+        let entry = ConversationCache.Entry(snapshot: history, preview: live, storedAt: Date())
+        Task { await cache.save(entry, scope: scope, sessionID: id) }
     }
     func updateSession(_ current: SessionDescriptor) {
         if current.state != session.state { stopRequested = false }
@@ -94,49 +250,208 @@ final class ConversationModel {
     }
     /// Suspending reads leaves durable mutations and their captured drafts intact.
     func observeChanges() async {
+        // On screen the conversation follows its own changes; an off-screen follower would subscribe to them again.
+        observing = true; unfollow(); defer { observing = false }
         let paths = ["/v1/sessions/\(session.id)/history", "/v1/sessions/\(session.id)/preview", "/v1/sessions"]
-        for await _ in client.changes(paths: paths) {
-            guard !Task.isCancelled, readsEnabled else { return }; await refresh()
+        var failures = 0
+        while !Task.isCancelled, readsEnabled {
+            var delivered = false
+            for await _ in client.changes(paths: paths) {
+                guard !Task.isCancelled, readsEnabled else { return }
+                delivered = true
+                await refresh()
+            }
+            // The watch ended while the page is still on screen: the link bounced past its
+            // subscription or a refusal took it down. Re-arm instead of freezing the page; the
+            // pause bounds the retries when a refusal is permanent.
+            guard !Task.isCancelled, readsEnabled else { return }
+            failures = delivered ? 0 : min(failures + 1, 5)
+            try? await Task.sleep(for: .seconds(1 << failures))
+            await refresh()
         }
     }
-    func suspendReads() { readsEnabled = false; refreshReads.suspend(); olderReads.suspend(); loadingOlder = false }
+    /// Whether an off-screen follower is running for this conversation.
+    var following: Bool { follower != nil }
+    /// Follows this conversation while it runs off screen, so switching to it shows its latest messages.
+    /// Nothing starts while it is on screen, where its own observer already follows it.
+    func follow(every interval: Duration) {
+        guard follower == nil, !observing else { return }
+        follower = Task { [weak self] in await self?.followHidden(every: interval) }
+    }
+    func unfollow() { follower?.cancel(); follower = nil }
+    /// Reads once, then again only after the Bridge reports a change, and at most once per interval: a running turn
+    /// changes every few seconds, and waiting lets those changes coalesce into one read.
+    ///
+    /// Only the history is watched. A Bridge link carries at most sixteen subscriptions, and the conversation on
+    /// screen, the session list and the feed already use some; the live tail is read with the history anyway.
+    private func followHidden(every interval: Duration) async {
+        await syncHidden()
+        var failures = 0
+        while !Task.isCancelled {
+            var delivered = false
+            for await _ in client.changes(paths: ["/v1/sessions/\(session.id)/history"]) {
+                guard !Task.isCancelled else { return }
+                delivered = true
+                try? await Task.sleep(for: interval)
+                guard !Task.isCancelled else { return }
+                await syncHidden()
+            }
+            // The watch ended while the conversation still runs off screen: re-arm so switching
+            // back to it shows its latest messages instead of the snapshot from before the drop.
+            guard !Task.isCancelled else { return }
+            failures = delivered ? 0 : min(failures + 1, 5)
+            try? await Task.sleep(for: .seconds(1 << failures))
+            await syncHidden()
+        }
+    }
+    /// One read for a conversation not on screen; one that is on screen is kept current by its own observer.
+    ///
+    /// A hidden conversation only needs its transcript: its live tail is not drawn and its own row in the Mac's
+    /// session list is not shown, while the link carries a bounded number of requests at once. Followers each
+    /// asking three questions are what filled that bound, and a page that arrived while it was full failed.
+    func syncHidden() async {
+        guard !observing, !busy, !Task.isCancelled else { return }
+        await refreshReads.run { [self] request in await readLatest(request, hidden: true) }
+    }
+    /// Fills the stored copy from the page the reader is on back to the start of the transcript. It only writes to
+    /// the store: the visible conversation is unchanged, and the work stops when the page goes away.
+    func startBackfill() {
+        guard let store, backfill == nil, hasMore, let first = messages.first?.seq else { return }
+        let scope = client.operationRecoveryScope, id = session.id, read = readHistory
+        backfill = Task { [weak self] in
+            var before = first
+            var pages = 0
+            // Sixty-four pages of the reader's own size covers a conversation of a few thousand messages; anything
+            // longer is filled the next time it is opened rather than held in one long background run.
+            while !Task.isCancelled, pages < 64 {
+                let page: ConversationSnapshot, more: Bool
+                if let chain = await self?.archiveChain {
+                    guard let next = try? await chain.older(limit: 100) else { break }
+                    page = next.page; more = next.hasMore
+                } else {
+                    guard let legacy = try? await read(before) else { break }
+                    page = legacy; more = legacy.hasMore
+                }
+                guard let next = page.messages.filter({ $0.seq < before }).first?.seq ?? page.messages.first.map({ _ in before }) else { break }
+                await store.save(page, scope: scope, sessionID: id, complete: !more)
+                before = min(before, next)
+                pages += 1
+                if !more { break }
+                if self?.readsEnabled == false { break }
+            }
+            await MainActor.run { self?.backfill = nil }
+        }
+    }
+    func stopBackfill() { backfill?.cancel(); backfill = nil }
+    /// The archive chain, readable from the fill's detached task.
+    var archiveChain: ArchiveChain? { archive }
+    func suspendReads() { readsEnabled = false; refreshReads.suspend(); olderReads.suspend(); loadingOlder = false; stopBackfill() }
     func resumeReads() { readsEnabled = true }
     func refresh() async {
         guard readsEnabled, !Task.isCancelled else { return }
+        // The questions are read beside the page, not after it: the page waits for the Mac's session list, and a
+        // card that could not be answered until that finished sat unanswerable for seconds after it appeared.
+        async let questions: Void = refreshQuestions()
         await refreshReads.run { [self] request in await readLatest(request) }
+        await questions
     }
-    private func readLatest(_ request: UUID) async {
+    private func readLatest(_ request: UUID, hidden: Bool = false) async {
+        let started = ContinuousClock.now
+        defer { diagLog(.debug, category: "open", "read landed after \(ContinuousClock.now - started) messages=\(messages.count)") }
         do {
             do { try await restorePendingSend() }
-            catch { if refreshReads.isCurrent(request) { mutationWarning = ErrorPresentation().message(error) } }
+            catch { if refreshReads.isCurrent(request) { logFailure("refresh.recovery", error, shown: true); mutationWarning = ErrorPresentation().message(error) } }
             guard refreshReads.isCurrent(request) else { return }
-            let descriptors = try await readSessions()
+            // The reads a refresh needs go out together: over the relay each costs a round trip, and one after
+            // another their times added up to several seconds before anything new appeared.
+            let tail = fullReadAt.map { Date().timeIntervalSince($0) < fullReadInterval } == true && !messages.isEmpty ? readTail : nil
+            let readSessions = readSessions, readHistory = readHistory, readPreview = readPreview, tailLimit = tailLimit
+            // The session list is a read of the whole Mac's sessions, and the page only needs its own row from it.
+            // Reading it on every refresh made the Mac answer the same list again and again while a turn ran, so
+            // it is read again only once this page's own row may have changed.
+            let readsListing = !hidden && (descriptorsReadAt.map { Date().timeIntervalSince($0) >= descriptorsInterval } ?? true)
+            if readsListing { descriptorsReadAt = Date() }
+            async let descriptorsRead: [SessionDescriptor] = readsListing ? readSessions() : []
+            let chain = archive
+            let readPage: @Sendable () async throws -> (
+                page: ConversationSnapshot, cursor: String?) = {
+                if let chain {
+                    let newest = try await chain.newest(limit: tailLimit)
+                    return (newest.page, newest.cursor)
+                }
+                if let tail { return (try await tail(tailLimit), nil) }
+                return (try await readHistory(nil), nil)
+            }
+            let readHole: (@Sendable (String, Int) async throws -> ConversationArchivePage)?
+            if let chain { readHole = { cursor, limit in try await chain.page(from: cursor, limit: limit) } }
+            else { readHole = nil }
+            async let historyRead = readPage()
+            async let liveRead: PreviewSnapshot? = hidden ? nil : try? readPreview()
+            // The transcript comes first: it is one page of one conversation, while the session list is every
+            // conversation on the Mac. Waiting for the list left the page blank for as long as that read takes
+            // (seconds on a Mac with fifty of them) although the page itself was already in hand. The list only
+            // decides whether the conversation can be written or reopened, and that lands with the next read.
+            var history: ConversationSnapshot
+            var historyCursor: String?
+            do {
+                let read = try await historyRead
+                history = read.page; historyCursor = read.cursor
+            }
+            catch let error as BridgeError where (error.status == 404 || error.status == 413) && archive != nil {
+                // No route (an older Bridge) or a transcript past the archive's bound: this conversation keeps the
+                // windowed history, which still shows what the Bridge's window can reach.
+                diagLog(.info, category: "open", "archive unavailable code=\(error.code); using the windowed history")
+                archive = nil
+                history = try await readHistory(nil)
+            }
+            var full = tail == nil || archive != nil
+            // A tail that does not reach the messages on screen would leave a gap, and one from a replaced
+            // transcript has nothing to join: both read the full page instead.
+            if !full, history.generation != generation || history.messages.first.map({ oldest in !messages.contains { $0.id == oldest.id } }) == true {
+                history = try await readHistory(nil); full = true
+            }
             guard refreshReads.isCurrent(request) else { return }
-            guard let current = descriptors.first(where: { $0.id == session.id }) else { throw BridgeError("read_only", "The cmux session is no longer available.", status: 404) }
-            let history = try await readHistory(nil)
+            let live = await liveRead
             guard refreshReads.isCurrent(request) else { return }
-            let live = try? await readPreview()
+            if full { fullReadAt = Date() }
+            // A page read from a replaced transcript is not merged into the one on screen; it replaces it.
+            let continues = generation == history.generation
+            // A page read from the newest end can start above the messages on screen when the turn produced more
+            // than one page since the last read. The reader's own paging walks down from the oldest message, so
+            // nothing else would ever ask for that stretch: it is read here from the page's own cursor.
+            let hole = continues ? await missingMessages(below: history, held: messages, using: historyCursor, read: readHole, limit: tailLimit) : []
             guard refreshReads.isCurrent(request) else { return }
-            updateSession(current)
-            if generation == history.generation {
+            if continues, !messages.isEmpty {
                 var next = messages
-                for message in history.messages {
-                    if let index = next.firstIndex(where: { $0.id == message.id }) { next[index] = message }
-                    else { next.append(message) }
+                var positions = [String: Int](minimumCapacity: next.count)
+                for (index, message) in next.enumerated() { positions[message.id] = index }
+                for message in hole + history.messages {
+                    if let index = positions[message.id] { next[index] = message }
+                    else { positions[message.id] = next.count; next.append(message) }
                 }
                 messages = next.sorted { $0.seq < $1.seq }
-            } else { olderReads.suspend(); loadingOlder = false; messages = history.messages; responses = []; generation = history.generation; hasMore = history.hasMore }
+            } else {
+                // A transcript that was rewritten (a compaction) is not the one on screen any more.
+                let replaced = !messages.isEmpty && generation != history.generation
+                olderReads.suspend(); loadingOlder = false; messages = history.messages; responses = []; generation = history.generation; hasMore = history.hasMore
+                if replaced { replacementCount += 1 }
+            }
             clipped = history.clipped
             let updatedIDs = Set(history.messages.map(\.id))
             images = images.filter { $0.generation == history.generation && !updatedIDs.contains($0.messageID) } + (history.images ?? [])
             if stopRequested, messages.last(where: { $0.role == .user })?.id != interruptedUserID { stopRequested = false }
-            if generation == history.generation {
+            // A replaced page starts from no replies; either way the page's own replies are kept. Dropping them on
+            // the first read made every turn grow its footer on the next one, after the page had settled.
+            do {
                 let incoming = history.responses ?? []
                 let anchors = Set(incoming.map(\.firstMessageID))
                 responses = responses.filter { !anchors.contains($0.firstMessageID) } + incoming
             }
             // Only a newest-page read carries them, so an earlier page must not clear the set.
             if history.backgroundTasks != nil { backgroundTasks = history.backgroundTasks ?? [] }
+            // Both full and tail reads are the newest page, which is the one that reports the model.
+            agentModel = history.agentModel
+            if let switched = switchedModel, switched.over != agentModel { switchedModel = nil }
             recordedRunSeconds = history.recordedRunSeconds; recordedTurnCount = history.recordedTurnCount ?? 0
             currentTurnStartedAt = history.currentTurnStartedAt; currentTurnCompleted = history.currentTurnCompleted ?? false
             timelineItems = ConversationTimeline().items(from: messages)
@@ -145,10 +460,23 @@ final class ConversationModel {
                 if message.role == .agent, case .prose(let value) = message.kind { return value.text }; return nil
             }.first
             preview = live?.text == committed ? nil : live?.text; compacting = live?.compacting ?? false; error = mutationWarning
+            // The Mac's session list decides what may be written or reopened, not what the page shows, so it is
+            // waited for here — after the reader already has the conversation.
+            let descriptors = try await descriptorsRead
+            guard refreshReads.isCurrent(request) else { return }
+            if let current = descriptors.first(where: { $0.id == session.id }) {
+                updateSession(current)
+            } else if readsListing {
+                throw BridgeError("read_only", "The cmux session is no longer available.", status: 404)
+            }
+            // A tail holds only the newest messages; the stored copy keeps the last full page.
+            if full { store(history, live: live) }
         } catch {
             // A lost link is shown and retried by the connection bar; the page keeps only errors about the conversation.
             guard refreshReads.isCurrent(request) else { return }
-            self.error = ErrorPresentation().isConnectivity(error) ? mutationWarning : ErrorPresentation().message(error)
+            let shown = !ErrorPresentation().isConnectivity(error)
+            logFailure("refresh", error, shown: shown)
+            self.error = shown ? ErrorPresentation().message(error) : mutationWarning
         }
     }
     func older() async {
@@ -156,25 +484,128 @@ final class ConversationModel {
         var reanchor: UUID?
         await olderReads.run { [self] request in
             loadingOlder = true
-            defer { if olderReads.revision == request { loadingOlder = false } }
+            // The flag answers "is a page in flight", so it clears however this read ends. It used to clear only
+            // when this request was still the newest one, and a superseded read then left it set for good: every
+            // later page — automatic, pulled or tapped — returned at the guard and the reader looked dead.
+            defer { loadingOlder = false }
             do {
-                let page = try await readHistory(seq)
+                let page: ConversationSnapshot
+                if let stored = await store?.page(scope: client.operationRecoveryScope, sessionID: session.id, beforeSeq: seq, limit: 40),
+                   stored.generation == sourceGeneration {
+                    // A page stored under another generation belongs to another seq space; using it here would put
+                    // its messages in the wrong place, so it is ignored and read again.
+                    page = stored
+                } else if let archive, let next = try? await archive.older(limit: 40) {
+                    page = next.page
+                } else if archive != nil {
+                    page = ConversationSnapshot(messages: [], hasMore: false, generation: sourceGeneration, clipped: false)
+                } else {
+                    page = try await readHistory(seq)
+                }
                 guard olderReads.isCurrent(request), generation == sourceGeneration else { return }
                 guard page.generation == sourceGeneration else { reanchor = request; return }
                 let responseIDs = Set(responses.map(\.firstMessageID))
                 responses.insert(contentsOf: (page.responses ?? []).filter { !responseIDs.contains($0.firstMessageID) }, at: 0)
                 let existing = Set(messages.map(\.id))
-                messages.insert(contentsOf: page.messages.filter { !existing.contains($0.id) }, at: 0)
+                let arriving = page.messages.filter { !existing.contains($0.id) }
+                messages.insert(contentsOf: arriving, at: 0)
                 let imageIDs = Set(images.map(\.id)); images += (page.images ?? []).filter { !imageIDs.contains($0.id) }
                 timelineItems = ConversationTimeline().items(from: messages); hasMore = page.hasMore
+                // Each earlier page joins the stored copy, so reading back through it later never asks the Mac again.
+                if let store { Task { await store.save(page, scope: client.operationRecoveryScope, sessionID: session.id, complete: !page.hasMore) } }
             } catch {
-                guard olderReads.isCurrent(request), generation == sourceGeneration, !ErrorPresentation().isConnectivity(error) else { return }
+                guard olderReads.isCurrent(request), generation == sourceGeneration else { return }
+                let shown = !ErrorPresentation().isConnectivity(error)
+                logFailure("older", error, shown: shown)
+                guard shown else { return }
                 self.error = ErrorPresentation().message(error)
             }
         }
         if let reanchor, readsEnabled, olderReads.isCurrent(reanchor), generation == sourceGeneration { await refresh() }
     }
+    /// The messages between a newest page and the conversation on screen, when a burst left a hole below the page.
+    ///
+    /// A turn can record more messages than one page holds between two reads. The next read starts at the newest
+    /// end again, so those messages would never arrive: they are read from the page's own cursor, bounded to a few
+    /// pages, and stop as soon as the page reaches the newest message already held.
+    private func missingMessages(below page: ConversationSnapshot, held: [ChatMessage], using cursor: String?,
+                                 read: (@Sendable (String, Int) async throws -> ConversationArchivePage)?,
+                                 limit: Int) async -> [ChatMessage] {
+        guard let read, let cursor, let newest = held.last?.seq, let oldest = page.messages.first?.seq,
+              oldest > newest else { return [] }
+        var missing: [ChatMessage] = []
+        var at: String? = cursor
+        var pages = 0
+        while let current = at, pages < 8, !Task.isCancelled {
+            guard let next = try? await read(current, limit), next.snapshot.generation == page.generation else { break }
+            missing.insert(contentsOf: next.snapshot.messages, at: 0)
+            pages += 1
+            if next.snapshot.messages.first.map({ $0.seq <= newest }) == true || next.nextCursor == nil { break }
+            at = next.nextCursor
+        }
+        if !missing.isEmpty { diagLog(.info, category: "open", "filled a hole pages=\(pages) messages=\(missing.count)") }
+        return missing
+    }
+    /// Reads the models the agent offers. A Bridge without model switching answers with an error and leaves none.
+    ///
+    /// The list belongs to the Mac and the agent, so the last list any conversation read is shown at once while
+    /// this one reads afresh. It is read every time the page opens or the app returns: the owner edits the agent's
+    /// configuration on the Mac while the app keeps running, and a list read once per launch went stale for days.
+    func loadModelChoices() async {
+        guard canSend, !modelsLoading, ["claude", "codex"].contains(session.agent) else { return }
+        modelsLoading = true; defer { modelsLoading = false }
+        let scope = client.operationRecoveryScope, agent = session.agent
+        // An unchanged list is never assigned again: the menu may be open, and any change rebuilds it.
+        if let shared = modelCache?.list(scope: scope, agent: agent), shared != modelChoices { modelChoices = shared }
+        do {
+            let list = try await readModels()
+            if modelChoices != list { modelChoices = list }
+            modelCache?.store(list, scope: scope, agent: agent)
+        } catch { logFailure("models", error, shown: false) }
+    }
+    /// Switches the agent to another model with its own model command. A failure is shown and never retried.
+    func switchModel(to name: String, label: String, confirmed: Bool = false) async {
+        guard canSwitchModel, !busy, !working, pendingSend == nil else { return }
+        busy = true; defer { busy = false }
+        modelAwaitingConfirmation = nil
+        do {
+            let request = ModelSwitchRequest(model: name, confirm: confirmed)
+            let receipt = try await postModel(request)
+            guard receipt.accepted, receipt.operationID == request.operationID else { throw BridgeError("outcome_unknown", "The model switch receipt could not be verified.", status: 504) }
+            switchedModel = (label, agentModel); error = nil
+            await refresh()
+        } catch {
+            // Nothing changed: the Agent's own question was closed, and it is the reader's to answer.
+            if (error as? BridgeError)?.code == "model_confirm_required" { modelAwaitingConfirmation = (name, label); return }
+            logFailure("model", error, shown: true); self.error = ErrorPresentation().message(error)
+        }
+    }
+    /// The title this page shows: a rename it just made, otherwise the one the list was opened with.
+    var shownTitle: String { renamedTitle ?? session.title }
+    /// Renames the conversation's tab in cmux, which the Mac and every paired device then read; an empty name clears it.
+    func rename(to title: String) async {
+        guard !busy else { return }
+        busy = true; defer { busy = false }
+        do {
+            let request = SessionRenameRequest(title: title)
+            let receipt = try await renameSession(request)
+            guard receipt.accepted, receipt.operationID == request.operationID else { throw BridgeError("outcome_unknown", "The rename receipt could not be verified.", status: 504) }
+            renamedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+            error = nil
+            await refresh()
+        } catch { logFailure("rename", error, shown: true); self.error = ErrorPresentation().message(error) }
+    }
     func useSpeechDraft() { if let text = speech.takeText() { draft += (draft.isEmpty ? "" : "\n") + text } }
+    /// Reopens the Agent session in a new terminal and follows the conversation once it reports back.
+    func resume() async {
+        guard canResume, !busy else { return }
+        busy = true; defer { busy = false }
+        do {
+            _ = try await client.post("/v1/sessions/\(session.id)/resume", body: ResumeRequest(), as: MutationReceipt.self)
+            // The Bridge opens a terminal; the conversation keeps its identity and reports as live once the Agent starts.
+            await refresh()
+        } catch { self.error = ErrorPresentation().message(error) }
+    }
     func send() async {
         guard canSend, !busy, !speech.active, !imageDraft.loading, pendingSend == nil,
               !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !imageDraft.images.isEmpty else { return }
@@ -210,6 +641,7 @@ final class ConversationModel {
                 if imageDraft.images.isEmpty { imageDraft.images = sent.attachments }
             }
             // The connection bar reports a lost link; the returned draft says the send did not happen.
+            logFailure("send", error, shown: !neverSent)
             self.error = neverSent ? nil : ErrorPresentation().message(error)
         }
     }
@@ -221,14 +653,14 @@ final class ConversationModel {
             guard status.operationID == request.operationID else { throw BridgeError("invalid_response", "The operation identity changed.", status: 502) }
             if status.state == .accepted { try await confirmSend(request); await refresh(); jumpToLatest += 1 }
             else { mutationWarning = String(localized: "error.outcome_unknown"); error = mutationWarning }
-        } catch { mutationWarning = ErrorPresentation().message(error); self.error = mutationWarning }
+        } catch { logFailure("checkPendingSend", error, shown: true); mutationWarning = ErrorPresentation().message(error); self.error = mutationWarning }
     }
     /// An explicit inspection acknowledgement releases the draft; it never sends it.
     func acknowledgePendingSend() async {
         guard !busy else { return }; busy = true; defer { busy = false }
         let released = pendingSend?.operationID
         do { try await saveRecovery(nil); outgoing.removeAll { $0.id == released }; pendingSend = nil; recoveryReady = true; recoveryFailed = false; recoveryTask = nil; mutationWarning = nil; error = nil }
-        catch { mutationWarning = ErrorPresentation().message(error); self.error = mutationWarning }
+        catch { logFailure("acknowledgePendingSend", error, shown: true); mutationWarning = ErrorPresentation().message(error); self.error = mutationWarning }
     }
     private func restorePendingSend() async throws {
         guard !recoveryReady else { return }
@@ -247,6 +679,8 @@ final class ConversationModel {
     }
     private func confirmSend(_ request: SendRequest) async throws {
         try await saveRecovery(nil)
+        // The turn this prompt starts changes the session's state, which this page reads from the list.
+        descriptorsReadAt = nil
         if draft == request.text { draft = "" }
         imageDraft.removeSubmitted(Set(request.attachments.map(\.id)))
         setDelivery(.sent, for: request.operationID)
@@ -257,7 +691,39 @@ final class ConversationModel {
     }
     func interrupt(hard: Bool = false) async {
         guard !busy else { return }; busy = true; defer { busy = false }
-        do { _ = try await client.post("/v1/sessions/\(session.id)/interrupt", body: InterruptRequest(hard: hard), as: MutationReceipt.self); markInterrupted(); await refresh() }
-        catch { self.error = ErrorPresentation().message(error) }
+        do { _ = try await client.post("/v1/sessions/\(session.id)/interrupt", body: InterruptRequest(hard: hard), as: MutationReceipt.self); markInterrupted(); descriptorsReadAt = nil; await refresh() }
+        catch { logFailure("interrupt", error, shown: true); self.error = ErrorPresentation().message(error) }
+    }
+    /// One line per failure the page handles: an error when it raises the red line, a warning when the connection bar owns it.
+    private func logFailure(_ operation: String, _ error: any Error, shown: Bool) {
+        diagLog(shown ? .error : .warning, category: "conversation",
+                "op=\(operation) error=\(TraceFormat().describe(error)) session=\(session.id.prefix(8)) shown=\(shown)")
+    }
+    /// Reads the questions this conversation's agent is waiting on.
+    ///
+    /// Only a pending `question` for this exact agent and session is offered, matched to the card by its prompt:
+    /// the transcript has no request identity, so the prompt the agent asked is what joins the two. A failure
+    /// leaves no answerable card rather than a stale one.
+    func refreshQuestions() async {
+        guard readsEnabled, !Task.isCancelled, client.canReplyFeed else { return }
+        if let last = questionsReadAt, Date().timeIntervalSince(last) < questionsInterval { return }
+        questionsReadAt = Date()
+        guard let items = try? await readFeed() else { pendingQuestions = [:]; return }
+        let next = ConversationQuestions().pending(items, agent: session.agent, sessionID: session.id)
+        if next != pendingQuestions { pendingQuestions = next }
+    }
+    /// Answers the agent's question with the labels the reader chose, in the order the questions were asked.
+    func answer(prompt: String, selections: [String]) async {
+        guard let pending = pendingQuestions[prompt], !answeringQuestion else { return }
+        answeringQuestion = true; defer { answeringQuestion = false }
+        do {
+            _ = try await replyFeed(pending.requestID, ConversationQuestions().reply(requestID: pending.requestID, selections: selections))
+            // Every card of that request becomes a record, each naming the answer it was given.
+            for (card, match) in pendingQuestions where match.requestID == pending.requestID {
+                pendingQuestions[card] = nil
+                if match.index < selections.count { answeredQuestions[card] = selections[match.index] }
+            }
+            await refresh()
+        } catch { logFailure("question.reply", error, shown: true); self.error = ErrorPresentation().message(error) }
     }
 }

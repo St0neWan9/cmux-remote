@@ -6,10 +6,17 @@ struct ToolDisclosure<Content: View>: View {
     let symbol: String
     var identifier = "tool.disclosure"
     @ViewBuilder let content: () -> Content
+    @Environment(\.holdPlace) private var holdPlace
     @State private var expanded = false
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Button { withAnimation(.easeInOut(duration: 0.18)) { expanded.toggle() } } label: {
+            Button {
+                // The reader is looking at this card: the page stays put while its height changes.
+                holdPlace()
+                // Not animated: an animated height change inside an open group moved the scroll view by hundreds
+                // of points the moment the card was tapped.
+                expanded.toggle()
+            } label: {
                 HStack(alignment: .center, spacing: 9) {
                     Image(systemName: symbol).font(.system(size: 16)).frame(width: 20)
                     Text(title).font(.subheadline).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)

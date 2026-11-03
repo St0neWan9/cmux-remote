@@ -28,6 +28,11 @@ public final class CloudRelaySocket: CloudRelayConnecting {
         let status = (task.response as? HTTPURLResponse)?.statusCode
         return status == 401 || status == 403 ? "relay_configuration" : "connection_failed"
     }
+    public func closeDetail() -> String {
+        guard task.closeCode != .invalid else { return "no_close_frame" }
+        let reason = task.closeReason.map { String(decoding: $0.prefix(64), as: UTF8.self) } ?? ""
+        return "close=\(task.closeCode.rawValue) reason=\(reason)"
+    }
     public func close() { task.cancel(with: .goingAway, reason: nil); session.invalidateAndCancel() }
     deinit { task.cancel(with: .goingAway, reason: nil); session.invalidateAndCancel() }
 }

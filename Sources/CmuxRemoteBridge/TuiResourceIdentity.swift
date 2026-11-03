@@ -16,7 +16,9 @@ public struct TuiResourceIdentity: Sendable {
         let bytes = Array(SHA256.hash(data: Data(("cmux-remote/tui/v1\u{0}" + machine + "\u{0}" + session + "\u{0}" + resource).utf8)).prefix(16))
         return UUID(uuid: (bytes[0],bytes[1],bytes[2],bytes[3],bytes[4],bytes[5],bytes[6],bytes[7],bytes[8],bytes[9],bytes[10],bytes[11],bytes[12],bytes[13],bytes[14],bytes[15])).uuidString.lowercased()
     }
-    public func conversation(machine: String, session: String, terminal: String, provider: String, providerSession: String) -> String {
-        "tui:" + uuid(machine: machine, session: session, resource: terminal + ":" + provider + ":" + providerSession.lowercased())
+    /// A conversation is identified by its Agent session, not by the terminal it happens to run in: resuming an
+    /// Agent into a new terminal must continue the same conversation rather than start a second one.
+    public func conversation(machine: String, session: String, provider: String, providerSession: String) -> String {
+        "tui:" + uuid(machine: machine, session: session, resource: provider + ":" + providerSession.lowercased())
     }
 }

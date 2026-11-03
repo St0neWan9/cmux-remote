@@ -10,15 +10,27 @@ struct MessageRow: View {
     var images: [ConversationImageReference] = []
     var openImage: ((ConversationImageReference) -> Void)?
     var openDetail: ((String, String) -> Void)?
+    /// The Feed request that may answer this question, when the agent is still waiting on it.
+    var pendingQuestion: ConversationQuestions.Match?
+    /// Whether an answer is on its way, so the card does not accept a second tap.
+    var answering = false
+    /// Sends the chosen labels for this question, in the question's own order.
+    var answerQuestion: (([String]) -> Void)?
+    /// What this reader chose here, when the transcript has not recorded it yet.
+    var chosenAnswer: String?
+    /// The conversation's visible bottom edge, so a waiting question's form blurs line by line at the edges.
+    var edgeBlur: CGFloat? = nil
     var body: some View {
         Group {
             if message.role == .user, case .prose(let value) = message.kind {
                 HStack(alignment: .top) {
                     Spacer(minLength: 44)
-                    Text(value.text).font(.body).lineSpacing(4).textSelection(.enabled)
+                    Text(PromptText.displayed(value.text)).font(.body).lineSpacing(4)
                         .foregroundStyle(Color.accentColor)
                         .padding(.horizontal, 16).padding(.vertical, 13)
                         .background(Color.accentColor.opacity(0.085), in: RoundedRectangle(cornerRadius: 24))
+                        .modifier(SelectableTextMenu(text: PromptText.displayed(value.text)))
+
                 }.padding(.top, 10).padding(.bottom, 22)
             } else {
                 VStack(alignment: .leading, spacing: 12) {
@@ -93,9 +105,34 @@ struct MessageRow: View {
                     }.frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
+        case .question where pendingQuestion.map { !$0.isFirst } ?? false:
+            // A later question of a request still waiting: the first card already carries it in its form, so a
+            // second copy would only repeat it. It shows again as a record once the request is answered.
+            EmptyView()
         case .question(let value):
-            VStack(alignment: .leading, spacing: 8) { Label(String(localized: "feed.title"), systemImage: "questionmark.bubble").font(.caption).foregroundStyle(.secondary); Text(value.prompt); ForEach(value.options) { Text($0.label) } }
-                .modifier(FloatingSurface())
+            // The same card answers on the phone and stays a record once the request is gone: only a currently
+            // pending request for this exact prompt is offered, and it is answered through the Feed.
+            VStack(alignment: .leading, spacing: 12) {
+                Label(String(localized: "feed.title"), systemImage: "questionmark.bubble").font(.caption).foregroundStyle(.secondary)
+                    .modifier(EdgeBlur(bottom: pendingQuestion == nil ? nil : edgeBlur))
+                if let pendingQuestion, pendingQuestion.isFirst, let answerQuestion {
+                    // The whole request is rendered on its first card, exactly as the Feed lists it: one reply
+                    // carries one label per question, so a card cannot answer only its own.
+                    // The form keeps its own identifiers: a container identifier would replace each control's.
+                    FeedQuestionView(questions: pendingQuestion.questions, busy: answering, edgeBlur: edgeBlur) { answers in answerQuestion(answers) }
+                } else {
+                    Text(value.prompt)
+                    // An answered question is a record of the choice, not a dead form: naming the answer is what
+                    // the reader came back for, and only a still-unanswered card says it cannot be answered here.
+                    if let selected = value.selectedOptionLabel ?? chosenAnswer {
+                        Text(value.options.isEmpty ? selected : String.localizedStringWithFormat(String(localized: "chat.question.answered"), selected))
+                            .font(.footnote).foregroundStyle(.secondary)
+                    } else {
+                        ForEach(value.options) { Text($0.label) }
+                        Text(String(localized: "feed.question.unavailable")).font(.footnote).foregroundStyle(.secondary)
+                    }
+                }
+            }.modifier(FloatingSurface())
         case .permissionRequest(let value):
             VStack(alignment: .leading, spacing: 8) { Label(value.title, systemImage: "hand.raised"); Text(value.subject).font(.system(.callout, design: .monospaced)) }
                 .modifier(FloatingSurface())

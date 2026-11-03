@@ -8,13 +8,14 @@ import CmuxRemoteCore
     func relayOriginRejectsCredentialsAndUnscopedURLs(_ value: String) {
         #expect(throws: (any Error).self) { try RelayOrigin(value) }
     }
-    @Test func unchangedJSONDoesNotCauseFalseSubscriptionUpdates() throws {
+    @Test func theObservationDigestComparesBytesNotSemanticJSON() throws {
         let digest = LinkObservationDigest()
         let a = Data(#"{"items":[{"state":"idle","id":"same"}],"count":1}"#.utf8)
-        let b = Data(#"{"count":1,"items":[{"id":"same","state":"idle"}]}"#.utf8)
-        #expect(try digest.digest(a) == digest.digest(b))
+        #expect(try digest.digest(a) == digest.digest(Data(#"{"items":[{"state":"idle","id":"same"}],"count":1}"#.utf8)))
         let changed = Data(#"{"count":1,"items":[{"id":"same","state":"working"}]}"#.utf8)
         #expect(try digest.digest(a) != digest.digest(changed))
+        // Key order is part of the digest; the Bridge encodes answers with sorted keys instead.
+        #expect(try digest.digest(a) != digest.digest(Data(#"{"count":1,"items":[{"id":"same","state":"idle"}]}"#.utf8)))
     }
     @Test func privateRegistrationFilesCannotBeSymlinksPublicOrOversized() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
