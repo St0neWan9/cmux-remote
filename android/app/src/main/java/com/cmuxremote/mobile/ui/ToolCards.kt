@@ -180,23 +180,25 @@ fun ActivityGroupCard(
         if (expanded) {
             // Rows flow with the timeline; there is no inner scroller and no
             // "view all" button. A long group opens its own page from the summary.
-            visibleRows.forEachIndexed { index, row ->
-                val previous = visibleRows.getOrNull(index - 1)
-                ToolDisclosureRow(
-                    row = row,
-                    onOpenDetail = { onOpenDetail(row) },
-                    onOpenReference = onOpenReference,
-                    onHoldPlace = onHoldPlace,
-                    modifier = Modifier.padding(
-                        top = when {
-                            index == 0 -> 0.dp
-                            // Consecutive tool titles keep their own rhythm; the
-                            // extra gap is only against surrounding content.
-                            row.kind != "thought" && previous?.kind != "thought" && previous != null -> 4.dp
-                            else -> 8.dp
-                        },
-                    ),
-                )
+            // The rows own their gaps: consecutive tool calls touch, as on the
+            // iPhone, while reasoning still gets its own paragraph break.
+            Column(verticalArrangement = Arrangement.spacedBy(0.dp)) {
+                visibleRows.forEachIndexed { index, row ->
+                    val previous = visibleRows.getOrNull(index - 1)
+                    ToolDisclosureRow(
+                        row = row,
+                        onOpenDetail = { onOpenDetail(row) },
+                        onOpenReference = onOpenReference,
+                        onHoldPlace = onHoldPlace,
+                        modifier = Modifier.padding(
+                            top = when {
+                                index == 0 -> 0.dp
+                                row.kind != "thought" && previous?.kind != "thought" && previous != null -> 0.dp
+                                else -> 8.dp
+                            },
+                        ),
+                    )
+                }
             }
         }
     }
