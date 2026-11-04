@@ -1358,7 +1358,10 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
         this.repository = repository
         val host = hosts.first { it.id == connection.host.id }
         // Show the last background snapshot immediately; the live read replaces it.
-        _shell.value = cachedState() ?: ShellState.Connected(connection.host.name, emptyList(), loading = true)
+        val cached = cachedState() ?: ShellState.Connected(connection.host.name, emptyList(), loading = true)
+        // Entering the app turns each Mac's tab while its first link is dialled,
+        // as the iPhone's `.connecting` state does; the first read clears it.
+        _shell.value = cached.copy(hostConnecting = hosts.associate { it.id to true })
         // A legacy shared-token connection has no signed link or relay permit.
         if (!connection.isLegacy) startLive(host)
         viewModelScope.launch {
@@ -1605,8 +1608,10 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
             _shell.value = shell.copy(
                 loading = true,
                 error = null,
-                // A background read is not a dial: no Mac's tab turns for it.
-                hostConnecting = emptyMap(),
+                // A background read is not a dial: no Mac's tab turns for it. A tab
+                // already turning from the first dial keeps turning until this read
+                // answers, so entering the app is never silent.
+                hostConnecting = shell.hostConnecting,
             )
             val cache = com.cmuxremote.mobile.background.SessionSnapshotCache(getApplication())
             val previousByHost = shell.sessions.groupBy { it.hostID }
@@ -1755,7 +1760,9 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
                     read.host.id to if (read.reached) read.workspaces else previousWorkspaces[read.host.id].orEmpty()
                 },
                 hostCanStart = results.associate { it.host.id to it.canStart },
-                hostConnecting = hosts.associate { it.id to false },
+                hostConnecting = shell.hostConnecting.filterKeys { id ->
+                    results.none { it.host.id == id }
+                },
                 hostPending = results.associate { it.host.id to it.feed.count { item -> item.status == "pending" } },
                 hostCachedPending = results.associate { it.host.id to it.cachedPending },
             )
