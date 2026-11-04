@@ -139,6 +139,8 @@ data class SessionListActions(
     val onOpenSidebar: () -> Unit = {},
     /** Long-press drag on a Mac pill: move the first Mac before the second. */
     val onMoveHost: (String, String) -> Unit = { _, _ -> },
+    /** Entering the list re-reads once, quietly; the Macs' dots then say who answered. */
+    val onAppear: () -> Unit = {},
 )
 
 @Composable
@@ -478,6 +480,11 @@ private fun SessionListContent(
     onCollapseSidebar: (() -> Unit)? = null,
 ) {
     var searching by remember { mutableStateOf(false) }
+    // Entering the list re-reads once, as the iPhone's `.task` does; this is also
+    // what fills the Macs' status dots when the app resumes on this page.
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        if (!model.loading) actions.onAppear()
+    }
     // Only a pull shows the refresh spinner; background refreshes stay quiet.
     var pullRefreshing by remember { mutableStateOf(false) }
     androidx.compose.runtime.LaunchedEffect(model.loading) {
@@ -671,20 +678,6 @@ private fun SessionListContent(
                         onSelect = actions.onHost,
                     )
                 }
-                if (model.hostErrors.isNotEmpty()) {
-                    item {
-                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            model.hostErrors.forEach { (id, message) ->
-                                val name = model.hosts.firstOrNull { it.first == id }?.second
-                                Text(
-                                    text = if (model.hosts.size > 1 && name != null) "$name: $message" else message,
-                                    color = MaterialTheme.colorScheme.error,
-                                    style = MaterialTheme.typography.labelMedium,
-                                )
-                            }
-                        }
-                    }
-                }
                 if (pendingCount > 0) {
                     item {
                         PendingCard(
@@ -750,13 +743,6 @@ private fun SessionListContent(
                                             CircleShape,
                                         ),
                                     )
-                                    if (reached == false) {
-                                        Text(
-                                            stringResource(R.string.sessions_unreachable),
-                                            color = MaterialTheme.colorScheme.error,
-                                            style = MaterialTheme.typography.labelMedium,
-                                        )
-                                    }
                                 }
                             }
                         }
@@ -859,10 +845,6 @@ private fun SessionListContent(
                             style = MaterialTheme.typography.labelMedium,
                         )
                     }
-                }
-                // The iPhone shows an error below a single Mac's list, not above it.
-                if (model.error != null && !multipleHosts) {
-                    item { Text(model.error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelMedium) }
                 }
             }
             // The first read covers the list rather than pushing its controls down.
