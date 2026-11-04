@@ -64,16 +64,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
-        // Back on screen, the page itself can start the service again on the way out.
-        PersistentConnectionService.stop(this)
         model.onForeground()
-    }
-
-    override fun onPause() {
-        super.onPause()
-        // Starting here, while the activity is still visible, is allowed; starting
-        // from onStop would hit the Android 12 background-start restriction.
-        if (model.shouldKeepAlive()) PersistentConnectionService.start(this)
     }
 
     override fun onStop() {

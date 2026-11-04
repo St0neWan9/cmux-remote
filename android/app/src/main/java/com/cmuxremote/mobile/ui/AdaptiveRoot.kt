@@ -130,6 +130,18 @@ fun CmuxApp(viewModel: CmuxViewModel) {
             }
         }
     }
+    // The connection service belongs to the app having Macs, not to one activity
+    // pause: starting it from the page keeps a rotation (or a permission dialog)
+    // from starting and stopping it in the same breath. A stop before the
+    // service reaches startForeground is what Android reports as a crash.
+    val connectedHosts = (shell as? ShellState.Connected)?.hosts?.isNotEmpty() == true
+    androidx.compose.runtime.LaunchedEffect(persistentConnection, connectedHosts) {
+        if (persistentConnection && connectedHosts) {
+            com.cmuxremote.mobile.background.PersistentConnectionService.start(context)
+        } else {
+            com.cmuxremote.mobile.background.PersistentConnectionService.stop(context)
+        }
+    }
     val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
     val imageStore = remember { com.cmuxremote.mobile.data.ChatImageStore(context) }
     // Both pickers prepare the chosen bytes the same way: bounded JPEG, no metadata.
