@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.ui.graphics.asImageBitmap
@@ -166,6 +167,8 @@ fun ConversationScreen(
 ) {
     var renaming by remember { mutableStateOf(false) }
     var previewImage by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
+    val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+    val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
     Column(modifier.fillMaxSize().background(MobileDesign.Canvas)) {
         ConversationHeader(
             title = state.session.title,
@@ -242,6 +245,12 @@ fun ConversationScreen(
             onQuote = onQuote,
             onSelectText = onSelectText,
             feedBusy = feedBusy,
+            // A tap on empty conversation space puts the keyboard away and lets
+            // the focused composer collapse back to its one-line bar.
+            onBackgroundTap = {
+                focusManager.clearFocus()
+                keyboard?.hide()
+            },
         )
         if (state.backgroundTasks.isNotEmpty() && onOpenTask != null) {
             BackgroundTasksRow(
@@ -288,6 +297,29 @@ fun ConversationScreen(
                 onUse = onUseSpeech,
                 onCancel = onCancelSpeech,
             )
+        }
+        // The running turn sits against the composer, as on the iPhone's bottom
+        // inset, not at the end of the transcript.
+        if (state.session.working) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                WorkingIndicator(size = 12.dp)
+                if (state.turnStartedAt != null) {
+                    LiveRunLabel(since = state.turnStartedAt, compacting = state.compacting, showsMark = false)
+                } else {
+                    Text(stringResource(R.string.common_working), color = MobileDesign.Muted, style = MaterialTheme.typography.labelMedium)
+                }
+                Spacer(Modifier.weight(1f))
+                Icon(Icons.Rounded.AutoAwesome, contentDescription = null, tint = MobileDesign.Muted, modifier = Modifier.size(13.dp))
+                Text(
+                    text = state.session.agent.replaceFirstChar { it.uppercase() },
+                    color = MobileDesign.Muted,
+                    style = MaterialTheme.typography.labelMedium,
+                )
+            }
         }
         // A short window (split screen, landscape) must still leave room for the
         // field and its action row above the keyboard: derive the growth limit
@@ -542,6 +574,8 @@ fun ConversationTimeline(
     onSelectText: ((String) -> Unit)? = null,
     /** A Feed reply is in flight; every question form must stay disabled. */
     feedBusy: Boolean = false,
+    /** A tap on empty transcript space dismisses the keyboard and the composer's focus. */
+    onBackgroundTap: (() -> Unit)? = null,
 ) {
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
@@ -695,7 +729,19 @@ fun ConversationTimeline(
             }
         }
     }
-    Box(modifier.fillMaxWidth()) {
+    Box(
+        modifier
+            .fillMaxWidth()
+            .then(
+                if (onBackgroundTap != null) {
+                    // Rows and buttons consume their own taps; the rest of the page
+                    // is the reader asking the keyboard and the composer to rest.
+                    Modifier.pointerInput(Unit) { detectTapGestures { onBackgroundTap() } }
+                } else {
+                    Modifier
+                },
+            ),
+    ) {
     PullToRefreshBox(
         isRefreshing = state.loadingOlder && pulled,
         onRefresh = pull,
@@ -872,25 +918,6 @@ fun ConversationTimeline(
         if (looseImages.isNotEmpty()) {
             item(key = "loose-images") { MessageImages(looseImages, onOpenImage) }
         }
-        if (state.session.working) {
-            item {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    WorkingIndicator(size = 12.dp)
-                    if (state.turnStartedAt != null) {
-                        LiveRunLabel(since = state.turnStartedAt, compacting = state.compacting, showsMark = false)
-                    } else {
-                        Text(stringResource(R.string.common_working), color = MobileDesign.Muted, style = MaterialTheme.typography.labelMedium)
-                    }
-                    Spacer(Modifier.weight(1f))
-                    Icon(Icons.Rounded.AutoAwesome, contentDescription = null, tint = MobileDesign.Muted, modifier = Modifier.size(13.dp))
-                    Text(
-                        text = state.session.agent.replaceFirstChar { it.uppercase() },
-                        color = MobileDesign.Muted,
-                        style = MaterialTheme.typography.labelMedium,
-                    )
-                }
-            }
-        }
         if (state.preview != null) {
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -971,7 +998,9 @@ fun ConversationTimeline(
         Box(
             modifier = Modifier
                 .padding(16.dp)
-                .size(44.dp)
+                // A short viewport with the keyboard up must not squeeze the circle
+                // into an oval; the padding may overflow, the size may not.
+                .requiredSize(44.dp)
                 .shadow(3.dp, CircleShape)
                 .background(MobileDesign.Canvas, CircleShape)
                 .border(0.5.dp, MobileDesign.Line, CircleShape)
