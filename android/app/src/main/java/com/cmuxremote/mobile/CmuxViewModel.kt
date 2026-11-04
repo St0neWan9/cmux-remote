@@ -356,6 +356,8 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
     private var openHostID: String? = null
     /** When the app last went to the background, so a return redials every Mac. */
     private var backgroundedAt: Long? = null
+    /** The foreground service held the links while the app was away. */
+    private var keepAliveActive = false
     /** Feed replies currently in flight, so a second tap cannot duplicate one. */
     private val _feedBusy = MutableStateFlow(false)
     val feedBusy: StateFlow<Boolean> = _feedBusy.asStateFlow()
@@ -378,6 +380,9 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
     val selectText: StateFlow<SelectTextRequest?> = _selectText.asStateFlow()
     private val _backgroundSync = MutableStateFlow(prefs.getBoolean("backgroundSync", true))
     val backgroundSync: StateFlow<Boolean> = _backgroundSync.asStateFlow()
+    /** A foreground service keeps the links and the slow poll alive while the app is away. */
+    private val _persistentConnection = MutableStateFlow(prefs.getBoolean("persistentConnection", true))
+    val persistentConnection: StateFlow<Boolean> = _persistentConnection.asStateFlow()
     private val _connection = MutableStateFlow<AuthorizedConnection?>(null)
     val connection: StateFlow<AuthorizedConnection?> = _connection.asStateFlow()
 
@@ -484,6 +489,19 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
         prefs.edit().putBoolean("backgroundSync", value).apply()
         if (value) com.cmuxremote.mobile.background.BackgroundSync.schedule(getApplication()) else com.cmuxremote.mobile.background.BackgroundSync.cancel(getApplication())
     }
+
+    fun setPersistentConnection(value: Boolean) {
+        _persistentConnection.value = value
+        prefs.edit().putBoolean("persistentConnection", value).apply()
+        if (!value) com.cmuxremote.mobile.background.PersistentConnectionService.stop(getApplication())
+    }
+
+    /** Whether the foreground service should keep this process and its links alive. */
+    fun shouldKeepAlive(): Boolean = _persistentConnection.value && hosts.isNotEmpty()
+
+    /** The links the service is meant to hold, still present and redialing on their own. */
+    private fun linksAreLive(): Boolean =
+        hosts.isNotEmpty() && hosts.all { lives.containsKey(it.id) }
 
     /** Forgets one Mac. The Mac still lists this device until the owner revokes it there. */
     fun removeMac(hostID: String? = null) {
@@ -835,7 +853,8 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
             val callback = object : android.net.ConnectivityManager.NetworkCallback() {
                 override fun onAvailable(network: android.net.Network) {
                     // A background wake owns its own reads; a path change must not start links.
-                    if (hosts.isEmpty() || backgroundedAt != null) return
+                    // A link the service is holding is redialled at once, as in the foreground.
+                    if (hosts.isEmpty() || (backgroundedAt != null && !keepAliveActive)) return
                     viewModelScope.launch { redialAll() }
                 }
             }
@@ -848,12 +867,15 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
     /** The app came back to the foreground: redial every Mac and re-read the open page. */
     fun onForeground() {
         val wasAway = backgroundedAt != null
+        // A service-held link survived the trip; it does not need a fresh dial.
+        val held = keepAliveActive && linksAreLive()
         backgroundedAt = null
+        keepAliveActive = false
         if (hosts.isEmpty()) return
         startDiscovery()
         pendingEnrollment?.let { startApprovalPolling(it) }
         viewModelScope.launch {
-            if (wasAway) redialAll()
+            if (wasAway && !held) redialAll()
             if (_conversation.value != null) {
                 // A model list can change while the app is away.
                 loadModels()
@@ -864,22 +886,30 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /** The app left the foreground: pause the slow poll until it returns. */
-    fun onBackground() {
+    /**
+     * The app left the foreground. With a foreground service holding the links,
+     * polls and subscriptions stay up and updates keep arriving; otherwise they
+     * pause until the next foreground, with only the periodic worker left.
+     */
+    fun onBackground(keepAlive: Boolean = false) {
         backgroundedAt = System.currentTimeMillis()
-        pollLoop?.cancel()
-        pollLoop = null
-        liveRefresh?.cancel()
+        keepAliveActive = keepAlive
         // A project read that outlives its page is wasted; the page reloads on return.
         projectJob?.cancel()
-        // The approval request stays; only its polling pauses until onForeground.
-        approvalPoll?.cancel()
-        approvalPoll = null
         discovery.stop()
-        // Links pause with the app; onForeground redials and starts them again.
-        lives.values.forEach { it.stop() }
-        lives.clear()
+        if (!keepAlive) {
+            pollLoop?.cancel()
+            pollLoop = null
+            liveRefresh?.cancel()
+            // The approval request stays; only its polling pauses until onForeground.
+            approvalPoll?.cancel()
+            approvalPoll = null
+            // Links pause with the app; onForeground redials and starts them again.
+            lives.values.forEach { it.stop() }
+            lives.clear()
+        }
         // The pass is scheduled when the app leaves, not only when it connected.
+        // It stays a fallback if the foreground service is stopped by the system.
         if (_backgroundSync.value && hosts.isNotEmpty()) {
             com.cmuxremote.mobile.background.BackgroundSync.schedule(getApplication())
         }
@@ -3151,6 +3181,8 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     override fun onCleared() {
+        // Without a page there is nothing for the kept-alive process to show.
+        com.cmuxremote.mobile.background.PersistentConnectionService.stop(getApplication())
         lives.values.forEach { it.stop() }
         lives.clear()
         networkCallback?.let { callback ->

@@ -358,6 +358,14 @@
     <string name="connection_certificate_fingerprint">证书指纹</string>
     <string name="connection_transport">传输</string>
     <string name="connection_key">密钥</string>
+    <string name="connection_persistent">后台保持连接</string>
+    <string name="connection_persistent_note">通过前台服务保持与 Mac 的加密连接，App 切到后台也会持续接收运行中的回复和待处理请求；通知栏会显示一个常驻通知。允许忽略电池优化可获得更稳定的连接。</string>
+    <string name="connection_persistent_channel">连接</string>
+    <string name="connection_persistent_channel_note">保持与 Mac 的连接，持续接收更新。</string>
+    <string name="connection_persistent_notification">正在保持与 Mac 的连接，持续接收更新</string>
+    <string name="connection_persistent_battery">电池优化</string>
+    <string name="connection_persistent_battery_note">如果手机仍然会断开连接，请允许 CmuxRemote 忽略电池优化。</string>
+    <string name="connection_persistent_battery_action">去允许</string>
     <string name="connection_background_sync">后台同步</string>
     <string name="connection_diagnostics">诊断日志</string>
     <string name="connection_remove_mac">移除这台 Mac</string>

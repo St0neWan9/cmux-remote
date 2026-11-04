@@ -1,23 +1,34 @@
 package com.cmuxremote.mobile
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.activity.enableEdgeToEdge
+import androidx.core.content.ContextCompat
+import com.cmuxremote.mobile.background.PersistentConnectionService
 import com.cmuxremote.mobile.ui.CmuxApp
 import com.cmuxremote.mobile.ui.theme.CmuxTheme
 
 class MainActivity : ComponentActivity() {
+    /** The ongoing connection notification is the service's, but the system asks first. */
+    private val notificationPermission =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+
+    private val model: CmuxViewModel by viewModels()
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        val model: CmuxViewModel by viewModels()
-        // A return to the foreground redials every Mac; leaving pauses the slow poll.
-        lifecycle.addObserver(object : androidx.lifecycle.DefaultLifecycleObserver {
-            override fun onStart(owner: androidx.lifecycle.LifecycleOwner) = model.onForeground()
-            override fun onStop(owner: androidx.lifecycle.LifecycleOwner) = model.onBackground()
-        })
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
         if (BuildConfig.DEBUG && intent?.getBooleanExtra("force_relay", false) == true) model.forceRelay = true
         // Debug-only test hook: a UI test can hand over the enrollment code the
         // Mac printed, instead of typing a long URL into the field.
@@ -49,5 +60,29 @@ class MainActivity : ComponentActivity() {
                 CmuxApp(model)
             }
         }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        // Back on screen, the page itself can start the service again on the way out.
+        PersistentConnectionService.stop(this)
+        model.onForeground()
+    }
+
+    override fun onPause() {
+        super.onPause()
+        // Starting here, while the activity is still visible, is allowed; starting
+        // from onStop would hit the Android 12 background-start restriction.
+        if (model.shouldKeepAlive()) PersistentConnectionService.start(this)
+    }
+
+    override fun onStop() {
+        super.onStop()
+        model.onBackground(keepAlive = model.shouldKeepAlive())
+    }
+
+    override fun onDestroy() {
+        if (isFinishing) PersistentConnectionService.stop(this)
+        super.onDestroy()
     }
 }
