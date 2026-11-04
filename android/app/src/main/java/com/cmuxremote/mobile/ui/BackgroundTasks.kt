@@ -36,6 +36,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -100,16 +101,26 @@ fun BackgroundTasksRow(
                             .fillMaxWidth()
                             .testTag("chat.background.task")
                             .clickable { onOpen(task) },
-                        verticalAlignment = Alignment.CenterVertically,
+                        // The bullet and the tool name sit on the summary's first
+                        // baseline, as the iPhone's firstTextBaseline row does; only
+                        // the chevron is centred against the wrapped row.
+                        verticalAlignment = Alignment.Top,
                         horizontalArrangement = Arrangement.spacedBy(7.dp),
                     ) {
-                        Text("•", color = MobileDesign.Muted, style = MaterialTheme.typography.labelMedium)
+                        Text(
+                            "•",
+                            color = MobileDesign.Muted,
+                            style = MaterialTheme.typography.labelMedium,
+                            modifier = Modifier.alignByBaseline(),
+                        )
                         Text(
                             text = task.tool,
                             color = MobileDesign.Muted,
                             style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Medium,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.alignByBaseline(),
                         )
                         Text(
                             text = task.status,
@@ -117,13 +128,13 @@ fun BackgroundTasksRow(
                             style = MaterialTheme.typography.labelMedium,
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier.weight(1f).alignByBaseline(),
                         )
                         androidx.compose.material3.Icon(
                             Icons.Rounded.ChevronRight,
                             contentDescription = null,
                             tint = MobileDesign.Muted,
-                            modifier = Modifier.size(12.dp),
+                            modifier = Modifier.size(12.dp).align(Alignment.CenterVertically),
                         )
                     }
                 }
