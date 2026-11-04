@@ -13,6 +13,39 @@ public struct CLIControlClient: CmuxControlling {
         self.executable = executable; self.socketPath = socketPath; self.environment = environment; self.retryWindow = retryWindow
     }
     public func request(_ method: String, params: [String: JSONValue]) async throws -> JSONValue {
+        // cmux scopes `workspace.list` to one window, the key one. The phone and the owner's approval page
+        // list one Mac, not one window, so every open window is merged. An explicit window keeps its own answer.
+        if method == "workspace.list", params["window_id"] == nil, let merged = await everyWindowWorkspaces(params) { return merged }
+        return try await rpc(method, params: params)
+    }
+    /// Merges `workspace.list` across every open window, in window order. A window whose read fails is left
+    /// out instead of failing the whole list; fewer than two windows keeps the direct answer.
+    private func everyWindowWorkspaces(_ params: [String: JSONValue]) async -> JSONValue? {
+        guard let windows = try? await rpc("window.list", params: [:])["windows"].array,
+              windows.count > 1, windows.count <= 16 else { return nil }
+        let ids = windows.compactMap { $0["id"].string }
+        guard ids.count == windows.count else { return nil }
+        let listings = await withTaskGroup(of: (Int, [JSONValue]?).self) { group in
+            for (index, id) in ids.enumerated() {
+                group.addTask { [self] in
+                    var scoped = params; scoped["window_id"] = .string(id)
+                    return (index, try? await rpc("workspace.list", params: scoped)["workspaces"].array)
+                }
+            }
+            var results: [(Int, [JSONValue]?)] = []
+            for await listing in group { results.append(listing) }
+            return results.sorted { $0.0 < $1.0 }
+        }
+        var rows: [JSONValue] = []; var seen = Set<String>()
+        for (_, listing) in listings {
+            for row in listing ?? [] {
+                guard let id = row["id"].string, seen.insert(id.lowercased()).inserted else { continue }
+                rows.append(row)
+            }
+        }
+        return rows.isEmpty ? nil : .object(["workspaces": .array(rows)])
+    }
+    private func rpc(_ method: String, params: [String: JSONValue]) async throws -> JSONValue {
         // A cmux stall under system load makes the official CLI fail fast. One bounded retry absorbs
         // that transient for reads; it only runs after a quick failure so the whole request, at worst
         // six plus half a second plus twelve seconds, stays inside the link's twenty-second no-progress window.

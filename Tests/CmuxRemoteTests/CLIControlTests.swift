@@ -64,6 +64,51 @@ import CmuxRemoteBridge
         } catch { #expect((error as? BridgeError)?.code == "outcome_unknown") }
         #expect(try String(contentsOf: counter, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines) == "3")
     }
+    @Test func workspaceListMergesEveryOpenWindowInOrder() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let executable = directory.appendingPathComponent("fixture-cli")
+        let script = """
+        #!/bin/sh
+        input=$(/bin/cat)
+        case "$5" in
+          window.list) /usr/bin/printf '{"windows":[{"id":"W1"},{"id":"W2"}]}' ;;
+          workspace.list)
+            case "$input" in
+              *'"W1"'*) /usr/bin/printf '{"window_id":"W1","workspaces":[{"id":"A1","title":"One"},{"id":"A2","title":"Two"}]}' ;;
+              *'"W2"'*) /usr/bin/printf '{"window_id":"W2","workspaces":[{"id":"B1","title":"Three"}]}' ;;
+              *) exit 9 ;;
+            esac ;;
+          *) exit 8 ;;
+        esac
+        """
+        try Data(script.utf8).write(to: executable)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
+        let rows = try await CLIControlClient(executable: executable, socketPath: "/example/cmux.sock")
+            .request("workspace.list", params: [:])["workspaces"].array
+        #expect(rows?.compactMap { $0["id"].string } == ["A1", "A2", "B1"])
+    }
+    @Test func anExplicitWindowIsListedWithoutReadingTheOthers() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let executable = directory.appendingPathComponent("fixture-cli")
+        let script = """
+        #!/bin/sh
+        input=$(/bin/cat)
+        [ "$5" = "workspace.list" ] || exit 8
+        case "$input" in
+          *'"W2"'*) /usr/bin/printf '{"workspaces":[{"id":"B1","title":"Three"}]}' ;;
+          *) exit 9 ;;
+        esac
+        """
+        try Data(script.utf8).write(to: executable)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
+        let rows = try await CLIControlClient(executable: executable, socketPath: "/example/cmux.sock")
+            .request("workspace.list", params: ["window_id": .string("W2")])["workspaces"].array
+        #expect(rows?.compactMap { $0["id"].string } == ["B1"])
+    }
     @Test func officialRPCUsesPrivateStdinAndDecodesPlainResults() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
