@@ -49,10 +49,24 @@ struct AskUserQuestionRequest: Sendable, Equatable {
     func isFreshMenu(_ lines: [String]) -> Bool {
         let tail = lines.suffix(4).joined(separator: " ").lowercased()
         guard tail.contains("enter to select"), tail.contains("esc to cancel") else { return false }
-        guard lines.contains(questions[0].prompt), !lines.contains(where: { $0.contains("☒") || $0.hasPrefix("Review your answers") }) else { return false }
+        // The menu wraps a long question inside its box, so the prompt is looked for in the menu's own text with
+        // its borders and line breaks removed, never as one whole screen line.
+        let text = Self.flattened(lines.joined())
+        guard text.contains(Self.flattened(questions[0].prompt)),
+              !lines.contains(where: { $0.contains("☒") || $0.hasPrefix("Review your answers") }) else { return false }
         let first = questions[0].options[0].label
         let cursor = questions[0].multiSelect ? "❯ 1. [ ] " + first : "❯ 1. " + first
-        return lines.contains(cursor) || lines.contains(cursor.replacingOccurrences(of: "❯ ", with: "❯\u{00a0}"))
+        return text.contains(Self.flattened(cursor))
+    }
+    /// The menu's text without its box-drawing borders and without any spacing, so a line the menu wrapped reads
+    /// as the one line the Agent's own request holds.
+    static func flattened(_ text: String) -> String {
+        let borders: Set<Unicode.Scalar> = ["│", "┃", "╭", "╮", "╰", "╯", "─", "━", "┌", "┐", "└", "┘", "├", "┤", "┬", "┴", "┼"]
+        var result = String.UnicodeScalarView()
+        for scalar in text.unicodeScalars where !scalar.properties.isWhitespace && !borders.contains(scalar) {
+            result.append(scalar)
+        }
+        return String(result)
     }
 
     /// The questions as the phone's question form reads them; option IDs are the digits that choose them.
