@@ -138,6 +138,10 @@ data class ConversationUi(
     val agentModel: String? = null,
     /** A prompt sent but not yet seen in the transcript, shown as its own bubble. */
     val outgoing: String? = null,
+    /** The history the send was made after: only a later user message can be it. */
+    val outgoingAfterSeq: Int? = null,
+    val outgoingGeneration: String? = null,
+    val outgoingKnownUserIDs: Set<String> = emptySet(),
     val outgoingFailed: Boolean = false,
     /** The send may have reached the Mac; only the reply was lost. */
     val outgoingUnconfirmed: Boolean = false,
@@ -1675,15 +1679,14 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
                     if (failures >= 3) quietHosts.add(read.host.id)
                 }
             }
-            // A single failed read leaves the last known state in place; only a Mac
-            // that stays down (quiet) loses its status.
+            // A single failed read leaves the last known state in place; a Mac that
+            // stays down (quiet) turns red, so an unreachable Mac is still visible
+            // on its filter pill without any red sentence under the list.
             _hostReachable.value = results.associate { read ->
-                val previous = _hostReachable.value[read.host.id]
                 read.host.id to when {
                     read.reached -> true
-                    // A Mac retried in the background keeps its red dot; still, one
-                    // failed read does not flip a healthy Mac.
-                    else -> previous ?: false
+                    read.host.id in quietHosts -> false
+                    else -> _hostReachable.value[read.host.id] ?: false
                 }
             }
             if (anyReached) {
@@ -1961,9 +1964,14 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
             // The acknowledgement is only about the turn that is now over.
             stopRequested = ui.stopRequested && session.working,
             outgoing = ui.outgoing?.takeIf { text ->
-                messages.none { message ->
-                    message.kind == "prose" && message.role == "user" && message.text.trim() == text.trim()
-                }
+                !com.cmuxremote.mobile.data.OutgoingPromptMatcher.recorded(
+                    text = text,
+                    afterSeq = ui.outgoingAfterSeq,
+                    generation = ui.outgoingGeneration,
+                    knownUserIDs = ui.outgoingKnownUserIDs,
+                    historyGeneration = snapshot.generation,
+                    messages = messages,
+                )
             },
         )
     }
@@ -2765,7 +2773,20 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
         val text = value.draft.trim()
         val scope = storeScope(current.connection)
         viewModelScope.launch {
-            _conversation.update { it?.copy(sending = true, error = null, outgoing = text, outgoingFailed = false, outgoingUnconfirmed = false, outgoingImages = prepared.size, stopRequested = false) }
+            _conversation.update { ui ->
+                ui?.copy(
+                    sending = true,
+                    error = null,
+                    outgoing = text,
+                    outgoingFailed = false,
+                    outgoingUnconfirmed = false,
+                    outgoingImages = prepared.size,
+                    stopRequested = false,
+                    outgoingAfterSeq = ui.messages.lastOrNull()?.seq,
+                    outgoingGeneration = ui.generation,
+                    outgoingKnownUserIDs = ui.messages.filter { it.role == "user" }.map { it.id }.toSet(),
+                )
+            }
             val operation = java.util.UUID.randomUUID().toString()
             rememberPending(scope, value.session.id, operation)
             try {
@@ -2920,7 +2941,20 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
         if (text.isEmpty() || value.sending || _pendingOperation.value != null) return
         val scope = storeScope(current.connection)
         viewModelScope.launch {
-            _conversation.update { it?.copy(sending = true, error = null, outgoing = text, outgoingFailed = false, outgoingUnconfirmed = false, outgoingImages = 0, stopRequested = false) }
+            _conversation.update { ui ->
+                ui?.copy(
+                    sending = true,
+                    error = null,
+                    outgoing = text,
+                    outgoingFailed = false,
+                    outgoingUnconfirmed = false,
+                    outgoingImages = 0,
+                    stopRequested = false,
+                    outgoingAfterSeq = ui.messages.lastOrNull()?.seq,
+                    outgoingGeneration = ui.generation,
+                    outgoingKnownUserIDs = ui.messages.filter { it.role == "user" }.map { it.id }.toSet(),
+                )
+            }
             val operation = java.util.UUID.randomUUID().toString()
             rememberPending(scope, value.session.id, operation)
             try {
