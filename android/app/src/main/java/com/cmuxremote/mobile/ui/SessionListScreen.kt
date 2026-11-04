@@ -649,19 +649,6 @@ private fun SessionListContent(
                         }
                     }
                 }
-                if (model.cachedAt != null && model.loading) {
-                    item {
-                        Text(
-                            text = stringResource(
-                                R.string.sessions_cached_at,
-                                android.text.format.DateFormat.getTimeFormat(androidx.compose.ui.platform.LocalContext.current)
-                                    .format(java.util.Date(model.cachedAt!!)),
-                            ),
-                            color = MobileDesign.Muted,
-                            style = MaterialTheme.typography.labelMedium,
-                        )
-                    }
-                }
                 item {
                     MacTabs(
                         hosts = model.hosts,
