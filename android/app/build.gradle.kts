@@ -36,8 +36,8 @@ android {
         applicationId = "com.cmuxremote.mobile"
         minSdk = 29
         targetSdk = 35
-        versionCode = 16
-        versionName = "0.1.15"
+        versionCode = 17
+        versionName = "0.1.16"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

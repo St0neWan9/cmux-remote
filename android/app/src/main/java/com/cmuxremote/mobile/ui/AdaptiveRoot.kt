@@ -456,6 +456,7 @@ fun CmuxApp(viewModel: CmuxViewModel) {
                     onConnection = viewModel::openConnection,
                     onOpenSidebar = { viewModel.setSidebar(true) },
                     onMoveHost = viewModel::moveHost,
+                    onAppear = viewModel::refresh,
                 )
                 taskDetail?.let { detail ->
                     TaskDetailSheet(
