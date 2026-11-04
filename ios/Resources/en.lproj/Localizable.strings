@@ -190,6 +190,7 @@
 "feed.resolved" = "Processed";
 "feed.expired" = "Expired";
 "feed.unsupported" = "This event has no supported reply action.";
+"feed.question.checking" = "Checking with the Mac whether this question can be answered here…";
 "feed.question.unavailable" = "This question can no longer be answered here.";
 "chat.question.answered" = "Answered: %@";
 "feed.recorded" = "Recorded";

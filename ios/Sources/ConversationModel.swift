@@ -43,6 +43,10 @@ final class ConversationModel {
     /// The transcript holds the question the agent asked; the Feed holds the request that may be answered.
     /// A card is answered only where both exist and name the same conversation and prompt.
     private(set) var pendingQuestions: [String: ConversationQuestions.Match] = [:]
+    /// Whether the last Feed read answered. Only a read that answered may say a request is gone: a failed one
+    /// says nothing about it, and treating it as "no questions" is what made a live card read "cannot be
+    /// answered here" the moment a relay link dropped.
+    private(set) var questionsVerified = false
     /// Whether answering is in flight, so a card does not accept a second tap.
     var answeringQuestion = false
     /// Answers given from this phone during the session, keyed by the prompt's own words.
@@ -115,6 +119,9 @@ final class ConversationModel {
     /// When this page last read the Feed for the questions it owns, and how often it does.
     private var questionsReadAt: Date?
     private let questionsInterval: TimeInterval = 8
+    /// The question prompts the transcript has shown, so a card that is new to the page reads the Feed at once
+    /// instead of waiting out the interval: that wait is what a reader saw as a card that could not be tapped.
+    private var questionPromptsShown: Set<String> = []
     private let descriptorsInterval: TimeInterval = 5
     private let refreshReads = ReadRequestOwner()
     private let olderReads = ReadRequestOwner()
@@ -160,6 +167,9 @@ final class ConversationModel {
          renameSession: (@Sendable (SessionRenameRequest) async throws -> MutationReceipt)? = nil,
          cache: ConversationCache? = nil, store: ConversationStore? = nil, archive: ArchiveChain? = nil, modelCache: ModelChoiceCache? = nil) {
         self.session = session; self.client = client; self.modelCache = modelCache; speech = SpeechDraftModel(input: speechInput ?? UnavailableSpeechInput())
+        // A Bridge that cannot reply has no request to offer, and the page should say so rather than wait for a
+        // read whose answer can never change that.
+        questionsVerified = !client.canReplyFeed
         let id = session.id
         let recovery = PendingSendStore(); let scope = client.operationRecoveryScope
         self.loadRecovery = loadRecovery ?? { try await recovery.load(scope: scope, sessionID: id) }
@@ -430,6 +440,13 @@ final class ConversationModel {
                     else { positions[message.id] = next.count; next.append(message) }
                 }
                 messages = next.sorted { $0.seq < $1.seq }
+            } else if !messages.isEmpty, history.messages.isEmpty, generation != history.generation {
+                // A transcript caught mid-rewrite (a compaction replacing the file) reads as a generation with no
+                // messages yet. Replacing a page the reader has with that empty answer blanked the conversation —
+                // the whole screen went white until a later read happened to carry the new record. The page keeps
+                // what it is showing and the next read, a few seconds away, brings the rewritten conversation.
+                diagLog(.warning, category: "open", "replacement held back: the new generation carried no messages generation=\(history.generation.prefix(8)) held=\(messages.count)")
+                return
             } else {
                 // A transcript that was rewritten (a compaction) is not the one on screen any more.
                 let replaced = !messages.isEmpty && generation != history.generation
@@ -455,6 +472,19 @@ final class ConversationModel {
             recordedRunSeconds = history.recordedRunSeconds; recordedTurnCount = history.recordedTurnCount ?? 0
             currentTurnStartedAt = history.currentTurnStartedAt; currentTurnCompleted = history.currentTurnCompleted ?? false
             timelineItems = ConversationTimeline().items(from: messages)
+            // A question card the page has not shown before reads the Feed at once: the interval that keeps a
+            // running conversation from reading the Feed on every change would otherwise leave the new card
+            // looking unanswerable for up to eight seconds, which is exactly what a reader saw as a dead card.
+            let prompts = Set(messages.compactMap(\.kind.questionPrompt))
+            if prompts != questionPromptsShown {
+                questionPromptsShown = prompts; questionsReadAt = nil
+                // Read here rather than on the next change: the parallel read at the start of this refresh was
+                // already throttled out, and nothing else would ask again until the next transcript change.
+                if !hidden {
+                    await refreshQuestions()
+                    guard refreshReads.isCurrent(request) else { return }
+                }
+            }
             outgoing = OutgoingPromptMatcher().pending(outgoing, messages: messages, generation: generation)
             let committed = messages.reversed().compactMap { message -> String? in
                 if message.role == .agent, case .prose(let value) = message.kind { return value.text }; return nil
@@ -702,15 +732,24 @@ final class ConversationModel {
     /// Reads the questions this conversation's agent is waiting on.
     ///
     /// Only a pending `question` for this exact agent and session is offered, matched to the card by its prompt:
-    /// the transcript has no request identity, so the prompt the agent asked is what joins the two. A failure
-    /// leaves no answerable card rather than a stale one.
+    /// the transcript has no request identity, so the prompt the agent asked is what joins the two.
+    ///
+    /// A read that fails leaves the last answer standing: it says nothing about whether the agent is still
+    /// waiting. Clearing the set there turned a live question's card into "cannot be answered here" on the first
+    /// dropped link, and it stayed dead until a later read happened to succeed.
     func refreshQuestions() async {
         guard readsEnabled, !Task.isCancelled, client.canReplyFeed else { return }
         if let last = questionsReadAt, Date().timeIntervalSince(last) < questionsInterval { return }
         questionsReadAt = Date()
-        guard let items = try? await readFeed() else { pendingQuestions = [:]; return }
-        let next = ConversationQuestions().pending(items, agent: session.agent, sessionID: session.id)
-        if next != pendingQuestions { pendingQuestions = next }
+        do {
+            let items = try await readFeed()
+            let next = ConversationQuestions().pending(items, agent: session.agent, sessionID: session.id)
+            questionsVerified = true
+            if next != pendingQuestions { pendingQuestions = next }
+        } catch {
+            questionsVerified = false
+            logFailure("questions", error, shown: false)
+        }
     }
     /// Answers the agent's question with the labels the reader chose, in the order the questions were asked.
     func answer(prompt: String, selections: [String]) async {

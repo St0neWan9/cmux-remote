@@ -189,6 +189,9 @@ struct ConversationView: View {
         .task(id: model.canSend && phase == .active) { if phase == .active { await model.loadModelChoices() } }
         .task(id: phase) {
             guard phase == .active else { model.suspendReads(); return }; model.resumeReads()
+            // Returning after the system reclaimed the page's memory re-shows the stored conversation at once; the
+            // read that follows takes seconds over a redialed link, and the page must not wait on it blank.
+            await model.restoreStored()
             await model.observeChanges()
         }
         .environment(\.colorScheme, .light)
@@ -283,7 +286,8 @@ struct ConversationView: View {
             else {
                 let prompt = item.first.kind.questionPrompt
                 MessageRow(message: item.first, projectRoot: model.session.cwd, openFile: model.client.allows(.projectRead) ? { selectedFile = $0; showProject = true } : nil, images: images, openImage: { selectedImage = $0 }, openDetail: openToolDetail,
-                           pendingQuestion: prompt.flatMap { model.pendingQuestions[$0] }, answering: model.answeringQuestion,
+                           pendingQuestion: prompt.flatMap { model.pendingQuestions[$0] }, questionsVerified: model.questionsVerified,
+                           answering: model.answeringQuestion,
                            answerQuestion: model.client.canReplyFeed ? { answers in Task { await model.answer(prompt: prompt ?? "", selections: answers) } } : nil,
                            chosenAnswer: prompt.flatMap { model.answeredQuestions[$0] }, edgeBlur: bottom)
             }
