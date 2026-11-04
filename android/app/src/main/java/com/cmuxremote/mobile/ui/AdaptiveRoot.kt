@@ -106,6 +106,7 @@ fun CmuxApp(viewModel: CmuxViewModel) {
     val feedError by viewModel.feedError.collectAsStateWithLifecycle()
     val feedHost by viewModel.feedHost.collectAsStateWithLifecycle()
     val backgroundSync by viewModel.backgroundSync.collectAsStateWithLifecycle()
+    val persistentConnection by viewModel.persistentConnection.collectAsStateWithLifecycle()
     val query by viewModel.query.collectAsStateWithLifecycle()
     val sortByTime by viewModel.sortByTime.collectAsStateWithLifecycle()
     val workspaceFilter by viewModel.workspaceFilter.collectAsStateWithLifecycle()
@@ -114,6 +115,21 @@ fun CmuxApp(viewModel: CmuxViewModel) {
     val start by viewModel.start.collectAsStateWithLifecycle()
     val listNotice by viewModel.listNotice.collectAsStateWithLifecycle()
     val context = androidx.compose.ui.platform.LocalContext.current
+    // Aggressive battery managers close foreground services; the user is offered
+    // the system exemption from the connection page.
+    val requestBatteryExemption: () -> Unit = {
+        val power = context.getSystemService(android.os.PowerManager::class.java)
+        if (power != null && !power.isIgnoringBatteryOptimizations(context.packageName)) {
+            runCatching {
+                context.startActivity(
+                    android.content.Intent(
+                        android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                        android.net.Uri.parse("package:" + context.packageName),
+                    ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+                )
+            }
+        }
+    }
     val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
     val imageStore = remember { com.cmuxremote.mobile.data.ChatImageStore(context) }
     // Both pickers prepare the chosen bytes the same way: bounded JPEG, no metadata.
@@ -703,6 +719,9 @@ fun CmuxApp(viewModel: CmuxViewModel) {
                     loading = !probed,
                     backgroundSync = backgroundSync,
                     onBackgroundSync = viewModel::setBackgroundSync,
+                    persistentConnection = persistentConnection,
+                    onPersistentConnection = viewModel::setPersistentConnection,
+                    onRequestBatteryExemption = requestBatteryExemption,
                     onRefresh = viewModel::refreshConnection,
                     onRemove = {
                         viewModel.removeMac(saved.host.id)

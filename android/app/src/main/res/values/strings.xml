@@ -358,6 +358,14 @@
     <string name="connection_certificate_fingerprint">Certificate fingerprint</string>
     <string name="connection_transport">Transport</string>
     <string name="connection_key">Key</string>
+    <string name="connection_persistent">Keep connected in the background</string>
+    <string name="connection_persistent_note">A foreground service keeps the encrypted link to your Macs alive, so running replies and pending requests keep arriving while the app is away. An ongoing notification is shown. Allow battery optimization exemption for the steadiest connection.</string>
+    <string name="connection_persistent_channel">Connection</string>
+    <string name="connection_persistent_channel_note">Keeps the link to your Macs alive for live updates.</string>
+    <string name="connection_persistent_notification">Keeping the link to your Macs alive for live updates</string>
+    <string name="connection_persistent_battery">Battery optimization</string>
+    <string name="connection_persistent_battery_note">If your phone still closes the connection, allow CmuxRemote to ignore battery optimization.</string>
+    <string name="connection_persistent_battery_action">Allow</string>
     <string name="connection_background_sync">Background sync</string>
     <string name="connection_diagnostics">Diagnostics</string>
     <string name="connection_remove_mac">Remove this Mac</string>

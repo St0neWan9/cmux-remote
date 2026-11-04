@@ -113,6 +113,9 @@ fun ConnectionDetailScreen(
     loading: Boolean,
     backgroundSync: Boolean,
     onBackgroundSync: (Boolean) -> Unit,
+    persistentConnection: Boolean,
+    onPersistentConnection: (Boolean) -> Unit,
+    onRequestBatteryExemption: () -> Unit,
     onRefresh: () -> Unit,
     onRemove: () -> Unit,
     onDiagnostics: () -> Unit,
@@ -225,6 +228,49 @@ fun ConnectionDetailScreen(
                     color = MobileDesign.Muted,
                     style = MaterialTheme.typography.labelMedium,
                 )
+            }
+
+            FloatingSurface(contentPadding = PaddingValues(16.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        stringResource(R.string.connection_persistent),
+                        color = MobileDesign.Ink,
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Switch(
+                        checked = persistentConnection,
+                        onCheckedChange = onPersistentConnection,
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = MobileDesign.Canvas,
+                            checkedTrackColor = MobileDesign.Accent,
+                            uncheckedThumbColor = MobileDesign.Canvas,
+                            uncheckedTrackColor = MobileDesign.Soft,
+                            uncheckedBorderColor = MobileDesign.Muted,
+                        ),
+                    )
+                }
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    stringResource(R.string.connection_persistent_note),
+                    color = MobileDesign.Muted,
+                    style = MaterialTheme.typography.labelMedium,
+                )
+                if (persistentConnection) {
+                    Spacer(Modifier.height(4.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            stringResource(R.string.connection_persistent_battery_note),
+                            color = MobileDesign.Muted,
+                            style = MaterialTheme.typography.labelMedium,
+                            modifier = Modifier.weight(1f),
+                        )
+                        TextButton(onClick = onRequestBatteryExemption) {
+                            Text(stringResource(R.string.connection_persistent_battery_action))
+                        }
+                    }
+                }
             }
 
             Column(verticalArrangement = Arrangement.spacedBy(MobileDesign.RowGap)) {
