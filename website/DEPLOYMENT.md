@@ -2,7 +2,7 @@
 
 - Hostname: `cmux-remote.trentaml.com`.
 - Worker: `cmux-remote-website`.
-- Version: `d5da2b6f-c5a9-403e-a927-871dd6711e42`.
+- Version: `983a12d9-c080-4d48-9f08-0dd1c8f9d0fa`.
 - Backup: `https://cmux-remote-website.cmux-remote-relay.workers.dev`.
 - Custom Domain enabled in production under the account owning `trentaml.com`.
 

@@ -85,6 +85,8 @@
   --warning-soft: #fef3c7;
   --danger: #b91c1c;
   --danger-soft: #fef2f2;
+  --chat-user-bg: #eef1fe;
+  --chat-user-ink: #335cf5;
 }
 [data-theme="dark"] {
   --canvas: #151614;
@@ -110,6 +112,8 @@
   --warning-soft: #3b3020;
   --danger: #fca5a5;
   --danger-soft: #3e232c;
+  --chat-user-bg: #203c67;
+  --chat-user-ink: #c3d9ff;
 }
 [data-theme="light"] {
   --canvas: #faf9f6;
@@ -135,4 +139,6 @@
   --warning-soft: #fef3c7;
   --danger: #b91c1c;
   --danger-soft: #fef2f2;
+  --chat-user-bg: #eef1fe;
+  --chat-user-ink: #335cf5;
 }
