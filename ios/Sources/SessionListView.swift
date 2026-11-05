@@ -31,6 +31,12 @@ struct SessionListView: View {
         get { Set(collapsedKeys.split(separator: "\n").map(String.init)) }
         nonmutating set { collapsedKeys = newValue.sorted().joined(separator: "\n") }
     }
+    /// Lists whose earlier conversations the reader opened, keyed like the groups; remembered across launches.
+    @AppStorage("sessions.earlierOpen") private var earlierOpenKeys = ""
+    private var earlierOpen: Set<String> {
+        get { Set(earlierOpenKeys.split(separator: "\n").map(String.init)) }
+        nonmutating set { earlierOpenKeys = newValue.sorted().joined(separator: "\n") }
+    }
     var body: some View {
         let links = model.links
         let workspaces = model.workspaces
@@ -42,6 +48,8 @@ struct SessionListView: View {
         // Time order and a single selected workspace need no workspace headings.
         let grouped = workspaceID == nil && sortMode == .workspace
         let recent = hosted.sorted { ($0.session.updatedAt ?? .distantPast) > ($1.session.updatedAt ?? .distantPast) }
+        // A search or a status filter is the reader looking for something: every match shows, nothing folds.
+        let folds = query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && filter == .all
         let loading = model.loading
         let error = model.error
         let multiple = shownLinks.count > 1
@@ -76,10 +84,7 @@ struct SessionListView: View {
                             .font(.footnote).foregroundStyle(.secondary).accessibilityIdentifier("sessions.start_notice")
                     }
                     if sortMode == .time {
-                        ForEach(recent) { hosted in
-                            Button { openConversation(hosted) } label: { sessionRow(hosted.session, host: multiple ? hosted.hostName : nil) }
-                                .buttonStyle(.plain).accessibilityIdentifier("session." + hosted.hostID + "." + hosted.session.id)
-                        }
+                        timeRows(recent, folds: folds, multiple: multiple)
                     } else {
                     ForEach(sections) { section in
                         VStack(alignment: .leading, spacing: MobileDesign.sectionGap) {
@@ -117,11 +122,7 @@ struct SessionListView: View {
                                         }
                                     }
                                     if !grouped || !collapsed.contains(key) {
-                                    ForEach(group.sessions) { session in
-                                        Button { openConversation(HostedSession(hostID: section.hostID, hostName: section.hostName, session: session)) } label: { sessionRow(session) }
-                                        .buttonStyle(.plain).accessibilityIdentifier("session." + section.hostID + "." + session.id)
-                                        .padding(.leading, grouped ? 34 : 0)
-                                    }
+                                        groupRows(group.sessions, section: section, key: key, folds: folds, indented: grouped)
                                     }
                                 }
                             }
@@ -206,6 +207,43 @@ struct SessionListView: View {
     }
     private func scopeTitle(_ links: [HostLink]) -> String {
         links.count > 1 ? String(format: String(localized: "sessions.all_macs"), links.count) : (links.first?.name ?? model.host)
+    }
+    /// The time-ordered list: its recent conversations, then the fold that holds the rest.
+    @ViewBuilder private func timeRows(_ recent: [HostedSession], folds: Bool, multiple: Bool) -> some View {
+        let split = folds ? SessionRecency().split(recent, floor: SessionRecency.timeFloor) { $0.session } : (shown: recent, earlier: [])
+        let open = earlierOpen.contains("time")
+        ForEach(open ? recent : split.shown) { hosted in
+            Button { openConversation(hosted) } label: { sessionRow(hosted.session, host: multiple ? hosted.hostName : nil) }
+                .buttonStyle(.plain).accessibilityIdentifier("session." + hosted.hostID + "." + hosted.session.id)
+        }
+        if !split.earlier.isEmpty { earlierRow(count: split.earlier.count, open: open, key: "time") }
+    }
+    /// One workspace's conversations: its recent ones, then the fold that holds the rest.
+    @ViewBuilder private func groupRows(_ sessions: [SessionDescriptor], section: SessionHostSection, key: String, folds: Bool, indented: Bool) -> some View {
+        let split = folds ? SessionRecency().split(sessions, floor: SessionRecency.workspaceFloor) { $0 } : (shown: sessions, earlier: [])
+        let open = earlierOpen.contains(key)
+        ForEach(open ? sessions : split.shown) { session in
+            Button { openConversation(HostedSession(hostID: section.hostID, hostName: section.hostName, session: session)) } label: { sessionRow(session) }
+                .buttonStyle(.plain).accessibilityIdentifier("session." + section.hostID + "." + session.id)
+                .padding(.leading, indented ? 34 : 0)
+        }
+        if !split.earlier.isEmpty { earlierRow(count: split.earlier.count, open: open, key: key).padding(.leading, indented ? 34 : 0) }
+    }
+    /// The fold under a list's recent conversations: it names how many earlier ones it holds and opens them in place.
+    private func earlierRow(count: Int, open: Bool, key: String) -> some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.18)) { if open { earlierOpen.remove(key) } else { earlierOpen.insert(key) } }
+        } label: {
+            HStack(spacing: 8) {
+                Text(open ? String(localized: "sessions.earlier_hide")
+                          : String.localizedStringWithFormat(String(localized: "sessions.earlier_show"), count))
+                Image(systemName: open ? "chevron.up" : "chevron.down").font(.caption2.weight(.semibold))
+            }
+            .font(.footnote).foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain).accessibilityIdentifier("sessions.earlier." + key)
+        .accessibilityValue(open ? String(localized: "chat.expanded") : String(localized: "chat.collapsed"))
     }
     private func toggle(_ key: String) {
         withAnimation(.easeInOut(duration: 0.18)) { if collapsed.contains(key) { collapsed.remove(key) } else { collapsed.insert(key) } }

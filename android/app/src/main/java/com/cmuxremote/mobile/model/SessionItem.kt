@@ -18,6 +18,8 @@ data class SessionItem(
     val cwd: String? = null,
     val writable: Boolean = false,
     val working: Boolean = false,
+    /** The Agent is blocked on the reader (a question or a permission); never folded away. */
+    val waiting: Boolean = false,
     val resumable: Boolean = false,
     /** The Mac's display name, shown in a flat list that mixes Macs. */
     val hostName: String? = null,

@@ -967,6 +967,7 @@ private fun present(hosted: com.cmuxremote.mobile.HostedSession, context: androi
         cwd = session.cwd,
         writable = session.writable,
         working = session.working,
+        waiting = session.state == "needs_input",
         resumable = session.resumable,
         trailing = when {
             session.working -> SessionTrailing.Working
@@ -987,6 +988,7 @@ private fun presentLegacy(session: SessionDescriptor, context: android.content.C
     cwd = session.cwd,
     writable = session.writable,
     working = session.working,
+    waiting = session.state == "needs_input",
     resumable = session.resumable,
     trailing = when {
         session.working -> SessionTrailing.Working
