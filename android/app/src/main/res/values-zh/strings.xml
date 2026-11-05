@@ -157,6 +157,11 @@
     <string name="sessions_connection_details">连接详情</string>
     <string name="sessions_title">会话</string>
     <string name="sessions_recent">最近</string>
+    <string name="sessions_earlier_hide">收起更早的会话</string>
+    <plurals name="sessions_earlier_show">
+        <item quantity="one">更早的 %d 个会话</item>
+        <item quantity="other">更早的 %d 个会话</item>
+    </plurals>
     <string name="sessions_no_sessions">还没有会话。</string>
     <string name="sessions_no_matching">没有匹配的会话。</string>
     <string name="sessions_other">其他会话</string>

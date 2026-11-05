@@ -285,6 +285,8 @@
 "sessions.sort.workspace" = "By workspace";
 "sessions.sort.time" = "By time";
 "sessions.recent" = "Recent";
+"sessions.earlier_show" = "%lld earlier conversations";
+"sessions.earlier_hide" = "Hide earlier conversations";
 "connection.reconnecting" = "Reconnecting…";
 "connection.offline" = "Can’t reach your Mac";
 "connection.connected" = "Connected";

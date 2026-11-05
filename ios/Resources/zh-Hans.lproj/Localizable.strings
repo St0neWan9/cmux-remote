@@ -285,6 +285,8 @@
 "sessions.sort.workspace" = "按工作区";
 "sessions.sort.time" = "按时间";
 "sessions.recent" = "最近";
+"sessions.earlier_show" = "更早的 %lld 个会话";
+"sessions.earlier_hide" = "收起更早的会话";
 "connection.reconnecting" = "正在重新连接…";
 "connection.offline" = "无法连接到 Mac";
 "connection.connected" = "已连接";

@@ -157,6 +157,11 @@
     <string name="sessions_connection_details">Connection details</string>
     <string name="sessions_title">Sessions</string>
     <string name="sessions_recent">Recent</string>
+    <string name="sessions_earlier_hide">Hide earlier conversations</string>
+    <plurals name="sessions_earlier_show">
+        <item quantity="one">%d earlier conversation</item>
+        <item quantity="other">%d earlier conversations</item>
+    </plurals>
     <string name="sessions_no_sessions">No conversations yet.</string>
     <string name="sessions_no_matching">No matching conversations.</string>
     <string name="sessions_other">Other sessions</string>

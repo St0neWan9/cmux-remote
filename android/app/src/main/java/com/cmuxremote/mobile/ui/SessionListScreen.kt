@@ -29,6 +29,7 @@ import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.KeyboardArrowUp
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Computer
 import androidx.compose.material.icons.rounded.HourglassEmpty
@@ -62,6 +63,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -69,6 +71,7 @@ import androidx.compose.ui.unit.dp
 import com.cmuxremote.mobile.R
 import com.cmuxremote.mobile.data.FeedItem
 import com.cmuxremote.mobile.model.SessionItem
+import com.cmuxremote.mobile.model.SessionRecency
 import com.cmuxremote.mobile.model.SessionTrailing
 import com.cmuxremote.mobile.ui.components.FloatingSurface
 import com.cmuxremote.mobile.ui.components.Pill
@@ -390,6 +393,35 @@ fun DrawerContent(
 }
 
 /** One conversation inside the drawer, indented under its workspace. */
+/** The fold under a list's recent conversations: it names how many earlier ones it holds and opens them in place. */
+@Composable
+private fun EarlierRow(count: Int, open: Boolean, key: String, modifier: Modifier = Modifier, onToggle: () -> Unit) {
+    val expanded = stringResource(R.string.common_expanded)
+    val collapsed = stringResource(R.string.common_collapsed)
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .testTag("sessions.earlier.$key")
+            .semantics(mergeDescendants = true) { stateDescription = if (open) expanded else collapsed }
+            .clickable(onClick = onToggle)
+            .padding(vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text(
+            if (open) stringResource(R.string.sessions_earlier_hide) else pluralStringResource(R.plurals.sessions_earlier_show, count, count),
+            color = MobileDesign.Muted,
+            style = MaterialTheme.typography.labelLarge,
+        )
+        Icon(
+            if (open) Icons.Rounded.KeyboardArrowUp else Icons.Rounded.KeyboardArrowDown,
+            contentDescription = null,
+            tint = MobileDesign.Muted,
+            modifier = Modifier.size(16.dp),
+        )
+    }
+}
+
 @Composable
 private fun DrawerSessionRow(
     session: SessionItem,
@@ -524,6 +556,9 @@ private fun SessionListContent(
             .thenByDescending { it.writable }
             .thenBy(collator) { it.title },
     )
+    // A search or a status filter is the reader looking for something: every match shows, nothing folds.
+    val folds = query.isEmpty() && model.statusFilter == 0
+    val recency = remember(now) { SessionRecency(java.time.Instant.ofEpochMilli(now)) }
     val multipleHosts = model.hosts.size > 1
     val showMacSections = multipleHosts && !model.sortByTime
     // Workspace headings disappear once one workspace is explicitly selected.
@@ -692,7 +727,10 @@ private fun SessionListContent(
                 }
                 if (model.sortByTime) {
                     // The iPhone's time order is flat; the Mac name travels in the row.
-                    items(ordered, key = { it.hostKey.orEmpty() + ":" + it.id }) { session ->
+                    val (recentRows, earlierRows) = if (folds) recency.split(ordered, SessionRecency.TIME_FLOOR) else ordered to emptyList()
+                    val earlierKey = "earlier:time"
+                    val earlierOpen = model.collapsed.contains(earlierKey)
+                    items(if (earlierOpen) ordered else recentRows, key = { it.hostKey.orEmpty() + ":" + it.id }) { session ->
                         SessionRow(
                             session = session,
                             selected = session.hostKey.orEmpty() + ":" + session.id == model.selectedID,
@@ -701,6 +739,9 @@ private fun SessionListContent(
                             modifier = Modifier.animateItem(),
                             onClick = { actions.onSelect(session) },
                         )
+                    }
+                    if (earlierRows.isNotEmpty()) {
+                        item(key = earlierKey) { EarlierRow(earlierRows.size, earlierOpen, earlierKey) { actions.onToggleGroup(earlierKey) } }
                     }
                 } else {
                     // Without Mac sections the rows still belong to their Mac; the
@@ -734,7 +775,10 @@ private fun SessionListContent(
                             }
                         }
                         if (model.workspaceFilter != null || !showGroupHeadings) {
-                            items(hostRows, key = { it.hostKey.orEmpty() + ":" + it.id }) { session ->
+                            val (recentRows, earlierRows) = if (folds) recency.split(hostRows, SessionRecency.WORKSPACE_FLOOR) else hostRows to emptyList()
+                            val earlierKey = "earlier:flat-$hostID-${model.workspaceFilter.orEmpty()}"
+                            val earlierOpen = model.collapsed.contains(earlierKey)
+                            items(if (earlierOpen) hostRows else recentRows, key = { it.hostKey.orEmpty() + ":" + it.id }) { session ->
                                 SessionRow(
                                     session = session,
                                     selected = session.hostKey.orEmpty() + ":" + session.id == model.selectedID,
@@ -742,6 +786,9 @@ private fun SessionListContent(
                                     modifier = Modifier.animateItem(),
                                     onClick = { actions.onSelect(session) },
                                 )
+                            }
+                            if (earlierRows.isNotEmpty()) {
+                                item(key = earlierKey) { EarlierRow(earlierRows.size, earlierOpen, earlierKey) { actions.onToggleGroup(earlierKey) } }
                             }
                         } else {
                             val groupRows = hostRows.groupBy { it.workspaceKey.lowercase() }
@@ -806,7 +853,10 @@ private fun SessionListContent(
                                     }
                                 }
                                 if (open) {
-                                    items(rows, key = { it.hostKey.orEmpty() + ":" + it.id }) { session ->
+                                    val (recentRows, earlierRows) = if (folds) recency.split(rows, SessionRecency.WORKSPACE_FLOOR) else rows to emptyList()
+                                    val earlierKey = "earlier:$key"
+                                    val earlierOpen = model.collapsed.contains(earlierKey)
+                                    items(if (earlierOpen) rows else recentRows, key = { it.hostKey.orEmpty() + ":" + it.id }) { session ->
                                         SessionRow(
                                             session = session,
                                             selected = session.hostKey.orEmpty() + ":" + session.id == model.selectedID,
@@ -814,6 +864,11 @@ private fun SessionListContent(
                                             modifier = Modifier.animateItem().padding(start = 34.dp),
                                             onClick = { actions.onSelect(session) },
                                         )
+                                    }
+                                    if (earlierRows.isNotEmpty()) {
+                                        item(key = earlierKey) {
+                                            EarlierRow(earlierRows.size, earlierOpen, earlierKey, Modifier.padding(start = 34.dp)) { actions.onToggleGroup(earlierKey) }
+                                        }
                                     }
                                 }
                             }
