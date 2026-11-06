@@ -3,16 +3,13 @@ description: Something Cmux Remote should do differently or do as well.
 labels: ["enhancement"]
 body:
   - type: textarea
-    id: problem
-    attributes:
-      label: What is the problem
-      description: Describe the situation you are in, not only the solution you have in mind.
-    validations:
-      required: true
-  - type: textarea
     id: proposal
     attributes:
-      label: What should happen
+      label: What should change
+      description: Describe the situation you are in and what Cmux Remote should do instead.
+      placeholder: |
+        Right now …
+        I would like it to …
     validations:
       required: true
   - type: dropdown
