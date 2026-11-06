@@ -1,0 +1,34 @@
+name: Feature request
+description: Something Cmux Remote should do differently or do as well.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What is the problem
+      description: Describe the situation you are in, not only the solution you have in mind.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What should happen
+    validations:
+      required: true
+  - type: dropdown
+    id: client
+    attributes:
+      label: Where
+      options:
+        - iPhone
+        - Android
+        - Mac companion
+        - Bridge / relay
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Anything else (optional)
+      description: Screenshots of other apps that do this well are welcome. No private data.

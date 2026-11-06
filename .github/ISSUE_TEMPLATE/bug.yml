@@ -1,0 +1,63 @@
+name: Bug report
+description: Something in Cmux Remote is broken or behaves unexpectedly.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Do not include tokens, pairing codes, device identities, bridge state or
+        personal conversations in text or screenshots — crop or blur them.
+  - type: dropdown
+    id: client
+    attributes:
+      label: Client
+      options:
+        - iPhone
+        - Android
+        - Mac companion
+        - Bridge / relay
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Cmux Remote ▸ About, the TestFlight build, or `CmuxRemote` in the Mac menu bar.
+      placeholder: "e.g. 0.1.5 (43)"
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: iOS / Android / macOS version, and cmux version
+      placeholder: "e.g. iOS 26.5, cmux 1.4.0"
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open a conversation
+        2. Switch to another app and back
+        3. …
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happens
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics (optional)
+      description: The app's diagnostics page (connection detail ▸ diagnostics ▸ copy). Remove anything private first.
+      render: text
