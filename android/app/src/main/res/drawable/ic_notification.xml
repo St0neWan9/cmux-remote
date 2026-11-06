@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Status bar icon for the persistent-connection notification. It is the same
+     emblem as the launcher foreground, scaled to fill the 24dp slot and drawn
+     as line art: the system tints it, so only the alpha matters and the screen
+     stays empty around the chevron. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+
+    <group
+        android:scaleX="0.3723"
+        android:scaleY="0.3723"
+        android:translateX="-8.104"
+        android:translateY="-8.104">
+
+        <!-- Monitor body, with the screen cut out. -->
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:fillType="evenOdd"
+            android:pathData="M24.987,34.542 H60.345 A5.957,5.957 0 0 1 66.302,40.499 V59.687 A5.957,5.957 0 0 1 60.345,65.644 H30.944 A5.957,5.957 0 0 1 24.987,59.687 V40.499 A5.957,5.957 0 0 1 30.944,34.542 Z M29.397,38.952 H60.963 A3.095,3.095 0 0 1 64.058,42.047 V58.681 A3.095,3.095 0 0 1 60.963,61.776 H32.492 A3.095,3.095 0 0 1 29.397,58.681 V42.047 A3.095,3.095 0 0 1 32.492,38.952 Z" />
+
+        <!-- Prompt chevron. -->
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M39.145,42.124 L53.691,50.944 L39.145,59.687 L39.145,54.503 L46.108,51.099 L39.145,47.075 Z" />
+
+        <!-- Monitor stand. -->
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M41.466,63.942 H49.59 A0.774,0.774 0 0 1 50.364,64.716 V67.81 A0.774,0.774 0 0 1 49.59,68.584 H42.24 A0.774,0.774 0 0 1 41.466,67.81 V64.716 A0.774,0.774 0 0 1 42.24,63.942 Z M33.729,67.965 H54.619 A2.089,2.089 0 0 1 56.708,70.054 A2.089,2.089 0 0 1 54.619,72.143 H35.818 A2.089,2.089 0 0 1 33.729,70.054 A2.089,2.089 0 0 1 35.818,67.965 Z" />
+
+        <!-- Phone shell, with the display cut out. -->
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:fillType="evenOdd"
+            android:pathData="M62.82,41.814 H78.371 A4.642,4.642 0 0 1 83.013,46.456 V68.816 A4.642,4.642 0 0 1 78.371,73.458 H67.462 A4.642,4.642 0 0 1 62.82,68.816 V46.456 A4.642,4.642 0 0 1 67.462,41.814 Z M66.379,45.838 H77.52 A2.321,2.321 0 0 1 79.841,48.159 V67.733 A2.321,2.321 0 0 1 77.52,70.054 H68.7 A2.321,2.321 0 0 1 66.379,67.733 V48.159 A2.321,2.321 0 0 1 68.7,45.838 Z" />
+
+        <!-- Home indicator. -->
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M71.447,65.644 H74.541 A1.122,1.122 0 0 1 75.663,66.766 A1.122,1.122 0 0 1 74.541,67.888 H71.447 A1.122,1.122 0 0 1 70.325,66.766 A1.122,1.122 0 0 1 71.447,65.644 Z" />
+    </group>
+</vector>

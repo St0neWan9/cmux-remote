@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The Android 12+ launch screen draws this on the white page. It is empty on
+     purpose: the launch screen stays a plain page, matching the iPhone's
+     generated launch screen, which has no mark either. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="@android:color/transparent" />
+</shape>
