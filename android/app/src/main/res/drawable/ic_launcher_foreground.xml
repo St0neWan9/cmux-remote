@@ -1,5 +1,55 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The icon itself is the adaptive background; the mask crops only its blue field. -->
-<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
-    <solid android:color="@android:color/transparent" />
-</shape>
+<!-- Adaptive icon foreground: the desktop-and-phone emblem.
+     The artwork is laid out so its bounding box stays inside the 72dp circle a
+     launcher is allowed to keep (bounds 25,34.5 to 83,73.5; the diagonal is
+     69.9dp), so no mask crops the monitor, the stand or the phone. The screen
+     and the phone display are holes: the cobalt background shows through. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Monitor body, with the screen border cut out. -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="M24.987,34.542 H60.345 A5.957,5.957 0 0 1 66.302,40.499 V59.687 A5.957,5.957 0 0 1 60.345,65.644 H30.944 A5.957,5.957 0 0 1 24.987,59.687 V40.499 A5.957,5.957 0 0 1 30.944,34.542 Z M29.397,38.952 H60.963 A3.095,3.095 0 0 1 64.058,42.047 V58.681 A3.095,3.095 0 0 1 60.963,61.776 H32.492 A3.095,3.095 0 0 1 29.397,58.681 V42.047 A3.095,3.095 0 0 1 32.492,38.952 Z" />
+
+    <!-- Screen surface. -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M30.712,40.267 H60.731 A1.934,1.934 0 0 1 62.665,42.201 V58.758 A1.934,1.934 0 0 1 60.731,60.692 H32.646 A1.934,1.934 0 0 1 30.712,58.758 V42.201 A1.934,1.934 0 0 1 32.646,40.267 Z" />
+
+    <!-- Prompt chevron. -->
+    <path android:pathData="M39.145,42.124 L53.691,50.944 L39.145,59.687 L39.145,54.503 L46.108,51.099 L39.145,47.075 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:endX="53.691"
+                android:endY="50.944"
+                android:startX="39.145"
+                android:startY="51.099"
+                android:type="linear">
+                <item android:color="#FF01D0FE" android:offset="0" />
+                <item android:color="#FF6438FE" android:offset="1" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Monitor stand. -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M41.466,63.942 H49.59 A0.774,0.774 0 0 1 50.364,64.716 V67.81 A0.774,0.774 0 0 1 49.59,68.584 H42.24 A0.774,0.774 0 0 1 41.466,67.81 V64.716 A0.774,0.774 0 0 1 42.24,63.942 Z M33.729,67.965 H54.619 A2.089,2.089 0 0 1 56.708,70.054 A2.089,2.089 0 0 1 54.619,72.143 H35.818 A2.089,2.089 0 0 1 33.729,70.054 A2.089,2.089 0 0 1 35.818,67.965 Z" />
+
+    <!-- Phone shell, with the display cut out. -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="M62.82,41.814 H78.371 A4.642,4.642 0 0 1 83.013,46.456 V68.816 A4.642,4.642 0 0 1 78.371,73.458 H67.462 A4.642,4.642 0 0 1 62.82,68.816 V46.456 A4.642,4.642 0 0 1 67.462,41.814 Z M66.379,45.838 H77.52 A2.321,2.321 0 0 1 79.841,48.159 V67.733 A2.321,2.321 0 0 1 77.52,70.054 H68.7 A2.321,2.321 0 0 1 66.379,67.733 V48.159 A2.321,2.321 0 0 1 68.7,45.838 Z" />
+
+    <!-- Home indicator. -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M71.447,65.644 H74.541 A1.122,1.122 0 0 1 75.663,66.766 A1.122,1.122 0 0 1 74.541,67.888 H71.447 A1.122,1.122 0 0 1 70.325,66.766 A1.122,1.122 0 0 1 71.447,65.644 Z" />
+</vector>
