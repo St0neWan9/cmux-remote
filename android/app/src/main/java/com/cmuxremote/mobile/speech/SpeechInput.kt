@@ -32,7 +32,12 @@ import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.coroutines.resume
 
 /**
- * On-device dictation only; no network recognizer, no audio leaves the device.
+ * Dictation through the platform's speech recognizer.
+ *
+ * An on-device engine is used when the device and language have one; otherwise the
+ * system's default recognizer takes over, so the mic button works wherever Android
+ * offers recognition at all. (The default recognizer may use the network.) No audio
+ * is ever uploaded by this app itself.
  *
  * Mirrors `SpeechInputService` / `SpeechDraftModel` on iOS: a session either produces
  * recognized text, is stopped by the caller, or fails with one of the stable codes in
@@ -68,38 +73,30 @@ class SpeechInput(private val context: Context) {
 
     /** Read-only preflight; reports what [start] would do without requesting anything. */
     fun availability(): Availability {
-        if (!onDeviceRecognitionAvailable()) return Availability.Unavailable
+        if (!SpeechRecognizer.isRecognitionAvailable(context)) return Availability.Unavailable
         return if (hasRecordPermission()) Availability.Ready else Availability.PermissionDenied
     }
 
     /**
-     * Requests RECORD_AUDIO when needed, starts on-device recognition, and suspends
-     * until the session ends. Any failed preflight fails closed: the command recognizer
-     * (which may use the network) is never created.
+     * Requests RECORD_AUDIO when needed, starts recognition, and suspends until the
+     * session ends. The on-device engine is preferred so audio stays local where the
+     * device supports it; when it cannot handle this language, the system's default
+     * recognizer is used instead.
      */
     @SuppressLint("MissingPermission")
     suspend fun start(): State = withContext(Dispatchers.Main.immediate) {
         closeSession()
         partial = ""
-        if (!onDeviceRecognitionAvailable()) {
+        if (!SpeechRecognizer.isRecognitionAvailable(context)) {
             return@withContext State(Availability.Unavailable, error = ERROR_UNAVAILABLE)
         }
         if (!hasRecordPermission() && !requestRecordPermission()) {
             return@withContext State(Availability.PermissionDenied, error = ERROR_DENIED)
         }
-        val recognizer = createOnDeviceRecognizer()
-            ?: return@withContext State(Availability.Unavailable, error = ERROR_UNAVAILABLE)
         val intent = recognitionIntent()
-        val supported = try {
-            supportsOnDeviceRecognition(recognizer, intent)
-        } catch (cancelled: CancellationException) {
-            runCatching { recognizer.destroy() }
-            throw cancelled
-        }
-        if (!supported) {
-            runCatching { recognizer.destroy() }
-            return@withContext State(Availability.Unavailable, error = ERROR_UNAVAILABLE)
-        }
+        val recognizer = supportedOnDeviceRecognizer(intent)
+            ?: runCatching { SpeechRecognizer.createSpeechRecognizer(context) }.getOrNull()
+            ?: return@withContext State(Availability.Unavailable, error = ERROR_UNAVAILABLE)
         val current = Session(recognizer)
         session = current
         try {
@@ -199,12 +196,25 @@ class SpeechInput(private val context: Context) {
         else -> null
     }
 
-    private fun onDeviceRecognitionAvailable(): Boolean =
-        Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && isOnDeviceRecognitionAvailable()
-
-    @RequiresApi(Build.VERSION_CODES.S)
-    private fun isOnDeviceRecognitionAvailable(): Boolean =
-        SpeechRecognizer.isOnDeviceRecognitionAvailable(context)
+    /**
+     * An on-device recognizer for this language, or nil when the platform has none:
+     * older than Android 12, no downloaded model, or the language is unsupported.
+     * `start` then falls back to the system's default recognizer.
+     */
+    private suspend fun supportedOnDeviceRecognizer(intent: Intent): SpeechRecognizer? {
+        val recognizer = createOnDeviceRecognizer() ?: return null
+        val supported = try {
+            supportsOnDeviceRecognition(recognizer, intent)
+        } catch (cancelled: CancellationException) {
+            runCatching { recognizer.destroy() }
+            throw cancelled
+        }
+        if (!supported) {
+            runCatching { recognizer.destroy() }
+            return null
+        }
+        return recognizer
+    }
 
     @RequiresApi(Build.VERSION_CODES.S)
     private fun createOnDeviceRecognizerNow(): SpeechRecognizer? =
@@ -218,7 +228,9 @@ class SpeechInput(private val context: Context) {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault().toLanguageTag())
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-            putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
+            // The on-device recognizer needs no hint; the default one may use the network,
+            // which is the system capability the mic button promises.
+            putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, false)
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
             putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, context.packageName)
         }
