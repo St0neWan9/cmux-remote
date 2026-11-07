@@ -577,7 +577,7 @@ android/                         # 新 Gradle 工程，独立构建
 | 扫码 | CameraX + ML Kit bundled barcode（或 ZXing 变体） | ML Kit 离线模型不依赖 Play Services，但仍有 Google 依赖；F-Droid 版本用 ZXing |
 | 持久化 | DataStore（连接/relay）、文件或 Room（操作账本、会话缓存） | 账本必须 fsync、容量有界、损坏时 fail closed；不备份 |
 | 后台 | WorkManager（best-effort）+ 前台生命周期 | 不承诺常驻 WebSocket；首版不做 FCM（会引入服务端，违反“无开发者服务器”） |
-| 语音 | `SpeechRecognizer` + `EXTRA_PREFER_OFFLINE`，并检查 on-device 支持 | `EXTRA_PREFER_OFFLINE` 只是偏好，不保证本地识别；必须先查询 `RecognitionSupport` / on-device 可用性，不可用就隐藏麦克风，绝不回退到云端识别 |
+| 语音 | `SpeechRecognizer`，优先 on-device | 优先 `createOnDeviceSpeechRecognizer` 并查询 `RecognitionSupport`；没有本机模型时改用系统默认识别器（可能走云端），不再隐藏麦克风。2026-11-07 按 issue #250 调整 |
 | DI | 手写 `AppContainer`（构造函数注入） | 与 Swift 的 composition root 一致；不引入 Hilt 以降低构建复杂度 |
 
 ### 6.2 模块与分层

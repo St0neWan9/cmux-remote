@@ -266,6 +266,18 @@ conversation with the agent.
 Implementation references: [Apple on-device recognition](https://developer.apple.com/documentation/speech/sfspeechrecognitionrequest/requiresondevicerecognition)
 and [on-device support](https://developer.apple.com/documentation/speech/sfspeechrecognizer/supportsondevicerecognition).
 
+## Android dictation
+
+The microphone prepares the same bounded draft through the platform recognizer
+(`speech/SpeechInput.kt`). Android 12+ with an on-device engine for the current
+language uses that engine, so audio stays on the device. A device or language without
+one uses the system's default recognizer instead of hiding the mic, and that
+recognizer may send audio to the device's recognition provider; this is the platform
+capability the mic button promises, and the app itself never uploads audio. Recognized
+text only ever reaches the draft. The 60-second and 8 KiB bounds, the
+`Finish`/`Cancel`/`Use text` actions, the rule that only an ordinary send reaches the
+agent, and the on-device and permission checks all match the iPhone.
+
 ## Combined milestone storage
 
 Production chat, Feed and Mac terminal mutations use one shared MutationLedger.

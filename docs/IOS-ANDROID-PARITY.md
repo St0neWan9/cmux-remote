@@ -26,7 +26,7 @@
 | 上拉加载更早 | `loadOlder` + `before_seq` 分页 |
 | 运行计时 / 回合用时 / 时间页 | `LiveRunLabel`、`ResponseRunLabel`、`TimingScreen` |
 | 待发送结果未知：持久化 + 检查回执 | `pendingOperation` + `GET /v2/operations/:id` |
-| 语音听写（设备端识别，60s / 8KiB） | `speech/SpeechInput.kt` |
+| 语音听写（优先设备端识别，无本机模型时用系统默认识别器，60s / 8KiB） | `speech/SpeechInput.kt` |
 | 扫码配对（CameraX + ML Kit） | `QrScannerScreen` |
 | 连接详情：身份 / 证书 / 能力 / 传输 / 密钥 / 移除 | `ConnectionDetailScreen` |
 | 诊断日志（500 条环形、脱敏、复制报告） | `data/Diagnostics.kt`、`DiagnosticLogScreen` |
