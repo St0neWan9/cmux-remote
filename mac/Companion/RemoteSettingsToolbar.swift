@@ -12,6 +12,7 @@ import AppKit
         ("devices", "mac.devices.title", "laptopcomputer.and.iphone"),
         ("connect", "mac.connect.title", "desktopcomputer"),
         ("advanced", "mac.advanced.title", "gearshape.2"),
+        ("about", "mac.about.title", "info.circle"),
     ]
     private var identifiers: [NSToolbarItem.Identifier] { sections.map { NSToolbarItem.Identifier($0.id) } }
     init(model: MacAppModel) {

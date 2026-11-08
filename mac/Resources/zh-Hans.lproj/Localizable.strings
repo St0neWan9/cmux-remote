@@ -116,6 +116,10 @@
 "mac.connect.host" = "远端 Mac";
 "mac.connect.placeholder" = "选择一台 Mac";
 "mac.advanced.title" = "高级";
+"mac.about.title" = "关于";
+"mac.about.website" = "官网";
+"mac.about.source" = "源码";
+"mac.about.note" = "cmux 的独立配套应用，非 cmux 官方产品。";
 "mac.stateDirectory.hint" = "切换此应用控制的后台服务，不会改变它的身份和授权。";
 "mac.menu.language" = "语言";
 "mac.unnamedHost" = "未命名主机";
