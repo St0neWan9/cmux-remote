@@ -116,6 +116,10 @@
 "mac.connect.host" = "Remote Mac";
 "mac.connect.placeholder" = "Choose a Mac";
 "mac.advanced.title" = "Advanced";
+"mac.about.title" = "About";
+"mac.about.website" = "Website";
+"mac.about.source" = "Source";
+"mac.about.note" = "An independent companion for cmux. Not an official cmux product.";
 "mac.stateDirectory.hint" = "Changes which background service this app controls. Its identity and grants stay unchanged.";
 "mac.menu.language" = "Language";
 "mac.unnamedHost" = "Unnamed host";

@@ -20,6 +20,8 @@ struct SessionListView: View {
     @AppStorage(SessionSortMode.storageKey) private var sortMode = SessionSortMode.workspace
     /// The new-session sheet; a target is set when it was opened from one workspace's group.
     @State private var showStart = false
+    /// The app's own page, opened from the list's title menu.
+    @State private var showAbout = false
     @State private var startFrom: StartTarget?
     /// A terminal cmux just opened; the list waits for its conversation and then opens it.
     @State private var awaiting: AwaitedStart?
@@ -157,6 +159,7 @@ struct SessionListView: View {
             .navigationDestination(isPresented: $showConversation) { if let selectedConversation { ConversationView(model: selectedConversation, hostName: selectedHostName) } }
 
             .navigationDestination(isPresented: $showFeed) { if let id = feedHostID, let link = model.link(for: id) { FeedView(client: link.client) } }
+            .navigationDestination(isPresented: $showAbout) { AboutView() }
 
         }
         } drawer: {
@@ -289,7 +292,8 @@ struct SessionListView: View {
                                  showFeed: { id in feedHostID = id; showFeed = true },
                                  refresh: { Task { await model.reconnect() } },
                                  start: { startFrom = nil; showStart = true },
-                                 addMac: { model.addingDevice = true })
+                                 addMac: { model.addingDevice = true },
+                                 about: { showAbout = true })
                 Spacer(minLength: 0)
                 Button { showSearch = true } label: {
                     Image(systemName: "magnifyingglass")

@@ -331,6 +331,11 @@
 "sessions.all_hosts" = "All";
 "sessions.close_search" = "Close search";
 "sessions.title_menu" = "Conversation options";
+"about.title" = "About";
+"about.version" = "Version %@";
+"about.website" = "cmux-remote.trenta.dev";
+"about.source" = "Source code on GitHub";
+"about.note" = "An independent companion for cmux. Not an official cmux product.";
 "feed.title_count" = "Waiting for you (%lld)";
 "chat.copy_text" = "Copy";
 "model.switch" = "Switch model";

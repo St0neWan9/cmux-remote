@@ -23,6 +23,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.AddCircle
+import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
@@ -124,6 +125,8 @@ fun SessionTitleMenu(
     onStart: () -> Unit,
     onAddMac: () -> Unit,
     onConnection: () -> Unit = {},
+    /** Opens the app's own page. */
+    onAbout: () -> Unit = {},
     /** Per-Mac pending counts, so a several-Mac menu can open the right queue. */
     pendingQueues: List<Triple<String, String, Int>> = emptyList(),
     onFeedHost: ((String) -> Unit)? = null,
@@ -196,6 +199,12 @@ fun SessionTitleMenu(
                 text = { Text(stringResource(R.string.sessions_connection_details)) },
                 leadingIcon = { Icon(Icons.Rounded.Settings, contentDescription = null, tint = MobileDesign.Muted) },
                 onClick = { onConnection(); open = false },
+            )
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.about_title)) },
+                leadingIcon = { Icon(Icons.Rounded.Info, contentDescription = null, tint = MobileDesign.Muted) },
+                onClick = { onAbout(); open = false },
+                modifier = Modifier.testTag("sessions.about"),
             )
         }
     }

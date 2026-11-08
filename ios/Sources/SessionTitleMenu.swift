@@ -11,6 +11,8 @@ struct SessionTitleMenu: View {
     let refresh: () -> Void
     let start: () -> Void
     let addMac: () -> Void
+    /// Opens the app's own page, where the website and the source live.
+    let about: () -> Void
     var body: some View {
         Menu {
             Picker(String(localized: "sessions.sort"), selection: $sortMode) {
@@ -28,6 +30,10 @@ struct SessionTitleMenu: View {
             Section(String(localized: "sessions.manage")) {
                 if canStart { Button(action: start) { Label(String(localized: "start.title"), systemImage: "plus") }.accessibilityIdentifier("sessions.start") }
                 Button(action: addMac) { Label(String(localized: "pair.add_device"), systemImage: "laptopcomputer") }
+            }
+            Section {
+                Button(action: about) { Label(String(localized: "about.title"), systemImage: "info.circle") }
+                    .accessibilityIdentifier("sessions.about")
             }
         } label: {
             HStack(spacing: 5) {

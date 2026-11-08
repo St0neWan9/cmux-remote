@@ -168,6 +168,11 @@
     <string name="sessions_sort">Sort</string>
     <string name="sessions_sort_workspace">By workspace</string>
     <string name="sessions_sort_time">By time</string>
+    <string name="about_title">About</string>
+    <string name="about_version">Version %1$s</string>
+    <string name="about_website">cmux-remote.trenta.dev</string>
+    <string name="about_source">Source code on GitHub</string>
+    <string name="about_note">An independent companion for cmux. Not an official cmux product.</string>
     <string name="sessions_connection">Connection details</string>
     <string name="sessions_no_permission">This Mac has not granted permission to read conversations.</string>
     <string name="sessions_unreachable">Unreachable</string>

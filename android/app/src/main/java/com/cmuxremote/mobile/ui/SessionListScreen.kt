@@ -519,6 +519,7 @@ private fun SessionListContent(
     }
     // Only a pull shows the refresh spinner; background refreshes stay quiet.
     var pullRefreshing by remember { mutableStateOf(false) }
+    var aboutOpen by remember { mutableStateOf(false) }
     androidx.compose.runtime.LaunchedEffect(model.loading) {
         if (!model.loading) pullRefreshing = false
     }
@@ -635,6 +636,7 @@ private fun SessionListContent(
                     onStart = { actions.onStart?.invoke() },
                     onAddMac = actions.onAddMac,
                     onConnection = actions.onConnection,
+                    onAbout = { aboutOpen = true },
                     pendingQueues = pendingQueues,
                     onFeedHost = actions.onOpenFeedHost,
                 )
@@ -647,6 +649,7 @@ private fun SessionListContent(
                 }
             }
         }
+        if (aboutOpen) AboutSheet(onDismiss = { aboutOpen = false })
         PullToRefreshBox(
             isRefreshing = pullRefreshing,
             onRefresh = {

@@ -16,6 +16,7 @@ struct RemoteSettingsView: View {
                 case "devices": DevicesSettingsView(model: app.sharing)
                 case "connect": CompanionView(model: app.remote)
                 case "advanced": MacAdvancedView(app: app, openLogs: openLogs)
+                case "about": AboutSettingsView()
                 default: SharingSettingsView(model: app.sharing)
                 }
             }
