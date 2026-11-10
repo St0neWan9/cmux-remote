@@ -233,12 +233,23 @@ private actor PhoneUIBackend: CmuxControlling {
                 try recordModel(name, stamp: stamp)
                 return .object(["submitted": .bool(true)])
             }
+            // A send the Mac refuses before anything reaches the agent: the phone takes the bubble back and returns
+            // the prompt to the composer, as it does when the link is down at the moment of sending.
+            if flag("refuse-send") { throw BridgeError("input_busy", "Fixture refused the send", status: 409) }
             let user: JSONValue = .object(["type": .string("user"), "uuid": .string(UUID().uuidString), "timestamp": .string(stamp), "message": .object(["content": .string(input)])])
             let replyText = "UI fixture received \(images.count) image(s) and your prompt. No agent was started."
             let reply: JSONValue = .object(["type": .string("assistant"), "uuid": .string(UUID().uuidString), "timestamp": .string(stamp), "message": .object(["content": .array([.object(["type": .string("text"), "text": .string(replyText)])])])])
             let duration: JSONValue = .object(["type": .string("system"), "subtype": .string("turn_duration"), "durationMs": .number(2500), "timestamp": .string(stamp)])
             // An opt-in delay stands in for an agent that records the prompt late, so the phone's pending bubble stays visible.
-            if flag("delay-transcript") {
+            // A turn as a real agent records it: the prompt first, with the turn left open so the page shows its
+            // running label under the prompt, and the reply a few seconds later.
+            if flag("open-turn") {
+                let transcript = transcript
+                Task {
+                    try? await Task.sleep(for: .seconds(3)); try? Self.append([user], to: transcript)
+                    try? await Task.sleep(for: .seconds(4)); try? Self.append([reply], to: transcript)
+                }
+            } else if flag("delay-transcript") {
                 let transcript = transcript
                 Task { try? await Task.sleep(for: .seconds(6)); try? Self.append([user, reply, duration], to: transcript) }
             } else { try Self.append([user, reply, duration], to: transcript) }

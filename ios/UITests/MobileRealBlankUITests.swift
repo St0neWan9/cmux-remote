@@ -40,9 +40,9 @@ final class MobileRealBlankUITests: XCTestCase {
             XCTAssertTrue(session.waitForExistence(timeout: 30), "The real session did not appear after a relaunch")
         }
     }
-    /// Samples the page every half second; once it has shown a message row, it must keep showing one.
+    /// Samples the page every half second; once it has shown a message row, it must keep showing one, and while it
+    /// does not offer the latest button its content must reach down to the composer.
     private func watch(_ app: XCUIApplication, label: String, seconds: TimeInterval) {
-        let page = app.scrollViews.firstMatch
         let deadline = Date().addingTimeInterval(seconds)
         var shown = false
         var blank = 0
@@ -59,11 +59,19 @@ final class MobileRealBlankUITests: XCTestCase {
                 let frame = row.frame
                 return !frame.isEmpty && frame.intersects(visible) && frame.height > 1
             }
-            if inView { shown = true; blank = 0 }
+            // A page resting past its own end also counts: its last rows sit under the header with blank space below
+            // them, the end is "in sight" so nothing offers the way back, and a row still intersects the page.
+            // Measured from the conversation's own rows: the first scroll view in the tree can be the list under it.
+            let contentEnd = rows.map(\.frame).filter { !$0.isEmpty }.map(\.maxY).max()
+            let composerTop = Self.first(in: tree, where: { $0.elementType == .textView || $0.elementType == .textField })?.frame.minY
+            let offersLatest = Self.first(in: tree, where: { $0.identifier == "chat.latest" }) != nil
+            let tailGap = (contentEnd != nil && composerTop != nil && !offersLatest) ? composerTop! - contentEnd! : 0
+            if inView && tailGap < 200 { shown = true; blank = 0 }
+            else if inView && !shown { shown = true }
             else if shown {
                 blank += 1
                 capture(app, "\(label)-blank-\(sample)")
-                print("BLANK \(label) sample=\(sample) rows=\(rows.count) page=\(visible)")
+                print("BLANK \(label) sample=\(sample) rows=\(rows.count) page=\(visible) tailGap=\(Int(tailGap))")
                 // A frame or two can land between a scroll and its layout; a page blank for over a second is the bug.
                 XCTAssertLessThan(blank, 3, "The page went blank (\(label), sample \(sample))")
                 if blank >= 3 { return }
