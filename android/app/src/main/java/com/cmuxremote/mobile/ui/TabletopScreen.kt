@@ -68,7 +68,7 @@ fun TabletopScreen(
                 onDraftChange = onDraft,
                 onSend = onSend,
                 onStop = onStop,
-                working = state.session.working,
+                working = state.activeResponse,
                 canSend = state.session.writable,
                 sending = state.sending,
                 error = state.error,

@@ -232,9 +232,8 @@
     <string name="chat_copy_text">复制文本</string>
     <string name="chat_send">发送</string>
     <string name="chat_outgoing_sending">发送中…</string>
-    <string name="chat_outgoing_sent">已送达，等待记录</string>
-    <string name="chat_outgoing_failed">未送达</string>
-    <string name="chat_outgoing_unconfirmed">送达未确认</string>
+    <string name="chat_outgoing_sent">已发送 · 等待智能体接收</string>
+    <string name="chat_outgoing_unconfirmed">未确认是否送达</string>
     <string name="chat_outgoing_images">%1$d 张图片</string>
     <string name="chat_preparing_image">正在准备图片…</string>
     <string name="chat_images_limit">最多只能附加 4 张图片。</string>

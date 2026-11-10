@@ -192,6 +192,16 @@ fun LiveRunLabel(
     }
 }
 
+/** The running turn's line in the timeline, closed by a divider like a finished reply's duration. */
+@Composable
+fun LiveRunDivider(since: Instant, compacting: Boolean, modifier: Modifier = Modifier) {
+    Column(modifier = modifier.fillMaxWidth().padding(top = 6.dp), horizontalAlignment = Alignment.Start) {
+        LiveRunLabel(since = since, compacting = compacting)
+        Spacer(Modifier.size(10.dp))
+        HorizontalDivider(color = Color.Black.copy(alpha = 0.1f), thickness = 0.5.dp)
+    }
+}
+
 /** "用时 3m 47s" divider shown above a finished reply. */
 @Composable
 fun ResponseRunLabel(seconds: Double, recorded: Boolean, modifier: Modifier = Modifier) {

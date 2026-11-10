@@ -232,8 +232,7 @@
     <string name="chat_copy_text">Copy text</string>
     <string name="chat_send">Send</string>
     <string name="chat_outgoing_sending">Sending…</string>
-    <string name="chat_outgoing_sent">Delivered, waiting for the transcript</string>
-    <string name="chat_outgoing_failed">Not delivered</string>
+    <string name="chat_outgoing_sent">Sent · waiting for the agent</string>
     <string name="chat_outgoing_unconfirmed">Delivery not confirmed</string>
     <string name="chat_outgoing_images">%1$d images</string>
     <string name="chat_preparing_image">Preparing image…</string>
