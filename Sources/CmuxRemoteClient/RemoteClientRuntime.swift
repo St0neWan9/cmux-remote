@@ -7,6 +7,8 @@ actor RemoteClientRuntime {
     private var pairing: PairingConfiguration
     private var connection: AuthorizedConnection?
     private var announcement: SignedValue<HostAnnouncement>?
+    /// The announcement fetch in flight, shared by every request that needs it meanwhile.
+    private var announcing: Task<SignedValue<HostAnnouncement>, any Error>?
     private var closed = false
     nonisolated let linkStates = LinkStateBroadcaster()
     /// Failed and timed-out requests, epoch retries and the link's own events, without credentials or bodies.
@@ -18,7 +20,9 @@ actor RemoteClientRuntime {
         else { transport = PinnedTransport(pairing: pairing) }
     }
     func close() { closed = true; transport.close(); linkStates.finish() }
-    func reconnect() async { guard !closed else { return }; announcement = nil; await transport.reconnect() }
+    func reconnect() async { guard !closed else { return }; announcement = nil; announcing = nil; await transport.reconnect() }
+    /// Whether the link kept across a trip to the background still answers; false dials nothing.
+    func verify() async -> Bool { guard !closed else { return false }; return await transport.verify() }
     func relocate(_ updated: AuthorizedConnection) throws {
         guard !closed, let current = connection, current.privateKey == updated.privateKey,
               current.grant.signature == updated.grant.signature, current.grant.value == updated.grant.value else { throw BridgeError("host_changed", "Relocation cannot replace the device or its authorization.") }
@@ -27,7 +31,7 @@ actor RemoteClientRuntime {
         let endpoint = try PairingConfiguration(host: updated.endpoint.host, port: updated.endpoint.port, token: String(repeating: "0", count: 32), certificateSHA256: updated.host.certificateSHA256)
         // In-flight requests own their old transport until completion; endpoint changes do not retry/cancel writes.
         // The new endpoint may be a restarted Bridge with a fresh epoch, so the cached announcement cannot be reused.
-        announcement = nil
+        announcement = nil; announcing = nil
         let states = linkStates
         trace("relocated to \(updated.endpoint.host):\(updated.endpoint.port)")
         transport = WebSocketTransport(host: updated.host, key: updated.privateKey, endpoint: updated.endpoint, report: { states.report($0) }, trace: trace); pairing = endpoint; connection = updated
@@ -58,11 +62,11 @@ actor RemoteClientRuntime {
         }
     }
     /// Forgets the cached epoch after a subscription reported it stale.
-    func discardEpoch() { announcement = nil }
+    func discardEpoch() { announcement = nil; announcing = nil }
     /// Forgets the cached epoch; false when none was cached, so a rejection under a fresh one is final.
     private func dropStaleEpoch() -> Bool {
         guard announcement != nil else { return false }
-        announcement = nil; return true
+        announcement = nil; announcing = nil; return true
     }
     func savedConnection() -> AuthorizedConnection? { connection }
     /// Learn a signed routing proof without replacing an in-flight transport or device grant.
@@ -102,23 +106,41 @@ actor RemoteClientRuntime {
         let request = try await authorized(path, method: "GET")
         return try await request.transport.image(request.path, query: ["reference_id": reference.id, "generation": reference.generation], authorization: request.authorization)
     }
+    /// The Bridge's verified announcement, fetched once however many requests ask for it at the same moment.
+    ///
+    /// A fresh link has none cached, and a return to the app sends every page's reads together: each fetched its
+    /// own, so eight identity reads filled the link's eight request slots before a single page was read.
+    private func currentAnnouncement(transport: any ResourceTransport, connection: AuthorizedConnection) async throws -> SignedValue<HostAnnouncement> {
+        if let cached = announcement { return cached }
+        let fetch: Task<SignedValue<HostAnnouncement>, any Error>
+        if let announcing { fetch = announcing } else {
+            fetch = Task {
+                let fetched = try await transport.request("/v2/identity", method: "GET", as: SignedValue<HostAnnouncement>.self)
+                let crypto = IdentityCryptography(); try crypto.verify(fetched, domain: "host", publicKey: connection.host.publicKey)
+                guard fetched.value.version == 2, fetched.value.host.id == connection.host.id,
+                      fetched.value.host.publicKey == connection.host.publicKey, fetched.value.host.certificateSHA256 == connection.host.certificateSHA256,
+                      UUID(uuidString: fetched.value.epoch) != nil else { throw BridgeError("host_changed", "The host identity changed. Pair again explicitly.") }
+                return fetched
+            }
+            announcing = fetch
+        }
+        do {
+            let fetched = try await fetch.value
+            // A reconnect or a stale epoch while the fetch was in flight started over; its answer is not kept.
+            if announcing == fetch { announcement = fetched; announcing = nil }
+            return fetched
+        } catch {
+            if announcing == fetch { announcing = nil }
+            throw error
+        }
+    }
     private func authorized(_ path: String, method: String) async throws -> AuthorizedRequest {
         guard !closed else { throw URLError(.cancelled) }
         guard path.hasPrefix("/v1/") else { throw BridgeError("invalid_route", "Invalid resource path.") }
         let transport = transport; let connection = connection; let pairing = pairing
         if let connection {
             // The epoch is stable per Bridge process; fetch it once per live link to save a relay round-trip.
-            let announcement: SignedValue<HostAnnouncement>
-            if let cached = self.announcement {
-                announcement = cached
-            } else {
-                let fetched = try await transport.request("/v2/identity", method: "GET", as: SignedValue<HostAnnouncement>.self)
-                let crypto2 = IdentityCryptography(); try crypto2.verify(fetched, domain: "host", publicKey: connection.host.publicKey)
-                guard fetched.value.version == 2, fetched.value.host.id == connection.host.id,
-                      fetched.value.host.publicKey == connection.host.publicKey, fetched.value.host.certificateSHA256 == connection.host.certificateSHA256,
-                      UUID(uuidString: fetched.value.epoch) != nil else { throw BridgeError("host_changed", "The host identity changed. Pair again explicitly.") }
-                self.announcement = fetched; announcement = fetched
-            }
+            let announcement = try await currentAnnouncement(transport: transport, connection: connection)
             try Task.checkCancellation()
             let crypto = IdentityCryptography()
             return AuthorizedRequest(transport: transport, path: "/v2/" + path.dropFirst(4), authorization: { uri, bytes in

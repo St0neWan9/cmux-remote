@@ -7,9 +7,12 @@ protocol ResourceTransport: Sendable {
     func close()
     /// Drops a link that may be dead and dials again; a request-per-call transport has nothing to drop.
     func reconnect() async
+    /// Whether a kept link still answers; a request-per-call transport has no link to keep.
+    func verify() async -> Bool
 }
 extension ResourceTransport {
     func reconnect() async {}
+    func verify() async -> Bool { false }
     func request<T: Decodable & Sendable>(_ path: String, method: String, query: [String: String] = [:], body: Data? = nil, authorization: (@Sendable (String, Data) throws -> String)? = nil, as: T.Type) async throws -> T {
         let response = try await exchange(path, method: method, query: query, body: body, authorization: authorization)
         try validate(response)

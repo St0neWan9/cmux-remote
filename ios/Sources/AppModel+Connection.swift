@@ -44,14 +44,27 @@ extension AppModel {
     /// Runs while the app is in the foreground: follows each link, redials when the network returns, and retries a lost Mac.
     func superviseConnections(network: NetworkPathMonitor = NetworkPathMonitor()) async {
         if let backgroundedAt {
-            // iOS tears the socket down within a couple of seconds of the app leaving the foreground (the bridge
-            // log shows the channel closing two seconds after the page's subscriptions are cancelled), so a link
-            // from before is gone however short the absence was. Redialing on return costs about two seconds; the
-            // alternative is a link that still looks connected and a request that waits out its twenty second
-            // deadline before the phone admits it is not.
-            diagLog(.info, category: "link", "redial all: returned after \(Int(Date().timeIntervalSince(backgroundedAt)))s in background")
+            let away = Int(Date().timeIntervalSince(backgroundedAt))
             self.backgroundedAt = nil
-            await reconnect()
+            if linksKeptInBackground() {
+                // The app kept running through a short absence, so its links may still be up: each is checked with a
+                // ping of a few seconds and only the ones that fail are dialed again. Redialing every return made the
+                // page say it was reconnecting after any glance at another app.
+                var checks: [String: Bool] = [:]
+                await withTaskGroup(of: (String, Bool).self) { group in
+                    for link in links { let client = link.client, id = link.id; group.addTask { (id, await client.verifyLink()) } }
+                    for await (id, alive) in group { checks[id] = alive }
+                }
+                let lost = links.filter { checks[$0.id] != true }
+                diagLog(.info, category: "link", "returned after \(away)s with links kept; redial \(lost.count) of \(links.count)")
+                if lost.isEmpty { await refresh() } else { reconnectSchedule.rearm(); await redial(lost) }
+            } else {
+                // A suspended app's sockets are torn down within a couple of seconds, so after a longer absence a link
+                // from before is gone. Redialing at once costs about two seconds; the alternative is a link that still
+                // looks connected and a request that waits out its twenty second deadline before the phone admits it.
+                diagLog(.info, category: "link", "redial all: returned after \(away)s in background")
+                await reconnect()
+            }
         }
         let observed = links.map { ($0.id, $0.client) }
         let schedule = reconnectSchedule

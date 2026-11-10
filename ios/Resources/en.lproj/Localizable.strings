@@ -288,6 +288,7 @@
 "sessions.earlier_show" = "%lld earlier conversations";
 "sessions.earlier_hide" = "Hide earlier conversations";
 "connection.reconnecting" = "Reconnecting…";
+"connection.updating" = "Updating…";
 "connection.offline" = "Can’t reach your Mac";
 "connection.connected" = "Connected";
 "connection.retry" = "Retry";

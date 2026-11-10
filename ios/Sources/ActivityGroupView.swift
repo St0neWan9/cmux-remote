@@ -70,10 +70,10 @@ struct ActivityGroupView: View {
                 ScrollView {
                     MessageRows(messages: item.messages, projectRoot: projectRoot, openFile: openFile, images: images,
                                 openImage: { reference in
-                                    if let client, !sessionID.isEmpty { sheetImage = reference } else { openImage?(reference) }
+                                    if client != nil, !sessionID.isEmpty { sheetImage = reference } else { openImage?(reference) }
                                 },
                                 openDetail: { messageID, field in
-                                    if let client, let generation { sheetDetail = ToolDetailReference(messageID: messageID, generation: generation, initialField: field) }
+                                    if client != nil, let generation { sheetDetail = ToolDetailReference(messageID: messageID, generation: generation, initialField: field) }
                                     else { openDetail?(messageID, field) }
                                 }, lazy: true)
                         .padding(.horizontal, 14).padding(.vertical, 12)

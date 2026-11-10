@@ -79,6 +79,22 @@ public actor TranscriptReader {
         return "\(cached.generation.uuidString):\(inode):\(size):\(modified.timeIntervalSinceReferenceDate):\(running)"
     }
 
+    /// What a history subscription compares between ticks, from the record's metadata alone.
+    ///
+    /// `stamp(path:)` answers only for a record this reader has parsed as it is now, so every write to a running
+    /// conversation sent the next tick through a full parse just to learn that something changed. The record's
+    /// identity, size and write time say that without reading it; the running tasks are added because a Monitor's
+    /// deadline changes what the conversation shows while the file stays still.
+    public func changeStamp(path: String) -> String? {
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: path),
+              let size = (attributes[.size] as? NSNumber)?.intValue,
+              let modified = attributes[.modificationDate] as? Date else { return nil }
+        let inode = "\(attributes[.systemFileNumber] ?? "unknown")"
+        let created = (attributes[.creationDate] as? Date)?.timeIntervalSinceReferenceDate ?? 0
+        let running = runningTasks(path: path, at: now()).count
+        return "\(inode):\(created):\(size):\(modified.timeIntervalSinceReferenceDate):\(running)"
+    }
+
     /// A subagent record shares the main record's shape but marks every row `isSidechain`; the pinned parser drops
     /// those rows, so a subagent's own conversation is read with the mark removed first.
     private static func withoutSidechain(_ lines: [String]) -> [String] {

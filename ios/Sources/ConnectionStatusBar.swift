@@ -6,6 +6,8 @@ struct ConnectionStatusBar: View {
     let state: LinkState?
     /// The unreachable Mac, named when the phone has several.
     var hostName: String? = nil
+    /// The link is up and the page is reading what changed while it was away.
+    var updating = false
     let retry: () -> Void
     var body: some View {
         Group {
@@ -31,10 +33,20 @@ struct ConnectionStatusBar: View {
                 .background(Color.white, in: Capsule())
                 .accessibilityElement(children: .contain).accessibilityIdentifier("connection.offline")
             case .connected, nil:
-                EmptyView()
+                if updating {
+                    HStack(spacing: 10) {
+                        WorkingIndicator(size: 14)
+                        Text(String(localized: "connection.updating")).font(.subheadline.weight(.medium))
+                    }
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 16).frame(height: 40)
+                    .background(Color.white, in: Capsule())
+                    .accessibilityElement(children: .combine).accessibilityIdentifier("connection.updating")
+                }
             }
         }
         .shadow(color: .black.opacity(0.08), radius: 12, y: 4)
         .animation(.easeInOut(duration: 0.2), value: state)
+        .animation(.easeInOut(duration: 0.2), value: updating)
     }
 }

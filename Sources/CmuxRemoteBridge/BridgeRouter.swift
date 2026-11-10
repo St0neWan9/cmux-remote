@@ -8,6 +8,8 @@ public struct BridgeRouter: Sendable {
     private let authority: ConnectionAuthority?
     private let mirrors: RemoteMirrorService?
     private let launcher: SessionLauncher?
+    /// Messages a history subscription's tick reads to see whether the conversation changed.
+    static let subscriptionTail = 30
     /// An explicitly selected legacy router, retained for migration and fixtures.
     /// A fixture's launcher acts with owner authority, since the legacy token is the owner's own.
     public init(service: SessionService, token: String, launcher: SessionLauncher? = nil) { self.service = service; legacyToken = token; authority = nil; mirrors = nil; self.launcher = launcher }
@@ -178,6 +180,12 @@ public struct BridgeRouter: Sendable {
                     try await require(client, capability, workspace: workspace)
                 }
                 switch (method, path[3]) {
+                // A subscription's tick only asks whether the conversation changed, and the newest archive page changes
+                // whenever its record does: it parses the record's last half megabyte. The windowed history parses up
+                // to 32 MB, which on a long conversation held the reader for eleven seconds after the record grew, and
+                // every page read waited behind it — a phone back from the background sat on old messages meanwhile.
+                case ("GET", "history") where subscriptionClientID != nil:
+                    data = try encode(await service.archive(id: id, tail: Self.subscriptionTail, cursor: nil, limit: Self.subscriptionTail, discovered: client != nil, access: access))
                 case ("GET", "history"): data = try encode(await service.history(id: id, beforeSeq: query["before_seq"].flatMap(Int.init), limit: query["limit"].flatMap(Int.init) ?? 100, discovered: client != nil, access: access))
                 case ("GET", "tool-detail"):
                     guard let messageID = query["message_id"], let generation = query["generation"], let field = query["field"] else { throw BridgeError("invalid_input", "A tool record, generation and field are required.") }

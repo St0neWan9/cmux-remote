@@ -5,11 +5,15 @@ import AVFAudio
 struct CmuxRemoteApp: App {
     @Environment(\.scenePhase) private var phase
     @State private var model: AppModel
+    /// Keeps the links through a short trip to another app.
+    @State private var linkHold: BackgroundLinkHold
     init() {
         let speechFactory: @MainActor () -> any SpeechInputServing = {
             SpeechInputService(audio: AVAudioSession.sharedInstance(), locale: .current)
         }
-        _model = State(initialValue: AppModel(makeSpeechInput: speechFactory))
+        let model = AppModel(makeSpeechInput: speechFactory), hold = BackgroundLinkHold()
+        model.linksKeptInBackground = { hold.end() }
+        _model = State(initialValue: model); _linkHold = State(initialValue: hold)
     }
     var body: some Scene {
         WindowGroup {
@@ -19,8 +23,8 @@ struct CmuxRemoteApp: App {
                 else { SessionListView(model: model) }
             }.environment(\.colorScheme, .light).tint(MobileDesign.accent).task(id: phase) {
                 model.restorePairing()
-                if phase == .active { model.resumeEnrollment(); await model.discover() }
-                else { model.pauseEnrollment(); if phase == .background { model.backgroundedAt = Date(); BackgroundSync.schedule() } }
+                if phase == .active { _ = linkHold.end(); model.resumeEnrollment(); await model.discover() }
+                else { model.pauseEnrollment(); if phase == .background { model.backgroundedAt = Date(); linkHold.begin(); BackgroundSync.schedule() } }
             }
             // Restarted when a Mac is added or removed, so every link is followed.
             .task(id: ConnectionSupervision(active: phase == .active, hosts: model.links.map(\.id))) {

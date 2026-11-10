@@ -27,6 +27,8 @@ final class AppModel {
     var linkStates: [String: LinkState] = [:]
     /// When the app last left the foreground, so a short switch does not force every link to dial again.
     @ObservationIgnored var backgroundedAt: Date?
+    /// Whether the app kept running through its last absence, so its links may still be up; set by the app.
+    @ObservationIgnored var linksKeptInBackground: @MainActor () -> Bool = { false }
     /// Paces automatic redials of lost Macs; it outlives one supervision pass so a person's retry can reset it.
     @ObservationIgnored let reconnectSchedule = ReconnectSchedule()
     /// Each Mac's model choices per agent, shared by its conversations.

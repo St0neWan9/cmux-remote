@@ -364,7 +364,7 @@ public actor SessionService {
         guard case .sessionHistory(let id) = resource, let record = records[id], let path = record.transcript,
               let workspace = record.descriptor.workspaceID else { return nil }
         let descriptor = record.descriptor
-        guard let transcript = await reader.stamp(path: path),
+        guard let transcript = await reader.changeStamp(path: path),
               // Suspension may let a discovery or hook event move the binding; that is a change too.
               records[id]?.descriptor == descriptor else { return nil }
         // The binding decides the history's background tasks and its scope, so it is part of the identity.
