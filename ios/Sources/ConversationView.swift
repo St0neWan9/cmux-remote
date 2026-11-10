@@ -18,7 +18,7 @@ struct ConversationView: View {
     @State private var initialScroll: Task<Void, Never>?
     /// Retries the opening jump: a row's height is known only after it lays out.
     @State private var settleTask: Task<Void, Never>?
-    /// Re-asserts the page's end after content grew, while the lazy stack measures the rows it gained.
+    /// Re-asserts the page's end after content grew, while the stack measures the rows it gained.
     @State private var followTask: Task<Void, Never>?
     /// The reader opened or closed a card: the page stays where it is until they scroll or ask for the latest.
     @State private var holdingPlace = false
@@ -61,6 +61,8 @@ struct ConversationView: View {
     /// Set while the pull gesture's own refresh control is on screen, so the timeline does not draw a second spinner
     /// for the same load.
     @State private var pulling = false
+    /// The stretch of the timeline laid out: the newest rows, grown a page at a time as the reader reads back.
+    @State private var window = TimelineWindow()
     private let hostName: String
     init(model: ConversationModel, hostName: String = "") {
         _model = State(initialValue: model); self.hostName = hostName
@@ -213,13 +215,19 @@ struct ConversationView: View {
         let runningSince = model.runningSince
         // The live label belongs at the top of the reply in progress; before the first reply it has its own row.
         let activeAnchor: String? = runningSince == nil ? nil : model.responses.last.flatMap { $0.completed ? nil : $0.firstMessageID }
+        let items = model.timelineItems
+        let shown = items[window.range(count: items.count) { id in items.firstIndex { $0.id == id } }]
+        let hidesEarlier = shown.startIndex > 0
         VStack(spacing: 0) {
         // The page's own bottom anchor holds the last row against the composer when the conversation is shorter
         // than the page. It used to be a blank filler sized from the rows' measured height, which is zero before
         // the first layout pass: the filler then took the whole page, the rows fell below the fold where a lazy
         // stack never lays out, and the page stayed blank for good. The system's anchor needs no measurement.
-        LazyVStack(alignment: .leading, spacing: 6) {
-            if model.hasMore {
+        //
+        // The rows are measured whole, not lazily: see `TimelineWindow` for the blank page a lazy stack's guessed
+        // heights made, and for how the window keeps a measured stack small.
+        VStack(alignment: .leading, spacing: 6) {
+            if model.hasMore || hidesEarlier {
                 // Reaching the top while reading back pages in the earlier messages; the page opens at the latest.
                 // It is also a button: the geometry trigger needs the marker to move, so a page already resting at
                 // the top would otherwise wait for a scroll it cannot make.
@@ -228,7 +236,7 @@ struct ConversationView: View {
                     else { Button(String(localized: "chat.load_earlier")) { reachedTop() }.buttonStyle(.plain).font(.footnote) }
                 }
                 .frame(maxWidth: .infinity).frame(height: 32).padding(.top, 12)
-                    // Position, not appearance: a lazy row stays alive offscreen, so its appearance fires only once.
+                    // Position, not appearance: the row stays alive offscreen, so its appearance fires only once.
                     .onGeometryChange(for: Bool.self) { $0.frame(in: .named("chatTimeline")).minY > -240 } action: { near in
                         // No state is written here: the page must not re-evaluate on every scroll frame.
                         if near && !atLatest { reachedTop() }
@@ -238,7 +246,7 @@ struct ConversationView: View {
             if model.messages.isEmpty && model.error == nil && !showsInitialLoading {
                 ContentUnavailableView(String(localized: "chat.empty"), systemImage: "bubble.left.and.bubble.right")
             }
-            ForEach(model.timelineItems) { item in
+            ForEach(shown) { item in
                 timelineRow(item, firstResponse: firstResponse, lastResponse: lastResponse, imagesByMessage: imagesByMessage, activeAnchor: activeAnchor, runningSince: runningSince, bottom: bottom)
                     .id(item.id)
                     .modifier(PinnedHeightProbe(pinned: isPinned(item)) { height in if abs(height - pinnedRowHeight) > 0.5 { pinnedRowHeight = height } })
@@ -312,15 +320,25 @@ struct ConversationView: View {
     /// `pull` is the reader asking with the pull gesture: that gesture answers with its own spinner, so it must do
     /// work even when an automatic page loaded a moment ago.
     private func loadOlder(_ proxy: ScrollViewProxy, pull: Bool = false) async {
+        let ids = model.timelineItems.map(\.id), first = window.range(in: ids).lowerBound
+        guard !model.loadingOlder, pull || Date() >= nextPageAllowed, first < ids.count else { return }
+        let anchor = ids[first]
+        // Rows the phone already holds are laid out first; the Mac is asked only once every held row is on the page.
+        if window.extend(in: ids) {
+            nextPageAllowed = Date().addingTimeInterval(0.8)
+            try? await Task.sleep(for: .milliseconds(50))
+            scrollTrace.note("scroll window-page"); proxy.scrollTo(anchor, anchor: .top)
+            return
+        }
         // A person asking is not filtered by what the page believes: a stale `hasMore` is exactly what made the pull
         // do nothing, and asking the chain again costs one request that answers "no more" honestly.
-        guard (pull || model.hasMore), !model.loadingOlder, pull || Date() >= nextPageAllowed,
-              let anchor = model.timelineItems.first?.id else { return }
+        guard pull || model.hasMore else { return }
         nextPageAllowed = Date().addingTimeInterval(0.8)
         await model.older()
         // A page that brings nothing new is not the end of the record: the loader keeps its pause, and the reader
         // scrolling again asks for the next one. Only `hasMore == false` ends the paging.
         guard model.timelineItems.first?.id != anchor else { return }
+        window.showFromFirst(in: model.timelineItems.map(\.id))
         // A scroll in the same update as the insertion is overridden by its layout; restore once the rows exist.
         try? await Task.sleep(for: .milliseconds(50))
         scrollTrace.note("scroll older-page"); proxy.scrollTo(anchor, anchor: .top)
@@ -335,7 +353,7 @@ struct ConversationView: View {
         // own spinner stays out of the way while it is on screen.
         pulling = true
         defer { pulling = false }
-        if model.hasMore { await loadOlder(proxy, pull: true) } else { await model.refresh() }
+        if model.hasMore || window.hidesEarlier(in: model.timelineItems.map(\.id)) { await loadOlder(proxy, pull: true) } else { await model.refresh() }
     }
     /// Scrolls to the newest message, then again while the freshly inserted rows finish measuring.
     ///
@@ -354,10 +372,9 @@ struct ConversationView: View {
     }
     /// Keeps the page at its end after content grew, for a moment.
     ///
-    /// One scroll resolves against the heights a lazy stack has estimated, and a tall row it has not built yet
-    /// makes that estimate too large: the page then rests past the content in blank space, and the drag a reader
-    /// tries first turns following off, so nothing brings it back but the latest button. Asking again as the rows
-    /// measure lands where the page really ends.
+    /// One scroll resolves against the layout of the moment, and a row that arrived in the same update has not
+    /// been measured yet: the page can stop short of its new end. Asking again as the rows measure lands where
+    /// the page really ends.
     private func follow(_ proxy: ScrollViewProxy) {
         guard atLatest, pinnedSent == nil else { return }
         scrollTrace.note("scroll follow"); scrollToNewest(proxy)
@@ -381,10 +398,9 @@ struct ConversationView: View {
     /// one taller than the page: its first line would then be pushed off the top and the reader would open on
     /// the middle of it. A tall newest row starts at the top instead.
     ///
-    /// Either way the newest row is the target rather than the page's end alone: a lazy stack estimates the
-    /// height of a row it has not built, and one very tall reply above makes that estimate wrong by thousands
-    /// of points, so asking for the marker first resolves into the middle of an earlier reply. Asking for the
-    /// row builds it; the marker is then in place for the last attempt.
+    /// Either way the newest row is the target rather than the page's end alone: a row inserted in the same
+    /// update is placed before the marker after it, so asking for the row first puts the marker in place for
+    /// the last attempt.
     private func scrollToNewest(_ proxy: ScrollViewProxy) {
         // A pinned prompt owns the page's position: the transcript refresh that records it, and the reply
         // that then grows, arrive as ordinary new rows, and following them to the end would carry the
@@ -425,7 +441,13 @@ struct ConversationView: View {
                 scrollTrace.note("userScrolling=\(scrolling)")
                 if scrolling { holdingPlace = false; pinnedSent = nil }
             }
-            .onChange(of: atLatest) { _, value in scrollTrace.note("atLatest=\(value) hold=\(holdingPlace)") }
+            .onChange(of: atLatest) { _, value in
+                scrollTrace.note("atLatest=\(value) hold=\(holdingPlace)")
+                // Away from the newest row the rows above the reader stay laid out; back at it, a stretch the
+                // reader grew while reading back returns to the newest rows.
+                let ids = model.timelineItems.map(\.id)
+                if value { window.settle(in: ids) } else { window.pin(in: ids) }
+            }
             .modifier(ScrollJumpTrace(trace: scrollTrace))
             // A card opened at the newest message would otherwise be carried off by the next one to arrive.
             .environment(\.holdPlace) { scrollTrace.toggled("atLatest=\(atLatest) latestVisible=\(latestVisible)"); atLatest = false; holdingPlace = true }
@@ -455,12 +477,16 @@ struct ConversationView: View {
             }
             .onChange(of: model.timelineItems.last?.id) { _, _ in
                 if !initiallyScrolled && !model.messages.isEmpty { settleAtBottom(proxy); initiallyScrolled = true }
-                else if atLatest { scrollTrace.note("scroll new-item"); follow(proxy) }
+                else if atLatest {
+                    // A long run watched from the end keeps adding rows; the stretch laid out stays bounded.
+                    window.settle(in: model.timelineItems.map(\.id))
+                    scrollTrace.note("scroll new-item"); follow(proxy)
+                }
             }
             // The transcript was rewritten under the page (a compaction): every row on screen was replaced, so the
             // page's offset no longer names anything and can rest past the shorter end — the latest is what is left.
             .onChange(of: model.replacementCount) { _, _ in
-                scrollTrace.note("scroll replaced"); atLatest = true; settleAtBottom(proxy, retries: 4)
+                scrollTrace.note("scroll replaced"); window = TimelineWindow(); atLatest = true; settleAtBottom(proxy, retries: 4)
             }
             .onChange(of: model.latestMessageText) { _, _ in if atLatest { scrollTrace.note("scroll new-text"); follow(proxy) } }
             .onChange(of: model.preview) { _, _ in if atLatest { scrollTrace.note("scroll preview"); follow(proxy) } }

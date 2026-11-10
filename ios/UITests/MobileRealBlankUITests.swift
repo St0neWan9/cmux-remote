@@ -49,8 +49,12 @@ final class MobileRealBlankUITests: XCTestCase {
         var sample = 0
         while Date() < deadline {
             sample += 1
-            let visible = page.frame
-            let rows = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "message.")).allElementsBoundByIndex
+            // One snapshot of the whole tree: querying rows and then reading each frame raced the page, which can
+            // replace a row between the two reads.
+            guard let tree = try? app.snapshot(), let visible = Self.first(in: tree, where: { $0.elementType == .scrollView })?.frame else {
+                Thread.sleep(forTimeInterval: 0.5); continue
+            }
+            let rows = Self.all(in: tree) { $0.identifier.hasPrefix("message.") || $0.identifier.hasPrefix("activity.") }
             let inView = rows.contains { row in
                 let frame = row.frame
                 return !frame.isEmpty && frame.intersects(visible) && frame.height > 1
@@ -68,6 +72,14 @@ final class MobileRealBlankUITests: XCTestCase {
         }
         XCTAssertTrue(shown, "The page never showed a message (\(label))")
         if !shown { capture(app, "\(label)-never") }
+    }
+    private static func first(in node: any XCUIElementSnapshot, where match: (any XCUIElementSnapshot) -> Bool) -> (any XCUIElementSnapshot)? {
+        if match(node) { return node }
+        for child in node.children { if let found = first(in: child, where: match) { return found } }
+        return nil
+    }
+    private static func all(in node: any XCUIElementSnapshot, where match: (any XCUIElementSnapshot) -> Bool) -> [any XCUIElementSnapshot] {
+        (match(node) ? [node] : []) + node.children.flatMap { all(in: $0, where: match) }
     }
     private func capture(_ app: XCUIApplication, _ name: String) {
         let attachment = XCTAttachment(screenshot: app.screenshot())
