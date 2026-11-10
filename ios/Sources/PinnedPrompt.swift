@@ -9,10 +9,14 @@ import CmuxRemoteCore
 struct PinnedPrompt: Equatable {
     /// The page's own foot below the rows, which the pinned prompt's tail leaves room for as well.
     static let foot: CGFloat = 18
+    /// The coordinate space of the timeline's rows, in which the pinned row's top is measured.
+    static let rowsSpace = "chatRows"
     /// The outgoing bubble, while it is still on the page.
     var outgoing: UUID?
     /// The text that identifies the recorded row once the bubble is gone.
     var text: String
+    /// The recorded row that took the pin over: an earlier prompt with the same words is not the pinned one.
+    var row: String? = nil
 }
 
 /// Whether a recorded user row carries the prompt a sent bubble showed.
@@ -28,16 +32,24 @@ enum PinnedPromptText {
     }
 }
 
-/// Reports a pinned row's height: the tail's size is the page minus that height, so it comes from the row.
-struct PinnedHeightProbe: ViewModifier {
-    let pinned: Bool
+/// Reports a measurement while a prompt is pinned: the pinned row's top within the rows, or the rows' own height.
+///
+/// The room left under a pinned prompt is the page minus everything from that prompt down — its own row and the
+/// running label, live preview and reply below it. Counting only the prompt's row let a running label that landed
+/// under it grow the page, and the bottom anchor then pushed the prompt up under the header.
+struct PinnedMeasureProbe: ViewModifier {
+    enum Measure { case top, height }
+    let active: Bool
+    var measure: Measure = .top
     let report: (CGFloat) -> Void
     @ViewBuilder func body(content: Content) -> some View {
-        if pinned {
-            content.onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
-                if abs(height - lastHeight) > 0.5 { lastHeight = height; report(height) }
+        if active {
+            content.onGeometryChange(for: CGFloat.self) { geometry in
+                measure == .top ? geometry.frame(in: .named(PinnedPrompt.rowsSpace)).minY : geometry.size.height
+            } action: { value in
+                if abs(value - last) > 0.5 { last = value; report(value) }
             }
         } else { content }
     }
-    @State private var lastHeight: CGFloat = 0
+    @State private var last: CGFloat = -1
 }

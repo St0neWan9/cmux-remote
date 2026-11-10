@@ -31,7 +31,9 @@ struct ConversationView: View {
     /// screen's, so it must be the scroll view's height that fills it.
     @State private var scrollHeight: CGFloat = 0
     /// The pinned prompt's own height, which with the page's foot is all the room its tail leaves.
-    @State private var pinnedRowHeight: CGFloat = 0
+    @State private var pinnedTop: CGFloat?
+    /// The rows' height while a prompt is pinned; with `pinnedTop` it gives everything from the prompt down.
+    @State private var pinnedRowsHeight: CGFloat = 0
     @State private var scrollTrace = ScrollTrace()
     /// A message opened on its own page to select part of it.
     @State private var selecting: SelectTextPage.Request?
@@ -249,7 +251,7 @@ struct ConversationView: View {
             ForEach(shown) { item in
                 timelineRow(item, firstResponse: firstResponse, lastResponse: lastResponse, imagesByMessage: imagesByMessage, activeAnchor: activeAnchor, runningSince: runningSince, bottom: bottom)
                     .id(item.id)
-                    .modifier(PinnedHeightProbe(pinned: isPinned(item)) { height in if abs(height - pinnedRowHeight) > 0.5 { pinnedRowHeight = height } })
+                    .modifier(PinnedMeasureProbe(active: isPinned(item)) { pinnedTop = $0 })
             }
             if activeAnchor == nil, let runningSince {
                 LiveRunLabel(since: runningSince, compacting: model.compacting, showsDivider: true, font: .subheadline)
@@ -259,7 +261,7 @@ struct ConversationView: View {
             LivePreviewRow(model: model)
             ForEach(model.outgoing) { prompt in
                 OutgoingPromptRow(prompt: prompt).id(prompt.id)
-                    .modifier(PinnedHeightProbe(pinned: pinnedSent?.outgoing == prompt.id) { height in if abs(height - pinnedRowHeight) > 0.5 { pinnedRowHeight = height } })
+                    .modifier(PinnedMeasureProbe(active: pinnedSent?.outgoing == prompt.id) { pinnedTop = $0 })
             }
             if let error = model.error {
                 Label(error, systemImage: "exclamationmark.circle").font(.footnote).foregroundStyle(.red).padding(12)
@@ -267,10 +269,12 @@ struct ConversationView: View {
 
             }
         }
-        // The whole difference between the page and its content; above the rows when the end is showing.
-        // Below a pinned prompt it is the room left after the rows under that prompt, so its top can reach
-        // the page's top; the reply then grows into that room without moving the prompt.
-        if !tailFirst { Color.clear.frame(height: max(0, bottom - PinnedPrompt.foot - pinnedRowHeight)) }
+        .coordinateSpace(name: PinnedPrompt.rowsSpace)
+        .modifier(PinnedMeasureProbe(active: !tailFirst, measure: .height) { pinnedRowsHeight = $0 })
+        // Below a pinned prompt, the room left after the prompt and everything under it, so the prompt's top can
+        // reach the page's top. The reply, the running label and the live preview grow into that room, and the
+        // page's height stays the same while they do, so nothing moves the prompt.
+        if !tailFirst { Color.clear.frame(height: pinnedRoom) }
         // The page's foot, so the marker below it is the true end of the content: anchoring that to the
         // bottom lands exactly where a drag to the end does.
         Color.clear.frame(height: 18)
@@ -418,7 +422,11 @@ struct ConversationView: View {
             ScrollView {
                 timeline(bottom: scrollHeight, tailFirst: pinnedSent == nil) { Task { await loadOlder(proxy) } }
             }
-            .defaultScrollAnchor(.bottom)
+            .defaultScrollAnchor(.bottom, for: .initialOffset)
+            .defaultScrollAnchor(.bottom, for: .alignment)
+            // A page at its end keeps its end as content grows. A pinned prompt keeps its top instead: once the reply
+            // outgrows the room under the prompt, holding the end would push the prompt up under the header.
+            .defaultScrollAnchor(pinnedSent == nil ? .bottom : .top, for: .sizeChanges)
             .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
                 if abs(height - scrollHeight) > 0.5 { scrollHeight = height }
             }
@@ -435,6 +443,17 @@ struct ConversationView: View {
             } action: { old, atEnd in
                 _ = old
                 bottomVisible(atEnd)
+            }
+            // Content that shrank under a resting page (a pinned room released, a row collapsing) leaves the offset
+            // past the new end. A scroll view keeps such an offset until it is dragged, and since the end is "in
+            // sight" nothing offered the way back: the last rows sat under the header above a page of blank. Out of
+            // a reader's own scroll, the page goes back to its end.
+            .onScrollGeometryChange(for: Bool.self) { geometry in
+                geometry.contentSize.height > geometry.containerSize.height
+                    && geometry.visibleRect.maxY - geometry.contentInsets.bottom > geometry.contentSize.height + 40
+            } action: { _, past in
+                guard past, pinnedSent == nil, !userScrolling else { return }
+                scrollTrace.note("scroll past-end"); atLatest = true; scrollToNewest(proxy)
             }
             .modifier(TimelineScrollInteraction(userScrolling: $userScrolling, atLatest: $atLatest, latestVisible: latestVisible))
             .onChange(of: userScrolling) { _, scrolling in
@@ -539,12 +558,18 @@ struct ConversationView: View {
     /// Whether a recorded row is the one a pin holds, by the text the outgoing bubble showed.
     private func isPinned(_ item: ConversationTimelineItem) -> Bool {
         guard let pinned = pinnedSent, pinned.outgoing == nil else { return false }
-        return PinnedPromptText.matches(item.first, pinned.text)
+        return pinned.row == item.id
     }
     /// The blank height after the newest content: the page's foot and end marker, and below a pinned prompt the
     /// room it leaves for the reply. It has to match the filler and foot the timeline lays out.
     private var pageTail: CGFloat {
-        19 + (pinnedSent == nil ? 0 : max(0, scrollHeight - PinnedPrompt.foot - pinnedRowHeight))
+        19 + (pinnedSent == nil ? 0 : pinnedRoom)
+    }
+    /// The blank room under a pinned prompt: the page less the prompt's row and every row below it. Until the
+    /// prompt's row has been measured the whole page is left, so the opening scroll to its top can land.
+    private var pinnedRoom: CGFloat {
+        let below = pinnedTop.map { max(0, pinnedRowsHeight - $0) } ?? 0
+        return max(0, scrollHeight - PinnedPrompt.foot - below)
     }
     /// The page's follow decision, taken from the marker's position each time it is re-measured.
     private func bottomVisible(_ visible: Bool) {
@@ -564,7 +589,7 @@ struct ConversationView: View {
         // The tail and the scroll land in the same update, so the top anchor is reachable before the reply
         // starts growing. Following stays on: with the tail shrinking, the page's end and the prompt's top
         // are the same place until the reply fills the page.
-        pinnedSent = PinnedPrompt(outgoing: sent.id, text: sent.text)
+        pinnedSent = PinnedPrompt(outgoing: sent.id, text: sent.text); pinnedTop = nil
         atLatest = true
         withAnimation { scrollTrace.note("scroll sent-prompt"); proxy.scrollTo(sent.id, anchor: .top) }
         // The bubble is inserted and scrolled in the same update, so its top may not exist yet; ask again
@@ -584,8 +609,15 @@ struct ConversationView: View {
         let target = model.timelineItems.last { item in
             item.first.role == .user && PinnedPromptText.matches(item.first, pinned.text)
         }
-        pinnedSent = PinnedPrompt(outgoing: nil, text: pinned.text)
-        if let target { proxy.scrollTo(target.id, anchor: .top); scrollTrace.note("scroll pin-handover") }
+        guard let target else {
+            // The bubble left without a recorded row to take over: the send was refused, or the transcript wrote
+            // the prompt differently. A pin with no row kept a page of blank room under the last reply, and with
+            // following off nothing brought the page back; it goes back to the end instead.
+            scrollTrace.note("scroll pin-lost"); pinnedSent = nil; pinnedTop = nil; atLatest = true; settleAtBottom(proxy)
+            return
+        }
+        pinnedSent = PinnedPrompt(outgoing: nil, text: pinned.text, row: target.id)
+        proxy.scrollTo(target.id, anchor: .top); scrollTrace.note("scroll pin-handover")
     }
     /// The way back to the page's end after a scroll away or a pinned prompt.
     private func latestButton(_ proxy: ScrollViewProxy) -> some View {
