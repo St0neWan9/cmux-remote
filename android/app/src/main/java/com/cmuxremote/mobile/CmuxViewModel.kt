@@ -123,8 +123,11 @@ data class ConversationUi(
     val hasMore: Boolean = false,
     val loadingOlder: Boolean = false,
     val feed: List<FeedItem> = emptyList(),
-    /** When the running turn began, for the live timer. */
+    /** When the transcript's current turn began, and whether it is over, as the newest read reported them. */
     val turnStartedAt: java.time.Instant? = null,
+    val turnCompleted: Boolean = false,
+    /** When the reader tapped send for the turn this phone started, until that turn is over (see [TurnClock]). */
+    val sentTurnAt: java.time.Instant? = null,
     /** Transcript generation the loaded history belongs to. */
     val generation: String = "",
     val images: List<com.cmuxremote.mobile.data.ImageReference> = emptyList(),
@@ -142,7 +145,6 @@ data class ConversationUi(
     val outgoingAfterSeq: Int? = null,
     val outgoingGeneration: String? = null,
     val outgoingKnownUserIDs: Set<String> = emptySet(),
-    val outgoingFailed: Boolean = false,
     /** The send may have reached the Mac; only the reply was lost. */
     val outgoingUnconfirmed: Boolean = false,
     /** How many images went with the pending prompt. */
@@ -151,7 +153,16 @@ data class ConversationUi(
     val clipped: Boolean = false,
     /** A stop was accepted; cleared when the turn actually ends or a new send starts. */
     val stopRequested: Boolean = false,
-)
+) {
+    private val sentTurnRunning: Boolean
+        get() = com.cmuxremote.mobile.data.TurnClock.sentTurnRunning(sentTurnAt, outgoing != null, outgoingUnconfirmed, turnCompleted)
+    /** Whether a turn is running, from the tap that started it rather than from the Mac's late report. */
+    val activeResponse: Boolean
+        get() = com.cmuxremote.mobile.data.TurnClock.active(stopRequested, sentTurnRunning, session.working, turnCompleted)
+    /** Where the running time counts from; null when nothing runs or the start is unknown. */
+    val runningSince: java.time.Instant?
+        get() = com.cmuxremote.mobile.data.TurnClock.since(activeResponse, sentTurnRunning, sentTurnAt, turnStartedAt)
+}
 
 /** One conversation together with the Mac it lives on. */
 data class HostedSession(
@@ -1828,7 +1839,8 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
                         recordedTurnCount = stored.recordedTurnCount,
                         agentModel = stored.agentModel,
                         generation = stored.generation,
-                        turnStartedAt = if (ui.session.working) stored.currentTurnStartedAt else null,
+                        turnStartedAt = stored.currentTurnStartedAt,
+                        turnCompleted = stored.currentTurnCompleted,
                     )
                 }
             }
@@ -1980,6 +1992,19 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
         } else {
             snapshot.images
         }
+        val outgoing = ui.outgoing?.takeIf { text ->
+            !com.cmuxremote.mobile.data.OutgoingPromptMatcher.recorded(
+                text = text,
+                afterSeq = ui.outgoingAfterSeq,
+                generation = ui.outgoingGeneration,
+                knownUserIDs = ui.outgoingKnownUserIDs,
+                historyGeneration = snapshot.generation,
+                messages = messages,
+            )
+        }
+        val keepsSentTurn = com.cmuxremote.mobile.data.TurnClock.keepsSentTurn(
+            ui.sentTurnAt, outgoing != null, snapshot.currentTurnCompleted, session.working, java.time.Instant.now(),
+        )
         return ui.copy(
             messages = messages,
             session = session,
@@ -1996,20 +2021,13 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
             agentModel = snapshot.agentModel ?: ui.agentModel,
             clipped = snapshot.clipped,
             generation = snapshot.generation,
-            turnStartedAt = if (session.working) snapshot.currentTurnStartedAt else null,
+            turnStartedAt = snapshot.currentTurnStartedAt,
+            turnCompleted = snapshot.currentTurnCompleted,
+            sentTurnAt = ui.sentTurnAt.takeIf { keepsSentTurn },
             compacting = if (session.working) ui.compacting else false,
             // The acknowledgement is only about the turn that is now over.
             stopRequested = ui.stopRequested && session.working,
-            outgoing = ui.outgoing?.takeIf { text ->
-                !com.cmuxremote.mobile.data.OutgoingPromptMatcher.recorded(
-                    text = text,
-                    afterSeq = ui.outgoingAfterSeq,
-                    generation = ui.outgoingGeneration,
-                    knownUserIDs = ui.outgoingKnownUserIDs,
-                    historyGeneration = snapshot.generation,
-                    messages = messages,
-                )
-            },
+            outgoing = outgoing,
         )
     }
 
@@ -2815,10 +2833,11 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
                     sending = true,
                     error = null,
                     outgoing = text,
-                    outgoingFailed = false,
                     outgoingUnconfirmed = false,
                     outgoingImages = prepared.size,
                     stopRequested = false,
+                    // The turn runs from the tap, before the Mac lists the session working (see TurnClock).
+                    sentTurnAt = java.time.Instant.now(),
                     outgoingAfterSeq = ui.messages.lastOrNull()?.seq,
                     outgoingGeneration = ui.generation,
                     outgoingKnownUserIDs = ui.messages.filter { it.role == "user" }.map { it.id }.toSet(),
@@ -2834,9 +2853,17 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
                 reloadOpen()
             } catch (error: ProtocolException) {
                 if (!unknownOutcome(error)) forgetPending(scope, value.session.id)
-                _conversation.update { it?.copy(sending = false, outgoingFailed = !unknownOutcome(error), outgoingUnconfirmed = unknownOutcome(error), error = error.userMessage()) }
+                // A refused send reached no agent: like the iPhone, its bubble leaves and no turn started; the draft
+                // still holds the prompt for a retry. An unknown outcome keeps the bubble, marked unconfirmed.
+                val refused = !unknownOutcome(error)
+                _conversation.update {
+                    it?.copy(
+                        sending = false, outgoing = if (refused) null else it.outgoing, outgoingUnconfirmed = !refused,
+                        sentTurnAt = if (refused) null else it.sentTurnAt, error = error.userMessage(),
+                    )
+                }
             } catch (error: Exception) {
-                _conversation.update { it?.copy(sending = false, outgoingFailed = false, outgoingUnconfirmed = true, error = error.userMessage() ?: getApplication<Application>().getString(R.string.chat_image_not_confirmed)) }
+                _conversation.update { it?.copy(sending = false, outgoingUnconfirmed = true, error = error.userMessage() ?: getApplication<Application>().getString(R.string.chat_image_not_confirmed)) }
             }
         }
     }
@@ -2983,10 +3010,11 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
                     sending = true,
                     error = null,
                     outgoing = text,
-                    outgoingFailed = false,
                     outgoingUnconfirmed = false,
                     outgoingImages = 0,
                     stopRequested = false,
+                    // The turn runs from the tap, before the Mac lists the session working (see TurnClock).
+                    sentTurnAt = java.time.Instant.now(),
                     outgoingAfterSeq = ui.messages.lastOrNull()?.seq,
                     outgoingGeneration = ui.generation,
                     outgoingKnownUserIDs = ui.messages.filter { it.role == "user" }.map { it.id }.toSet(),
@@ -3001,9 +3029,17 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
                 reloadOpen()
             } catch (error: ProtocolException) {
                 if (!unknownOutcome(error)) forgetPending(scope, value.session.id)
-                _conversation.update { it?.copy(sending = false, outgoingFailed = !unknownOutcome(error), outgoingUnconfirmed = unknownOutcome(error), error = error.userMessage()) }
+                // A refused send reached no agent: like the iPhone, its bubble leaves and no turn started; the draft
+                // still holds the prompt for a retry. An unknown outcome keeps the bubble, marked unconfirmed.
+                val refused = !unknownOutcome(error)
+                _conversation.update {
+                    it?.copy(
+                        sending = false, outgoing = if (refused) null else it.outgoing, outgoingUnconfirmed = !refused,
+                        sentTurnAt = if (refused) null else it.sentTurnAt, error = error.userMessage(),
+                    )
+                }
             } catch (error: Exception) {
-                _conversation.update { it?.copy(sending = false, outgoingFailed = false, outgoingUnconfirmed = true, error = error.userMessage() ?: "The prompt was not confirmed.") }
+                _conversation.update { it?.copy(sending = false, outgoingUnconfirmed = true, error = error.userMessage() ?: "The prompt was not confirmed.") }
             }
         }
     }
@@ -3023,7 +3059,8 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             try {
                 current.interrupt(value.session.id, hard = hard)
-                if (!hard) _conversation.update { it?.copy(stopRequested = true) }
+                if (!hard) _conversation.update { it?.copy(stopRequested = true, sentTurnAt = null) }
+                else _conversation.update { it?.copy(sentTurnAt = null) }
                 com.cmuxremote.mobile.data.Diagnostics.log(
                     com.cmuxremote.mobile.data.Diagnostics.Level.Info,
                     "conversation",

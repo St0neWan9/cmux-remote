@@ -57,7 +57,6 @@ import androidx.compose.material.icons.rounded.PanTool
 import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material.icons.rounded.WifiOff
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -188,7 +187,7 @@ fun ConversationScreen(
             onOpenTiming = onOpenTiming,
             onRefresh = onRefreshConversation,
             onForceStop = onForceStop?.takeIf { state.session.working && canControl },
-            onSoftStop = if (state.session.working) onStop else null,
+            onSoftStop = if (state.activeResponse || state.session.working) onStop else null,
         )
         // A white capsule floats over the page, as on the iPhone; the failed state
         // keeps a retry, the connecting state explains the wait.
@@ -300,15 +299,17 @@ fun ConversationScreen(
         }
         // The running turn sits against the composer, as on the iPhone's bottom
         // inset, not at the end of the transcript.
-        if (state.session.working) {
+        // It runs from the tap that sent the prompt, not from the Mac's later report (see TurnClock).
+        if (state.activeResponse) {
             Row(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 WorkingIndicator(size = 12.dp)
-                if (state.turnStartedAt != null) {
-                    LiveRunLabel(since = state.turnStartedAt, compacting = state.compacting, showsMark = false)
+                val since = state.runningSince
+                if (since != null) {
+                    LiveRunLabel(since = since, compacting = state.compacting, showsMark = false)
                 } else {
                     Text(stringResource(R.string.common_working), color = MobileDesign.Muted, style = MaterialTheme.typography.labelMedium)
                 }
@@ -339,7 +340,7 @@ fun ConversationScreen(
             onDraftChange = onDraft,
             onSend = onSend,
             onStop = onStop,
-            working = state.session.working,
+            working = state.activeResponse,
             canSend = canControl && state.session.writable,
             sending = state.sending,
             // The timeline carries the error row; a second copy under the composer
@@ -717,6 +718,12 @@ fun ConversationTimeline(
     }
     val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
     val responseByFirst = remember(state.responses) { state.responses.associateBy { it.firstMessageID } }
+    val runningSince = state.runningSince
+    val entries = remember(state.messages) { timelineEntries(state.messages) }
+    // The running label tops the reply in progress; before the first reply, or while the prompt is still on its way,
+    // it has a row of its own under the prompt, as on the iPhone.
+    val liveAnchor = com.cmuxremote.mobile.data.TurnClock.liveAnchor(runningSince != null, state.outgoing != null, state.responses)
+        ?.takeIf { anchor -> entries.any { entry -> entryFirstID(entry) == anchor } }
     // Scrolling the transcript puts the keyboard away, as the iPhone's interactive dismissal does.
     val dismissKeyboardOnScroll = remember(keyboard) {
         object : androidx.compose.ui.input.nestedscroll.NestedScrollConnection {
@@ -797,17 +804,15 @@ fun ConversationTimeline(
                 )
             }
         }
-        items(timelineEntries(state.messages), key = { it.key }) { entry ->
+        items(entries, key = { it.key }) { entry ->
             when (entry) {
                 is TimelineEntry.Single -> Column(
                     modifier = Modifier.testTag("message." + entry.message.id),
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     // The reply being written carries the same timer as the composer row.
-                    val lastReply = state.messages.lastOrNull { it.kind == "prose" && it.role != "user" }
-                    if (state.session.working && state.turnStartedAt != null && entry.message.id == lastReply?.id) {
-                        LiveRunLabel(since = state.turnStartedAt, compacting = state.compacting)
-                        HorizontalDivider(color = androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.1f), thickness = 0.5.dp)
+                    if (runningSince != null && entry.message.id == liveAnchor) {
+                        LiveRunDivider(since = runningSince, compacting = state.compacting)
                     } else if (entry.message.kind == "prose" && entry.message.role != "user") {
                         // The iPhone places the finished reply's duration, and its divider,
                         // at the start of the reply's own timeline item.
@@ -889,8 +894,12 @@ fun ConversationTimeline(
                 is TimelineEntry.Group -> {
                     val models = toolRowModels(entry.rows)
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        responseByFirst[entry.rows.firstOrNull()?.id]?.durationSeconds
-                            ?.let { ResponseRunLabel(seconds = it, recorded = true) }
+                        if (runningSince != null && entry.rows.firstOrNull()?.id == liveAnchor) {
+                            LiveRunDivider(since = runningSince, compacting = state.compacting)
+                        } else {
+                            responseByFirst[entry.rows.firstOrNull()?.id]?.durationSeconds
+                                ?.let { ResponseRunLabel(seconds = it, recorded = true) }
+                        }
                         ActivityGroupCard(
                             rows = models,
                             isLatest = entry.isLatest,
@@ -918,6 +927,9 @@ fun ConversationTimeline(
         if (looseImages.isNotEmpty()) {
             item(key = "loose-images") { MessageImages(looseImages, onOpenImage) }
         }
+        if (runningSince != null && liveAnchor == null && state.outgoing == null) {
+            item(key = "live-run") { LiveRunDivider(since = runningSince, compacting = state.compacting) }
+        }
         if (state.preview != null) {
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -937,13 +949,11 @@ fun ConversationTimeline(
                     UserBubble(displayedPrompt(state.outgoing), onCopyText, onSelectText)
                     Text(
                         text = when {
-                            state.outgoingFailed -> stringResource(R.string.chat_outgoing_failed)
                             state.outgoingUnconfirmed -> stringResource(R.string.chat_outgoing_unconfirmed)
                             state.sending -> stringResource(R.string.chat_outgoing_sending)
                             else -> stringResource(R.string.chat_outgoing_sent)
                         },
                         color = when {
-                            state.outgoingFailed -> MaterialTheme.colorScheme.error
                             state.outgoingUnconfirmed -> MobileDesign.Warning
                             else -> MobileDesign.Muted
                         },
@@ -960,6 +970,11 @@ fun ConversationTimeline(
                     }
                 }
             }
+        }
+        // A prompt still on its way runs from the tap: its label sits under the bubble, where the recorded prompt's
+        // label then takes over without a gap.
+        if (runningSince != null && state.outgoing != null) {
+            item(key = "live-run") { LiveRunDivider(since = runningSince, compacting = state.compacting) }
         }
         item(key = "latest-marker") { Spacer(Modifier.height(1.dp)) }
         // The iPhone reserves 18pt under the last line before the composer.
@@ -1039,6 +1054,11 @@ private sealed interface TimelineEntry {
 }
 
 /** Consecutive tool operations collapse into one group, as they do on the iPhone. */
+private fun entryFirstID(entry: TimelineEntry): String? = when (entry) {
+    is TimelineEntry.Single -> entry.message.id
+    is TimelineEntry.Group -> entry.rows.firstOrNull()?.id
+}
+
 private fun timelineEntries(messages: List<ChatMessage>): List<TimelineEntry> {
     val out = mutableListOf<TimelineEntry>()
     var run = mutableListOf<ChatMessage>()
@@ -1457,7 +1477,7 @@ fun ComposerArea(
         if (!canSend) {
             Text(stringResource(R.string.chat_read_only_notice), color = MobileDesign.Muted, style = MaterialTheme.typography.labelMedium)
         }
-        if (working && stopRequested) {
+        if (stopRequested) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
