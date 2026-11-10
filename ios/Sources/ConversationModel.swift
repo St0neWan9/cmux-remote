@@ -141,6 +141,11 @@ final class ConversationModel {
     private var questionPromptsShown: Set<String> = []
     private let descriptorsInterval: TimeInterval = 5
     private let refreshReads = ReadRequestOwner()
+    /// The page is reading the conversation afresh after it was away (opened, or back from another app), and has
+    /// not landed a read yet: what it shows may be behind. Raised only once the read takes long enough to notice.
+    private(set) var updating = false
+    /// Reads of the newest page that reached the page, so a catch-up knows when one has landed, whoever asked.
+    private var landedReads = 0
     private let olderReads = ReadRequestOwner()
     private var readsEnabled = true
     /// Whether the conversation is on screen and following its own changes.
@@ -297,6 +302,32 @@ final class ConversationModel {
             await refresh()
         }
     }
+    /// Reads the conversation until one read lands, for a page that was away: opened, or back from another app.
+    ///
+    /// The page used to wait for its subscription's first change, and a read that failed while the link was still
+    /// dialing (or found the link's slots full) was dropped as a connection hiccup. The page then showed what it had
+    /// before the switch, with nothing saying it was behind, until the agent next wrote to its record. This reads at
+    /// once, asks again with short pauses until a read reaches the page, and says it is updating while it waits.
+    func catchUp() async {
+        let start = landedReads
+        // A read that lands within half a second needs no word on screen.
+        let reveal = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(500))
+            guard !Task.isCancelled, let self, self.landedReads == start, self.readsEnabled else { return }
+            self.updating = true
+        }
+        defer { reveal.cancel(); if landedReads != start || !readsEnabled { updating = false } }
+        var pause = 1
+        // About forty seconds of asking: past that the link is down and its own bar says so, or the Mac refuses the
+        // read and the page shows why; the subscription still reads when the conversation changes.
+        for _ in 0..<12 where !Task.isCancelled && readsEnabled && landedReads == start {
+            // A read already on its way (the subscription's own) is waited for, not cancelled by another.
+            if !refreshReads.inFlight { await refresh() }
+            guard landedReads == start else { break }
+            try? await Task.sleep(for: .seconds(pause)); pause = min(pause * 2, 4)
+        }
+        if landedReads == start, !Task.isCancelled { diagLog(.warning, category: "open", "catch-up ended without a read") }
+    }
     /// Whether an off-screen follower is running for this conversation.
     var following: Bool { follower != nil }
     /// Follows this conversation while it runs off screen, so switching to it shows its latest messages.
@@ -372,7 +403,7 @@ final class ConversationModel {
     func stopBackfill() { backfill?.cancel(); backfill = nil }
     /// The archive chain, readable from the fill's detached task.
     var archiveChain: ArchiveChain? { archive }
-    func suspendReads() { readsEnabled = false; refreshReads.suspend(); olderReads.suspend(); loadingOlder = false; stopBackfill() }
+    func suspendReads() { readsEnabled = false; refreshReads.suspend(); olderReads.suspend(); loadingOlder = false; updating = false; stopBackfill() }
     func resumeReads() { readsEnabled = true }
     func refresh() async {
         guard readsEnabled, !Task.isCancelled else { return }
@@ -509,6 +540,7 @@ final class ConversationModel {
                 if message.role == .agent, case .prose(let value) = message.kind { return value.text }; return nil
             }.first
             preview = live?.text == committed ? nil : live?.text; compacting = live?.compacting ?? false; error = mutationWarning
+            if !hidden { landedReads += 1; updating = false }
             // The Mac's session list decides what may be written or reopened, not what the page shows, so it is
             // waited for here — after the reader already has the conversation.
             let descriptors = try await descriptorsRead

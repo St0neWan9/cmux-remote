@@ -82,7 +82,9 @@ struct ConversationView: View {
         .safeAreaInset(edge: .top, spacing: 0) {
             VStack(spacing: 6) {
                 header
-                ConnectionStatusBar(state: linkState) { Task { await reconnect() } }
+                // Once the link is up the page may still be showing what it had before the reader left; it says so
+                // until the first fresh read lands. The opening spinner already says it for an empty page.
+                ConnectionStatusBar(state: linkState, updating: model.updating && !showsInitialLoading) { Task { await reconnect() } }
             }
             // A translucent white veil, like the page itself: content shows faintly under it, with no material
             // tint and no per-row rasterization.
@@ -196,7 +198,10 @@ struct ConversationView: View {
             // Returning after the system reclaimed the page's memory re-shows the stored conversation at once; the
             // read that follows takes seconds over a redialed link, and the page must not wait on it blank.
             await model.restoreStored()
+            // The page reads at once rather than waiting for its subscription, and says so until a read lands.
+            async let caughtUp: Void = model.catchUp()
             await model.observeChanges()
+            await caughtUp
         }
         .environment(\.colorScheme, .light)
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { pageHeight = $0 }

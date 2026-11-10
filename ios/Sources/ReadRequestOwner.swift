@@ -5,6 +5,8 @@ import Foundation
     private(set) var revision = UUID()
     private var task: Task<Void, Never>?
     func isCurrent(_ request: UUID) -> Bool { revision == request && !Task.isCancelled }
+    /// Whether a read is in flight, so a retry does not cancel one that may still land.
+    var inFlight: Bool { task != nil }
     func suspend() { revision = UUID(); task?.cancel(); task = nil }
     func run(_ operation: @escaping @MainActor (UUID) async -> Void) async {
         guard !Task.isCancelled else { return }

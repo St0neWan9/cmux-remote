@@ -9,6 +9,7 @@ final class WebSocketTransport: ResourceTransport {
         connection = LinkClientConnection(host: host, key: key, endpoint: endpoint, relayDial: relayDial, report: report, trace: trace, lanDeadline: lanDeadline)
     }
     func reconnect() async { await connection.reconnect() }
+    func verify() async -> Bool { await connection.verify() }
     func updateRelay(_ relay: RelayEndpoint?) async { await connection.updateRelay(relay) }
     func exchange(_ path: String, method: String, query: [String: String], body: Data?, authorization: (@Sendable (String, Data) throws -> String)?) async throws -> LinkResourceResponse {
         let uri = try resourceURI(path, query: query)

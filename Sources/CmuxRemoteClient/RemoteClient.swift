@@ -70,6 +70,8 @@ public final class RemoteClient: Sendable {
     public func relocate(_ connection: AuthorizedConnection) async throws { try await runtime.relocate(connection) }
     /// Drops a link that may be dead and dials again, for a manual refresh or a network that came back.
     public func reconnect() async { await runtime.reconnect() }
+    /// Whether the link kept while the app was away still answers, within a few seconds; it dials nothing.
+    public func verifyLink() async -> Bool { await runtime.verify() }
     /// The link's state as it changes, starting with the current one once a dial has happened.
     public func linkStates() -> AsyncStream<LinkState> { runtime.linkStates.states() }
     public func close() { let runtime = runtime; Task { await runtime.close() } }

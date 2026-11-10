@@ -31,6 +31,10 @@ actor LinkClientConnection {
     private var receiver: Task<Void, Never>?
     private var heartbeat: Task<Void, Never>?
     private var pending: [String: Pending] = [:]
+    /// The Bridge's own per-link limit on requests in flight.
+    static let slotLimit = 8
+    private var slotsInUse = 0
+    private var slotWaiters: [(id: UUID, waiter: CheckedContinuation<Void, Never>)] = []
     private var subscriptions: [String: AsyncThrowingStream<LinkFrame, any Error>.Continuation] = [:]
     /// Recently cancelled IDs; the Bridge may already have frames for them in flight.
     private var abandoned: [String] = []
@@ -63,10 +67,12 @@ actor LinkClientConnection {
     }
     func updateRelay(_ relay: RelayEndpoint?) { endpoint.relay = relay }
     func exchange(_ frame: LinkFrame) async throws -> LinkResourceResponse {
-        try Task.checkCancellation(); try await connect(); try Task.checkCancellation()
-        // Capacity, not input: a page that arrives while the link is saturated asks again, and the reader is not
-        // shown an error about what they typed.
-        guard pending.count < 8 else { throw BridgeError("link_busy", "The concurrent request limit was reached.", status: 429) }
+        try Task.checkCancellation()
+        // A request beyond the link's eight waits for a slot rather than failing. Returning to the app sends every
+        // page's reads at once, and the ones refused as busy were dropped as a connection hiccup: the conversation
+        // then sat on what it showed before the switch until the agent next wrote to its record.
+        try await takeSlot(); defer { releaseSlot() }
+        try await connect(); try Task.checkCancellation()
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { done in
                 let deadline = Task { [weak self] in
@@ -78,6 +84,47 @@ actor LinkClientConnection {
                 }
             }
         } onCancel: { Task { await self.cancel(frame.id) } }
+    }
+    /// Waits, oldest first, until fewer than `slotLimit` requests are in flight. A cancelled wait leaves the queue.
+    private func takeSlot() async throws {
+        while slotsInUse >= Self.slotLimit {
+            let id = UUID()
+            await withTaskCancellationHandler {
+                await withCheckedContinuation { waiter in
+                    if Task.isCancelled { waiter.resume(); return }
+                    slotWaiters.append((id, waiter))
+                }
+            } onCancel: { Task { await self.leaveSlotQueue(id) } }
+            try Task.checkCancellation()
+        }
+        slotsInUse += 1
+    }
+    private func releaseSlot() {
+        slotsInUse -= 1
+        if !slotWaiters.isEmpty { slotWaiters.removeFirst().waiter.resume() }
+    }
+    private func leaveSlotQueue(_ id: UUID) {
+        guard let index = slotWaiters.firstIndex(where: { $0.id == id }) else { return }
+        slotWaiters.remove(at: index).waiter.resume()
+    }
+    /// Whether the link is still answering, for a return to the foreground that kept it: a ping with a short
+    /// deadline, so a link that died while the app was away is dialed again at once instead of after a read's
+    /// twenty seconds. A link already known down answers false without a ping.
+    func verify(deadline: Duration = .seconds(3)) async -> Bool {
+        guard !closed, let current = socket else { return false }
+        do {
+            try await withThrowingTaskGroup(of: Void.self) { group in
+                group.addTask { try await current.ping() }
+                group.addTask { try await Task.sleep(for: deadline); throw URLError(.timedOut) }
+                defer { group.cancelAll() }
+                try await group.next()
+            }
+            return socket === current
+        } catch {
+            trace("kept link failed its check error=\(TraceFormat().describe(error))")
+            await failed(error, source: current)
+            return false
+        }
     }
     func subscribe(_ frame: LinkFrame) async throws -> AsyncThrowingStream<LinkFrame, any Error> {
         try Task.checkCancellation(); try await connect()

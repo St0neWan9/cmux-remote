@@ -111,23 +111,35 @@ private struct ReadPathFixture {
         #expect(first == second)
         #expect(await fixture.cmux.discoveries == discoveries)
     }
-    /// The skip is only for an unchanged source: an appended record makes the next tick run the handler.
+    /// The skip is only for an unchanged source: an appended record changes the stamp at once, before any parse,
+    /// so the next tick runs the handler and the phone is told.
     @Test func anAppendedTranscriptChangesTheStamp() async throws {
         let fixture = try await ReadPathFixture.create()
         defer { fixture.stop() }
         let uri = "/v2/sessions/scoped/history"
-        let before = try await fixture.read(uri)
+        let before = await fixture.router.respondResource(method: "GET", uri: uri, authorization: nil, body: Data(), subscriptionClientID: fixture.clientID)
         let stamp = try #require(await fixture.router.subscriptionStamp(uri: uri, clientID: fixture.clientID))
         let handle = try FileHandle(forWritingTo: fixture.cmux.transcript)
         try handle.seekToEnd(); try handle.write(contentsOf: ReadPathCmux.transcriptLine("scoped-3", "Line 3")); try handle.close()
-        // The cached record no longer matches the file, so nothing is provable until the handler reads it.
-        #expect(await fixture.router.subscriptionStamp(uri: uri, clientID: fixture.clientID) == nil)
+        let after = try #require(await fixture.router.subscriptionStamp(uri: uri, clientID: fixture.clientID))
+        #expect(after != stamp)
         let tick = await fixture.router.respondResource(method: "GET", uri: uri, authorization: nil, body: Data(), subscriptionClientID: fixture.clientID)
         #expect(tick.status == 200)
-        #expect(tick.data != before.1)
-        let after = await fixture.router.subscriptionStamp(uri: uri, clientID: fixture.clientID)
-        #expect(after != nil)
-        #expect(after != stamp)
+        #expect(tick.data != before.data)
+    }
+    /// A history subscription's tick reads the newest archive page, never the windowed history: on a long record
+    /// that parse held the reader for seconds and every page read queued behind it.
+    @Test func aHistoryTickReadsOnlyTheNewestPage() async throws {
+        let fixture = try await ReadPathFixture.create(transcriptLines: BridgeRouter.subscriptionTail + 12)
+        defer { fixture.stop() }
+        let tick = await fixture.router.respondResource(method: "GET", uri: "/v2/sessions/scoped/history", authorization: nil, body: Data(), subscriptionClientID: fixture.clientID)
+        #expect(tick.status == 200)
+        let page = try JSONDecoder().decode(ConversationArchivePage.self, from: tick.data)
+        #expect(page.snapshot.messages.count == BridgeRouter.subscriptionTail)
+        #expect(page.snapshot.messages.last?.id == "scoped-\(BridgeRouter.subscriptionTail + 11)")
+        // A phone's own history read is unchanged: the windowed page, all of it.
+        let read = try JSONDecoder().decode(ConversationSnapshot.self, from: try await fixture.read("/v2/sessions/scoped/history").1)
+        #expect(read.messages.count == BridgeRouter.subscriptionTail + 12)
     }
     /// The terminal preview and the session list have no local change signal and are rebuilt every tick.
     @Test func previewAndSessionListTicksAreNeverSkipped() async throws {

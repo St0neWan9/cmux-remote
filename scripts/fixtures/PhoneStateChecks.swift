@@ -3,6 +3,22 @@ import CmuxRemoteCore
 import CmuxRemoteClient
 import CmuxAgentChat
 
+/// A conversation that moved on while the phone was away, read over a link that refuses the first reads as busy
+/// and answers slowly: what a return to the app meets while every page reads at once.
+private actor ReturningHistory {
+    private(set) var reads = 0
+    let refusals: Int
+    init(refusals: Int) { self.refusals = refusals }
+    func read() async throws -> ConversationSnapshot {
+        reads += 1
+        if reads <= refusals { throw BridgeError("link_busy", "The concurrent request limit was reached.", status: 429) }
+        try await Task.sleep(for: .milliseconds(700))
+        let messages = [ChatMessage(id: "before", seq: 1, role: .agent, timestamp: .distantPast, kind: .prose(ChatProse(text: "离开前"))),
+                        ChatMessage(id: "while-away", seq: 2, role: .agent, timestamp: .distantPast, kind: .prose(ChatProse(text: "离开时写的")))]
+        return ConversationSnapshot(messages: messages, hasMore: false, generation: "away", clipped: false)
+    }
+}
+
 /// A transcript whose last turn is closed, then records the phone's prompt with the turn open, then closes it.
 private actor TurnHistory {
     private var stage = 0
@@ -388,6 +404,22 @@ private actor DeferredToolPage {
                    "The running time stopped or restarted when the transcript recorded the prompt")
         await turnHistory.complete(); await turnChat.refresh()
         checkMedia(!turnChat.hasActiveResponse && turnChat.runningSince == nil, "A turn the transcript closed kept running")
+        // Back from another app: the first reads are refused as busy and the next one is slow. The page keeps asking
+        // until a read lands, and says it is updating while it waits, instead of sitting on what it had before.
+        let returning = ReturningHistory(refusals: 2)
+        let returnChat = ConversationModel(session: session, client: client, loadRecovery: { nil }, saveRecovery: { _ in }, sendRequest: { MutationReceipt(operationID: $0.operationID, accepted: true) },
+                                           readSessions: { [session] }, readHistory: { _ in try await returning.read() },
+                                           readPreview: { PreviewSnapshot(text: nil, available: false) })
+        var sawUpdating = false
+        let watcher = Task { @MainActor in
+            while !Task.isCancelled { if returnChat.updating { sawUpdating = true }; try? await Task.sleep(for: .milliseconds(50)) }
+        }
+        await returnChat.catchUp()
+        watcher.cancel()
+        checkMedia(returnChat.messages.map(\.id) == ["before", "while-away"], "A return whose first reads were refused never read what changed while away")
+        checkMedia(sawUpdating, "A slow catch-up never said the page was updating")
+        checkMedia(!returnChat.updating && returnChat.error == nil, "The page still said it was updating after its read landed, or showed the busy link as an error")
+        checkMedia(await returning.reads == 3, "The catch-up read \(await returning.reads) times instead of until the first read landed")
         var ended = session; ended.state = "ended"
         let readonlyPhoto = makePhotoChat(sender: { try await lost.send($0) }, descriptor: ended)
         readonlyPhoto.imageDraft.images = [photo]; await readonlyPhoto.send()
