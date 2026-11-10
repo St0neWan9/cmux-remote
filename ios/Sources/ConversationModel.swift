@@ -23,8 +23,25 @@ final class ConversationModel {
     var stopRequested = false
     private var interruptedUserID: String?
     var working: Bool { session.state.hasPrefix("working") }
-    var hasActiveResponse: Bool { working && !stopRequested && !currentTurnCompleted }
-    var runningSince: Date? { hasActiveResponse ? currentTurnStartedAt : nil }
+    /// The prompt this phone sent last and when the reader tapped send, until the turn it starts is over.
+    ///
+    /// The Mac's session list is read at most every few seconds, and a cmux-tui session reports working from its
+    /// rendered screen, later still. Waiting for either left a gap: the bubble's "sent" line went away when the
+    /// transcript recorded the prompt, and the running label had not come yet. The phone knows a turn has started
+    /// the moment the send leaves it, so the running time counts from the tap.
+    private var sentTurn: (id: UUID, at: Date)?
+    /// Whether the turn this phone started is still running, as far as the phone can tell before the Mac says so.
+    private var sentTurnRunning: Bool {
+        guard let sentTurn else { return false }
+        // Not recorded yet: the transcript's current turn is still the one before this prompt.
+        if let prompt = outgoing.first(where: { $0.id == sentTurn.id }) { return prompt.delivery != .unconfirmed }
+        return !currentTurnCompleted
+    }
+    var hasActiveResponse: Bool { !stopRequested && (sentTurnRunning || (working && !currentTurnCompleted)) }
+    var runningSince: Date? {
+        guard hasActiveResponse else { return nil }
+        return sentTurnRunning ? sentTurn?.at : currentTurnStartedAt
+    }
     func responseText(_ response: ConversationResponse) -> String {
         messages.filter { $0.seq == response.lastSeq && $0.role == .agent }
             .compactMap { message -> String? in if case .prose(let value) = message.kind { return value.text }; return nil }.joined(separator: "\n\n")
@@ -255,7 +272,7 @@ final class ConversationModel {
         session = current
     }
     func markInterrupted() {
-        stopRequested = true
+        stopRequested = true; sentTurn = nil
         interruptedUserID = messages.last(where: { $0.role == .user })?.id
     }
     /// Suspending reads leaves durable mutations and their captured drafts intact.
@@ -335,7 +352,7 @@ final class ConversationModel {
             // longer is filled the next time it is opened rather than held in one long background run.
             while !Task.isCancelled, pages < 64 {
                 let page: ConversationSnapshot, more: Bool
-                if let chain = await self?.archiveChain {
+                if let chain = self?.archiveChain {
                     guard let next = try? await chain.older(limit: 100) else { break }
                     page = next.page; more = next.hasMore
                 } else {
@@ -486,6 +503,8 @@ final class ConversationModel {
                 }
             }
             outgoing = OutgoingPromptMatcher().pending(outgoing, messages: messages, generation: generation)
+            // Once the transcript recorded the prompt, its own turn takes over: a closed turn ends the phone's.
+            if let sent = sentTurn, !outgoing.contains(where: { $0.id == sent.id }), currentTurnCompleted { sentTurn = nil }
             let committed = messages.reversed().compactMap { message -> String? in
                 if message.role == .agent, case .prose(let value) = message.kind { return value.text }; return nil
             }.first
@@ -496,6 +515,10 @@ final class ConversationModel {
             guard refreshReads.isCurrent(request) else { return }
             if let current = descriptors.first(where: { $0.id == session.id }) {
                 updateSession(current)
+                // An agent that went away without closing its turn leaves it open in the transcript for good; the
+                // Mac reporting the session idle well after the prompt was recorded ends what the phone started.
+                if let sent = sentTurn, !working, !outgoing.contains(where: { $0.id == sent.id }),
+                   Date().timeIntervalSince(sent.at) > 60 { sentTurn = nil }
             } else if readsListing {
                 throw BridgeError("read_only", "The cmux session is no longer available.", status: 404)
             }
@@ -648,6 +671,7 @@ final class ConversationModel {
             pendingSend = request; sent = request
             // The prompt moves into the conversation at once; the composer is free while the agent catches up.
             outgoing.append(OutgoingPrompt(request: request, after: messages, generation: generation))
+            sentTurn = (request.operationID, Date())
             draft = ""; imageDraft.removeSubmitted(Set(request.attachments.map(\.id))); jumpToLatest += 1
             try await saveRecovery(request)
             let receipt = try await sendRequest(request)
@@ -659,8 +683,8 @@ final class ConversationModel {
             // link was down before it (the identity check failed), so nothing reached the Mac.
             let neverSent = !(error is BridgeError) && ErrorPresentation().isConnectivity(error)
             if neverSent || (error as? BridgeError).map({ safeRejections.contains($0.code) }) == true {
-                // Nothing reached the agent: the prompt leaves the conversation.
-                if let sent { outgoing.removeAll { $0.id == sent.operationID } }
+                // Nothing reached the agent: the prompt leaves the conversation, and no turn started.
+                if let sent { outgoing.removeAll { $0.id == sent.operationID }; if sentTurn?.id == sent.operationID { sentTurn = nil } }
                 do { try await saveRecovery(nil); pendingSend = nil; mutationWarning = nil }
                 catch { mutationWarning = ErrorPresentation().message(error) }
             }
@@ -689,7 +713,7 @@ final class ConversationModel {
     func acknowledgePendingSend() async {
         guard !busy else { return }; busy = true; defer { busy = false }
         let released = pendingSend?.operationID
-        do { try await saveRecovery(nil); outgoing.removeAll { $0.id == released }; pendingSend = nil; recoveryReady = true; recoveryFailed = false; recoveryTask = nil; mutationWarning = nil; error = nil }
+        do { try await saveRecovery(nil); outgoing.removeAll { $0.id == released }; if sentTurn?.id == released { sentTurn = nil }; pendingSend = nil; recoveryReady = true; recoveryFailed = false; recoveryTask = nil; mutationWarning = nil; error = nil }
         catch { logFailure("acknowledgePendingSend", error, shown: true); mutationWarning = ErrorPresentation().message(error); self.error = mutationWarning }
     }
     private func restorePendingSend() async throws {

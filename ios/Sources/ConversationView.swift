@@ -216,7 +216,8 @@ struct ConversationView: View {
         let firstResponse = index.firstResponse, lastResponse = index.lastResponse, imagesByMessage = index.imagesByMessage
         let runningSince = model.runningSince
         // The live label belongs at the top of the reply in progress; before the first reply it has its own row.
-        let activeAnchor: String? = runningSince == nil ? nil : model.responses.last.flatMap { $0.completed ? nil : $0.firstMessageID }
+        // A prompt not recorded yet has no reply above it: the label then follows the bubble instead.
+        let activeAnchor: String? = runningSince == nil || !model.outgoing.isEmpty ? nil : model.responses.last.flatMap { $0.completed ? nil : $0.firstMessageID }
         let items = model.timelineItems
         let shown = items[window.range(count: items.count) { id in items.firstIndex { $0.id == id } }]
         let hidesEarlier = shown.startIndex > 0
@@ -253,7 +254,7 @@ struct ConversationView: View {
                     .id(item.id)
                     .modifier(PinnedMeasureProbe(active: isPinned(item)) { pinnedTop = $0 })
             }
-            if activeAnchor == nil, let runningSince {
+            if activeAnchor == nil, model.outgoing.isEmpty, let runningSince {
                 LiveRunLabel(since: runningSince, compacting: model.compacting, showsDivider: true, font: .subheadline)
             }
             // The live tail changes on every poll; keeping that read in its own view stops the whole timeline
@@ -262,6 +263,11 @@ struct ConversationView: View {
             ForEach(model.outgoing) { prompt in
                 OutgoingPromptRow(prompt: prompt).id(prompt.id)
                     .modifier(PinnedMeasureProbe(active: pinnedSent?.outgoing == prompt.id) { pinnedTop = $0 })
+            }
+            // A prompt still on its way runs from the tap: its label sits under the bubble, where the recorded
+            // prompt's label then takes over without a gap.
+            if !model.outgoing.isEmpty, let runningSince {
+                LiveRunLabel(since: runningSince, compacting: model.compacting, showsDivider: true, font: .subheadline)
             }
             if let error = model.error {
                 Label(error, systemImage: "exclamationmark.circle").font(.footnote).foregroundStyle(.red).padding(12)

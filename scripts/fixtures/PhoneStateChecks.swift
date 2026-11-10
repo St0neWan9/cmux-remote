@@ -3,6 +3,24 @@ import CmuxRemoteCore
 import CmuxRemoteClient
 import CmuxAgentChat
 
+/// A transcript whose last turn is closed, then records the phone's prompt with the turn open, then closes it.
+private actor TurnHistory {
+    private var stage = 0
+    func record() { stage = 1 }
+    func complete() { stage = 2 }
+    func read() -> ConversationSnapshot {
+        let earlier = [ChatMessage(id: "ask", seq: 1, role: .user, timestamp: .distantPast, kind: .prose(ChatProse(text: "上一个问题"))),
+                       ChatMessage(id: "answer", seq: 2, role: .agent, timestamp: .distantPast, kind: .prose(ChatProse(text: "上一个回答")))]
+        let prompt = ChatMessage(id: "prompt", seq: 3, role: .user, timestamp: Date(), kind: .prose(ChatProse(text: "发版")))
+        let reply = ChatMessage(id: "reply", seq: 4, role: .agent, timestamp: Date(), kind: .prose(ChatProse(text: "好的")))
+        switch stage {
+        case 0: return ConversationSnapshot(messages: earlier, hasMore: false, generation: "turn", clipped: false, currentTurnStartedAt: .distantPast, currentTurnCompleted: true)
+        case 1: return ConversationSnapshot(messages: earlier + [prompt], hasMore: false, generation: "turn", clipped: false, currentTurnStartedAt: Date(), currentTurnCompleted: false)
+        default: return ConversationSnapshot(messages: earlier + [prompt, reply], hasMore: false, generation: "turn", clipped: false, currentTurnStartedAt: Date(), currentTurnCompleted: true)
+        }
+    }
+}
+
 private actor FixtureEnrollment: DeviceEnrolling {
     nonisolated let request: SignedValue<EnrollmentRequest>
     private let delaySubmission: Bool
@@ -353,6 +371,23 @@ private actor DeferredToolPage {
                    "A send that never left the offline phone stayed blocked as an unknown outcome")
         await offlineChat.refresh()
         checkMedia(offlineChat.error == nil && offlineChat.pendingSend == nil, "A recovered link brought back a stale network error")
+        // The Mac still lists the session idle and the transcript has not recorded the prompt: the turn runs from the
+        // tap anyway, through the moment the transcript records it, until the transcript closes it.
+        let turnHistory = TurnHistory()
+        let idle = { var value = session; value.state = "idle"; return value }()
+        let turnChat = ConversationModel(session: idle, client: client, loadRecovery: { nil }, saveRecovery: { _ in }, sendRequest: { MutationReceipt(operationID: $0.operationID, accepted: true) },
+                                         readSessions: { [idle] }, readHistory: { _ in await turnHistory.read() },
+                                         readPreview: { PreviewSnapshot(text: nil, available: false) })
+        await turnChat.refresh()
+        checkMedia(!turnChat.hasActiveResponse, "An idle conversation showed a running turn before any send")
+        let tapped = Date(); turnChat.draft = "发版"; await turnChat.send()
+        checkMedia(turnChat.hasActiveResponse && turnChat.runningSince.map { abs($0.timeIntervalSince(tapped)) < 2 } == true,
+                   "A sent prompt waiting for the transcript did not run from the tap")
+        await turnHistory.record(); await turnChat.refresh()
+        checkMedia(turnChat.outgoing.isEmpty && turnChat.hasActiveResponse && turnChat.runningSince.map { abs($0.timeIntervalSince(tapped)) < 2 } == true,
+                   "The running time stopped or restarted when the transcript recorded the prompt")
+        await turnHistory.complete(); await turnChat.refresh()
+        checkMedia(!turnChat.hasActiveResponse && turnChat.runningSince == nil, "A turn the transcript closed kept running")
         var ended = session; ended.state = "ended"
         let readonlyPhoto = makePhotoChat(sender: { try await lost.send($0) }, descriptor: ended)
         readonlyPhoto.imageDraft.images = [photo]; await readonlyPhoto.send()
