@@ -326,9 +326,10 @@ public actor TranscriptReader {
     public func toolText(path: String, agent: String, messageID: String, generation: String,
                          field: String, offset: Int, contentID: String?, limit: Int) async throws -> ToolTextPage {
         try Task.checkCancellation()
+        let archived = await archiveGeneration(path)
         let snapshot = try history(path: path, agent: agent, beforeSeq: nil, limit: 1)
         let selectedGeneration = generation == "current" && offset == 0 && contentID == nil ? snapshot.generation : generation
-        guard snapshot.generation == selectedGeneration else { throw BridgeError("stale_detail", "The conversation record changed. Reload this detail.", status: 409) }
+        guard snapshot.generation == selectedGeneration || archived == selectedGeneration else { throw BridgeError("stale_detail", "The conversation record changed. Reload this detail.", status: 409) }
         guard observations[path]?.messages.contains(where: { $0.id == messageID }) == true else { throw BridgeError("detail_not_found", "This tool record is unavailable.", status: 404) }
         guard let observed = observations[path] else { throw BridgeError("stale_detail", "The conversation record changed. Reload this detail.", status: 409) }
         // The same window as the snapshot keeps message identities aligned.
@@ -351,7 +352,7 @@ public actor TranscriptReader {
         default: throw BridgeError("invalid_input", "Select a supported field of a tool record.", status: 422)
         }
         let refreshed = try history(path: path, agent: agent, beforeSeq: nil, limit: 1)
-        guard refreshed.generation == selectedGeneration else { throw BridgeError("stale_detail", "The conversation record changed during this read.", status: 409) }
+        guard refreshed.generation == snapshot.generation else { throw BridgeError("stale_detail", "The conversation record changed during this read.", status: 409) }
         let digest = IdentityCryptography().digest(Data(text.utf8))
         guard contentID == nil || contentID == digest else { throw BridgeError("stale_detail", "The tool output changed. Reload this detail.", status: 409) }
         try Task.checkCancellation()
@@ -363,9 +364,21 @@ public actor TranscriptReader {
                             text: pageText, offset: offset, nextOffset: next < total ? next : nil, totalCharacters: total)
     }
 
+    /// The generation the archive route names this record by.
+    ///
+    /// A conversation is read through the archive, and its pages name the record by the persisted generation, not by
+    /// the windowed history's. A tool detail or an image asked for from such a page carries that generation, and
+    /// comparing it with the history's alone refused every one as stale: no recorded image could be opened. Both
+    /// name the same record, so either is accepted; a replaced record changes both. Read before the history, since
+    /// the store is another actor and the record cache must not change between the check and the lookup.
+    private func archiveGeneration(_ path: String) async -> String? {
+        guard let metadata = try? archiveMetadata(path) else { return nil }
+        return await generationStore.generation(for: path, inode: metadata.inode, creationDate: metadata.creationDate, size: metadata.size)
+    }
     func image(path: String, agent: String, referenceID: String, generation: String) async throws -> TranscriptImageRecord {
+        let archived = await archiveGeneration(path)
         let current = try history(path: path, agent: agent, beforeSeq: nil, limit: 1)
-        guard current.generation == generation else { throw BridgeError("stale_detail", "The image record changed. Reload the conversation.", status: 409) }
+        guard current.generation == generation || archived == generation else { throw BridgeError("stale_detail", "The image record changed. Reload the conversation.", status: 409) }
         guard let record = observations[path]?.images.first(where: { $0.reference(generation: generation).id == referenceID }) else { throw BridgeError("image_unavailable", "This recorded image is unavailable.", status: 404) }
         return record
     }
