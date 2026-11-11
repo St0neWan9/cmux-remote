@@ -60,7 +60,10 @@ struct ChatComposer: View {
     }
     private var textField: some View {
         TextField(String(localized: "chat.follow_up"), text: $draft, axis: .vertical)
-            .font(.body).lineLimit(expanded ? 1...max(2, maxLines) : 1...1).focused(focused).padding(.vertical, expanded ? 11 : 8)
+            .font(.body).lineLimit(expanded ? 1...max(2, maxLines) : 1...1).focused(focused)
+            // Open, the action row sits right under the text: the controls' own 44pt frames already leave room above
+            // their symbols, and padding under the text as well read as an empty line.
+            .padding(.top, expanded ? 11 : 8).padding(.bottom, expanded ? 0 : 8)
             // The field's text view bounces even when everything fits, so the placeholder could be dragged
             // up and down; it moves only once the draft outgrows its lines.
             .scrollBounceBehavior(.basedOnSize, axes: .vertical)
