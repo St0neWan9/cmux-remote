@@ -75,6 +75,9 @@ struct ConversationView: View {
         _model = State(initialValue: model); self.hostName = hostName
         sharedLinkState = linkState; sharedRetry = retryLink
     }
+    /// The page may be behind: back from another app before its first read lands, or its link dialing. Said quietly
+    /// on the composer's status line, where a running turn shows its time; a pill at the top read as "cannot connect".
+    private var showsUpdating: Bool { (model.updating || shownLinkState == .connecting) && !showsInitialLoading }
     private var shownLinkState: LinkState? {
         if let sharedLinkState { return sharedLinkState() }
         return linkState
@@ -95,11 +98,9 @@ struct ConversationView: View {
                 // Once the link is up the page may still be showing what it had before the reader left; it says so
                 // until the first fresh read lands. The opening spinner already says it for an empty page.
                 // The page uses the list's own link and never dials it; a dial in progress is the list's to show, on
-                // its Mac's tab. Here it only means the content is on its way, so it reads as updating; a link that
-                // failed still offers its retry.
-                let dialing = shownLinkState == .connecting
-                ConnectionStatusBar(state: dialing ? nil : shownLinkState,
-                                    updating: (model.updating || dialing) && !showsInitialLoading) { Task { await reconnect() } }
+                // its Mac's tab, and here only means content is on its way (see `showsUpdating`). A link that failed
+                // still offers its retry at the top.
+                ConnectionStatusBar(state: shownLinkState == .connecting ? nil : shownLinkState) { Task { await reconnect() } }
             }
             // A translucent white veil, like the page itself: content shows faintly under it, with no material
             // tint and no per-row rasterization.
@@ -130,6 +131,13 @@ struct ConversationView: View {
                         else { Text(String(localized: "chat.working")).font(.footnote) }
                         Spacer(); Label(model.session.agent.capitalized, systemImage: "sparkles").font(.caption)
                     }.foregroundStyle(.secondary).padding(.horizontal, 12)
+                } else if showsUpdating {
+                    HStack(spacing: 7) {
+                        ProgressView().controlSize(.mini)
+                        Text(String(localized: "connection.updating")).font(.footnote)
+                        Spacer()
+                    }.foregroundStyle(.secondary).padding(.horizontal, 12)
+                    .accessibilityElement(children: .combine).accessibilityIdentifier("connection.updating")
                 } else if model.canResume {
                     // The Agent's terminal is gone but its session can be reopened, so the page offers that instead
                     // of a composer that would have nowhere to type.
