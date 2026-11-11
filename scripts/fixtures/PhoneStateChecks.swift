@@ -297,6 +297,32 @@ private actor DeferredToolPage {
         feedOnly.client = feedOnlyClient; await feedOnly.refresh()
         if feedOnly.error != nil || feedOnly.workspaces.first?.id != "allowed" || !feedOnly.sessions.isEmpty { failures.append("A Feed-only grant tried to read conversations or lost its workspace list") }
 
+        // Back from the background, the list must show its Mac dialing while the redial runs, as the conversation
+        // page does: following began only after the redial, so the list kept "connected" from before the app left.
+        // The endpoint never answers (a documentation address), so the dial is held open while the list is read.
+        let readScope = ClientScope(workspaces: bootstrap.value.workspaces, capabilities: [.workspaceRead, .conversationRead])
+        let readGrant = try crypto.sign(EnrollmentGrant(request: request.value, scope: readScope, issuedAt: 1000), domain: "grant", privateKey: hostKey)
+        let silentClient = try RemoteClient(connection: AuthorizedConnection(host: host, endpoint: BridgeEndpoint(host: "192.0.2.1", port: 7740), privateKey: key, grant: readGrant))
+        defer { silentClient.close() }
+        let backFromAway = AppModel(fetchSessions: { _ in [] }, fetchWorkspaces: { _ in [] })
+        backFromAway.links = [HostLink(id: "studio", name: "Studio", client: silentClient, connection: nil)]
+        backFromAway.linkStates["studio"] = .connected
+        backFromAway.backgroundedAt = Date().addingTimeInterval(-120)
+        let supervising = Task { @MainActor in await backFromAway.superviseConnections() }
+        try? await Task.sleep(for: .milliseconds(1500))
+        if backFromAway.linkStates["studio"] == .connected {
+            failures.append("While a return redialed its Mac, the list still showed the link from before the app left as connected")
+        }
+        if backFromAway.shownLinkState(of: silentClient) != .connecting { failures.append("The page and the list did not both show the Mac dialing after a return") }
+        supervising.cancel(); await supervising.value
+        // A Mac retried in the background reads as unreachable on the page, as on its tab; a person's retry shows the dial.
+        backFromAway.linkStates["studio"] = .connecting; backFromAway.quietHosts = ["studio"]
+        if backFromAway.shownLinkState(of: silentClient) != .disconnected { failures.append("A quietly retried Mac read as dialing on its page but unreachable on its tab") }
+        let retrying = Task { @MainActor in await backFromAway.reconnect(client: silentClient) }
+        try? await Task.sleep(for: .milliseconds(300))
+        if backFromAway.quietHosts.contains("studio") || backFromAway.shownLinkState(of: silentClient) != .connecting { failures.append("A retry from the page did not show its Mac dialing") }
+        retrying.cancel(); silentClient.close(); await retrying.value
+
         var mediaChecks = 0
         func checkMedia(_ condition: Bool, _ message: String) { mediaChecks += 1; if !condition { failures.append(message) } }
         let blue = Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAKklEQVR4nGPQyrtDU8QwasGoBaMWjFowasGoBaMWjFowasGoBaMWDBULAFSk0ExUjkswAAAAAElFTkSuQmCC")!
