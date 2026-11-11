@@ -46,6 +46,31 @@ private actor HistoricalImageCmux: CmuxControlling {
             #expect(bytes.count < 524_288 && bytes.prefix(3) == Data([0xff,0xd8,0xff]))
         }
     }
+    /// The phone reads conversations through the archive, whose pages name the record by its persisted generation.
+    /// Images and tool details asked for from such a page open; they used to be refused as stale every time.
+    @Test func imagesAndToolDetailsOpenFromAnArchivePage() async throws {
+        let root = try directory(); defer { try? FileManager.default.removeItem(at: root) }
+        let file = root.appendingPathComponent("chat.jsonl")
+        try transcript([
+            ["type":"user", "uuid":"inline", "message":["content":[inline()]]],
+            ["type":"assistant", "uuid":"call", "message":["content":[["type":"tool_use", "id":"tool", "name":"Read", "input":["file_path":"/project/a.swift"]]]]],
+            ["type":"user", "uuid":"result", "message":["content":[["type":"tool_result", "tool_use_id":"tool", "content":"FULL_OUTPUT"]]]]
+        ]).write(to: file)
+        let service = SessionService(cmux: HistoricalImageCmux(transcript: file.path, project: root.path), home: root.appendingPathComponent("home"), transcriptRoots: [root])
+        let page = try await service.archive(id: "one", tail: 30, cursor: nil, limit: 30).snapshot
+        let windowed = try await service.history(id: "one", beforeSeq: nil, limit: 100)
+        // The two routes name the record differently; this is what made every archive reference look stale.
+        #expect(page.generation != windowed.generation)
+        let reference = try #require(page.images?.first)
+        let bytes = try await service.image(id: "one", referenceID: reference.id, generation: page.generation)
+        #expect(bytes.prefix(3) == Data([0xff, 0xd8, 0xff]))
+        let detail = try await service.toolText(id: "one", messageID: "call", generation: page.generation, field: "output", offset: 0, contentID: nil, limit: 16_384)
+        #expect(detail.text.contains("FULL_OUTPUT") && detail.generation == page.generation)
+        // A replaced record still refuses the old reference.
+        try transcript([["type":"user", "uuid":"inline", "message":["content":[inline()]]]]).write(to: file, options: .atomic)
+        do { _ = try await service.image(id: "one", referenceID: reference.id, generation: page.generation); Issue.record("Expected replaced transcript denial") }
+        catch { #expect((error as? BridgeError)?.code == "stale_detail") }
+    }
     @Test func inlineUserBlocksAndCodexDataURLsProduceOpaqueGenerationBoundReferences() async throws {
         let root = try directory(); defer { try? FileManager.default.removeItem(at: root) }
         let file = root.appendingPathComponent("chat.jsonl")
