@@ -66,8 +66,18 @@ struct ConversationView: View {
     /// The stretch of the timeline laid out: the newest rows, grown a page at a time as the reader reads back.
     @State private var window = TimelineWindow()
     private let hostName: String
-    init(model: ConversationModel, hostName: String = "") {
+    /// The Mac's link as the list shows it, and the retry that goes with it. Read from the list's own state, so the
+    /// page never says "reconnecting" for a Mac the list has just shown as connected. Without them (previews and
+    /// fixtures) the page follows its client directly.
+    private let sharedLinkState: (() -> LinkState?)?
+    private let sharedRetry: (() async -> Void)?
+    init(model: ConversationModel, hostName: String = "", linkState: (() -> LinkState?)? = nil, retryLink: (() async -> Void)? = nil) {
         _model = State(initialValue: model); self.hostName = hostName
+        sharedLinkState = linkState; sharedRetry = retryLink
+    }
+    private var shownLinkState: LinkState? {
+        if let sharedLinkState { return sharedLinkState() }
+        return linkState
     }
     /// The first history read has not answered yet: the page is loading, not empty.
     ///
@@ -84,13 +94,13 @@ struct ConversationView: View {
                 header
                 // Once the link is up the page may still be showing what it had before the reader left; it says so
                 // until the first fresh read lands. The opening spinner already says it for an empty page.
-                ConnectionStatusBar(state: linkState, updating: model.updating && !showsInitialLoading) { Task { await reconnect() } }
+                ConnectionStatusBar(state: shownLinkState, updating: model.updating && !showsInitialLoading) { Task { await reconnect() } }
             }
             // A translucent white veil, like the page itself: content shows faintly under it, with no material
             // tint and no per-row rasterization.
             .background(Color.white.opacity(0.95))
         }
-        .task { for await state in model.client.linkStates() { linkState = state } }
+        .task { guard sharedLinkState == nil else { return }; for await state in model.client.linkStates() { linkState = state } }
         // The first page lands, then the rest of the conversation is filled into the store in the background.
         .onChange(of: model.historyGeneration) { _, _ in model.startBackfill() }
         .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -363,7 +373,7 @@ struct ConversationView: View {
     }
     /// A pull reads earlier messages while there are any, otherwise the latest; it redials only a link that is down.
     private func pullToRefresh(_ proxy: ScrollViewProxy) async {
-        if linkState != nil && linkState != .connected { await reconnect(); return }
+        if shownLinkState != nil && shownLinkState != .connected { await reconnect(); return }
         // The pull is the same load as the automatic one; only its indicator belongs to the system, so the row's
         // own spinner stays out of the way while it is on screen.
         pulling = true
@@ -646,8 +656,8 @@ struct ConversationView: View {
     }
     /// The menu's refresh redials a link that may be dead before reading, and shows the dial while it happens.
     private func reconnect() async {
-        if linkState != .connected { linkState = .connecting }
-        await model.client.reconnect()
+        if let sharedRetry { await sharedRetry() }
+        else { if linkState != .connected { linkState = .connecting }; await model.client.reconnect() }
         await model.refresh()
     }
     private var header: some View {

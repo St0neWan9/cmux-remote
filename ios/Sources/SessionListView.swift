@@ -156,7 +156,14 @@ struct SessionListView: View {
             .refreshable { await model.pullToRefresh() }
             .task { await model.refresh() }
             .overlay { if loading && hosted.isEmpty { ProgressView() } }
-            .navigationDestination(isPresented: $showConversation) { if let selectedConversation { ConversationView(model: selectedConversation, hostName: selectedHostName) } }
+            .navigationDestination(isPresented: $showConversation) {
+                if let selectedConversation {
+                    // The page shows its Mac's link as the list does, so the two never disagree.
+                    ConversationView(model: selectedConversation, hostName: selectedHostName,
+                                     linkState: { model.shownLinkState(of: selectedConversation.client) },
+                                     retryLink: { await model.reconnect(client: selectedConversation.client) })
+                }
+            }
 
             .navigationDestination(isPresented: $showFeed) { if let id = feedHostID, let link = model.link(for: id) { FeedView(client: link.client) } }
             .navigationDestination(isPresented: $showAbout) { AboutView() }
