@@ -94,7 +94,12 @@ struct ConversationView: View {
                 header
                 // Once the link is up the page may still be showing what it had before the reader left; it says so
                 // until the first fresh read lands. The opening spinner already says it for an empty page.
-                ConnectionStatusBar(state: shownLinkState, updating: model.updating && !showsInitialLoading) { Task { await reconnect() } }
+                // The page uses the list's own link and never dials it; a dial in progress is the list's to show, on
+                // its Mac's tab. Here it only means the content is on its way, so it reads as updating; a link that
+                // failed still offers its retry.
+                let dialing = shownLinkState == .connecting
+                ConnectionStatusBar(state: dialing ? nil : shownLinkState,
+                                    updating: (model.updating || dialing) && !showsInitialLoading) { Task { await reconnect() } }
             }
             // A translucent white veil, like the page itself: content shows faintly under it, with no material
             // tint and no per-row rasterization.
