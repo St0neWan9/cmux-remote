@@ -29,7 +29,9 @@ final class MobileReturnKeepsLinkUITests: XCTestCase {
         XCTAssertTrue(rows.firstMatch.waitForExistence(timeout: 30), "The conversation never showed a message.")
         Thread.sleep(forTimeInterval: 3)
 
-        // A glance at another app: the link is kept, so the page never says it is reconnecting.
+        // A glance at another app: the link is kept. The page never says it is reconnecting in any case (a dial is
+        // shown on the list's Mac tab only), so whether the link was kept is read from the Bridge's link sessions; here
+        // the page must show no dial and be settled within four seconds.
         XCUIDevice.shared.press(.home)
         Thread.sleep(forTimeInterval: 6)
         app.activate()
@@ -41,7 +43,7 @@ final class MobileReturnKeepsLinkUITests: XCTestCase {
             if reconnecting.exists { sawReconnecting = true; add(XCTAttachment(screenshot: app.screenshot())) }
             Thread.sleep(forTimeInterval: 0.25)
         }
-        XCTAssertFalse(sawReconnecting, "A six-second trip to another app redialed the link.")
+        XCTAssertFalse(sawReconnecting, "The conversation page showed a reconnecting pill; a dial belongs on the list's Mac tab.")
         XCTAssertTrue(rows.firstMatch.exists, "The page lost its messages after a short trip.")
         XCTAssertFalse(updating.exists, "The page still said it was updating four seconds after a short trip.")
 
