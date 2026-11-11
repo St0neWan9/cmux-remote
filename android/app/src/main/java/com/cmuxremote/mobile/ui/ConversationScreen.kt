@@ -322,19 +322,6 @@ fun ConversationScreen(
                 )
             }
         }
-        // A short window (split screen, landscape) must still leave room for the
-        // field and its action row above the keyboard: derive the growth limit
-        // from what is actually visible, not half the full screen.
-        val density = androidx.compose.ui.platform.LocalDensity.current
-        val imeBottom = androidx.compose.foundation.layout.WindowInsets.ime.getBottom(density)
-        // The configuration height is the app window (split screen included), not
-        // the whole display; subtract what the keyboard covers.
-        val windowDp = LocalContext.current.resources.configuration.screenHeightDp.toFloat()
-        val visibleDp = (windowDp - imeBottom / density.density).coerceAtLeast(0f)
-        val composerLines = ((visibleDp * 0.32f - 110f) / 22f).toInt().coerceIn(1, 6)
-        // A split screen or landscape phone can leave less room above the keyboard
-        // than the two-row composer needs; keep the single-line bar there.
-        val compactComposer = visibleDp < 240f
         ComposerArea(
             draft = state.draft,
             onDraftChange = onDraft,
@@ -360,8 +347,6 @@ fun ConversationScreen(
                 }
             },
             sendBlocked = pendingSend || imagePreparing > 0 || busy,
-            expandedMaxLines = composerLines,
-            compactHeight = compactComposer,
             onPickImages = onPickImages,
             onPickImageFile = onPickImageFile,
             onOpenProject = onOpenProject,
@@ -1449,7 +1434,6 @@ fun ComposerArea(
     /** A pending receipt or an image still being prepared blocks another send. */
     sendBlocked: Boolean = false,
     /** Lines the composer may grow to on focus. */
-    expandedMaxLines: Int = 4,
     /** Too little height above the keyboard for the two-row layout. */
     compactHeight: Boolean = false,
     onPickImages: (() -> Unit)? = null,
@@ -1465,7 +1449,14 @@ fun ComposerArea(
     var focused by remember { mutableStateOf(false) }
     // A focused bar, an image draft or a multi-line draft takes the two-row layout.
     val expanded = focused || hasImages || draft.contains('\n')
-    val twoPart = expanded && !compactHeight
+    // The limit comes from what is visible above the keyboard in this window (split screen and a tablet's pane
+    // included), measured here so every page that shows the composer grows it the same way.
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val imeBottom = androidx.compose.foundation.layout.WindowInsets.ime.getBottom(density)
+    val windowDp = LocalContext.current.resources.configuration.screenHeightDp.toFloat()
+    val visibleDp = (windowDp - imeBottom / density.density).coerceAtLeast(0f)
+    val expandedMaxLines = ComposerSizing.maxLines(visibleDp, density.fontScale)
+    val twoPart = expanded && !compactHeight && !ComposerSizing.compact(visibleDp)
     val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
     Column(
         modifier = modifier
@@ -1665,20 +1656,25 @@ private fun ComposerField(
     modifier: Modifier,
     onFocusChanged: (Boolean) -> Unit,
 ) {
+    // One fixed line height, so the field is exactly as tall as its lines: it opens at one and grows a line at a
+    // time up to `expandedMaxLines`, then scrolls inside itself (see ComposerSizing).
+    val style = TextStyle(color = MobileDesign.Ink, fontSize = 15.sp, lineHeight = ComposerSizing.LINE_HEIGHT_SP.sp)
     BasicTextField(
         value = draft,
         onValueChange = onDraftChange,
         modifier = modifier
             .testTag("chat.composer")
-            .padding(vertical = if (expanded) 11.dp else 8.dp)
+            // Focused, the action row sits right under the field: padding below the text read as an empty line.
+            .padding(top = if (expanded) 10.dp else 8.dp, bottom = if (expanded) 2.dp else 8.dp)
             .onFocusChanged { onFocusChanged(it.isFocused) },
         enabled = enabled,
-        textStyle = TextStyle(color = MobileDesign.Ink, fontSize = 15.sp),
+        textStyle = style,
         cursorBrush = SolidColor(MobileDesign.Accent),
+        minLines = 1,
         maxLines = if (expanded) expandedMaxLines else 1,
         decorationBox = { inner ->
             Box {
-                if (draft.isEmpty()) Text(stringResource(R.string.chat_input_placeholder), color = MobileDesign.Muted, fontSize = 15.sp)
+                if (draft.isEmpty()) Text(stringResource(R.string.chat_input_placeholder), style = style.copy(color = MobileDesign.Muted), maxLines = 1)
                 inner()
             }
         },
