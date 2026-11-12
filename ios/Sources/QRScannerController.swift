@@ -47,7 +47,7 @@ final class QRScannerController: UIViewController, @preconcurrency AVCaptureMeta
     /// Continuous autofocus from the start, so pointing the phone is enough; a tap refines it.
     private func focusWithoutTapping() {
         guard let device, device.isFocusModeSupported(.continuousAutoFocus) else { return }
-        try? device.lockForConfiguration(); device.focusMode = .continuousAutoFocus; try? device.unlockForConfiguration()
+        try? device.lockForConfiguration(); device.focusMode = .continuousAutoFocus; device.unlockForConfiguration()
     }
     private func addViewfinder() {
         dim.fillColor = UIColor.black.withAlphaComponent(0.45).cgColor
@@ -113,13 +113,13 @@ final class QRScannerController: UIViewController, @preconcurrency AVCaptureMeta
             try device.lockForConfiguration()
             device.focusPointOfInterest = devicePoint
             device.focusMode = .autoFocus
-            try device.unlockForConfiguration()
+            device.unlockForConfiguration()
         } catch { return }
         showReticle(at: point)
         Task { [weak self] in
             try? await Task.sleep(for: .seconds(2))
             guard let self, !self.stopped, let device = self.device, device.isFocusModeSupported(.continuousAutoFocus) else { return }
-            try? device.lockForConfiguration(); device.focusMode = .continuousAutoFocus; try? device.unlockForConfiguration()
+            try? device.lockForConfiguration(); device.focusMode = .continuousAutoFocus; device.unlockForConfiguration()
         }
     }
     private func showReticle(at point: CGPoint) {
