@@ -109,6 +109,11 @@ actor TuiResourceFixture: TuiResourceRequesting {
         root["agents"] = .array([])
         raw = .object(root)
     }
+    /// The owner renamed the conversation's tab, on the Mac or from the phone.
+    func renameTab(_ name: String) {
+        var root = raw.object!, tabs = root["tabs"]!.array!, row = tabs[0].object!
+        row["name"] = .string(name); tabs[0] = .object(row); root["tabs"] = .array(tabs); raw = .object(root)
+    }
     func clearAgents() { var root = raw.object!; root["agents"] = .array([]); raw = .object(root) }
     func replaceIdentity() { var root = raw.object!; root["machine"] = .object(["id": .string("machine_" + String(repeating: "e", count: 32))]); raw = .object(root) }
     func makeAmbiguous() {

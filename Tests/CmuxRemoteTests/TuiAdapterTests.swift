@@ -44,6 +44,20 @@ import CmuxRemoteCore
         #expect(await source.effects.count == 1)
         #expect(await source.effects.first?.1["terminal"]?.string == TuiResourceFixture.terminal)
     }
+    /// A conversation served from its archived row (the daemon forgot its Agent, its terminal still runs) takes its
+    /// tab's new name. The list used to keep the title the row was first seen with, while the renamed page did not.
+    @Test func aRenameReachesTheListForAConversationTheDaemonForgot() async throws {
+        let root = try temporary(); defer { try? FileManager.default.removeItem(at: root) }
+        let source = TuiResourceFixture(), session = service(adapter(source, root: root), root: root)
+        #expect(try await session.sessions().first?.title == "Fixture Agent")
+        await source.clearAgents()
+        let revived = service(adapter(source, root: root), root: root)
+        #expect(try await revived.sessions().first?.title == "Fixture Agent")
+        await source.renameTab("Reportify Fix")
+        #expect(try await revived.sessions().first?.title == "Reportify Fix")
+        // The new name is what a restarted Bridge reads back too.
+        #expect(try await service(adapter(source, root: root), root: root).sessions().first?.title == "Reportify Fix")
+    }
     @Test func aConversationIsIdentifiedByItsAgentNotItsTerminal() async throws {
         let root = try temporary(); defer { try? FileManager.default.removeItem(at: root) }
         let identity = TuiResourceIdentity()
