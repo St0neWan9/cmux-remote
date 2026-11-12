@@ -1,15 +1,15 @@
 import XCTest
 
-/// A prompt sent from the phone opens at the top of the page and stays there while the reply starts.
+/// A prompt sent from the phone lands at the end of the conversation, above the composer, and the reply grows under it.
 ///
-/// Run on a fixture with `long-conversation` or `short-conversation`, plus `open-turn` and `report-working` flags: the prompt is recorded late,
-/// the turn stays open so the running label lands under it, and the reply follows. Without a delay the bubble is
-/// replaced before it can be found, which is how this test failed on every run before.
+/// The page used to lift the prompt to its top over a page of blank room: it jumped up on every send, sat blank, and
+/// a miscounted room pushed the prompt half under the header. Now nothing moves but the new content arriving below.
+///
+/// Run on a fixture with `long-conversation` or `short-conversation`, plus `open-turn` and `report-working` flags: the
+/// prompt is recorded late, the turn stays open so the running label lands under it, and the reply follows.
 @MainActor
 final class MobileSentPromptAnchorUITests: XCTestCase {
-    func testASentPromptRestsAtTheTopAndStaysThereWhileTheTurnRuns() throws {
-        // A conversation shorter than the page is the harder case: the room under the prompt is then exactly what
-        // makes the page a page tall, and anything that lands under the prompt without shrinking it grows the page.
+    func testASentPromptStaysAtTheEndAndTheReplyGrowsUnderIt() throws {
         try XCTSkipUnless(["long-conversation", "short-conversation"].contains(FixtureShape.current() ?? ""), "This run's fixture holds the \(FixtureShape.current() ?? "default") transcript.")
         guard let pairingPath = ProcessInfo.processInfo.environment["CMUX_REMOTE_TEST_PAIRING_PATH"], !pairingPath.isEmpty else {
             throw XCTSkip("Supply an isolated fixture pairing file to send without real sessions.")
@@ -23,31 +23,34 @@ final class MobileSentPromptAnchorUITests: XCTestCase {
         let session = app.buttons.matching(NSPredicate(format: "identifier ENDSWITH %@", "fixture-session")).firstMatch
         XCTAssertTrue(session.waitForExistence(timeout: 10))
         session.tap()
-        XCTAssertTrue(app.textFields.firstMatch.waitForExistence(timeout: 5))
-
         let composer = app.textFields.firstMatch
+        XCTAssertTrue(composer.waitForExistence(timeout: 5))
+        Thread.sleep(forTimeInterval: 2)
         composer.tap()
-        composer.typeText("置顶检查")
+        composer.typeText("位置检查")
         app.buttons["chat.send"].firstMatch.tap()
 
-        let sent = app.descendants(matching: .any).matching(NSPredicate(format: "identifier == %@", "message.outgoing")).firstMatch
-        XCTAssertTrue(sent.waitForExistence(timeout: 10), "The sent prompt did not appear.")
-        Thread.sleep(forTimeInterval: 1.0)
         let header = app.buttons["chat.back"].frame
-        let bubble = sent.frame
-        XCTAssertLessThan(bubble.minY - header.maxY, 140, "The sent prompt rested \(Int(bubble.minY - header.maxY))pt below the header instead of at the top.")
-
-        // The fixture records the prompt after a delay (`open-turn`), so the turn's running state appears
-        // first, then the recorded prompt replaces the bubble and the reply lands under it. Through all of it the
-        // prompt keeps the top it was given: neither carried back down by a follow scroll, nor pushed up under the
-        // header by a running label that grew the page below it.
-        let prompt = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "置顶检查")).firstMatch
+        let prompt = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "位置检查")).firstMatch
+        XCTAssertTrue(prompt.waitForExistence(timeout: 10), "The sent prompt did not appear.")
+        let rows = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@ OR identifier BEGINSWITH %@", "message.", "activity."))
+        // Through the bubble, the recorded prompt replacing it and the reply landing under it: the prompt is never under
+        // the header, and the conversation always reaches down to the composer, so no page of blank opens up.
         for sample in 1...20 {
             Thread.sleep(forTimeInterval: 0.5)
             XCTAssertTrue(prompt.exists, "The prompt disappeared from the page (sample \(sample)).")
-            let offset = prompt.frame.minY - header.maxY
-            XCTAssertLessThan(offset, 140, "The prompt drifted \(Int(offset))pt below the header (sample \(sample)).")
-            XCTAssertGreaterThan(offset, -4, "The prompt was pushed \(Int(-offset))pt up under the header (sample \(sample)).")
+            let composerTop = app.textFields.firstMatch.frame.minY
+            // The running label and live preview under the prompt are content too, before the reply is recorded as a
+            // row; the composer row's own running label sits just above the field and is left out.
+            let labels = app.descendants(matching: .any).matching(identifier: "response.elapsed").allElementsBoundByIndex
+                .map(\.frame).filter { !$0.isEmpty && $0.maxY < composerTop - 50 }
+            let preview = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "UI fixture received")).allElementsBoundByIndex.map(\.frame)
+            let end = (rows.allElementsBoundByIndex.map(\.frame) + labels + preview).filter { !$0.isEmpty && $0.maxY < composerTop }.map(\.maxY).max() ?? 0
+            if prompt.frame.maxY > header.maxY + 4 {
+                XCTAssertGreaterThan(prompt.frame.minY, header.maxY - 4, "The prompt was pushed \(Int(header.maxY - prompt.frame.minY))pt under the header (sample \(sample)).")
+            }
+            XCTAssertLessThan(composerTop - end, 200, "A page of blank opened \(Int(composerTop - end))pt above the composer (sample \(sample)).")
+            if sample % 5 == 0 { let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "s\(sample)"; shot.lifetime = .keepAlways; add(shot) }
         }
     }
     /// The turn runs from the tap: the running time sits under the prompt from the moment it is sent, stays there when
