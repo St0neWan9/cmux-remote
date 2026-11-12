@@ -31,6 +31,8 @@ struct TuiSessionSnapshot: Sendable {
     let terminalTitles: [String: String]
     /// Each terminal tab's own identity, so a rename can name the tab the conversation runs in.
     let tabIDs: [String: String]
+    /// The name the owner gave each terminal's tab, renamed on the Mac or from the phone.
+    let tabNames: [String: String]
     /// The pane and screen a tab hangs from: a tab operation names its whole parent chain.
     let tabPanes: [String: String]
     let tabScreens: [String: String]
@@ -94,7 +96,7 @@ struct TuiSessionSnapshot: Sendable {
         rawWorkspaces = Dictionary(uniqueKeysWithValues: workspaceRows.keys.map { (identity.uuid(machine: machineID, session: sessionID, resource: $0), $0) })
         surfaces = Set(terminals.keys.map { identity.uuid(machine: machineID, session: sessionID, resource: $0) })
         terminalTitles = terminals.compactMapValues { $0["title"].string }
-        self.tabIDs = tabIDs; self.tabPanes = tabPanes; self.tabScreens = tabScreens
+        self.tabIDs = tabIDs; self.tabNames = tabNames; self.tabPanes = tabPanes; self.tabScreens = tabScreens
         let occupied = Set(memberships.values.flatMap { $0 })
         self.occupiedWorkspaces = arrays["workspaces"]!.filter { occupied.contains($0["id"].string ?? "") }.map { row in
             .object(["id": .string(identity.uuid(machine: machineID, session: sessionID, resource: row["id"].string ?? "")), "title": row["name"], "backend": .string("cmux-tui"),
@@ -124,6 +126,10 @@ struct TuiSessionSnapshot: Sendable {
                                  title: tabNames[terminal] ?? content["title"].string.flatMap { $0.isEmpty ? nil : $0 } ?? workspaceRows[workspace]?["name"].string ?? provider, cwd: content["cwd"].string, state: state))
         }
         bindings = bound
+    }
+    /// A conversation's title by the same rule a live binding takes: the tab's own name, then the terminal's title.
+    func title(ofTerminal terminal: String) -> String? {
+        tabNames[terminal] ?? terminalTitles[terminal].flatMap { $0.isEmpty ? nil : $0 }
     }
     func selectors(_ binding: Binding? = nil) -> [String: JSONValue] {
         var result: [String: JSONValue] = ["machine": .string(machine), "session": .string(session)]

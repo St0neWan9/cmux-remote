@@ -442,6 +442,17 @@ public actor TuiControlAdapter: CmuxControlling {
         }
         var next = catalog
         for binding in current.bindings { next[binding.id] = binding }
+        // An archived conversation whose Agent the daemon no longer reports, on a terminal that still runs, is served
+        // from its archived row. That row kept the title it was first seen with, so renaming its tab (on the Mac or
+        // from the phone) changed the page the rename was made on but never the list. It takes the current name by
+        // the live rule; a terminal a live binding claims belongs to that binding instead.
+        let claimed = Set(current.bindings.map(\.surfaceID))
+        for (id, archived) in next where !claimed.contains(archived.surfaceID) && current.runningTerminals.contains(archived.surfaceID) {
+            guard let title = current.title(ofTerminal: archived.terminal), title != archived.title else { continue }
+            next[id] = TuiSessionSnapshot.Binding(id: archived.id, provider: archived.provider, providerSession: archived.providerSession, terminal: archived.terminal,
+                                                  workspace: archived.workspace, surfaceID: archived.surfaceID, workspaceID: archived.workspaceID,
+                                                  title: title, cwd: archived.cwd, state: archived.state)
+        }
         guard next.count <= 200 else { throw BridgeError("too_large", "The daemon conversation archive is full.", status: 413) }
         if next != catalog { try archive?.save(identity: identity, rows: Array(next.values)) }
         catalog = next
