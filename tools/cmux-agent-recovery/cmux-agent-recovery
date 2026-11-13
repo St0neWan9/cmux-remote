@@ -1,0 +1,1046 @@
+#!/usr/bin/env python3
+"""Snapshot open coding agents and relaunch them after a reboot.
+
+cmux-tui keeps a durable detached owner, so quitting the TUI or killing the
+owner does not stop agents. A reboot or shutdown does: the owner, the
+per-terminal host processes and every agent process end together. cmux
+restores workspace records, but it does not restart terminal processes, and
+the agent conversation does not resume by itself.
+
+This tool closes that gap:
+
+  save      Record every currently open agent (Claude Code, Codex) with its
+            terminal, workspace, working directory, provider, agent session
+            id and command line.
+  restore   After reboot, ensure each local session owner is running and
+            relaunch every recorded agent with its resume flag in the same
+            workspace.
+  list      Show the latest snapshot.
+  install   Install a LaunchAgent that runs `save` every few minutes, so the
+            snapshot is fresh even when the machine is shut down abruptly.
+            With --auto-restore it also runs `restore` at login.
+  uninstall Remove those LaunchAgents.
+
+The snapshot only holds session ids, working directories and command lines;
+it never contains transcripts. It is stored mode 0600 under
+~/.local/state/cmux-agent-recovery by default.
+"""
+
+from __future__ import annotations
+
+import argparse
+import fcntl
+import json
+import os
+import plistlib
+import shlex
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+
+VERSION = 1
+DEFAULT_STATE = Path(
+    os.environ.get("CMUX_AGENT_RECOVERY_STATE")
+    or Path.home() / ".local" / "state" / "cmux-agent-recovery"
+)
+SNAPSHOT = "snapshot.json"
+RESTORE_REPORT = "last-restore.json"
+STATE_LOCK = "state.lock"
+SNAPSHOT_MODE = 0o600
+DIR_MODE = 0o700
+LAUNCH_AGENT_SAVE = "dev.valuz.cmux-agent-recovery.save"
+LAUNCH_AGENT_RESTORE = "dev.valuz.cmux-agent-recovery.restore"
+CMUX = os.environ.get("CMUX_TUI_BIN") or shutil.which("cmux-tui") or "cmux-tui"
+
+
+class CmuxError(RuntimeError):
+    pass
+
+
+# ---------------------------------------------------------------- utilities
+
+
+def now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def log(message: str, *, quiet: bool = False, error: bool = False) -> None:
+    if not quiet:
+        print(message, file=sys.stderr if error else sys.stdout, flush=True)
+
+
+def run(argv: list[str], *, timeout: int = 30, check: bool = True) -> subprocess.CompletedProcess:
+    try:
+        proc = subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
+    except FileNotFoundError as exc:
+        raise CmuxError(f"{argv[0]}: not found") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise CmuxError(f"timed out after {timeout}s: {' '.join(argv)}") from exc
+    if check and proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout or "").strip()
+        raise CmuxError(f"{' '.join(argv)} failed ({proc.returncode}): {detail}")
+    return proc
+
+
+def cmux_json(args: list[str], *, timeout: int = 30) -> object:
+    proc = run([CMUX] + args, timeout=timeout)
+    text = proc.stdout.strip()
+    if not text:
+        return None
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise CmuxError(f"invalid JSON from {' '.join([CMUX] + args)}: {text[:200]}") from exc
+
+
+def ensure_state_dir(state: Path) -> None:
+    state.mkdir(parents=True, exist_ok=True)
+    os.chmod(state, DIR_MODE)
+
+
+def write_private(path: Path, data: dict) -> None:
+    ensure_state_dir(path.parent)
+    fd, tmp = tempfile.mkstemp(prefix=".tmp-", dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(data, handle, ensure_ascii=False, indent=2, sort_keys=True)
+            handle.write("\n")
+        os.chmod(tmp, SNAPSHOT_MODE)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def read_json(path: Path) -> dict | None:
+    try:
+        with open(path, encoding="utf-8") as handle:
+            return json.load(handle)
+    except FileNotFoundError:
+        return None
+    except json.JSONDecodeError as exc:
+        raise CmuxError(f"{path} is not valid JSON: {exc}") from exc
+
+
+def acquire_state_lock(state: Path, *, blocking: bool):
+    """Serialize `save` and `restore` so a periodic save cannot overwrite a
+    half-restored snapshot."""
+    ensure_state_dir(state)
+    handle = open(state / STATE_LOCK, "a+", encoding="utf-8")
+    try:
+        fcntl.flock(handle, fcntl.LOCK_EX | (0 if blocking else fcntl.LOCK_NB))
+    except BlockingIOError:
+        handle.close()
+        return None
+    return handle
+
+
+# ------------------------------------------------------------ session access
+
+
+def socket_dirs() -> list[Path]:
+    uid = os.getuid()
+    candidates: list[Path] = []
+    runtime = os.environ.get("XDG_RUNTIME_DIR")
+    if runtime:
+        candidates.append(Path(runtime) / f"cmux-tui-{uid}")
+    # launchd may not export TMPDIR; ask the platform for the per-user temp dir.
+    try:
+        probe = subprocess.run(
+            ["/usr/bin/getconf", "DARWIN_USER_TEMP_DIR"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if probe.returncode == 0 and probe.stdout.strip():
+            candidates.append(Path(probe.stdout.strip()) / f"cmux-tui-{uid}")
+    except (OSError, subprocess.SubprocessError):
+        pass
+    env_socket = os.environ.get("CMUX_TUI_SOCKET") or os.environ.get("CMUX_MUX_SOCKET")
+    if env_socket:
+        candidates.append(Path(env_socket).parent)
+    candidates.append(Path(tempfile.gettempdir()) / f"cmux-tui-{uid}")
+    candidates.append(Path("/tmp") / f"cmux-tui-{uid}")
+    seen: set[Path] = set()
+    result: list[Path] = []
+    for candidate in candidates:
+        if candidate not in seen:
+            seen.add(candidate)
+            result.append(candidate)
+    return result
+
+
+def discover_sessions() -> list[tuple[str, Path]]:
+    found: list[tuple[str, Path]] = []
+    seen: set[Path] = set()
+    for directory in socket_dirs():
+        try:
+            sockets = sorted(directory.glob("*.sock"))
+        except OSError:
+            continue
+        for socket in sockets:
+            if socket in seen or socket.name.endswith(".spawn-lock"):
+                continue
+            seen.add(socket)
+            found.append((socket.name[: -len(".sock")], socket))
+    return found
+
+
+def session_args(name: str, socket: Path | str | None) -> list[str]:
+    if socket:
+        return ["--socket", str(socket)]
+    return ["--session", name]
+
+
+def owner_args(name: str, socket: Path | str | None) -> list[str]:
+    # Starting an owner needs both: the socket is the endpoint and the name
+    # selects the durable state subtree. `--socket` alone would start a
+    # "main"-named owner and read the wrong state after a reboot. Most read
+    # commands reject both together, so they use session_args() instead.
+    if socket:
+        return ["--session", name, "--socket", str(socket)]
+    return ["--session", name]
+
+
+def session_is_local(name: str, args: list[str]) -> bool:
+    """A remote SSH session's local socket proxies another machine.
+
+    Restoring those locally would start the agent on this Mac instead of the
+    remote host, so they are skipped.
+    """
+    try:
+        machines = cmux_json(args + ["machine", "list", "--json"]) or []
+        session = cmux_json(args + ["session", name, "show", "--json"])
+    except CmuxError:
+        return False
+    if not isinstance(session, dict):
+        return False
+    machine_id = session.get("machine_id")
+    for machine in machines if isinstance(machines, list) else []:
+        if machine.get("id") == machine_id:
+            return machine.get("origin", "local") == "local"
+    return True
+
+
+# --------------------------------------------------------------- detection
+
+
+def provider_from_path(path: str | None) -> str | None:
+    if not path:
+        return None
+    lowered = path.lower()
+    base = os.path.basename(lowered)
+    if "claude" in base or "/claude/" in lowered:
+        return "claude"
+    if "codex" in base or "/codex/" in lowered:
+        return "codex"
+    return None
+
+
+def ps_command(pid: int) -> str | None:
+    try:
+        proc = run(["ps", "-o", "command=", "-p", str(pid)], timeout=5, check=False)
+    except CmuxError:
+        return None
+    if proc.returncode != 0:
+        return None
+    return proc.stdout.strip() or None
+
+
+def agent_argv(process: dict, provider: str) -> list[str] | None:
+    """The agent's own argv, not the shell wrapper around it."""
+    for child in process.get("children") or []:
+        command = ps_command(int(child))
+        if not command:
+            continue
+        try:
+            argv = shlex.split(command)
+        except ValueError:
+            argv = command.split()
+        if argv and provider_from_path(argv[0]) == provider:
+            return argv
+    top = process.get("argv") or []
+    if top and provider_from_path(top[0]) == provider:
+        return list(top)
+    return None
+
+
+def session_id_from_argv(argv: list[str]) -> str | None:
+    """The agent's own command line often names its session explicitly."""
+    for index, item in enumerate(argv):
+        if item.startswith("--resume="):
+            return item.split("=", 1)[1] or None
+        if item.startswith("--session-id="):
+            return item.split("=", 1)[1] or None
+        if item in ("--resume", "-r") and index + 1 < len(argv):
+            value = argv[index + 1]
+            if not value.startswith("-"):
+                return value
+    if len(argv) >= 3 and argv[1] == "resume":
+        return argv[2]
+    return None
+
+
+# Flags that consume the following argument for `claude`. Positional arguments
+# are the prompt; replaying them on resume would re-send an old request.
+CLAUDE_VALUE_FLAGS = {
+    "-r",
+    "--resume",
+    "--model",
+    "--fallback-model",
+    "--append-system-prompt",
+    "--append-system-prompt-file",
+    "--permission-mode",
+    "--allowedTools",
+    "--allowed-tools",
+    "--disallowedTools",
+    "--disallowed-tools",
+    "--mcp-config",
+    "--settings",
+    "--add-dir",
+    "--output-format",
+    "--input-format",
+    "--max-turns",
+    "--agent",
+    "--agents",
+    "--plugin-dir",
+    "--system-prompt",
+    "--system-prompt-file",
+    "--thinking-display",
+    "--effort",
+    "--betas",
+    "--session-id",
+    "--debug-file",
+    "--max-budget-usd",
+    "--permission-prompt-tool",
+}
+
+
+def strip_claude_prompt(argv: list[str], *, keep_continue: bool = False) -> list[str]:
+    out = [argv[0]]
+    index = 1
+    while index < len(argv):
+        item = argv[index]
+        if item in ("--continue", "-c"):
+            if keep_continue:
+                out.append("--continue")
+            index += 1
+            continue
+        if item.startswith("-"):
+            out.append(item)
+            if item in CLAUDE_VALUE_FLAGS and "=" not in item:
+                if index + 1 < len(argv):
+                    out.append(argv[index + 1])
+                    index += 2
+                    continue
+            index += 1
+            continue
+        index += 1  # positional prompt
+    return out
+
+
+def collect_tab_ids(node: object, out: set[str]) -> None:
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if key == "tab_ids" and isinstance(value, list):
+                out.update(str(tab) for tab in value)
+            else:
+                collect_tab_ids(value, out)
+    elif isinstance(node, list):
+        for value in node:
+            collect_tab_ids(value, out)
+
+
+def tab_workspace_map(args: list[str]) -> dict[str, str]:
+    mapping: dict[str, str] = {}
+    try:
+        screens = cmux_json(args + ["screen", "list", "--json"]) or []
+    except CmuxError:
+        return mapping
+    for screen in screens if isinstance(screens, list) else []:
+        workspace = screen.get("workspace_id")
+        if not workspace:
+            continue
+        tabs: set[str] = set()
+        collect_tab_ids(screen.get("layout"), tabs)
+        for tab in tabs:
+            mapping[tab] = workspace
+    return mapping
+
+
+def collect_agents(name: str, args: list[str], *, quiet: bool = False) -> list[dict]:
+    terminals = cmux_json(args + ["terminal", "list", "--json"]) or []
+    running = {
+        terminal["id"]: terminal
+        for terminal in terminals
+        if isinstance(terminal, dict) and terminal.get("running") and terminal.get("id")
+    }
+    if not running:
+        return []
+
+    records = cmux_json(args + ["agent", "list", "--json"]) or []
+    latest: dict[str, dict] = {}
+    for record in records if isinstance(records, list) else []:
+        terminal_id = record.get("terminal_id")
+        if terminal_id not in running:
+            continue
+        previous = latest.get(terminal_id)
+        if previous is None or int(record.get("updated_at_ms") or 0) > int(
+            previous.get("updated_at_ms") or 0
+        ):
+            latest[terminal_id] = record
+
+    tab_ws = tab_workspace_map(args)
+    workspaces = cmux_json(args + ["workspace", "list", "--json"]) or []
+    workspace_names = {
+        workspace["id"]: workspace.get("name") or ""
+        for workspace in workspaces
+        if isinstance(workspace, dict) and workspace.get("id")
+    }
+
+    entries: list[dict] = []
+    for terminal_id, terminal in running.items():
+        try:
+            process = cmux_json(
+                args + ["terminal", terminal_id, "process", "show", "--json"]
+            ) or {}
+        except CmuxError:
+            continue
+        provider = provider_from_path(process.get("foreground_executable"))
+        if not provider:
+            continue
+        argv = agent_argv(process, provider)
+        record = latest.get(terminal_id) or {}
+        extra = record.get("extra") or {}
+        if extra.get("agent") and extra.get("agent") != provider:
+            log(
+                f"skip {terminal_id}: foreground is {provider}, latest report is "
+                f"{extra.get('agent')}",
+                quiet=quiet,
+                error=True,
+            )
+            continue
+        if not argv:
+            log(f"skip {terminal_id}: could not read the {provider} command line", quiet=quiet, error=True)
+            continue
+        if not terminal.get("tab_ids"):
+            log(
+                f"skip {terminal_id}: terminal has no placement in any workspace",
+                quiet=quiet,
+                error=True,
+            )
+            continue
+        # The hook-reported id is the live session. A `claude --resume` in the
+        # process argv can name the original conversation that was copied into
+        # a new session, so it is only a fallback.
+        session_id = extra.get("agent_session_id") or session_id_from_argv(argv)
+        resume_mode = "id"
+        if not session_id:
+            if provider == "claude" and ("--continue" in argv or "-c" in argv):
+                resume_mode = "continue"
+            else:
+                log(
+                    f"skip {terminal_id}: no agent session id reported and the "
+                    "command line does not name one",
+                    quiet=quiet,
+                    error=True,
+                )
+                continue
+
+        tab_id = terminal.get("tab_id")
+        workspace_id = tab_ws.get(tab_id) if tab_id else None
+        if workspace_id is None:
+            for candidate in terminal.get("tab_ids") or []:
+                workspace_id = tab_ws.get(candidate)
+                if workspace_id:
+                    break
+
+        cwd = (
+            process.get("foreground_cwd")
+            or process.get("cwd")
+            or terminal.get("cwd")
+            or str(Path.home())
+        )
+        entries.append(
+            {
+                "terminal_id": terminal_id,
+                "tab_id": tab_id,
+                "workspace_id": workspace_id,
+                "workspace_name": workspace_names.get(workspace_id or "", ""),
+                "title": terminal.get("title") or "",
+                "cwd": cwd,
+                "provider": provider,
+                "agent_session_id": str(session_id or ""),
+                "resume_mode": resume_mode,
+                "state": record.get("state"),
+                "updated_at_ms": record.get("updated_at_ms"),
+                "argv": argv,
+            }
+        )
+    # Two terminals can display the same agent session; resuming both would
+    # open a copy in the second one. Prefer the placed terminal, then dedupe.
+    entries.sort(key=lambda entry: entry.get("workspace_id") is None)
+    deduped: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+    for entry in entries:
+        key = (
+            entry["provider"],
+            entry["agent_session_id"] or "continue:" + entry["cwd"],
+        )
+        if key in seen:
+            log(
+                f"skip {entry['terminal_id']}: {entry['provider']} "
+                f"{entry['agent_session_id'] or 'session'} is already recorded "
+                "for another terminal",
+                quiet=quiet,
+                error=True,
+            )
+            continue
+        seen.add(key)
+        deduped.append(entry)
+    return deduped
+
+
+# ---------------------------------------------------------------- commands
+
+
+def cmd_save(args: argparse.Namespace) -> int:
+    state = Path(args.state_dir).expanduser()
+    lock = acquire_state_lock(state, blocking=False)
+    if lock is None:
+        log("a restore is running; snapshot skipped", quiet=args.quiet, error=True)
+        return 0
+    if args.session:
+        wanted = set(args.session)
+        discovered = [
+            (name, socket)
+            for name, socket in discover_sessions()
+            if name in wanted
+        ]
+        missing = wanted - {name for name, _ in discovered}
+        for name in sorted(missing):
+            discovered.append((name, None))
+    else:
+        discovered = discover_sessions()
+
+    snapshot = {"version": VERSION, "captured_at": now_iso(), "sessions": {}}
+    reachable = 0
+    for name, socket in discovered:
+        c_args = session_args(name, socket)
+        try:
+            cmux_json(c_args + ["server", "status", "--json"])
+        except CmuxError:
+            log(f"{name}: not running, skipped", quiet=args.quiet, error=True)
+            continue
+        if not session_is_local(name, c_args):
+            log(f"{name}: remote session, skipped", quiet=args.quiet, error=True)
+            continue
+        reachable += 1
+        try:
+            agents = collect_agents(name, c_args, quiet=args.quiet)
+        except CmuxError as exc:
+            log(f"{name}: {exc}", quiet=args.quiet, error=True)
+            continue
+        if agents:
+            snapshot["sessions"][name] = {
+                "socket": str(socket) if socket else None,
+                "agents": agents,
+            }
+        log(f"{name}: {len(agents)} open agent(s)", quiet=args.quiet)
+
+    if reachable == 0 and not args.force:
+        log(
+            "no cmux session was reachable; keeping the previous snapshot "
+            "(use --force to overwrite it anyway)",
+            quiet=args.quiet,
+            error=True,
+        )
+        return 1
+
+    path = state / SNAPSHOT
+    write_private(path, snapshot)
+    total = sum(len(session["agents"]) for session in snapshot["sessions"].values())
+    log(f"saved {total} agent(s) from {len(snapshot['sessions'])} session(s) to {path}", quiet=args.quiet)
+    return 0
+
+
+def load_snapshot(state: Path) -> dict:
+    snapshot = read_json(state / SNAPSHOT)
+    if not snapshot:
+        raise CmuxError(f"no snapshot at {state / SNAPSHOT}; run `save` first")
+    if snapshot.get("version") != VERSION:
+        raise CmuxError(f"unsupported snapshot version {snapshot.get('version')}")
+    return snapshot
+
+
+def ensure_owner(name: str, socket: str | None, *, timeout: int = 20) -> list[str]:
+    """Make sure the local owner exists, then return the arguments that address it."""
+    primary = session_args(name, socket)
+    try:
+        cmux_json(primary + ["server", "status", "--json"])
+        return primary
+    except CmuxError:
+        pass
+
+    start_args = owner_args(name, socket)
+    attempts = [start_args]
+    if socket:
+        attempts.append(["--session", name])  # temp dir changed since the snapshot
+    last_error: Exception | None = None
+    for c_args in attempts:
+        try:
+            run([CMUX] + c_args + ["server", "ensure"], timeout=30, check=False)
+        except CmuxError as exc:
+            last_error = exc
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            try:
+                cmux_json(c_args + ["server", "status", "--json"])
+                return c_args
+            except CmuxError:
+                time.sleep(0.5)
+    raise CmuxError(f"could not start the cmux owner for {name}: {last_error}")
+
+
+def live_agents(args: list[str]) -> set[tuple[str, str]]:
+    live: set[tuple[str, str]] = set()
+    terminals = cmux_json(args + ["terminal", "list", "--json"]) or []
+    running = {
+        terminal["id"]
+        for terminal in terminals
+        if isinstance(terminal, dict) and terminal.get("running")
+    }
+    records = cmux_json(args + ["agent", "list", "--json"]) or []
+    for record in records if isinstance(records, list) else []:
+        extra = record.get("extra") or {}
+        agent = extra.get("agent")
+        session_id = extra.get("agent_session_id")
+        if record.get("terminal_id") in running and agent and session_id:
+            live.add((str(agent), str(session_id)))
+    return live
+
+
+def resume_argv(entry: dict) -> list[str] | None:
+    provider = entry.get("provider")
+    session_id = entry.get("agent_session_id") or ""
+    argv = [str(item) for item in (entry.get("argv") or [])]
+    if not argv:
+        argv = ["claude"] if provider == "claude" else ["codex"]
+    if not session_id:
+        # `claude --continue` resumes the most recent conversation in the cwd.
+        return strip_claude_prompt(argv, keep_continue=True) if provider == "claude" else argv
+
+    if provider == "claude":
+        argv = strip_claude_prompt(argv)
+        if any(item.startswith("--resume=") for item in argv):
+            return [
+                f"--resume={session_id}" if item.startswith("--resume=") else item
+                for item in argv
+            ]
+        index = next((i for i, item in enumerate(argv) if item in ("--resume", "-r")), None)
+        if index is not None:
+            if index + 1 >= len(argv) or argv[index + 1].startswith("-"):
+                argv.insert(index + 1, session_id)
+            else:
+                argv[index + 1] = session_id
+            return argv
+        return argv + ["--resume", session_id]
+
+    if provider == "codex":
+        index = next((i for i, item in enumerate(argv) if i > 0 and item == "resume"), None)
+        if index is not None:
+            if index + 1 < len(argv) and not argv[index + 1].startswith("-"):
+                return argv[: index + 2]  # drop a trailing prompt
+            return argv[: index + 1] + [session_id]
+        return [argv[0], "resume", session_id]
+
+    return None
+
+
+def running_terminal_text(args: list[str]) -> str:
+    """Command lines of every running terminal, for resume-id matching.
+
+    The durable terminal argv keeps the command it was launched with even when
+    the inner process has exec'd into something else, and it is the only live
+    signal available before a resumed agent's hooks report.
+    """
+    terminals = cmux_json(args + ["terminal", "list", "--json"]) or []
+    parts: list[str] = []
+    for terminal in terminals if isinstance(terminals, list) else []:
+        if not (isinstance(terminal, dict) and terminal.get("running")):
+            continue
+        try:
+            info = cmux_json(
+                args + ["terminal", terminal["id"], "process", "show", "--json"]
+            ) or {}
+        except CmuxError:
+            continue
+        parts.append(" ".join(str(item) for item in (info.get("argv") or [])))
+    return "\n".join(parts)
+
+
+def resolve_workspace(entry: dict, args: list[str], cache: dict) -> str:
+    entry_key = (entry.get("workspace_id"), entry.get("workspace_name"))
+    if entry_key in cache:
+        return cache[entry_key]
+
+    workspaces = cmux_json(args + ["workspace", "list", "--json"]) or []
+    by_id = {workspace["id"]: workspace for workspace in workspaces if workspace.get("id")}
+    workspace_id = entry.get("workspace_id")
+    if workspace_id in by_id:
+        cache[entry_key] = workspace_id
+        return workspace_id
+
+    name = entry.get("workspace_name") or ""
+    for candidate in by_id.values():
+        if name and candidate.get("name") == name:
+            cache[entry_key] = candidate["id"]
+            return candidate["id"]
+
+    created = cmux_json(
+        args
+        + ["workspace", "create", "--name", name or "restored", "--empty", "--json"]
+    ) or {}
+    value = created.get("value") or {}
+    new_id = value.get("workspace_id")
+    if not new_id:
+        raise CmuxError(f"could not create a workspace for {entry.get('terminal_id')}")
+    cache[entry_key] = new_id
+    return new_id
+
+
+def restore_script(entry: dict) -> tuple[str, list[str]]:
+    argv = resume_argv(entry)
+    if argv is None:
+        raise CmuxError(f"unsupported provider {entry.get('provider')}")
+    cwd = entry.get("cwd") or str(Path.home())
+    if not os.path.isdir(cwd):
+        cwd = str(Path.home())
+    script = "cd {} && exec {}".format(
+        shlex.quote(cwd), " ".join(shlex.quote(item) for item in argv)
+    )
+    return script, argv
+
+
+def cmd_restore(args: argparse.Namespace) -> int:
+    state = Path(args.state_dir).expanduser()
+    lock = acquire_state_lock(state, blocking=True)
+    snapshot = load_snapshot(state)
+    report = {
+        "restored_at": now_iso(),
+        "dry_run": bool(args.dry_run),
+        "sessions": {},
+    }
+    failures = 0
+
+    for name, data in snapshot["sessions"].items():
+        if args.session and name not in args.session:
+            continue
+        entries = data.get("agents") or []
+        session_report = {"launched": [], "skipped": [], "failed": []}
+        report["sessions"][name] = session_report
+        if not entries:
+            continue
+
+        try:
+            c_args = ensure_owner(name, data.get("socket"))
+        except CmuxError as exc:
+            log(f"{name}: {exc}", quiet=args.quiet, error=True)
+            session_report["failed"].extend(
+                {"agent_session_id": entry["agent_session_id"], "reason": str(exc)}
+                for entry in entries
+            )
+            failures += len(entries)
+            continue
+
+        ps_text = ""
+        argv_text = ""
+        if not args.dry_run:
+            ps_text = run(["ps", "-axo", "command="], timeout=15, check=False).stdout
+            try:
+                argv_text = running_terminal_text(c_args)
+            except CmuxError:
+                argv_text = ""
+
+        live = live_agents(c_args)
+        cache: dict = {}
+        for entry in entries:
+            session_id = entry.get("agent_session_id") or ""
+            provider = entry.get("provider")
+            key = (
+                (provider, session_id)
+                if session_id
+                else (provider, "continue:" + (entry.get("cwd") or ""))
+            )
+            short = session_id[:8] if session_id else "continue"
+            label = f"{provider} {short} ({entry.get('title') or entry['terminal_id']})"
+
+            if not args.dry_run and (
+                key in live
+                or (session_id and session_id in argv_text)
+                or (session_id and ps_text and session_id in ps_text)
+            ):
+                log(f"{name}: skip {label}: already running", quiet=args.quiet)
+                session_report["skipped"].append(
+                    {"agent_session_id": session_id, "reason": "already running"}
+                )
+                continue
+
+            try:
+                workspace_id = resolve_workspace(entry, c_args, cache)
+                script, argv = restore_script(entry)
+            except CmuxError as exc:
+                log(f"{name}: cannot restore {label}: {exc}", quiet=args.quiet, error=True)
+                session_report["failed"].append(
+                    {"agent_session_id": session_id, "reason": str(exc)}
+                )
+                failures += 1
+                continue
+
+            if args.dry_run:
+                log(
+                    f"[dry-run] {name} workspace {workspace_id}: {script}",
+                    quiet=args.quiet,
+                )
+                session_report["launched"].append(
+                    {"agent_session_id": session_id, "workspace_id": workspace_id, "argv": argv}
+                )
+                continue
+
+            try:
+                result = cmux_json(
+                    c_args
+                    + [
+                        "workspace",
+                        workspace_id,
+                        "run",
+                        "--on-exit",
+                        "keep",
+                        "--json",
+                        "--",
+                        "/bin/sh",
+                        "-lc",
+                        script,
+                    ]
+                )
+            except CmuxError as exc:
+                log(f"{name}: failed to launch {label}: {exc}", quiet=args.quiet, error=True)
+                session_report["failed"].append(
+                    {"agent_session_id": session_id, "reason": str(exc)}
+                )
+                failures += 1
+                continue
+
+            value = (result or {}).get("value") or {}
+            terminal_id = value.get("terminal_id")
+            log(f"{name}: restored {label} as {terminal_id}", quiet=args.quiet)
+            session_report["launched"].append(
+                {
+                    "agent_session_id": session_id,
+                    "terminal_id": terminal_id,
+                    "workspace_id": workspace_id,
+                    "argv": argv,
+                }
+            )
+            live.add(key)
+
+    write_private(state / RESTORE_REPORT, report)
+    launched = sum(len(s["launched"]) for s in report["sessions"].values())
+    skipped = sum(len(s["skipped"]) for s in report["sessions"].values())
+    log(
+        f"restore finished: {launched} launched, {skipped} already running, {failures} failed",
+        quiet=args.quiet,
+    )
+    return 1 if failures else 0
+
+
+def cmd_list(args: argparse.Namespace) -> int:
+    state = Path(args.state_dir).expanduser()
+    snapshot = read_json(state / SNAPSHOT)
+    if not snapshot:
+        log(f"no snapshot at {state / SNAPSHOT}", quiet=args.quiet)
+        return 1
+    if args.json:
+        print(json.dumps(snapshot, ensure_ascii=False, indent=2, sort_keys=True))
+        return 0
+    print(f"snapshot: {snapshot.get('captured_at')}  ({state / SNAPSHOT})")
+    for name, data in snapshot.get("sessions", {}).items():
+        print(f"\n[{name}]  {len(data.get('agents') or [])} agent(s)  socket={data.get('socket')}")
+        for entry in data.get("agents") or []:
+            print(
+                "  {provider:<6} {sid}  {state:<8} {title}\n"
+                "         workspace {workspace}\n"
+                "         cwd       {cwd}\n"
+                "         argv      {argv}".format(
+                    provider=entry.get("provider", "?"),
+                    sid=entry.get("agent_session_id", "?"),
+                    state=entry.get("state") or "?",
+                    title=entry.get("title") or "",
+                    workspace=entry.get("workspace_name") or entry.get("workspace_id") or "(none)",
+                    cwd=entry.get("cwd") or "",
+                    argv=" ".join(entry.get("argv") or []),
+                )
+            )
+    return 0
+
+
+# ------------------------------------------------------------- LaunchAgents
+
+
+def launch_agent_dir() -> Path:
+    return Path.home() / "Library" / "LaunchAgents"
+
+
+def launchctl(*args: str) -> subprocess.CompletedProcess:
+    return run(["launchctl", *args], timeout=20, check=False)
+
+
+def write_plist(label: str, program: list[str], *, interval: int | None, run_at_load: bool) -> Path:
+    directory = launch_agent_dir()
+    directory.mkdir(parents=True, exist_ok=True)
+    state = DEFAULT_STATE
+    ensure_state_dir(state)
+    payload = {
+        "Label": label,
+        "ProgramArguments": program,
+        "EnvironmentVariables": {
+            "PATH": ":".join(
+                [
+                    str(Path.home() / ".local" / "bin"),
+                    "/opt/homebrew/bin",
+                    "/usr/local/bin",
+                    "/usr/bin",
+                    "/bin",
+                    "/usr/sbin",
+                    "/sbin",
+                ]
+            )
+        },
+        "RunAtLoad": run_at_load,
+        "ProcessType": "Background",
+        "LowPriorityIO": True,
+        "StandardOutPath": str(state / "launchd.log"),
+        "StandardErrorPath": str(state / "launchd.log"),
+    }
+    if interval:
+        payload["StartInterval"] = interval
+        payload["ThrottleInterval"] = 30
+    path = directory / f"{label}.plist"
+    with open(path, "wb") as handle:
+        plistlib.dump(payload, handle)
+    os.chmod(path, 0o600)
+    return path
+
+
+def bootstrap(label: str, path: Path) -> None:
+    domain = f"gui/{os.getuid()}"
+    launchctl("bootout", domain, str(path))
+    result = launchctl("bootstrap", domain, str(path))
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout).strip()
+        raise CmuxError(f"launchctl bootstrap {label} failed: {detail}")
+
+
+def remove_agent(label: str) -> None:
+    domain = f"gui/{os.getuid()}"
+    path = launch_agent_dir() / f"{label}.plist"
+    launchctl("bootout", domain, str(path))
+    try:
+        path.unlink()
+        log(f"removed {path}")
+    except FileNotFoundError:
+        pass
+
+
+def cmd_install(args: argparse.Namespace) -> int:
+    script = str(Path(__file__).resolve())
+    path = write_plist(
+        LAUNCH_AGENT_SAVE,
+        [script, "save", "--quiet"],
+        interval=max(30, int(args.interval)),
+        run_at_load=True,
+    )
+    bootstrap(LAUNCH_AGENT_SAVE, path)
+    log(f"installed {LAUNCH_AGENT_SAVE}: save every {args.interval}s ({path})")
+
+    if args.auto_restore:
+        restore_path = write_plist(
+            LAUNCH_AGENT_RESTORE,
+            [script, "restore", "--quiet"],
+            interval=None,
+            run_at_load=True,
+        )
+        bootstrap(LAUNCH_AGENT_RESTORE, restore_path)
+        log(f"installed {LAUNCH_AGENT_RESTORE}: restore at login ({restore_path})")
+    else:
+        remove_agent(LAUNCH_AGENT_RESTORE)
+    return 0
+
+
+def cmd_uninstall(args: argparse.Namespace) -> int:
+    for label in (LAUNCH_AGENT_SAVE, LAUNCH_AGENT_RESTORE):
+        remove_agent(label)
+    return 0
+
+
+# ------------------------------------------------------------------- parser
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="cmux-agent-recovery",
+        description="Snapshot open coding agents and relaunch them after a reboot.",
+    )
+    parser.add_argument("--state-dir", default=str(DEFAULT_STATE), help=argparse.SUPPRESS)
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    save = sub.add_parser("save", help="record currently open agents")
+    save.add_argument("--session", action="append", help="only this cmux session (repeatable)")
+    save.add_argument("--force", action="store_true", help="overwrite even if no session is reachable")
+    save.add_argument("--quiet", action="store_true")
+    save.set_defaults(func=cmd_save)
+
+    restore = sub.add_parser("restore", help="relaunch recorded agents after a reboot")
+    restore.add_argument("--session", action="append", help="only this cmux session (repeatable)")
+    restore.add_argument("--dry-run", action="store_true", help="print the commands without running them")
+    restore.add_argument("--quiet", action="store_true")
+    restore.set_defaults(func=cmd_restore)
+
+    listing = sub.add_parser("list", help="show the latest snapshot")
+    listing.add_argument("--json", action="store_true")
+    listing.add_argument("--quiet", action="store_true")
+    listing.set_defaults(func=cmd_list)
+
+    install = sub.add_parser("install", help="install a LaunchAgent that snapshots periodically")
+    install.add_argument("--interval", type=int, default=300, help="seconds between snapshots (default 300)")
+    install.add_argument("--auto-restore", action="store_true", help="also restore agents at login")
+    install.set_defaults(func=cmd_install)
+
+    uninstall = sub.add_parser("uninstall", help="remove the LaunchAgents")
+    uninstall.set_defaults(func=cmd_uninstall)
+    return parser
+
+
+def main(argv: list[str]) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if not shutil.which(CMUX) and not Path(CMUX).exists():
+        parser.error(f"cmux-tui not found (looked for {CMUX}); set CMUX_TUI_BIN")
+    try:
+        return int(args.func(args))
+    except CmuxError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    except KeyboardInterrupt:
+        return 130
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
