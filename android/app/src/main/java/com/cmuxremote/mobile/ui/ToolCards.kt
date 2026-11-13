@@ -433,7 +433,8 @@ private fun ToolCodeCard(
                         color = MobileDesign.Accent,
                         style = MaterialTheme.typography.labelMedium,
                         modifier = Modifier
-                            .background(MobileDesign.Canvas, RoundedCornerShape(50))
+                            .clip(RoundedCornerShape(50))
+                            .background(MobileDesign.Canvas)
                             .clickable { onOpenReference(path) }
                             .padding(horizontal = 10.dp, vertical = 7.dp),
                     )
@@ -644,7 +645,8 @@ private fun PageAction(
 ) {
     Box(
         modifier = modifier
-            .background(MobileDesign.Soft, RoundedCornerShape(50))
+            .clip(RoundedCornerShape(50))
+            .background(MobileDesign.Soft)
             .clickable(enabled = enabled, onClick = onClick)
             .padding(vertical = 10.dp),
         contentAlignment = Alignment.Center,

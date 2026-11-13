@@ -348,7 +348,7 @@ fun WhitePageHeader(
     ) {
         if (dismissal == PageDismissal.Back) {
             Box(
-                modifier = Modifier.size(44.dp).testTag("page.back").clickable(onClick = onDismiss),
+                modifier = Modifier.size(44.dp).clip(CircleShape).testTag("page.back").clickable(onClick = onDismiss),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(Icons.Rounded.ChevronLeft, contentDescription = stringResource(R.string.common_back), tint = MobileDesign.Ink, modifier = Modifier.size(22.dp))
@@ -369,7 +369,7 @@ fun WhitePageHeader(
             trailing()
         } else if (dismissal == PageDismissal.Close) {
             Box(
-                modifier = Modifier.size(44.dp).testTag("page.close").clickable(onClick = onDismiss),
+                modifier = Modifier.size(44.dp).clip(CircleShape).testTag("page.close").clickable(onClick = onDismiss),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(Icons.Rounded.Close, contentDescription = stringResource(R.string.common_close), tint = MobileDesign.Ink, modifier = Modifier.size(20.dp))

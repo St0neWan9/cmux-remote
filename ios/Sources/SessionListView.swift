@@ -83,7 +83,11 @@ struct SessionListView: View {
                                 .accessibilityAddTraits(filter == value ? .isSelected : [])
                         }
                     }
+                    // The scroll view clips to its bounds, which cut the selected capsule's shadow off below it. The
+                    // row gets room for the shadow inside and gives it back outside, so the layout does not move.
+                    .padding(.horizontal, MobileDesign.pageInset).padding(.vertical, 14)
                     }
+                    .padding(.horizontal, -MobileDesign.pageInset).padding(.vertical, -14)
                     if let startNotice {
                         Label(startNotice, systemImage: awaiting == nil ? "checkmark.circle" : "hourglass")
                             .font(.footnote).foregroundStyle(.secondary).accessibilityIdentifier("sessions.start_notice")

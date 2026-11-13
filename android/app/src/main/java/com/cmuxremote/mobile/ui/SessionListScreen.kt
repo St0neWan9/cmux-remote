@@ -1,5 +1,6 @@
 package com.cmuxremote.mobile.ui
 
+import androidx.compose.ui.layout.layout
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -55,6 +56,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.shadow
@@ -215,7 +217,7 @@ fun DrawerContent(
             Text(stringResource(R.string.app_name), color = MobileDesign.Ink, style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
             Box {
                 Box(
-                    modifier = Modifier.size(44.dp).clickable { sortOpen = true },
+                    modifier = Modifier.size(44.dp).clip(CircleShape).clickable { sortOpen = true },
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
@@ -239,7 +241,7 @@ fun DrawerContent(
                 }
             }
             Box(
-                modifier = Modifier.size(44.dp).clickable { searching = true },
+                modifier = Modifier.size(44.dp).clip(CircleShape).clickable { searching = true },
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
@@ -366,7 +368,7 @@ fun DrawerContent(
                         )
                     }
                     Box(
-                        modifier = Modifier.size(44.dp).testTag("sessions.host.settings.$id").clickable { onHostConnection(id) },
+                        modifier = Modifier.size(44.dp).clip(CircleShape).testTag("sessions.host.settings.$id").clickable { onHostConnection(id) },
                         contentAlignment = Alignment.Center,
                     ) {
                         Icon(
@@ -444,7 +446,8 @@ private fun DrawerSessionRow(
         modifier = Modifier
             .fillMaxWidth()
             .padding(start = 16.dp)
-            .background(if (selected) MobileDesign.AccentSoft else MobileDesign.Canvas, androidx.compose.foundation.shape.RoundedCornerShape(10.dp))
+            .clip(androidx.compose.foundation.shape.RoundedCornerShape(10.dp))
+            .background(if (selected) MobileDesign.AccentSoft else MobileDesign.Canvas)
             .clickable(onClick = onClick)
             .padding(horizontal = 10.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -474,7 +477,8 @@ private fun DrawerRow(title: String, count: Int, selected: Boolean, onClick: () 
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(if (selected) MobileDesign.AccentSoft else MobileDesign.Canvas, androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
+            .clip(androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
+            .background(if (selected) MobileDesign.AccentSoft else MobileDesign.Canvas)
             .clickable(onClick = onClick)
             .padding(horizontal = 10.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -917,8 +921,23 @@ private const val ARCHIVE_FILTER = 3
 
 @Composable
 private fun FilterChips(selected: Int, onSelect: (Int) -> Unit) {
+    // A scrolling row clips to its bounds, which cut off the selected pill's shadow. The row reaches into the page
+    // inset and a little above and below, with that room given back as padding, so the pills stay where they were.
+    val bleed = MobileDesign.PageInset
+    val rise = 8.dp
     Row(
-        modifier = Modifier.horizontalScroll(rememberScrollState()).testTag("sessions.filters"),
+        modifier = Modifier
+            .layout { measurable, constraints ->
+                val x = bleed.roundToPx()
+                val y = rise.roundToPx()
+                val wide = if (constraints.hasBoundedWidth) constraints.maxWidth + 2 * x else constraints.maxWidth
+                val placeable = measurable.measure(constraints.copy(minWidth = wide, maxWidth = wide))
+                val width = if (constraints.hasBoundedWidth) constraints.maxWidth else placeable.width - 2 * x
+                layout(width, placeable.height - 2 * y) { placeable.place(-x, -y) }
+            }
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = bleed, vertical = rise)
+            .testTag("sessions.filters"),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         listOf(

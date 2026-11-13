@@ -1,5 +1,7 @@
 package com.cmuxremote.mobile.ui
 
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.clip
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -766,7 +768,7 @@ fun CmuxApp(viewModel: CmuxViewModel) {
                     horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp),
                 ) {
                     Box(
-                        modifier = Modifier.size(44.dp).clickable { viewModel.closeGroup() },
+                        modifier = Modifier.size(44.dp).clip(CircleShape).clickable { viewModel.closeGroup() },
                         contentAlignment = Alignment.Center,
                     ) {
                         androidx.compose.material3.Icon(
