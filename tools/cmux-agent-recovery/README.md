@@ -156,7 +156,13 @@ For each session in the snapshot:
 1. `server status`; on failure `server ensure --session <name> --socket <path>`.
    Both flags are required: the socket selects the endpoint and the name selects
    the durable state subtree. Falling back to `--session` alone handles a temp
-   directory that moved.
+   directory that moved. `ensure` is retried with backoff, and if it still does
+   not produce a ready owner, `restore` starts the detached `--headless` owner
+   itself and waits longer than the CLI's own 10 second deadline: recovery owns
+   the start, so it does not depend on the login session already being ready.
+   Every failed attempt keeps the CLI's exit code and stderr, and the detached
+   owner's pid and exit state, in the restore report; a bare `None` no longer
+   hides the cause.
 2. Skip entries that are already running. The check uses the live agent roster
    for the session, the resume id in every running terminal's recorded command
    line, and the process table.

@@ -254,6 +254,51 @@ def ps_command(pid: int) -> str | None:
     return proc.stdout.strip() or None
 
 
+SHELL_BASENAMES = {"sh", "bash", "zsh", "dash", "ksh"}
+
+
+def shell_payload(argv: list[str]) -> str | None:
+    """The script passed to a shell's `-c`, if argv is a shell invocation."""
+    if not argv or os.path.basename(argv[0]).lower() not in SHELL_BASENAMES:
+        return None
+    for index in range(1, len(argv)):
+        item = argv[index]
+        if item == "--":
+            continue
+        if not item.startswith("-"):
+            return None
+        if "c" not in item[1:]:
+            continue
+        return argv[index + 1] if index + 1 < len(argv) else None
+    return None
+
+
+def unwrap_shell_argv(argv: list[str], provider: str) -> list[str] | None:
+    """The agent argv behind the `sh -lc 'cd <cwd> && exec <agent>'` wrapper.
+
+    `restore` starts every agent through that wrapper so it can change the
+    working directory. After `exec` the shell process itself is the agent, so
+    the terminal's recorded argv is the only place the agent command survives.
+    """
+    payload = shell_payload(argv)
+    if not payload:
+        return None
+    try:
+        words = shlex.split(payload)
+    except ValueError:
+        words = payload.split()
+    if "exec" in words:
+        words = words[words.index("exec") + 1 :]
+    else:
+        for separator in ("&&", ";", "||"):
+            if separator in words:
+                words = words[words.index(separator) + 1 :]
+                break
+    if words and provider_from_path(words[0]) == provider:
+        return words
+    return None
+
+
 def agent_argv(process: dict, provider: str) -> list[str] | None:
     """The agent's own argv, not the shell wrapper around it."""
     for child in process.get("children") or []:
@@ -269,6 +314,9 @@ def agent_argv(process: dict, provider: str) -> list[str] | None:
     top = process.get("argv") or []
     if top and provider_from_path(top[0]) == provider:
         return list(top)
+    unwrapped = unwrap_shell_argv(top, provider)
+    if unwrapped:
+        return unwrapped
     return None
 
 
@@ -580,8 +628,81 @@ def load_snapshot(state: Path) -> dict:
     return snapshot
 
 
-def ensure_owner(name: str, socket: str | None, *, timeout: int = 20) -> list[str]:
-    """Make sure the local owner exists, then return the arguments that address it."""
+DETACHED_OWNER_IDENTITY_ENV = (
+    "CMUX_SURFACE_ID",
+    "CMUX_WORKSPACE_ID",
+    "CMUX_TAB_ID",
+    "CMUX_PANEL_ID",
+    "CMUX_PANE_ID",
+)
+
+
+def clip(text: str, limit: int = 400) -> str:
+    text = " ".join((text or "").split())
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+def spawn_detached_owner(name: str, socket: str | None) -> subprocess.Popen:
+    """Start the headless owner the way `server ensure` does.
+
+    Recovery owns the start: `server ensure` has a 10 second deadline of its
+    own and, in the launchd login context, can give up before the login
+    session is ready. This is the same detached `--headless` process the CLI
+    would spawn: its own session, null stdio, and the launching client's
+    terminal identity variables removed so the owner does not inherit them.
+    """
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if key not in DETACHED_OWNER_IDENTITY_ENV
+    }
+    return subprocess.Popen(
+        [CMUX, "--headless", *owner_args(name, socket)],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+        close_fds=True,
+        env=env,
+    )
+
+
+def wait_for_owner(c_args: list[str], timeout: int) -> None:
+    deadline = time.monotonic() + timeout
+    last_error = "no answer"
+    while time.monotonic() < deadline:
+        try:
+            cmux_json(c_args + ["server", "status", "--json"])
+            return
+        except CmuxError as exc:
+            last_error = str(exc)
+            time.sleep(0.5)
+    raise CmuxError(f"status failed for {timeout}s: {last_error}")
+
+
+def ensure_owner(
+    name: str,
+    socket: str | None,
+    *,
+    timeout: int = 20,
+    attempts: int = 3,
+    retry_delay: float = 2.0,
+    start_timeout: int = 60,
+    quiet: bool = False,
+) -> list[str]:
+    """Make sure the local owner exists, then return the arguments that address it.
+
+    Recovery is responsible for starting cmux-tui, so a failed or slow
+    `server ensure` is not the end: after the CLI attempts, this spawns the
+    detached owner itself and waits longer than the CLI's own deadline.
+
+    At login the restore job also races the login session, and `server ensure`
+    fails the same way whether it gave up early or merely started slowly.
+    Each addressing mode is therefore retried with backoff, and every attempt
+    keeps the CLI's own exit code and stderr. The old code used
+    `check=False` and dropped both, which is why the restore report only ever
+    said `None`.
+    """
     primary = session_args(name, socket)
     try:
         cmux_json(primary + ["server", "status", "--json"])
@@ -589,24 +710,69 @@ def ensure_owner(name: str, socket: str | None, *, timeout: int = 20) -> list[st
     except CmuxError:
         pass
 
-    start_args = owner_args(name, socket)
-    attempts = [start_args]
+    modes = [owner_args(name, socket)]
     if socket:
-        attempts.append(["--session", name])  # temp dir changed since the snapshot
-    last_error: Exception | None = None
-    for c_args in attempts:
-        try:
-            run([CMUX] + c_args + ["server", "ensure"], timeout=30, check=False)
-        except CmuxError as exc:
-            last_error = exc
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
+        modes.append(["--session", name])  # temp dir changed since the snapshot
+
+    failures: list[str] = []
+    for c_args in modes:
+        mode = " ".join(c_args)
+        for attempt in range(1, attempts + 1):
+            ensure_error = ""
             try:
-                cmux_json(c_args + ["server", "status", "--json"])
+                proc = run([CMUX] + c_args + ["server", "ensure"], timeout=30, check=False)
+                if proc.returncode != 0:
+                    detail = clip((proc.stderr or proc.stdout or "").strip())
+                    ensure_error = f"server ensure exited {proc.returncode}" + (
+                        f": {detail}" if detail else ""
+                    )
+            except CmuxError as exc:
+                ensure_error = f"server ensure failed: {exc}"
+
+            try:
+                wait_for_owner(c_args, timeout)
                 return c_args
-            except CmuxError:
-                time.sleep(0.5)
-    raise CmuxError(f"could not start the cmux owner for {name}: {last_error}")
+            except CmuxError as exc:
+                status_error = str(exc)
+
+            failures.append(
+                f"[{mode}] ensure attempt {attempt}/{attempts}: "
+                f"{ensure_error or 'server ensure reported success'}; {status_error}"
+            )
+            if attempt < attempts:
+                delay = retry_delay * (2 ** (attempt - 1))
+                log(f"cmux owner {name} not ready, retrying in {delay:.0f}s", quiet=quiet, error=True)
+                time.sleep(delay)
+
+        # The CLI could not produce a ready owner; start it ourselves.
+        try:
+            owner = spawn_detached_owner(name, socket)
+        except OSError as exc:
+            failures.append(f"[{mode}] could not spawn a detached owner: {exc}")
+            continue
+        log(f"cmux owner {name} not ready after ensure; started pid {owner.pid}", quiet=quiet, error=True)
+        try:
+            wait_for_owner(c_args, start_timeout)
+            return c_args
+        except CmuxError as exc:
+            status_error = str(exc)
+
+        code = owner.poll()
+        state = "still starting" if code is None else f"exited {code}"
+        failures.append(
+            f"[{mode}] detached owner pid {owner.pid} {state}; {status_error}"
+        )
+        if code is None:
+            owner.terminate()
+            try:
+                owner.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                owner.kill()
+                owner.wait()
+
+    raise CmuxError(
+        f"could not start the cmux owner for {name}: " + " | ".join(failures)
+    )
 
 
 def live_agents(args: list[str]) -> set[tuple[str, str]]:
@@ -750,7 +916,7 @@ def cmd_restore(args: argparse.Namespace) -> int:
             continue
 
         try:
-            c_args = ensure_owner(name, data.get("socket"))
+            c_args = ensure_owner(name, data.get("socket"), quiet=args.quiet)
         except CmuxError as exc:
             log(f"{name}: {exc}", quiet=args.quiet, error=True)
             session_report["failed"].extend(
