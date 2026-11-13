@@ -49,7 +49,10 @@ struct SessionListView: View {
         let drawerSections = SessionHostSection.make(links: links, sessions: model.hostedSessions.filter { filter.matches($0.session, query: query, workspaceID: workspaceID) }, workspaces: workspaces)
         // Time order and a single selected workspace need no workspace headings.
         let grouped = workspaceID == nil && sortMode == .workspace
-        let recent = hosted.sorted { ($0.session.updatedAt ?? .distantPast) > ($1.session.updatedAt ?? .distantPast) }
+        // The Archive reads newest clear first; every other list by last activity.
+        let archive = filter == .archived
+        let order: (HostedSession) -> Date = { (archive ? $0.session.clearedAt : $0.session.updatedAt) ?? .distantPast }
+        let recent = hosted.sorted { order($0) > order($1) }
         // A search or a status filter is the reader looking for something: every match shows, nothing folds.
         let folds = query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && filter == .all
         let loading = model.loading
@@ -85,7 +88,8 @@ struct SessionListView: View {
                         Label(startNotice, systemImage: awaiting == nil ? "checkmark.circle" : "hourglass")
                             .font(.footnote).foregroundStyle(.secondary).accessibilityIdentifier("sessions.start_notice")
                     }
-                    if sortMode == .time {
+                    // The Archive is one list in clear order, whatever order the others take.
+                    if sortMode == .time || archive {
                         timeRows(recent, folds: folds, multiple: multiple)
                     } else {
                     ForEach(sections) { section in
@@ -132,7 +136,9 @@ struct SessionListView: View {
                     }
                     }
                     if hosted.isEmpty && !loading {
-                        Text(String(localized: !canRead ? "sessions.no_read_grant" : (model.hostedSessions.isEmpty ? "sessions.empty" : "sessions.no_matches"))).foregroundStyle(.secondary).padding(.vertical, 12)
+                        let archiveEmpty = archive && query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        Text(String(localized: !canRead ? "sessions.no_read_grant" : (model.hostedSessions.isEmpty ? "sessions.empty" : (archiveEmpty ? "sessions.archive_empty" : "sessions.no_matches"))))
+                            .foregroundStyle(.secondary).padding(.vertical, 12)
                     }
                     // The Mac's tab already says it is unreachable, and a Mac retried in the background is not shown
                     // as failing; the red line is for other failures.
@@ -262,6 +268,10 @@ struct SessionListView: View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 7) {
                 Text(session.title).font(.body).foregroundStyle(.primary).lineLimit(2)
+                if let cleared = session.clearedAt {
+                    Label(String(format: String(localized: "sessions.archived_at"), cleared.formatted(date: .abbreviated, time: .shortened)), systemImage: "archivebox")
+                        .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
                 HStack(spacing: 8) {
                     Text(session.agent.capitalized)
                     if let host { Text(host).lineLimit(1) }

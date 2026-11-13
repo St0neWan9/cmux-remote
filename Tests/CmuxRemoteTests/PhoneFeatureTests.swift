@@ -16,6 +16,11 @@ import CmuxRemoteCore
         let idle = SessionDescriptor(id: "c", agent: "claude", title: "Waiting", cwd: "/projects/cmux", workspaceID: "ABC", surfaceID: "s", state: "idle")
         #expect(SessionFilter.working.matches(idle, query: "", workspaceID: nil))
         #expect(!SessionFilter.readOnly.matches(idle, query: "", workspaceID: nil))
+        // A conversation `/clear` replaced is in the Archive and in no other list, search included.
+        let cleared = SessionDescriptor(id: "d", agent: "claude", title: "History", cwd: nil, state: "ended", clearedAt: Date(timeIntervalSince1970: 0))
+        #expect(SessionFilter.archived.matches(cleared, query: "hist", workspaceID: nil))
+        #expect(!SessionFilter.all.matches(cleared, query: "", workspaceID: nil) && !SessionFilter.readOnly.matches(cleared, query: "", workspaceID: nil))
+        #expect(!SessionFilter.archived.matches(ended, query: "", workspaceID: nil))
     }
     @Test func questionsSwitchBetweenCustomAndOrderedMultiSelect() {
         var draft = FeedQuestionDraft()

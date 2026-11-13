@@ -50,6 +50,7 @@ public actor TuiControlAdapter: CmuxControlling {
         case "vault.sessions", "chat.sessions.dump":
             let current = try await snapshot()
             let liveIDs = Set(current.bindings.map(\.id))
+            let claimed = Set(current.bindings.map(\.surfaceID))
             let activity = await hookActivity(current)
             let bindings = catalog.values.sorted { $0.id < $1.id }
             let paths = method == "vault.sessions" ? try transcripts.locate(Array(bindings)) : [:]
@@ -62,13 +63,17 @@ public actor TuiControlAdapter: CmuxControlling {
                 if !liveIDs.contains(binding.id) {
                     // A running terminal only means the Agent is still there when its own prompt is on screen; the
                     // shell that replaced it would accept the phone's text as a command, so that case is resumable.
-                    let running = current.runningTerminals.contains(binding.surfaceID)
+                    // A terminal another live Agent holds is that Agent's, as after `/clear`: its prompt is not this
+                    // conversation's, so the conversation there is over rather than revived.
+                    let running = current.runningTerminals.contains(binding.surfaceID) && !claimed.contains(binding.surfaceID)
                     let promptKnown = running ? await showsAgentPrompt(current, binding: binding) : nil
                     revived = running && promptKnown == true
                     if !revived { row["state"] = .string("ended"); row["status"] = .string("ended") }
                 }
                 if liveIDs.contains(binding.id) || revived, let state = activity[binding.providerSession] { row["state"] = .string(state); row["status"] = .string(state) }
                 else if revived { row["state"] = .string("idle"); row["status"] = .string("idle") }
+                // Revived is inferred from the screen, not proven by a hook; a later `/clear` on the terminal outranks it.
+                if revived { row["revived"] = .bool(true) }
                 // A conversation that can be reopened says so, so the phone offers to resume instead of a lock.
                 if !liveIDs.contains(binding.id), !revived {
                     let resumable = await resumableBinding(id: binding.id, in: current, promptKnown: promptKnown)

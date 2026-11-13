@@ -23,4 +23,6 @@ data class SessionItem(
     val resumable: Boolean = false,
     /** The Mac's display name, shown in a flat list that mixes Macs. */
     val hostName: String? = null,
+    /** When `/clear` replaced the conversation: it is listed in the Archive only, with this time under its title. */
+    val clearedAt: java.time.Instant? = null,
 )

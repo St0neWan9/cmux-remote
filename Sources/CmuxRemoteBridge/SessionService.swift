@@ -7,6 +7,8 @@ public actor SessionService {
     private struct Record: Sendable {
         var descriptor: SessionDescriptor
         let transcript: String?
+        /// Live only because its terminal still shows an Agent prompt, with no hook proving it is this Agent's.
+        var revived = false
     }
     private let cmux: any CmuxControlling
     private let transcriptRoots: [URL]
@@ -14,7 +16,7 @@ public actor SessionService {
     private let commandLine = AgentCommandLine()
     private let reader: TranscriptReader
     private var records: [String: Record] = [:]
-    private var transcriptTails: [String: (size: Int, cwd: String?, lastMessage: Date?, title: String?)] = [:]
+    private var transcriptTails: [String: (size: Int, cwd: String?, lastMessage: Date?, title: String?, clearedFrom: Date??)] = [:]
     /// Least recently used, so a burst of newly seen transcripts leaves the conversations still open in place.
     private var tailOrder: [String: Int] = [:]
     private var tailSequence = 0
@@ -190,23 +192,25 @@ public actor SessionService {
 
     /// Last message time and the agent's own directory; the tail is re-read only when the file grew.
     /// Write time stands in only when the tail holds no dated message.
-    private func transcriptFacts(_ path: String) -> (cwd: String?, updatedAt: Date?, title: String?)? {
+    /// `clearedFrom` is when `/clear` opened the session, read once from the file's unchanging start.
+    private func transcriptFacts(_ path: String) -> (cwd: String?, updatedAt: Date?, title: String?, lastMessage: Date?, clearedFrom: Date?)? {
         guard let attributes = try? FileManager.default.attributesOfItem(atPath: path),
               let size = (attributes[.size] as? NSNumber)?.intValue else { return nil }
         let modified = attributes[.modificationDate] as? Date
         if let cached = transcriptTails[path], cached.size == size {
             tailSequence += 1; tailOrder[path] = tailSequence
-            return (cached.cwd, cached.lastMessage ?? modified, cached.title)
+            return (cached.cwd, cached.lastMessage ?? modified, cached.title, cached.lastMessage, cached.clearedFrom ?? nil)
         }
         let cwd = size > 0 ? TranscriptWorkingDirectory().read(path: path, size: size) : nil
         let lastMessage = size > 0 ? TranscriptActivity().lastMessage(path: path, size: size) : nil
         // A record rewritten as the conversation develops, so a longer transcript may carry a newer name.
         let title = transcriptTails[path]?.title ?? TranscriptTitle().readTitle(path: path)
+        let clearedFrom = transcriptTails[path]?.clearedFrom ?? (size > 0 ? TranscriptOpening().clearedFrom(path: path) : nil)
         if transcriptTails[path] == nil, transcriptTails.count >= 512, let oldest = tailOrder.min(by: { $0.value < $1.value })?.key {
             transcriptTails[oldest] = nil; tailOrder[oldest] = nil
         }
         tailSequence += 1; tailOrder[path] = tailSequence
-        transcriptTails[path] = (size, cwd, lastMessage, title); return (cwd, lastMessage ?? modified, title)
+        transcriptTails[path] = (size, cwd, lastMessage, title, clearedFrom); return (cwd, lastMessage ?? modified, title, lastMessage, clearedFrom ?? nil)
     }
     /// The name the person gave each tab, which a cmux rename changes immediately; the vault keeps the agent's own title.
     private func surfaceTitles() async -> [String: String] {
@@ -273,12 +277,14 @@ public actor SessionService {
             record.descriptor.workspaceID = item["workspace_id"].string
             record.descriptor.surfaceID = item["surface_id"].string
             record.descriptor.state = item["state"].string ?? "unknown"
+            record.revived = item["revived"].bool == true
             // cmux verifies its own daemon sessions; for a desktop session it only keeps the row, so this
             // side applies the same rule it documents: an ended Agent whose transcript still records the
             // working directory can be reopened, and nothing else may claim it can.
             record.descriptor.resumable = item["resumable"].bool == true || desktopResumable(item, record: record)
             discovered[id] = record
         }
+        var opened: [String: (lastMessage: Date?, clearedFrom: Date?)] = [:]
         for (id, record) in discovered {
             guard let path = record.transcript, let facts = transcriptFacts(path) else { continue }
             let old = record.descriptor
@@ -286,6 +292,7 @@ public actor SessionService {
             let named = old.title == old.id ? facts.title ?? old.title : old.title
             discovered[id]?.descriptor = SessionDescriptor(id: old.id, agent: old.agent, title: named, cwd: facts.cwd ?? old.cwd, workspaceID: old.workspaceID,
                                                            surfaceID: old.surfaceID, state: old.state, updatedAt: facts.updatedAt, resumable: old.resumable)
+            opened[id] = (facts.lastMessage, facts.clearedFrom)
         }
         await reconcileResumedSessions(&discovered)
         records = discovered
@@ -307,6 +314,17 @@ public actor SessionService {
             records[id]?.descriptor.workspaceID = event["workspace_id"].string
             records[id]?.descriptor.surfaceID = event["surface_id"].string
             records[id]?.descriptor.state = event["state"].string ?? "unknown"
+        }
+        let cleared = ClearedSessions().times(records.values.map { record in
+            let descriptor = record.descriptor
+            return .init(id: descriptor.id, surfaceID: descriptor.surfaceID, live: descriptor.state != "ended" && !record.revived,
+                         lastMessage: opened[descriptor.id]?.lastMessage, clearedFrom: opened[descriptor.id]?.clearedFrom)
+        })
+        for (id, at) in cleared {
+            records[id]?.descriptor.clearedAt = at
+            // A cleared conversation read as revived was a guess from the prompt on its terminal; that prompt belongs to
+            // the conversation the clear started, so this one is over and takes no input.
+            if records[id]?.revived == true { records[id]?.descriptor.state = "ended" }
         }
         return records.values.map(\.descriptor).sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
     }

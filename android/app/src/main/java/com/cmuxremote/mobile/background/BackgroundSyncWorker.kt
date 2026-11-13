@@ -197,6 +197,7 @@ class BackgroundSyncWorker(context: Context, params: WorkerParameters) : Corouti
                         put("state", JsonPrimitive(session.state))
                         session.updatedAt?.let { put("updatedAt", JsonPrimitive(it)) }
                         put("resumable", JsonPrimitive(session.resumable))
+                        session.clearedAt?.let { put("clearedAt", JsonPrimitive(it)) }
                     }
                 },
             ),

@@ -179,6 +179,9 @@
     <string name="sessions_filter_all">全部</string>
     <string name="sessions_filter_working">运行中</string>
     <string name="sessions_filter_read_only">只读</string>
+    <string name="sessions_filter_archived">归档</string>
+    <string name="sessions_archived_at">归档于 %1$s</string>
+    <string name="sessions_archive_empty">没有归档的会话。执行过 /clear 的会话会移到这里。</string>
     <string name="sessions_pending_items">%1$d 项待处理</string>
 
     <!-- Conversation -->
