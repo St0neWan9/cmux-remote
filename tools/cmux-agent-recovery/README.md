@@ -32,13 +32,54 @@ does not resume by itself.
   terminal has no hook record, the tool falls back to a `--resume` value in the
   agent command line.
 
-## Install
+## Install on a new machine
 
-```sh
-install -m 755 tools/cmux-agent-recovery/cmux-agent-recovery ~/.local/bin/
-~/.local/bin/cmux-agent-recovery save
-~/.local/bin/cmux-agent-recovery install --auto-restore
-```
+The repository does not contain LaunchAgent plists. `install` generates them
+for the current user, with absolute paths to the installed script, the state
+directory and the log file. Do not copy plists from another machine: they point
+at the other user's home directory and script path, even when the user name is
+the same. Generate them here instead.
+
+1. Install the prerequisites: macOS, Python 3.9 or newer, `cmux-tui` on `PATH`
+   (or `CMUX_TUI_BIN`), and the agent hooks for the providers you use:
+
+   ```sh
+   cmux agent hook install claude codex
+   ```
+
+2. Get this directory onto the machine (clone the repository, or copy
+   `tools/cmux-agent-recovery/`).
+
+3. Put the script where launchd can keep calling it:
+
+   ```sh
+   install -m 755 tools/cmux-agent-recovery/cmux-agent-recovery ~/.local/bin/
+   ```
+
+   `install` records this absolute path in the plists, so run the remaining
+   commands through `~/.local/bin/cmux-agent-recovery`, or make sure
+   `~/.local/bin` is on `PATH`.
+
+4. Record the current state and check detection. On a machine with no agents
+   open this writes an empty snapshot, which is expected:
+
+   ```sh
+   cmux-agent-recovery save
+   cmux-agent-recovery list
+   ```
+
+5. Generate and load both LaunchAgents:
+
+   ```sh
+   cmux-agent-recovery install --auto-restore
+   ```
+
+6. Verify that launchd loaded them:
+
+   ```sh
+   launchctl print gui/$(id -u)/dev.valuz.cmux-agent-recovery.save
+   launchctl print gui/$(id -u)/dev.valuz.cmux-agent-recovery.restore
+   ```
 
 `install` writes LaunchAgents to `~/Library/LaunchAgents`:
 
@@ -51,6 +92,15 @@ The plist stores the absolute path of the script that ran `install`. Install
 from the copy you want launchd to call, normally `~/.local/bin/cmux-agent-recovery`.
 Running `install` without `--auto-restore` removes the login job and keeps only
 the periodic snapshot. `uninstall` removes both.
+
+### Moving from another machine
+
+The snapshot is only useful together with the agent session data it names.
+`claude --resume <id>` and `codex resume <id>` read `~/.claude/projects/` and
+`~/.codex/`; if that data did not come across, copy the script and this README,
+but skip `~/.local/state/cmux-agent-recovery/snapshot.json` and let the periodic
+save build a fresh one. The LaunchAgents themselves are always regenerated,
+never copied.
 
 ## Commands
 
