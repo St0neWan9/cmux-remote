@@ -33,6 +33,7 @@ import fcntl
 import json
 import os
 import plistlib
+import re
 import shlex
 import shutil
 import subprocess
@@ -50,6 +51,8 @@ DEFAULT_STATE = Path(
 SNAPSHOT = "snapshot.json"
 RESTORE_REPORT = "last-restore.json"
 STATE_LOCK = "state.lock"
+HISTORY_DIR = "history"
+HISTORY_KEEP = 200
 SNAPSHOT_MODE = 0o600
 DIR_MODE = 0o700
 LAUNCH_AGENT_SAVE = "dev.valuz.cmux-agent-recovery.save"
@@ -127,6 +130,136 @@ def read_json(path: Path) -> dict | None:
         return None
     except json.JSONDecodeError as exc:
         raise CmuxError(f"{path} is not valid JSON: {exc}") from exc
+
+
+def boot_id() -> str:
+    """A stable id for the current boot, so history can be grouped by reboot."""
+    try:
+        proc = run(["sysctl", "-n", "kern.boottime"], timeout=5, check=False)
+        if proc.returncode == 0:
+            match = re.search(r"sec\s*=\s*(\d+)", proc.stdout)
+            if match:
+                return match.group(1)
+    except CmuxError:
+        pass
+    try:
+        with open("/proc/stat", encoding="utf-8") as handle:
+            for line in handle:
+                if line.startswith("btime "):
+                    return line.split()[1]
+    except OSError:
+        pass
+    return ""
+
+
+def snapshot_agent_count(snapshot: dict | None) -> int:
+    if not snapshot:
+        return 0
+    return sum(
+        len(session.get("agents") or [])
+        for session in (snapshot.get("sessions") or {}).values()
+    )
+
+
+def snapshot_signature(snapshot: dict | None) -> tuple:
+    signature: list[tuple] = []
+    for name, data in sorted(((snapshot or {}).get("sessions") or {}).items()):
+        for agent in data.get("agents") or []:
+            signature.append(
+                (
+                    name,
+                    agent.get("provider"),
+                    agent.get("agent_session_id"),
+                    agent.get("cwd"),
+                    agent.get("workspace_id"),
+                )
+            )
+    return tuple(sorted(signature))
+
+
+def history_paths(state: Path) -> list[Path]:
+    directory = state / HISTORY_DIR
+    if not directory.is_dir():
+        return []
+    return sorted(directory.glob("snapshot-*.json"))
+
+
+def newest_history_snapshot(state: Path) -> dict | None:
+    for path in reversed(history_paths(state)):
+        try:
+            snapshot = read_json(path)
+        except CmuxError:
+            continue
+        if snapshot:
+            return snapshot
+    return None
+
+
+def prune_history(state: Path, keep: int = HISTORY_KEEP) -> None:
+    paths = history_paths(state)
+    if keep <= 0:
+        return
+    for path in paths[:-keep]:
+        try:
+            path.unlink()
+        except OSError:
+            pass
+
+
+def archive_snapshot(state: Path, snapshot: dict) -> Path | None:
+    """Keep one copy of each distinct agent set before the latest is replaced.
+
+    A save after a failed login restore used to overwrite the only record of
+    the agents that were open before the reboot. The previous state is now
+    archived first, grouped by boot id, so it can be restored explicitly.
+    """
+    newest = newest_history_snapshot(state)
+    if (
+        newest is not None
+        and snapshot_signature(newest) == snapshot_signature(snapshot)
+        and (newest.get("boot_id") or "") == (snapshot.get("boot_id") or "")
+    ):
+        return None
+    directory = state / HISTORY_DIR
+    ensure_state_dir(directory)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    path = directory / f"snapshot-{stamp}.json"
+    index = 1
+    while path.exists():
+        path = directory / f"snapshot-{stamp}-{index}.json"
+        index += 1
+    write_private(path, snapshot)
+    prune_history(state)
+    return path
+
+
+def resolve_snapshot(state: Path, selector: str) -> Path:
+    selector = (selector or "latest").strip()
+    if selector == "latest":
+        return state / SNAPSHOT
+    if selector == "previous-boot":
+        current = boot_id()
+        latest = read_json(state / SNAPSHOT)
+        if latest is not None and (latest.get("boot_id") or "") != current:
+            return state / SNAPSHOT
+        for path in reversed(history_paths(state)):
+            try:
+                snapshot = read_json(path)
+            except CmuxError:
+                continue
+            if snapshot is not None and (snapshot.get("boot_id") or "") != current:
+                return path
+        raise CmuxError(
+            "no snapshot from a previous boot; see `cmux-agent-recovery history`"
+        )
+    path = Path(selector).expanduser()
+    if not path.exists():
+        alternate = state / selector
+        if alternate.exists():
+            path = alternate
+        else:
+            raise CmuxError(f"snapshot not found: {selector}")
+    return path
 
 
 def acquire_state_lock(state: Path, *, blocking: bool):
@@ -578,7 +711,12 @@ def cmd_save(args: argparse.Namespace) -> int:
     else:
         discovered = discover_sessions()
 
-    snapshot = {"version": VERSION, "captured_at": now_iso(), "sessions": {}}
+    snapshot = {
+        "version": VERSION,
+        "captured_at": now_iso(),
+        "boot_id": boot_id(),
+        "sessions": {},
+    }
     reachable = 0
     for name, socket in discovered:
         c_args = session_args(name, socket)
@@ -612,20 +750,48 @@ def cmd_save(args: argparse.Namespace) -> int:
         )
         return 1
 
+    previous: dict | None = None
+    try:
+        previous = read_json(state / SNAPSHOT)
+    except CmuxError as exc:
+        log(f"ignoring unreadable previous snapshot: {exc}", quiet=args.quiet, error=True)
+
+    if previous is not None and (
+        (previous.get("boot_id") or "") != (snapshot.get("boot_id") or "")
+        or snapshot_signature(previous) != snapshot_signature(snapshot)
+    ):
+        archived = archive_snapshot(state, previous)
+        if archived:
+            log(f"archived previous snapshot to {archived}", quiet=args.quiet)
+
     path = state / SNAPSHOT
     write_private(path, snapshot)
-    total = sum(len(session["agents"]) for session in snapshot["sessions"].values())
+    total = snapshot_agent_count(snapshot)
+    previous_count = snapshot_agent_count(previous)
+    if previous_count >= 2 and total * 2 < previous_count:
+        # Keep this visible even for the quiet LaunchAgent run: this is the
+        # case where a failed restore or a half-open session replaced a much
+        # larger set, and the previous one is the one worth restoring.
+        log(
+            f"warning: agent count dropped from {previous_count} to {total}; "
+            f"the previous snapshot is in {state / HISTORY_DIR}",
+            quiet=False,
+            error=True,
+        )
     log(f"saved {total} agent(s) from {len(snapshot['sessions'])} session(s) to {path}", quiet=args.quiet)
     return 0
 
 
-def load_snapshot(state: Path) -> dict:
-    snapshot = read_json(state / SNAPSHOT)
+def load_snapshot(state: Path, selector: str = "latest") -> tuple[dict, Path]:
+    path = resolve_snapshot(state, selector)
+    snapshot = read_json(path)
     if not snapshot:
-        raise CmuxError(f"no snapshot at {state / SNAPSHOT}; run `save` first")
+        raise CmuxError(f"no snapshot at {path}; run `save` first")
     if snapshot.get("version") != VERSION:
-        raise CmuxError(f"unsupported snapshot version {snapshot.get('version')}")
-    return snapshot
+        raise CmuxError(
+            f"unsupported snapshot version {snapshot.get('version')} in {path}"
+        )
+    return snapshot, path
 
 
 DETACHED_OWNER_IDENTITY_ENV = (
@@ -852,7 +1018,9 @@ def running_terminal_text(args: list[str]) -> str:
     return "\n".join(parts)
 
 
-def resolve_workspace(entry: dict, args: list[str], cache: dict) -> str:
+def resolve_workspace(
+    entry: dict, args: list[str], cache: dict, *, dry_run: bool = False
+) -> str:
     entry_key = (entry.get("workspace_id"), entry.get("workspace_name"))
     if entry_key in cache:
         return cache[entry_key]
@@ -869,6 +1037,10 @@ def resolve_workspace(entry: dict, args: list[str], cache: dict) -> str:
         if name and candidate.get("name") == name:
             cache[entry_key] = candidate["id"]
             return candidate["id"]
+
+    if dry_run:
+        # A dry run must not change the session.
+        return f"<would create {name or 'restored'}>"
 
     created = cmux_json(
         args
@@ -898,12 +1070,28 @@ def restore_script(entry: dict) -> tuple[str, list[str]]:
 def cmd_restore(args: argparse.Namespace) -> int:
     state = Path(args.state_dir).expanduser()
     lock = acquire_state_lock(state, blocking=True)
-    snapshot = load_snapshot(state)
+    snapshot, snapshot_path = load_snapshot(state, args.snapshot)
     report = {
         "restored_at": now_iso(),
         "dry_run": bool(args.dry_run),
+        "snapshot": str(snapshot_path),
+        "snapshot_captured_at": snapshot.get("captured_at"),
+        "snapshot_boot_id": snapshot.get("boot_id"),
         "sessions": {},
     }
+    count = snapshot_agent_count(snapshot)
+    log(
+        f"using snapshot {snapshot_path} "
+        f"(captured {snapshot.get('captured_at') or '?'}, {count} agent(s))",
+        quiet=args.quiet,
+    )
+    if args.snapshot == "latest" and count == 0:
+        log(
+            "note: the latest snapshot has no agents; `history` may hold an "
+            "earlier state and `--snapshot previous-boot` selects it",
+            quiet=args.quiet,
+            error=True,
+        )
     failures = 0
 
     for name, data in snapshot["sessions"].items():
@@ -960,7 +1148,9 @@ def cmd_restore(args: argparse.Namespace) -> int:
                 continue
 
             try:
-                workspace_id = resolve_workspace(entry, c_args, cache)
+                workspace_id = resolve_workspace(
+                    entry, c_args, cache, dry_run=args.dry_run
+                )
                 script, argv = restore_script(entry)
             except CmuxError as exc:
                 log(f"{name}: cannot restore {label}: {exc}", quiet=args.quiet, error=True)
@@ -1057,6 +1247,74 @@ def cmd_list(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_history(args: argparse.Namespace) -> int:
+    state = Path(args.state_dir).expanduser()
+    current_boot = boot_id()
+    entries: list[dict] = []
+
+    latest = None
+    try:
+        latest = read_json(state / SNAPSHOT)
+    except CmuxError as exc:
+        log(str(exc), quiet=args.quiet, error=True)
+    if latest:
+        entries.append(
+            {
+                "kind": "latest",
+                "path": str(state / SNAPSHOT),
+                "captured_at": latest.get("captured_at"),
+                "boot_id": latest.get("boot_id"),
+                "agents": snapshot_agent_count(latest),
+            }
+        )
+
+    for path in reversed(history_paths(state)):
+        try:
+            snapshot = read_json(path)
+        except CmuxError:
+            continue
+        if not snapshot:
+            continue
+        entries.append(
+            {
+                "kind": "history",
+                "path": str(path),
+                "captured_at": snapshot.get("captured_at"),
+                "boot_id": snapshot.get("boot_id"),
+                "agents": snapshot_agent_count(snapshot),
+            }
+        )
+
+    if args.json:
+        print(
+            json.dumps(
+                {"current_boot": current_boot, "snapshots": entries},
+                ensure_ascii=False,
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 0
+    if not entries:
+        log("no snapshots; run `save` first", quiet=args.quiet)
+        return 1
+
+    print(f"current boot: {current_boot or 'unknown'}")
+    for entry in entries:
+        marker = "  <current boot" if entry["boot_id"] == current_boot else ""
+        print(
+            "{kind:<8} {captured:<22} boot={boot:<12} agents={agents:<3} {path}{marker}".format(
+                kind=entry["kind"],
+                captured=entry.get("captured_at") or "?",
+                boot=entry.get("boot_id") or "?",
+                agents=entry["agents"],
+                path=entry["path"],
+                marker=marker,
+            )
+        )
+    return 0
+
+
 # ------------------------------------------------------------- LaunchAgents
 
 
@@ -1131,7 +1389,10 @@ def cmd_install(args: argparse.Namespace) -> int:
         LAUNCH_AGENT_SAVE,
         [script, "save", "--quiet"],
         interval=max(30, int(args.interval)),
-        run_at_load=True,
+        # Do not save at load: the login restore must read the snapshot from
+        # before the reboot, and otherwise both jobs race at login and the
+        # empty early-boot state can replace it.
+        run_at_load=False,
     )
     bootstrap(LAUNCH_AGENT_SAVE, path)
     log(f"installed {LAUNCH_AGENT_SAVE}: save every {args.interval}s ({path})")
@@ -1175,9 +1436,20 @@ def build_parser() -> argparse.ArgumentParser:
 
     restore = sub.add_parser("restore", help="relaunch recorded agents after a reboot")
     restore.add_argument("--session", action="append", help="only this cmux session (repeatable)")
+    restore.add_argument(
+        "--snapshot",
+        default="latest",
+        metavar="SELECTOR",
+        help="latest (default), previous-boot, or a snapshot file",
+    )
     restore.add_argument("--dry-run", action="store_true", help="print the commands without running them")
     restore.add_argument("--quiet", action="store_true")
     restore.set_defaults(func=cmd_restore)
+
+    history = sub.add_parser("history", help="list the current and archived snapshots")
+    history.add_argument("--json", action="store_true")
+    history.add_argument("--quiet", action="store_true")
+    history.set_defaults(func=cmd_history)
 
     listing = sub.add_parser("list", help="show the latest snapshot")
     listing.add_argument("--json", action="store_true")

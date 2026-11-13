@@ -85,7 +85,7 @@ the same. Generate them here instead.
 
 | Agent | Behavior |
 | --- | --- |
-| `dev.valuz.cmux-agent-recovery.save` | Runs `save --quiet` every 300 seconds and at load. |
+| `dev.valuz.cmux-agent-recovery.save` | Runs `save --quiet` every 300 seconds. It deliberately does not run at load, so the login restore can read the snapshot from before the reboot. |
 | `dev.valuz.cmux-agent-recovery.restore` | Runs `restore --quiet` at login. |
 
 The plist stores the absolute path of the script that ran `install`. Install
@@ -110,8 +110,11 @@ cmux-agent-recovery save --session cmux     # one session only, repeatable
 cmux-agent-recovery save --force            # overwrite even if no session answers
 
 cmux-agent-recovery list                    # show the latest snapshot
+cmux-agent-recovery history                 # latest plus archived snapshots
 cmux-agent-recovery restore --dry-run       # print commands without running them
 cmux-agent-recovery restore                 # relaunch recorded agents
+cmux-agent-recovery restore --snapshot previous-boot
+cmux-agent-recovery restore --snapshot history/snapshot-20261113T231100Z.json
 cmux-agent-recovery restore --session cmux  # one session only
 
 cmux-agent-recovery install --auto-restore  # periodic save + restore at login
@@ -151,6 +154,10 @@ so a periodic save cannot replace a snapshot in the middle of a restore.
 
 ## How `restore` works
 
+`restore` first picks a snapshot: `latest` by default, or
+`--snapshot previous-boot|<path>`. It prints the file, capture time and agent
+count before doing anything.
+
 For each session in the snapshot:
 
 1. `server status`; on failure `server ensure --session <name> --socket <path>`.
@@ -180,11 +187,38 @@ resume flag is normalized, so an old request is not sent again. For Codex, an
 existing `codex resume` command is kept (a trailing prompt is dropped), and a
 missing session id is added.
 
+## Snapshot history and recovery
+
+Each `save` archives the previous snapshot under `history/` before replacing
+`snapshot.json` whenever the agent set or the boot changed. Every snapshot
+records `boot_id`, a boot-time identifier, so history can be grouped by reboot.
+This is what makes a failed login restore recoverable: the snapshot from before
+the reboot survives even if an early save at login records only the first agent
+that was opened afterwards.
+
+- `history` lists the current snapshot and every archived one with capture time,
+  boot id and agent count.
+- `restore --snapshot previous-boot` selects the newest snapshot whose boot id
+  differs from the current boot. Before the first save of a boot that is
+  `snapshot.json` itself, which is exactly the pre-reboot state the login restore
+  should use.
+- `restore --snapshot <path>` selects an exact archived file; a relative path is
+  also resolved against the state directory.
+- When a save's agent count is less than half of the previous snapshot, it warns
+  in the LaunchAgent log and still keeps the previous state in history. It does
+  not block the save: closing agents before a reboot is legitimate.
+
+History keeps the newest 200 distinct states, pruned oldest first. The save
+LaunchAgent no longer runs at load, so it cannot overwrite the pre-reboot
+snapshot before the login restore reads it; the first periodic save happens one
+interval after login.
+
 ## State and permissions
 
 ```text
 ~/.local/state/cmux-agent-recovery/
   snapshot.json      0600   latest save
+  history/                  archived distinct snapshots, newest 200
   last-restore.json  0600   what the last restore launched, skipped and failed
   state.lock         0600   serializes save and restore
   launchd.log               LaunchAgent stdout and stderr
@@ -195,10 +229,14 @@ session ids; treat it as private to the account.
 
 ## Limitations
 
-- A real reboot has not been exercised end to end. The cold path was tested in
-  an isolated cmux session by killing the owner and every terminal host, then
-  starting a fresh owner: the restored command ran in the recorded working
-  directory and a repeated restore skipped it.
+- A real reboot has not been observed with the current version. An earlier
+  version failed to start the owner at login and the next save replaced the only
+  snapshot. The current version retries `server ensure`, starts the detached
+  owner itself, keeps the previous state in history, and no longer saves at
+  load. The cold path has been tested in an isolated session by killing the
+  owner and every terminal host, then starting a fresh owner.
+- History keeps the newest 200 distinct states. An older state that matters
+  should be copied out of `history/` before it is pruned.
 - cmux does not restore the screen/pane layout after a reboot. Agents return to
   the same workspace as new terminals; workspaces persist, screens do not.
 - Terminals with no placement in a workspace are skipped. They are not visible
@@ -221,3 +259,6 @@ session ids; treat it as private to the account.
   them.
 - In an isolated session, killing the owner and terminal hosts and then running
   `restore` launched the recorded command; a second run skipped it.
+- Saving over a fixture snapshot archived the previous state under `history/`,
+  `history` listed both with their boot ids, and the previous-boot selector
+  resolved the archived copy. Pruning kept the requested number of entries.
