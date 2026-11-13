@@ -2,11 +2,13 @@ import Foundation
 
 /// Read-only discovery filters never launch a session or broaden its host provenance.
 public enum SessionFilter: String, CaseIterable, Sendable {
-    case all, working, readOnly
+    case all, working, readOnly, archived
     public func matches(_ session: SessionDescriptor, query: String, workspaceID: String?) -> Bool {
         if let workspaceID, session.workspaceID?.lowercased() != workspaceID.lowercased() { return false }
+        // A conversation `/clear` replaced lives in the Archive alone, out of every other list.
+        if (self == .archived) != (session.clearedAt != nil) { return false }
         switch self {
-        case .all: break
+        case .all, .archived: break
         // "Running" means a live Agent you can still talk to, idle or busy; history that cannot be
         // reopened is Read-only instead.
         case .working: if !session.state.hasPrefix("working") && !session.writable { return false }

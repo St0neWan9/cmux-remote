@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Archive
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.Lock
@@ -68,6 +69,18 @@ fun SessionRow(
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
+            session.clearedAt?.let { cleared ->
+                Row(horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Rounded.Archive, contentDescription = null, tint = MobileDesign.Muted, modifier = Modifier.size(12.dp))
+                    Text(
+                        text = context.getString(R.string.sessions_archived_at, archivedTime(cleared, context)),
+                        color = MobileDesign.Muted,
+                        style = MaterialTheme.typography.labelMedium,
+                        maxLines = 1,
+                        modifier = Modifier.testTag("session.archived_at"),
+                    )
+                }
+            }
             // One column per fact, as the iPhone lays them out, not one joined line.
             Row(
                 horizontalArrangement = Arrangement.spacedBy(5.dp),
@@ -136,3 +149,11 @@ private fun relativeAge(
         android.text.format.DateUtils.FORMAT_ABBREV_RELATIVE,
     ).toString()
 }
+
+/** The date and time `/clear` archived a conversation, in the reader's locale. */
+private fun archivedTime(at: java.time.Instant, context: android.content.Context): String =
+    android.text.format.DateUtils.formatDateTime(
+        context,
+        at.toEpochMilli(),
+        android.text.format.DateUtils.FORMAT_SHOW_DATE or android.text.format.DateUtils.FORMAT_SHOW_TIME or android.text.format.DateUtils.FORMAT_ABBREV_MONTH,
+    )

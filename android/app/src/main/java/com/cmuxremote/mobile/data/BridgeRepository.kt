@@ -31,6 +31,8 @@ data class SessionDescriptor(
     val state: String,
     val updatedAt: String?,
     val resumable: Boolean,
+    /** When `/clear` replaced this conversation; the phone keeps it in the Archive. Older Bridges omit it. */
+    val clearedAt: String? = null,
 ) {
     val writable: Boolean get() = workspaceID != null && surfaceID != null && state != "ended"
     val working: Boolean get() = state.startsWith("working")
@@ -647,6 +649,7 @@ class BridgeRepository(val connection: AuthorizedConnection, private val client:
                 state = object_.string("state") ?: "unknown",
                 updatedAt = object_.string("updatedAt"),
                 resumable = object_.bool("resumable") ?: false,
+                clearedAt = object_.string("clearedAt"),
             )
         }
 
@@ -671,6 +674,7 @@ class BridgeRepository(val connection: AuthorizedConnection, private val client:
                         put("state", JsonPrimitive(session.state))
                         session.updatedAt?.let { put("updatedAt", JsonPrimitive(it)) }
                         put("resumable", JsonPrimitive(session.resumable))
+                        session.clearedAt?.let { put("clearedAt", JsonPrimitive(it)) }
                     }
                 },
             ),

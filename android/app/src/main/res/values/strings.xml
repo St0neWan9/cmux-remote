@@ -179,6 +179,9 @@
     <string name="sessions_filter_all">All</string>
     <string name="sessions_filter_working">Running</string>
     <string name="sessions_filter_read_only">Read-only</string>
+    <string name="sessions_filter_archived">Archive</string>
+    <string name="sessions_archived_at">Archived %1$s</string>
+    <string name="sessions_archive_empty">No archived conversations. A conversation you /clear moves here.</string>
     <string name="sessions_pending_items">%1$d pending</string>
 
     <!-- Conversation -->

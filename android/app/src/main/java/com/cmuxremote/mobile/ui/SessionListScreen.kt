@@ -194,6 +194,8 @@ fun DrawerContent(
     val query = model.query.trim()
     val filtered = model.sessions
         .filter { model.hostFilter == null || it.hostKey == null || it.hostKey == model.hostFilter }
+        // A conversation `/clear` replaced is listed only while the Archive is chosen.
+        .filter { (it.clearedAt != null) == (model.statusFilter == ARCHIVE_FILTER) }
         .filter {
             query.isEmpty() || it.title.contains(query, ignoreCase = true) ||
                 it.agent.contains(query, ignoreCase = true) ||
@@ -532,8 +534,11 @@ private fun SessionListContent(
         }
     }
     val query = model.query.trim()
+    val archive = model.statusFilter == ARCHIVE_FILTER
     val filtered = model.sessions.filter { session ->
-        (model.hostFilter == null || session.hostKey == null || session.hostKey == model.hostFilter) &&
+        // A conversation `/clear` replaced lives in the Archive alone, out of every other list.
+        (session.clearedAt != null) == archive &&
+            (model.hostFilter == null || session.hostKey == null || session.hostKey == model.hostFilter) &&
             (model.workspaceFilter == null || session.workspaceKey.equals(model.workspaceFilter, ignoreCase = true)) &&
             (
                 query.isEmpty() ||
@@ -552,8 +557,9 @@ private fun SessionListContent(
     // Newest first, writable before read-only, then by title; equal activity must
     // not depend on whatever order the Bridge happened to return.
     val collator = remember { java.text.Collator.getInstance() }
+    // The Archive reads newest clear first.
     val ordered = filtered.sortedWith(
-        compareByDescending<SessionItem> { it.updatedAt?.toEpochMilli() ?: Long.MIN_VALUE }
+        compareByDescending<SessionItem> { (if (archive) it.clearedAt else it.updatedAt)?.toEpochMilli() ?: Long.MIN_VALUE }
             .thenByDescending { it.writable }
             .thenBy(collator) { it.title },
     )
@@ -561,9 +567,11 @@ private fun SessionListContent(
     val folds = query.isEmpty() && model.statusFilter == 0
     val recency = remember(now) { SessionRecency(java.time.Instant.ofEpochMilli(now)) }
     val multipleHosts = model.hosts.size > 1
-    val showMacSections = multipleHosts && !model.sortByTime
+    // The Archive is one list in clear order, whatever order the others take.
+    val flat = model.sortByTime || archive
+    val showMacSections = multipleHosts && !flat
     // Workspace headings disappear once one workspace is explicitly selected.
-    val showGroupHeadings = model.workspaceFilter == null && !model.sortByTime
+    val showGroupHeadings = model.workspaceFilter == null && !flat
     val recentTitle = stringResource(R.string.sessions_recent)
     val otherTitle = stringResource(R.string.sessions_other)
     val expandedLabel = stringResource(R.string.common_expanded)
@@ -718,7 +726,7 @@ private fun SessionListContent(
                 item {
                     FilterChips(model.statusFilter, actions.onStatus)
                 }
-                if (!multipleHosts && !model.sortByTime && model.workspaceFilter == null && model.sessions.isNotEmpty()) {
+                if (!multipleHosts && !flat && model.workspaceFilter == null && model.sessions.isNotEmpty()) {
                     item {
                         Text(
                             stringResource(R.string.sessions_workspaces),
@@ -728,7 +736,7 @@ private fun SessionListContent(
                         )
                     }
                 }
-                if (model.sortByTime) {
+                if (flat) {
                     // The iPhone's time order is flat; the Mac name travels in the row.
                     val (recentRows, earlierRows) = if (folds) recency.split(ordered, SessionRecency.TIME_FLOOR) else ordered to emptyList()
                     val earlierKey = "earlier:time"
@@ -884,6 +892,7 @@ private fun SessionListContent(
                             text = when {
                                 !model.canReadConversations -> stringResource(R.string.sessions_no_permission)
                                 model.sessions.isEmpty() -> stringResource(R.string.sessions_no_sessions)
+                                archive && query.isEmpty() -> stringResource(R.string.sessions_archive_empty)
                                 else -> stringResource(R.string.sessions_no_matching)
                             },
                             color = MobileDesign.Muted,
@@ -903,6 +912,9 @@ private fun SessionListContent(
     }
 }
 
+/** The status filter that shows the conversations `/clear` replaced, and only those. */
+private const val ARCHIVE_FILTER = 3
+
 @Composable
 private fun FilterChips(selected: Int, onSelect: (Int) -> Unit) {
     Row(
@@ -913,6 +925,7 @@ private fun FilterChips(selected: Int, onSelect: (Int) -> Unit) {
             stringResource(R.string.sessions_filter_all),
             stringResource(R.string.sessions_filter_working),
             stringResource(R.string.sessions_filter_read_only),
+            stringResource(R.string.sessions_filter_archived),
         ).forEachIndexed { index, label ->
             Pill(
                 text = label,

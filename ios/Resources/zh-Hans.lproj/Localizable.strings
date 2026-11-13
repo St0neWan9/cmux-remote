@@ -130,6 +130,9 @@
 "sessions.filter.all" = "全部";
 "sessions.filter.working" = "运行中";
 "sessions.filter.readOnly" = "只读历史";
+"sessions.filter.archived" = "归档";
+"sessions.archived_at" = "归档于 %@";
+"sessions.archive_empty" = "没有归档的对话。执行过 /clear 的对话会移到这里。";
 "connection.title" = "连接详情";
 "connection.reachable" = "Bridge 连接已验证";
 "connection.endpoint" = "地址";

@@ -130,6 +130,9 @@
 "sessions.filter.all" = "All";
 "sessions.filter.working" = "Running";
 "sessions.filter.readOnly" = "Read-only";
+"sessions.filter.archived" = "Archive";
+"sessions.archived_at" = "Archived %@";
+"sessions.archive_empty" = "No archived conversations. A conversation you /clear moves here.";
 "connection.title" = "Connection";
 "connection.reachable" = "Bridge connection verified";
 "connection.endpoint" = "Address";

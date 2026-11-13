@@ -84,6 +84,20 @@ class BridgeDecodeTest {
     }
 
     @Test
+    fun theClearTimeSurvivesTheStoredList() {
+        // A conversation `/clear` replaced keeps its Archive time through the cache a failed read falls back to.
+        val read = BridgeRepository.decodeSessions(
+            """
+            [{"id":"old","agent":"claude","title":"Build","state":"ended","resumable":false,"clearedAt":"2026-11-12T10:00:00Z"},
+             {"id":"new","agent":"claude","title":"Build","state":"idle","resumable":false}]
+            """.trimIndent(),
+        )
+        assertEquals("2026-11-12T10:00:00Z", read[0].clearedAt)
+        assertEquals(null, read[1].clearedAt)
+        assertEquals(read, BridgeRepository.decodeSessions(BridgeRepository.encodeSessions(read)))
+    }
+
+    @Test
     fun aMalformedCacheIsAnEmptyListNotACrash() {
         assertEquals(emptyList<SessionDescriptor>(), BridgeRepository.decodeSessions("not json"))
     }
