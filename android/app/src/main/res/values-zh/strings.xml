@@ -207,6 +207,7 @@
     <string name="chat_live_preview">实时预览</string>
     <string name="chat_connection_lost">连不上这台 Mac，显示的是已读到的内容。</string>
     <string name="chat_reconnecting">正在重新连接…</string>
+    <string name="chat_updating">正在更新…</string>
     <string name="chat_tool_call">工具调用</string>
     <string name="chat_command">命令</string>
     <string name="chat_file_change">文件修改</string>

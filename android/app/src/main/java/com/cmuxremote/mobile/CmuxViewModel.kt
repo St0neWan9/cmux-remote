@@ -153,6 +153,12 @@ data class ConversationUi(
     val clipped: Boolean = false,
     /** A stop was accepted; cleared when the turn actually ends or a new send starts. */
     val stopRequested: Boolean = false,
+    /**
+     * The page is reading the conversation afresh after it was away (opened, back from another app, redialled)
+     * and the read has not answered yet: what it shows may be behind. Raised only once the read takes long enough
+     * to notice, as on the iPhone.
+     */
+    val updating: Boolean = false,
 ) {
     private val sentTurnRunning: Boolean
         get() = com.cmuxremote.mobile.data.TurnClock.sentTurnRunning(sentTurnAt, outgoing != null, outgoingUnconfirmed, turnCompleted)
@@ -467,7 +473,7 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
         refreshConnection()
         viewModelScope.launch {
             repository?.let { refreshRelayHint(it) }
-            if (_conversation.value != null) reloadOpen() else refresh()
+            if (_conversation.value != null) catchUpOpen() else refresh()
         }
     }
 
@@ -890,7 +896,7 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
             if (_conversation.value != null) {
                 // A model list can change while the app is away.
                 loadModels()
-                reloadOpen()
+                catchUpOpen()
             } else {
                 refresh()
             }
@@ -943,7 +949,7 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
         (_shell.value as? ShellState.Connected)?.let { current ->
             _shell.value = current.copy(hostConnecting = emptyMap())
         }
-        if (_conversation.value != null) reloadOpen() else refresh()
+        if (_conversation.value != null) catchUpOpen() else refresh()
     }
 
     fun restore() {
@@ -1844,42 +1850,45 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 }
             }
-            try {
-                val snapshot = current.history(session.id)
-                val preview = runCatching { current.preview(session.id) }.getOrNull()
-                val feed = runCatching { current.feed() }.getOrDefault(emptyList()).map {
-                    it.copy(hostID = host?.id.orEmpty(), hostName = host?.name.orEmpty())
-                }
-                _conversation.update { ui ->
-                    if (ui?.session?.id != session.id) ui
-                    else applySnapshot(ui, snapshot, ui.session, feed).copy(
-                        preview = preview?.text,
-                        compacting = preview?.compacting ?: false,
-                        loading = false,
-                    )
-                }
-                conversationFailures.remove(openHostID)
-                _reachable.value = true
-                lastStoredAt[scope + ":" + session.id] = System.currentTimeMillis()
-                withContext(Dispatchers.IO) {
-                    runCatching {
-                        conversations.save(snapshot, scope, session.id, complete = !snapshot.hasMore)
+            // A stored copy can be on screen already; a slow first read says it is updating.
+            catchingUp(session.id) {
+                try {
+                    val snapshot = current.history(session.id)
+                    val preview = runCatching { current.preview(session.id) }.getOrNull()
+                    val feed = runCatching { current.feed() }.getOrDefault(emptyList()).map {
+                        it.copy(hostID = host?.id.orEmpty(), hostName = host?.name.orEmpty())
                     }
-                }
-                if (snapshot.hasMore) {
-                    snapshot.messages.firstOrNull()?.seq?.let { oldest ->
-                        startBackfill(current, scope, session.id, oldest)
+                    _conversation.update { ui ->
+                        if (ui?.session?.id != session.id) ui
+                        else applySnapshot(ui, snapshot, ui.session, feed).copy(
+                            preview = preview?.text,
+                            compacting = preview?.compacting ?: false,
+                            loading = false,
+                        )
                     }
+                    conversationFailures.remove(openHostID)
+                    _reachable.value = true
+                    lastStoredAt[scope + ":" + session.id] = System.currentTimeMillis()
+                    withContext(Dispatchers.IO) {
+                        runCatching {
+                            conversations.save(snapshot, scope, session.id, complete = !snapshot.hasMore)
+                        }
+                    }
+                    if (snapshot.hasMore) {
+                        snapshot.messages.firstOrNull()?.seq?.let { oldest ->
+                            startBackfill(current, scope, session.id, oldest)
+                        }
+                    }
+                } catch (error: ProtocolException) {
+                    noteReadFailure(error)
+                    // A lost link is the status bar's story; only an application refusal
+                    // belongs in the transcript.
+                    val message = if (isConnectivity(error)) null else error.userMessage()
+                    _conversation.update { it?.copy(loading = false, error = message) }
+                } catch (error: Exception) {
+                    noteReadFailure(error)
+                    _conversation.update { it?.copy(loading = false, error = error.userMessage() ?: "History could not be read.") }
                 }
-            } catch (error: ProtocolException) {
-                noteReadFailure(error)
-                // A lost link is the status bar's story; only an application refusal
-                // belongs in the transcript.
-                val message = if (isConnectivity(error)) null else error.userMessage()
-                _conversation.update { it?.copy(loading = false, error = message) }
-            } catch (error: Exception) {
-                noteReadFailure(error)
-                _conversation.update { it?.copy(loading = false, error = error.userMessage() ?: "History could not be read.") }
             }
         }
     }
@@ -3247,9 +3256,44 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
         const val BACKFILL_PAGES = 64
         const val STORE_COALESCE_MS = 2_000L
         const val OLDER_PAUSE_MS = 800L
+        /** How long a catch-up read may take before the page says it is updating. */
+        const val UPDATING_REVEAL_MS = 500L
         /** Matches the iPhone's approved-Mac limit. */
         const val MAX_HOSTS = 16
         const val MAX_RELAY_ORIGINS = 8
+    }
+
+    /** Reads the open page again after it was away, saying it is updating while that read is slow. */
+    private suspend fun catchUpOpen() {
+        val id = _conversation.value?.session?.id ?: return
+        catchingUp(id) { reloadOpen() }
+    }
+
+    /** Catch-up reads in flight per conversation; the page says it is updating until the last one answers. */
+    private val catchUps = mutableMapOf<String, Int>()
+
+    /**
+     * Runs a read of a page that was away. A read that answers within half a second needs no word on screen;
+     * a slower one shows "Updating…" on the composer's status line until it answers, as on the iPhone.
+     */
+    private suspend fun catchingUp(sessionID: String, read: suspend () -> Unit) {
+        catchUps[sessionID] = (catchUps[sessionID] ?: 0) + 1
+        val reveal = viewModelScope.launch {
+            delay(UPDATING_REVEAL_MS)
+            _conversation.update { if (it?.session?.id == sessionID) it.copy(updating = true) else it }
+        }
+        try {
+            read()
+        } finally {
+            reveal.cancel()
+            val left = (catchUps[sessionID] ?: 1) - 1
+            if (left > 0) {
+                catchUps[sessionID] = left
+            } else {
+                catchUps.remove(sessionID)
+                _conversation.update { if (it?.session?.id == sessionID) it.copy(updating = false) else it }
+            }
+        }
     }
 
     private suspend fun reloadOpen() {

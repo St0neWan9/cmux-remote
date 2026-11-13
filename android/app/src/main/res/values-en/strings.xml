@@ -207,6 +207,7 @@
     <string name="chat_live_preview">Live preview</string>
     <string name="chat_connection_lost">This Mac cannot be reached; what you see is already read.</string>
     <string name="chat_reconnecting">Reconnecting…</string>
+    <string name="chat_updating">Updating…</string>
     <string name="chat_tool_call">Tool call</string>
     <string name="chat_command">Command</string>
     <string name="chat_file_change">File change</string>

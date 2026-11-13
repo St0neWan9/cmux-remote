@@ -189,9 +189,10 @@ fun ConversationScreen(
             onForceStop = onForceStop?.takeIf { state.session.working && canControl },
             onSoftStop = if (state.activeResponse || state.session.working) onStop else null,
         )
-        // A white capsule floats over the page, as on the iPhone; the failed state
-        // keeps a retry, the connecting state explains the wait.
-        if (connecting || offline) {
+        // A white capsule floats over the page, as on the iPhone, for a link that failed, with its retry. A link
+        // that is dialing only means content is on its way: the composer's status line says it is updating, since
+        // a pill at the top read as "cannot connect".
+        if (offline && !connecting) {
             Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)) {
                 Row(
                     modifier = Modifier
@@ -205,24 +206,19 @@ fun ConversationScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    if (connecting) {
-                        WorkingIndicator(size = 14.dp)
-                        Text(stringResource(R.string.chat_reconnecting), color = MobileDesign.Muted, style = MaterialTheme.typography.labelMedium)
-                    } else {
-                        Icon(Icons.Rounded.WifiOff, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(15.dp))
+                    Icon(Icons.Rounded.WifiOff, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(15.dp))
+                    Text(
+                        text = stringResource(R.string.chat_connection_lost),
+                        color = MobileDesign.Muted,
+                        style = MaterialTheme.typography.labelMedium,
+                    )
+                    if (onRetryConnection != null) {
                         Text(
-                            text = stringResource(R.string.chat_connection_lost),
-                            color = MobileDesign.Muted,
+                            text = stringResource(R.string.common_retry),
+                            color = MobileDesign.Accent,
                             style = MaterialTheme.typography.labelMedium,
+                            modifier = Modifier.clickable(onClick = onRetryConnection).padding(vertical = 2.dp),
                         )
-                        if (onRetryConnection != null) {
-                            Text(
-                                text = stringResource(R.string.common_retry),
-                                color = MobileDesign.Accent,
-                                style = MaterialTheme.typography.labelMedium,
-                                modifier = Modifier.clickable(onClick = onRetryConnection).padding(vertical = 2.dp),
-                            )
-                        }
                     }
                 }
             }
@@ -320,6 +316,17 @@ fun ConversationScreen(
                     color = MobileDesign.Muted,
                     style = MaterialTheme.typography.labelMedium,
                 )
+            }
+        } else if (state.updating || connecting) {
+            // Without a running turn, the same line says the page is catching up: back from another app, or its
+            // link dialing. A running turn keeps its time there instead.
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 4.dp).testTag("connection.updating"),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                WorkingIndicator(size = 12.dp)
+                Text(stringResource(R.string.chat_updating), color = MobileDesign.Muted, style = MaterialTheme.typography.labelMedium)
             }
         }
         ComposerArea(
