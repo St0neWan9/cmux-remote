@@ -230,7 +230,7 @@ private fun ModeChoice(label: String, selected: Boolean, tag: String, onClick: (
 @Composable
 private fun HeaderAction(label: String, icon: androidx.compose.ui.graphics.vector.ImageVector, onClick: () -> Unit) {
     Box(
-        modifier = Modifier.size(44.dp).clickable(onClick = onClick),
+        modifier = Modifier.size(44.dp).clip(CircleShape).clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         Icon(icon, contentDescription = label, tint = MobileDesign.Muted, modifier = Modifier.size(19.dp))

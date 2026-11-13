@@ -152,7 +152,8 @@ fun ImagePreviewScreen(
                             color = MobileDesign.Accent,
                             style = MaterialTheme.typography.labelMedium,
                             modifier = Modifier
-                                .background(MobileDesign.Soft, CircleShape)
+                                .clip(CircleShape)
+                                .background(MobileDesign.Soft)
                                 .clickable(onClick = onRetry)
                                 .padding(horizontal = 16.dp, vertical = 10.dp),
                         )

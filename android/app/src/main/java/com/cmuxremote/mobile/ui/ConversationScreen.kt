@@ -1406,7 +1406,8 @@ private fun DraftImageStrip(
                     modifier = Modifier
                         .align(Alignment.TopEnd)
                         .size(18.dp)
-                        .background(MobileDesign.Ink, CircleShape)
+                        .clip(CircleShape)
+                        .background(MobileDesign.Ink)
                         .clickable { onRemove(index) }
                         .semantics { contentDescription = describe },
                     contentAlignment = Alignment.Center,
@@ -1603,7 +1604,8 @@ private fun MessageImages(
                 color = MobileDesign.Accent,
                 style = MaterialTheme.typography.labelMedium,
                 modifier = Modifier
-                    .background(MobileDesign.AccentSoft, RoundedCornerShape(50))
+                    .clip(RoundedCornerShape(50))
+                    .background(MobileDesign.AccentSoft)
                     .clickable { onOpenImage(reference) }
                     .padding(horizontal = 12.dp, vertical = 8.dp),
             )

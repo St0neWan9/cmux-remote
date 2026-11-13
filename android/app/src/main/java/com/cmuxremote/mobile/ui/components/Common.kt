@@ -1,6 +1,7 @@
 package com.cmuxremote.mobile.ui.components
 
 import androidx.compose.foundation.border
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -49,6 +50,8 @@ fun Pill(
         modifier = modifier
             .semantics { this.selected = isSelected }
             .then(if (selected) Modifier.shadow(3.dp, shape, clip = false) else Modifier)
+            // The pressed tint follows the capsule rather than filling its square bounds.
+            .clip(shape)
             .background(MobileDesign.Canvas, shape)
             .border(0.5.dp, MobileDesign.Line, shape)
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)

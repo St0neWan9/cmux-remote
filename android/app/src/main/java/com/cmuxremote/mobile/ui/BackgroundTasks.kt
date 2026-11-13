@@ -220,7 +220,8 @@ fun TaskDetailSheet(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .background(MobileDesign.Soft, RoundedCornerShape(50))
+                                .clip(RoundedCornerShape(50))
+                                .background(MobileDesign.Soft)
                                 .clickable(enabled = !loadingEarlier, onClick = onLoadEarlier)
                                 .padding(horizontal = 12.dp, vertical = 10.dp),
                             horizontalArrangement = Arrangement.Center,
@@ -290,7 +291,8 @@ fun TaskDetailSheet(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .background(MobileDesign.Soft, RoundedCornerShape(50))
+                            .clip(RoundedCornerShape(50))
+                            .background(MobileDesign.Soft)
                             .clickable(enabled = !loadingMore, onClick = onLoadMore)
                             .padding(horizontal = 12.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,

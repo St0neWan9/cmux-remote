@@ -30,6 +30,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -57,7 +58,7 @@ fun ModelMenu(
     var customText by remember { mutableStateOf("") }
     Box(modifier) {
         Row(
-            modifier = (if (label != null) Modifier else Modifier.background(MobileDesign.Soft, CircleShape))
+            modifier = (if (label != null) Modifier else Modifier.clip(CircleShape).background(MobileDesign.Soft))
                 .clickable(enabled = enabled, onClick = { expanded = true })
                 .then(if (label != null) Modifier else Modifier.padding(horizontal = 12.dp, vertical = 8.dp)),
             verticalAlignment = Alignment.CenterVertically,
