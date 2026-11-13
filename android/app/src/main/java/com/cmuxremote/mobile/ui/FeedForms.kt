@@ -1,5 +1,6 @@
 package com.cmuxremote.mobile.ui
 
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -468,6 +469,7 @@ private fun QuestionBlock(
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag(tag + ".option." + optionIndex)
+                    .clip(RoundedCornerShape(12.dp))
                     .clickable(enabled = enabled) { onChoose(optionIndex) }
                     .heightIn(min = MobileDesign.Control),
                 verticalAlignment = Alignment.CenterVertically,

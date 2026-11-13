@@ -148,6 +148,7 @@ fun ActivityGroupCard(
                 .semantics {
                     stateDescription = expandedLabel
                 }
+                .clip(RoundedCornerShape(12.dp))
                 .clickable {
                     onHoldPlace?.invoke()
                     // A group too long for the timeline is read on its own page;
@@ -299,6 +300,7 @@ internal fun ToolDisclosureRow(
                 .semantics {
                     stateDescription = expandedLabel
                 }
+                .clip(RoundedCornerShape(12.dp))
                 .clickable { onHoldPlace?.invoke(); expanded = !expanded }
                 .padding(vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -483,6 +485,7 @@ private fun ToolCodeBlock(text: String, secondary: Boolean = false) {
             modifier = Modifier
                 .align(Alignment.TopEnd)
                 .size(16.dp)
+                .clip(CircleShape)
                 .clickable {
                     clipboard.setText(androidx.compose.ui.text.AnnotatedString(text))
                 },
@@ -558,6 +561,7 @@ fun ToolDetailScreen(
                                     if (selected) MobileDesign.Ink else MobileDesign.Soft,
                                     RoundedCornerShape(50),
                                 )
+                                .clip(RoundedCornerShape(50))
                                 .clickable(enabled = !loading) { onSelectField(index) }
                                 .padding(horizontal = 12.dp, vertical = 8.dp),
                         )

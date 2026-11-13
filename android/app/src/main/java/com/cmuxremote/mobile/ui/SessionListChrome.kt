@@ -1,5 +1,6 @@
 package com.cmuxremote.mobile.ui
 
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -135,7 +136,7 @@ fun SessionTitleMenu(
     var open by remember { mutableStateOf(false) }
     Box(modifier.testTag("sessions.menu")) {
         Row(
-            modifier = Modifier.clickable { open = true }.padding(vertical = 6.dp, horizontal = 2.dp),
+            modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { open = true }.padding(vertical = 6.dp, horizontal = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(2.dp),
         ) {
@@ -353,6 +354,7 @@ private fun Capsule(
                     else -> unknown
                 }
             }
+            .clip(CircleShape)
             .clickable(onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
