@@ -217,7 +217,7 @@ fun ConversationScreen(
                             text = stringResource(R.string.common_retry),
                             color = MobileDesign.Accent,
                             style = MaterialTheme.typography.labelMedium,
-                            modifier = Modifier.clickable(onClick = onRetryConnection).padding(vertical = 2.dp),
+                            modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable(onClick = onRetryConnection).padding(vertical = 2.dp),
                         )
                     }
                 }
@@ -368,7 +368,10 @@ fun ConversationScreen(
     previewImage?.let { bitmap ->
         androidx.compose.ui.window.Dialog(onDismissRequest = { previewImage = null }) {
             Box(
-                modifier = Modifier.fillMaxSize().clickable { previewImage = null },
+                modifier = Modifier.fillMaxSize().clickable(
+                    interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                    indication = null,
+                ) { previewImage = null },
                 contentAlignment = Alignment.Center,
             ) {
                 androidx.compose.foundation.Image(
@@ -776,6 +779,7 @@ fun ConversationTimeline(
                         .fillMaxWidth()
                         // A short conversation whose groups fit on one screen cannot be
                         // scrolled, so the row itself is the way to ask for an older page.
+                        .clip(RoundedCornerShape(12.dp))
                         .clickable(enabled = !state.loadingOlder && onLoadOlder != null) { onLoadOlder?.invoke(true) }
                         .padding(vertical = 8.dp),
                     horizontalArrangement = Arrangement.Center,
@@ -1202,7 +1206,7 @@ private fun LongPressText(
     val available = onCopy != null || onSelect != null
     Box {
         Box(
-            Modifier.combinedClickable(
+            Modifier.clip(RoundedCornerShape(12.dp)).combinedClickable(
                 onClick = {},
                 onLongClick = if (available) ({ open = true }) else null,
             ),
@@ -1292,7 +1296,7 @@ private fun PendingSendBanner(
                     text = stringResource(R.string.chat_check_receipt),
                     color = MobileDesign.Accent,
                     style = MaterialTheme.typography.labelMedium,
-                    modifier = Modifier.clickable(onClick = onCheck).padding(vertical = 4.dp),
+                    modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable(onClick = onCheck).padding(vertical = 4.dp),
                 )
             }
             if (onAcknowledge != null) {
@@ -1300,7 +1304,7 @@ private fun PendingSendBanner(
                     text = stringResource(R.string.chat_pending_send_acknowledge),
                     color = MobileDesign.Muted,
                     style = MaterialTheme.typography.labelMedium,
-                    modifier = Modifier.clickable(onClick = onAcknowledge).padding(vertical = 4.dp),
+                    modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable(onClick = onAcknowledge).padding(vertical = 4.dp),
                 )
             }
     }
@@ -1334,6 +1338,7 @@ private fun QuestionCard(
                 modifier = if (onAnswer != null && selected == null) {
                     Modifier
                         .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
                         .clickable { onAnswer(listOf(option)) }
                         .padding(vertical = 4.dp)
                 } else Modifier,
@@ -1705,7 +1710,7 @@ private fun ComposerAttach(
     val hasActions = onPickImages != null || onPickImageFile != null || onOpenProject != null || onOpenFeed != null
     Box {
         Box(
-            modifier = Modifier.size(if (expanded) 44.dp else 38.dp).testTag("chat.attach").clickable(enabled = hasActions) { actions = true },
+            modifier = Modifier.size(if (expanded) 44.dp else 38.dp).testTag("chat.attach").clip(CircleShape).clickable(enabled = hasActions) { actions = true },
             contentAlignment = Alignment.Center,
         ) {
             Icon(
@@ -1749,7 +1754,7 @@ private fun ComposerAttach(
 @Composable
 private fun ComposerVoice(dictating: Boolean, expanded: Boolean, enabled: Boolean, onClick: () -> Unit) {
     Box(
-        modifier = Modifier.size(if (expanded) 44.dp else 38.dp).testTag("chat.voice").clickable(enabled = enabled, onClick = onClick),
+        modifier = Modifier.size(if (expanded) 44.dp else 38.dp).testTag("chat.voice").clip(CircleShape).clickable(enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         Icon(
@@ -1844,12 +1849,12 @@ private fun SpeechDraftStrip(
                 modifier = Modifier.weight(1f),
             )
             if (onCancel != null) {
-                Text(stringResource(R.string.common_cancel), color = MobileDesign.Muted, style = MaterialTheme.typography.labelMedium, modifier = Modifier.clickable { onCancel() }.padding(4.dp))
+                Text(stringResource(R.string.common_cancel), color = MobileDesign.Muted, style = MaterialTheme.typography.labelMedium, modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { onCancel() }.padding(4.dp))
             }
             if (listening && onFinish != null) {
-                Text(stringResource(R.string.chat_speech_finish), color = MobileDesign.Accent, style = MaterialTheme.typography.labelMedium, modifier = Modifier.clickable { onFinish() }.padding(4.dp))
+                Text(stringResource(R.string.chat_speech_finish), color = MobileDesign.Accent, style = MaterialTheme.typography.labelMedium, modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { onFinish() }.padding(4.dp))
             } else if (!listening && onUse != null && text.isNotBlank()) {
-                Text(stringResource(R.string.chat_speech_use), color = MobileDesign.Accent, style = MaterialTheme.typography.labelMedium, modifier = Modifier.clickable { onUse() }.padding(4.dp))
+                Text(stringResource(R.string.chat_speech_use), color = MobileDesign.Accent, style = MaterialTheme.typography.labelMedium, modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { onUse() }.padding(4.dp))
             }
         }
         if (text.isNotBlank()) {

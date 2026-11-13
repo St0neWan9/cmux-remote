@@ -1,5 +1,7 @@
 package com.cmuxremote.mobile.ui.components
 
+import androidx.compose.ui.semantics.Role
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.border
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
@@ -73,6 +75,29 @@ fun Pill(
             style = MaterialTheme.typography.labelMedium,
         )
     }
+}
+
+/**
+ * A round floating button the size of its white disc. Material's IconButton presses a fixed 40dp circle, which
+ * left a smaller grey circle inside the 48dp disc drawn around it.
+ */
+@Composable
+fun FloatingCircleButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    raised: Boolean = false,
+    content: @Composable () -> Unit,
+) {
+    Box(
+        modifier = modifier
+            .size(48.dp)
+            .then(if (raised) Modifier.shadow(3.dp, CircleShape) else Modifier)
+            .clip(CircleShape)
+            .background(MobileDesign.Canvas)
+            .border(0.5.dp, MobileDesign.Line, CircleShape)
+            .clickable(role = Role.Button, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) { content() }
 }
 
 @Composable

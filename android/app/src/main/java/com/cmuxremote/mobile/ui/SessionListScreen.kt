@@ -1,5 +1,6 @@
 package com.cmuxremote.mobile.ui
 
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.layout.layout
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -70,6 +71,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.cmuxremote.mobile.ui.components.FloatingCircleButton
 import com.cmuxremote.mobile.R
 import com.cmuxremote.mobile.data.FeedItem
 import com.cmuxremote.mobile.model.SessionItem
@@ -297,7 +299,7 @@ fun DrawerContent(
                     }
                     item(key = key) {
                         Row(
-                            modifier = Modifier.fillMaxWidth().clickable { actions.onToggleGroup(key) }.padding(horizontal = 8.dp, vertical = 8.dp),
+                            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable { actions.onToggleGroup(key) }.padding(horizontal = 8.dp, vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
@@ -343,7 +345,7 @@ fun DrawerContent(
         Column(Modifier.fillMaxWidth().padding(horizontal = MobileDesign.PageInset, vertical = 8.dp)) {
             model.hosts.forEach { (id, name) ->
                 Row(
-                    modifier = Modifier.fillMaxWidth().clickable { onHostConnection(id) }.padding(vertical = 8.dp),
+                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable { onHostConnection(id) }.padding(vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
@@ -381,7 +383,7 @@ fun DrawerContent(
                 }
             }
             Row(
-                modifier = Modifier.testTag("sessions.add_mac").clickable { actions.onAddMac() }.padding(vertical = 8.dp),
+                modifier = Modifier.testTag("sessions.add_mac").clip(RoundedCornerShape(8.dp)).clickable { actions.onAddMac() }.padding(vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
@@ -407,6 +409,7 @@ private fun EarlierRow(count: Int, open: Boolean, key: String, modifier: Modifie
             .fillMaxWidth()
             .testTag("sessions.earlier.$key")
             .semantics(mergeDescendants = true) { stateDescription = if (open) expanded else collapsed }
+            .clip(RoundedCornerShape(12.dp))
             .clickable(onClick = onToggle)
             .padding(vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -612,24 +615,12 @@ private fun SessionListContent(
                 horizontalArrangement = Arrangement.spacedBy(2.dp),
             ) {
                 if (compact) {
-                    IconButton(
-                        onClick = actions.onOpenSidebar,
-                        modifier = Modifier
-                    .shadow(3.dp, CircleShape)
-                    .background(MobileDesign.Canvas, CircleShape)
-                    .border(0.5.dp, MobileDesign.Line, CircleShape),
-                    ) {
+                    FloatingCircleButton(onClick = actions.onOpenSidebar, raised = true) {
                         Icon(Icons.Rounded.Menu, contentDescription = stringResource(R.string.common_sidebar), tint = MobileDesign.Ink)
                     }
                 } else if (onCollapseSidebar != null) {
                     // Wide sidebar: the same top-left control as the phone, but it hides the column.
-                    IconButton(
-                        onClick = onCollapseSidebar,
-                        modifier = Modifier
-                            .shadow(3.dp, CircleShape)
-                            .background(MobileDesign.Canvas, CircleShape)
-                            .border(0.5.dp, MobileDesign.Line, CircleShape),
-                    ) {
+                    FloatingCircleButton(onClick = onCollapseSidebar, raised = true) {
                         Icon(
                             Icons.Rounded.Menu,
                             contentDescription = stringResource(R.string.sessions_collapse_sidebar),
@@ -653,10 +644,7 @@ private fun SessionListContent(
                     onFeedHost = actions.onOpenFeedHost,
                 )
                 Spacer(Modifier.weight(1f))
-                IconButton(
-                    onClick = { searching = true },
-                    modifier = Modifier.background(MobileDesign.Canvas, CircleShape).border(0.5.dp, MobileDesign.Line, CircleShape),
-                ) {
+                FloatingCircleButton(onClick = { searching = true }) {
                     Icon(Icons.Rounded.Search, contentDescription = stringResource(R.string.common_search), tint = MobileDesign.Ink)
                 }
             }
@@ -832,6 +820,7 @@ private fun SessionListContent(
                                                 heading()
                                                 stateDescription = if (open) expanded else collapsed
                                             }
+                                            .clip(RoundedCornerShape(12.dp))
                                             .clickable { actions.onToggleGroup(key) },
                                         verticalAlignment = Alignment.CenterVertically,
                                         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -967,11 +956,13 @@ private fun PendingCard(
 ) {
     var menu by remember { mutableStateOf(false) }
     val perHost = queues.size > 1 && onOpenHost != null
-    FloatingSurface(modifier = Modifier.testTag("sessions.pending"), contentPadding = PaddingValues(horizontal = 14.dp, vertical = if (dense) 10.dp else 14.dp)) {
+    FloatingSurface(
+        modifier = Modifier.testTag("sessions.pending"),
+        contentPadding = PaddingValues(horizontal = 14.dp, vertical = if (dense) 10.dp else 14.dp),
+        onClick = { if (perHost) menu = true else onOpen() },
+    ) {
         Row(
-            modifier = Modifier
-                .semantics(mergeDescendants = true) {}
-                .clickable { if (perHost) menu = true else onOpen() },
+            modifier = Modifier.semantics(mergeDescendants = true) {},
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {

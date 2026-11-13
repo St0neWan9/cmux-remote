@@ -72,6 +72,7 @@ fun BackgroundTasksRow(
             modifier = Modifier
                 .fillMaxWidth()
                 .testTag("chat.background")
+                .clip(RoundedCornerShape(12.dp))
                 .clickable { expanded = !expanded },
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(7.dp),
@@ -100,6 +101,7 @@ fun BackgroundTasksRow(
                         modifier = Modifier
                             .fillMaxWidth()
                             .testTag("chat.background.task")
+                            .clip(RoundedCornerShape(12.dp))
                             .clickable { onOpen(task) },
                         // The bullet and the tool name sit on the summary's first
                         // baseline, as the iPhone's firstTextBaseline row does; only

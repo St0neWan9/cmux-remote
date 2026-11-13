@@ -175,7 +175,7 @@ fun StartSessionScreen(
                         text = stringResource(R.string.start_refresh),
                         color = MobileDesign.Accent,
                         style = MaterialTheme.typography.labelMedium,
-                        modifier = Modifier.clickable(enabled = !busy) { onRefreshRoots() },
+                        modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable(enabled = !busy) { onRefreshRoots() },
                     )
                 }
                 Spacer(Modifier.height(10.dp))
@@ -210,7 +210,7 @@ fun StartSessionScreen(
                             text = stringResource(R.string.start_up),
                             color = MobileDesign.Accent,
                             style = MaterialTheme.typography.labelMedium,
-                            modifier = Modifier.clickable(enabled = !busy) { onUpFolder() },
+                            modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable(enabled = !busy) { onUpFolder() },
                         )
                     }
                     Spacer(Modifier.height(8.dp))

@@ -1,5 +1,6 @@
 package com.cmuxremote.mobile.ui
 
+import androidx.compose.foundation.shape.RoundedCornerShape
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.Image
@@ -114,7 +115,7 @@ fun ImagePreviewScreen(
                     text = stringResource(if (copied) R.string.common_copied else R.string.common_copy),
                     color = MobileDesign.Accent,
                     style = MaterialTheme.typography.labelMedium,
-                    modifier = Modifier.clickable {
+                    modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable {
                         copied = copyImage(context, bytes)
                     }.padding(vertical = 4.dp),
                 )

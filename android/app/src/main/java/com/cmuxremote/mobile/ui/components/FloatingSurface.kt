@@ -1,6 +1,7 @@
 package com.cmuxremote.mobile.ui.components
 
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
@@ -18,6 +19,8 @@ import com.cmuxremote.mobile.ui.theme.MobileDesign
 fun FloatingSurface(
     modifier: Modifier = Modifier,
     contentPadding: PaddingValues = PaddingValues(16.dp),
+    /** A card that opens something presses as a whole, inside its rounded shape, not just around its content. */
+    onClick: (() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val shape = RoundedCornerShape(MobileDesign.CardRadius)
@@ -31,6 +34,11 @@ fun FloatingSurface(
         shape = shape,
         color = MobileDesign.Canvas,
     ) {
-        Column(Modifier.padding(contentPadding), content = content)
+        Column(
+            Modifier
+                .then(if (onClick != null) Modifier.fillMaxWidth().clickable(onClick = onClick) else Modifier)
+                .padding(contentPadding),
+            content = content,
+        )
     }
 }

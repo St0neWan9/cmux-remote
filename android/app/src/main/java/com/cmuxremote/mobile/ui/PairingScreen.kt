@@ -1,5 +1,6 @@
 package com.cmuxremote.mobile.ui
 
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -290,7 +291,7 @@ fun PairingScreen(
 
         FloatingSurface(contentPadding = PaddingValues(16.dp)) {
             Row(
-                modifier = Modifier.fillMaxWidth().clickable { advanced = !advanced },
+                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable { advanced = !advanced },
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
@@ -501,6 +502,7 @@ private fun HostRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
             .clickable(enabled = !approved, onClick = onClick)
             .padding(vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -555,7 +557,7 @@ fun AwaitingEnrollmentCard(awaiting: AwaitingEnrollment, onCancel: () -> Unit) {
             color = MobileDesign.Ink,
             fontWeight = FontWeight.SemiBold,
             fontFamily = FontFamily.Monospace,
-            modifier = Modifier.clickable { showDetails = !showDetails },
+            modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { showDetails = !showDetails },
         )
         if (showDetails) {
             Spacer(Modifier.height(6.dp))
@@ -610,7 +612,7 @@ fun AwaitingOwnerScreen(
                 color = MobileDesign.Ink,
                 fontWeight = FontWeight.SemiBold,
                 fontFamily = FontFamily.Monospace,
-                modifier = Modifier.clickable { showDetails = !showDetails },
+                modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { showDetails = !showDetails },
             )
             if (showDetails) {
                 Spacer(Modifier.height(6.dp))

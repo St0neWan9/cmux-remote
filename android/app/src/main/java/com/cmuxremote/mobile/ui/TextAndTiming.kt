@@ -390,7 +390,7 @@ private fun FooterAction(
 ) {
     // One 36×44 icon target; the label is the accessibility name, not visible text.
     Box(
-        modifier = modifier.width(36.dp).height(44.dp).clickable(onClick = onClick),
+        modifier = modifier.width(36.dp).height(44.dp).clip(CircleShape).clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         Icon(
