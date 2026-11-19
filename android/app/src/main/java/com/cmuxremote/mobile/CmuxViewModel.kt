@@ -2087,11 +2087,14 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
         terminalPoll = viewModelScope.launch {
             while (isActive) {
                 val id = session.surfaceID ?: break
+                var changed = false
                 try {
                     val screen = current.terminalScreen(id)
+                    val text = screen.string("text").orEmpty()
+                    changed = text != _terminal.value?.text
                     _terminal.update { ui ->
                         if (ui?.session?.id != session.id) ui else ui.copy(
-                            text = screen.string("text").orEmpty(),
+                            text = text,
                             columns = screen.int("columns") ?: 0,
                             rows = screen.int("rows") ?: 0,
                             error = null,
@@ -2102,7 +2105,8 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
                         if (ui?.session?.id != session.id) ui else ui.copy(error = error.userMessage())
                     }
                 }
-                delay(1_000)
+                // New output earns a fast follow-up; a quiet screen costs one poll a second.
+                delay(if (changed) 250L else 1_000L)
             }
         }
     }

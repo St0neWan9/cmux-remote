@@ -55,14 +55,17 @@ struct TerminalSessionView: View {
     private func poll() async {
         guard !terminalID.isEmpty else { return }
         while !Task.isCancelled {
+            var changed = false
             do {
                 let snapshot = try await client.get("/v3/terminals/\(terminalID)/screen", as: TerminalSnapshot.self)
+                changed = snapshot.text != text
                 text = snapshot.text
                 error = nil
             } catch {
                 if !Task.isCancelled { self.error = ErrorPresentation().message(error) }
             }
-            do { try await Task.sleep(for: .seconds(1)) } catch { return }
+            // New output earns a fast follow-up; a quiet screen costs one poll a second.
+            do { try await Task.sleep(for: changed ? .milliseconds(250) : .seconds(1)) } catch { return }
         }
     }
 
