@@ -37,9 +37,11 @@ struct OwnerControlRouter: Sendable {
                 try store.save(chosen.compactMap(\.string))
                 value = .object(["directories": .array(store.load().map { .string(display($0)) })])
             case "bridge.workspaces":
-                // The companion's mirror table is cmux-only; provider spaces are
-                // exposed separately so an unknown UUID never reaches a mirror.
-                value = try await service.workspaces()
+                // Pairing and approval list every shareable space: cmux workspaces
+                // plus provider spaces. Provider rows carry their source name so
+                // the companion can label them, and the mirror table, which is
+                // cmux-only, never offers them as a mirror target.
+                value = .object(["workspaces": .array(try await availableWorkspaces())])
             case "providers.list":
                 guard let providers else { throw BridgeError("providers_unsupported", "Upgrade the Bridge to list terminal providers.") }
                 value = try json(await providers.descriptors())
@@ -82,7 +84,7 @@ struct OwnerControlRouter: Sendable {
             case "enrollment.approve":
                 guard let requestID = params["request_id"].string, let scopeJSON = params["scope"].object else { throw BridgeError("invalid_input", "Approve an exact request and explicit scope.") }
                 let scope = try JSONDecoder().decode(ClientScope.self, from: JSONEncoder().encode(JSONValue.object(scopeJSON)))
-                let available = try await service.workspaces()["workspaces"].array ?? []
+                let available = try await availableWorkspaces()
                 let IDs = Set(available.compactMap { $0["id"].string?.lowercased() })
                 guard Set(scope.workspaces).isSubset(of: IDs) else { throw BridgeError("invalid_scope", "The selected workspace no longer exists.") }
                 try await authority.approve(requestID: requestID, scope: scope); value = .object(["approved": .bool(true)])
@@ -116,9 +118,18 @@ struct OwnerControlRouter: Sendable {
     private func availableWorkspaces() async throws -> [JSONValue] {
         var rows = try await service.workspaces()["workspaces"].array ?? []
         if let providers, let list = try? await providers.spaces(providerID: nil) {
-            rows += list.spaces.map { .object(["id": .string($0.id), "title": .string($0.title)]) }
+            let names = Dictionary(uniqueKeysWithValues: await providers.descriptors().map { ($0.id, $0.name) })
+            rows += list.spaces.map { space in
+                .object(["id": .string(space.id), "title": .string(space.title),
+                         "provider_id": .string(space.providerID),
+                         "source": .string(names[space.providerID] ?? "Terminal")])
+            }
         }
-        return Array(rows.prefix(100))
+        var seen = Set<String>()
+        return Array(rows.filter { row in
+            guard let id = row["id"].string?.lowercased() else { return false }
+            return seen.insert(id).inserted
+        }.prefix(100))
     }
     /// The home directory shows as `~` wherever a folder is named.
     private func display(_ url: URL) -> String {

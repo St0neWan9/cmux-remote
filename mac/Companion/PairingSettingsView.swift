@@ -1,4 +1,5 @@
 import SwiftUI
+import CmuxRemoteCore
 import CmuxRemoteMac
 
 /// New-device pairing: an explicit workspace allow-list, then an expiring QR for exactly that scope.
@@ -57,13 +58,19 @@ struct PairingSettingsView: View {
     }
     private var items: [MacTableItem] {
         model.workspaces.compactMap { workspace in
-            workspace["id"].string.map { MacTableItem(id: $0.lowercased(), title: workspace["title"].string ?? String(localized: "mac.untitled", bundle: .interface)) }
+            workspace["id"].string.map { MacTableItem(id: $0.lowercased(), title: workspaceTitle(workspace)) }
         }
+    }
+    /// cmux workspaces keep their name; a provider space names its source too,
+    /// so a Rex session is never mistaken for a cmux workspace.
+    private func workspaceTitle(_ workspace: JSONValue) -> String {
+        let title = workspace["title"].string ?? String(localized: "mac.untitled", bundle: .interface)
+        return workspace["source"].string.map { "\(title) · \($0)" } ?? title
     }
     private func setAllowed(_ allowed: Bool, for item: MacTableItem) {
         if allowed { model.selectedWorkspaces.insert(item.id) } else { model.selectedWorkspaces.remove(item.id) }
     }
     private func workspaceName(_ id: String) -> String {
-        model.workspaces.first { $0["id"].string?.lowercased() == id.lowercased() }?["title"].string ?? id
+        model.workspaces.first { $0["id"].string?.lowercased() == id.lowercased() }.map(workspaceTitle) ?? id
     }
 }

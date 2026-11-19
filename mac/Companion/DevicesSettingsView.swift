@@ -120,7 +120,9 @@ struct DevicesSettingsView: View {
         return request.scope.workspaces.filter { known.contains($0.lowercased()) }
     }
     private func workspaceName(_ id: String) -> String {
-        model.workspaces.first { $0["id"].string?.lowercased() == id.lowercased() }?["title"].string ?? id
+        guard let workspace = model.workspaces.first(where: { $0["id"].string?.lowercased() == id.lowercased() }) else { return id }
+        let title = workspace["title"].string ?? id
+        return workspace["source"].string.map { "\(title) · \($0)" } ?? title
     }
 }
 

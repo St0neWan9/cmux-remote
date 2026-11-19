@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 import CmuxRemoteCore
+import CmuxRemoteClient
 @testable import CmuxRemoteBridge
 
 private actor OwnerFixtureProvider: TerminalProvider {
@@ -76,5 +77,52 @@ private actor OwnerFixtureProvider: TerminalProvider {
                                                           "operation_id": .string(operation.uuidString)])]))
         #expect(input["result"]["accepted"].bool == true)
         #expect(await provider.sent.map(\.operationID) == [operation])
+    }
+
+    /// A provider space must be offered in the owner's pairing list and must
+    /// survive approval validation, or a Rex session can never reach a phone.
+    @Test func ownerSharesAndApprovesAProviderSpace() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let state = BridgeState(directory: root); try state.initialize()
+        let authority = try state.authority(name: "Owner fixture")
+        let transcript = root.appendingPathComponent("demo.jsonl")
+        try Data().write(to: transcript)
+        let service = SessionService(cmux: DemoCmux(transcript: transcript.path, project: root.path),
+                                     home: root, transcriptRoots: [root])
+        let registry = ProviderRegistry()
+        let provider = OwnerFixtureProvider()
+        try await registry.register(provider)
+        let providers = ProviderDirectory(registry: registry)
+        let owner = OwnerControlRouter(authority: authority, service: service, providers: providers)
+        let sharing = ManagedSharingService(state: state, authority: authority,
+                                            router: BridgeRouter(service: service, authority: authority, providers: providers),
+                                            listen: "127.0.0.1", port: 0, advertise: false)
+        let started = try await sharing.start(); let port = try #require(started["port"].int)
+        defer { Task { _ = await sharing.stop() } }
+
+        let listed = await owner.respond(.object(["id": .string("1"), "method": .string("bridge.workspaces"), "params": .object([:])]))
+        let row = listed["result"]["workspaces"].array?.first { $0["id"].string == provider.space.id }
+        #expect(row?["source"].string == "Fixture")
+
+        let opened = await owner.respond(.object(["id": .string("2"), "method": .string("enrollment.open"),
+            "params": .object(["host": .string("127.0.0.1"), "port": .number(Double(port)),
+                               "workspaces": .array([.string(provider.space.id)])])]))
+        #expect(opened["ok"].bool == true)
+        let bootstrap = try JSONDecoder().decode(SignedValue<EnrollmentBootstrap>.self,
+                                                 from: JSONEncoder().encode(opened["result"]))
+        let enrollment = try EnrollmentClient(bootstrap: bootstrap, privateKey: IdentityCryptography().generatePrivateKey(),
+                                              name: "Fixture phone", kind: "iphone", capabilities: [.workspaceRead])
+        defer { enrollment.close() }
+        _ = try await enrollment.submit()
+        let request = try #require(try await authority.pendingRequests().first)
+
+        let scope = ClientScope(workspaces: [provider.space.id], capabilities: [.workspaceRead])
+        let approved = await owner.respond(.object(["id": .string("3"), "method": .string("enrollment.approve"),
+            "params": .object(["request_id": .string(request.requestID),
+                               "scope": try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(scope))])]))
+        #expect(approved["ok"].bool == true, "\(approved)")
+        #expect(try await authority.enrolledClients().first?.scope.workspaces == [provider.space.id])
     }
 }
