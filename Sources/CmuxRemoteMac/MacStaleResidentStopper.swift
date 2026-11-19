@@ -27,7 +27,11 @@ struct MacStaleResidentStopper: Sendable {
 
     /// Processes whose full command line is exactly this executable in resident mode for this state directory.
     private func residentProcessIDs() -> [pid_t] {
-        let expected = executable.path + " resident --state " + directory.path
+        // The renamed companion must also retire the helper installed by the
+        // previous app name. Only these two helper paths for this exact state
+        // directory match, never cmux itself.
+        let suffix = " resident --state " + directory.path
+        let expected = ["/Contents/Helpers/term-remote", "/Contents/Helpers/cmux-remote"].map { $0 + suffix }
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/ps")
         process.arguments = ["-axww", "-o", "pid=,command="]
@@ -39,7 +43,7 @@ struct MacStaleResidentStopper: Sendable {
         guard process.terminationStatus == 0 else { return [] }
         return String(decoding: data, as: UTF8.self).split(separator: "\n").compactMap { line in
             let fields = line.split(maxSplits: 1, omittingEmptySubsequences: true) { $0 == " " }
-            guard fields.count == 2, fields[1] == Substring(expected), let pid = pid_t(fields[0]) else { return nil }
+            guard fields.count == 2, expected.contains(where: { fields[1].hasSuffix($0) }), let pid = pid_t(fields[0]) else { return nil }
             return pid
         }
     }
