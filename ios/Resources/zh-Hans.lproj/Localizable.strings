@@ -1,6 +1,6 @@
 "app.title" = "term remote";
-"pair.intro" = "在手机上使用你的 cmux";
-"pair.instructions" = "在 Mac 启动 Bridge。扫描配对二维码或选择附近的 Bridge，然后在 Mac 批准这台设备。";
+"pair.intro" = "你的终端，在手机上";
+"pair.instructions" = "在 Mac 启动 term remote 服务。扫描配对二维码或选择附近的 Mac，然后在 Mac 批准这台设备。";
 "pair.connection" = "连接";
 "pair.host" = "Mac 地址";
 "pair.port" = "端口";
@@ -42,13 +42,13 @@
 "error.read_only" = "此会话是只读的，或绑定的智能体已停止。请回到会话列表刷新后重试。";
 "error.task_unavailable" = "这个任务的记录已经不在这台 Mac 上了。";
 "error.input_busy" = "桌面上有草稿或未处理的问题，请先处理。";
-"error.socket" = "请打开 cmux 并检查 socket 访问设置。";
+"error.socket" = "请打开终端应用并检查 socket 访问设置。";
 "error.history" = "此历史记录不可用，或超过当前读取上限。";
 "error.file" = "此文件无法预览，或不允许从该项目分享。";
 "error.expired" = "此请求已不再等待处理，请刷新列表。";
-"error.connection" = "无法完成请求，请重试，或检查网络和 Mac 上的 Bridge。";
+"error.connection" = "无法完成请求，请重试，或检查网络和 Mac 上的 term remote 服务。";
 "pair.scan" = "扫描配对二维码";
-"pair.scan_instructions" = "在 Mac 运行 cmux-remote serve --pair。扫码只会申请配对，主人批准后才能访问。";
+"pair.scan_instructions" = "在 Mac 运行 term-remote serve --pair。扫码只会申请配对，主人批准后才能访问。";
 "pair.advanced" = "高级设置";
 "pair.cancel" = "取消";
 "pair.camera_unavailable" = "相机不可用，请在设置中允许相机访问，或使用高级配对。";
@@ -60,7 +60,7 @@
 "error.keychain" = "连接成功，但无法保存设备凭证，请检查应用签名。";
 "pair.awaiting_owner" = "等待 Mac 批准";
 "pair.owner_instructions" = "请在 Mac 确认这台 iPhone 的连接请求，并核对下方设备身份。批准后手机会自动连接。";
-"pair.nearby" = "附近的 Bridge";
+"pair.nearby" = "附近的 Mac";
 "pair.searching" = "正在搜索局域网……无法发现设备时，也可以扫码配对。";
 "pair.trust_host" = "确认主机身份";
 "pair.trust_instructions" = "申请访问前，请与 Mac 主人核对以下身份。仅凭 Bonjour 名称不能确认主机身份。";
@@ -117,7 +117,7 @@
 "chat.rename_title" = "对话重命名";
 "chat.rename_placeholder" = "标签标题";
 "chat.rename_save" = "保存";
-"chat.rename_note" = "名称会同步到 Mac 上 cmux 的标签页。留空则恢复自动命名。";
+"chat.rename_note" = "名称会同步到 Mac 上的终端标签页。留空则恢复自动命名。";
 "chat.recorded_turns" = "已记录 %ld 轮回复的运行时间。";
 "chat.no_timing" = "暂无已记录的运行时长。";
 "chat.timing_note" = "已记录的运行时间不包含轮次之间的空闲时间。缺失的时长不计入累计；响应耗时估算使用会话记录的时间戳。";
@@ -134,7 +134,7 @@
 "sessions.archived_at" = "归档于 %@";
 "sessions.archive_empty" = "没有归档的对话。执行过 /clear 的对话会移到这里。";
 "connection.title" = "连接详情";
-"connection.reachable" = "Bridge 连接已验证";
+"connection.reachable" = "服务连接已验证";
 "connection.endpoint" = "地址";
 "connection.protocol" = "协议";
 "connection.identity" = "主机身份";
@@ -170,7 +170,7 @@
 "feed.effect.autoAccept" = "批准计划并让智能体自动接受文件修改。";
 "feed.effect.manual" = "以手动决策方式批准此计划。";
 "chat.hard_stop" = "强制停止";
-"chat.hard_stop_note" = "向此现有智能体发送 cmux 支持的强制中断，可能打断尚未完成的工作。";
+"chat.hard_stop_note" = "向此现有智能体发送 provider 支持的强制中断，可能打断尚未完成的工作。";
 "project.empty_changes" = "暂无改动文件。";
 "project.empty_content" = "暂无可显示的内容。";
 "project.truncated" = "内容已截断";
@@ -242,7 +242,7 @@
 
 "tool.detail.changed" = "记录已更新，请刷新后查看当前内容。";
 
-"tool.detail.unavailable" = "此 Bridge 尚不支持完整工具记录，请更新 Bridge 后重试。";
+"tool.detail.unavailable" = "此服务尚不支持完整工具记录，请更新 Bridge 后重试。";
 
 "image.history.open" = "查看图片";
 "error.image_unavailable" = "这张历史图片已不可用，或超出预览限制。";
@@ -339,7 +339,7 @@
 "about.version" = "版本 %@";
 "about.website" = "官网 cmux-remote.trenta.dev";
 "about.source" = "GitHub 源码";
-"about.note" = "cmux 的独立配套应用，非 cmux 官方产品。";
+"about.note" = "面向多种终端来源的独立配套应用，非 cmux 官方产品。";
 "feed.title_count" = "待处理事项（%lld）";
 "chat.copy_text" = "复制";
 "model.switch" = "切换模型";

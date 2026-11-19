@@ -552,7 +552,7 @@ final class ConversationModel {
                 if let sent = sentTurn, !working, !outgoing.contains(where: { $0.id == sent.id }),
                    Date().timeIntervalSince(sent.at) > 60 { sentTurn = nil }
             } else if readsListing {
-                throw BridgeError("read_only", "The cmux session is no longer available.", status: 404)
+                throw BridgeError("read_only", "This conversation is no longer available.", status: 404)
             }
             // A tail holds only the newest messages; the stored copy keeps the last full page.
             if full { store(history, live: live) }

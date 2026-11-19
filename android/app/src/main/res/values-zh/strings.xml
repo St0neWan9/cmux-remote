@@ -114,7 +114,7 @@
     <string name="pair_relay_add">添加中转</string>
     <string name="pair_advanced">高级</string>
     <string name="pair_import_note">无法扫码时，可以粘贴配对链接，或 Mac 导出的登记 JSON。</string>
-    <string name="pair_import_placeholder">cmux-remote://enroll… 或 {…}</string>
+    <string name="pair_import_placeholder">配对链接或 JSON</string>
     <string name="pair_import">导入并申请</string>
     <string name="pair_reset_identity">重置本机身份</string>
     <string name="pair_reset_identity_title">重置本机身份？</string>
@@ -172,7 +172,7 @@
     <string name="about_version">版本 %1$s</string>
     <string name="about_website">官网 cmux-remote.trenta.dev</string>
     <string name="about_source">GitHub 源码</string>
-    <string name="about_note">cmux 的独立配套应用，非 cmux 官方产品。</string>
+    <string name="about_note">面向多种终端来源的独立配套应用，非 cmux 官方产品。</string>
     <string name="sessions_connection">连接详情</string>
     <string name="sessions_no_permission">这台 Mac 没有授予读取会话的权限。</string>
     <string name="sessions_unreachable">连不上</string>
@@ -434,7 +434,7 @@
     <string name="pair_legacy_fill">用粘贴的 JSON 填充连接字段</string>
     <string name="error_draft_storage">待确认的发送无法保存或恢复，请先检查对话再重新发送。</string>
     <string name="error_keychain">连接成功，但无法保存设备密钥，请检查应用签名。</string>
-    <string name="error_socket">请打开 cmux 并检查 socket 访问设置。</string>
+    <string name="error_socket">请打开终端应用并检查 socket 访问设置。</string>
     <string name="error_capacity">这台 Mac 已无法再接受新设备。</string>
     <string name="error_speech_no_speech">没有识别到文字，请重试或直接输入。</string>
     <string name="chat_question_answered">已回答：%1$s</string>

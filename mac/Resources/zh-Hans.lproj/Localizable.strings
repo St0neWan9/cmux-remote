@@ -21,7 +21,7 @@
 "mac.trust" = "发送配对申请";
 "mac.trustMessage" = "请先核对远端主机名称和证书指纹。发送配对申请后，必须由远端主机所有者批准工作区和终端权限。";
 "mac.openCompanion" = "打开 Companion";
-"mac.extensionHint" = "在 Companion 中连接、授权并选择远程工作区。请先在本地 cmux 内启动 Bridge。";
+"mac.extensionHint" = "在 Companion 中连接、授权并选择远程工作区。请先在本地 cmux 内启动 term remote 服务。";
 "mac.bridgeHint" = "在远端设置中检查本机服务；在远端的“共享本机”中开始配对并批准申请。";
 "mac.error.scope" = "本机需要相应的工作区或终端权限。";
 "mac.error.unsupported" = "当前设备或 cmux 版本不支持此镜像。";
@@ -45,7 +45,7 @@
 "mac.share.stopped" = "本机共享已关闭";
 "mac.share.connectionDetails" = "连接详情";
 "mac.share.port" = "端口";
-"mac.share.noWorkspaces" = "在 cmux 中打开 workspace 后刷新。";
+"mac.share.noWorkspaces" = "在终端来源中打开 workspace 后刷新。";
 "mac.pairing.title" = "添加设备";
 "mac.pairing.workspaceHint" = "选择允许新设备申请访问的 workspace。已有设备的授权保持不变。";
 "mac.pairing.open" = "开始配对";
@@ -69,10 +69,10 @@
 "mac.setup.instructions" = "首次连接请在 cmux 中新开一个 shell，运行一次下方命令，然后在此重试。";
 "mac.setup.copy" = "复制连接命令";
 "mac.setup.retry" = "重试连接";
-"mac.error.setup" = "先将此应用连接到本机 cmux。";
-"mac.error.setupStorage" = "保存的 cmux 连接无效，请重新执行连接设置。";
+"mac.error.setup" = "先将此应用连接到本机的终端来源。";
+"mac.error.setupStorage" = "保存的终端连接无效，请重新执行连接设置。";
 "mac.error.starting" = "后台服务正在启动，请稍后重试。";
-"mac.error.resident" = "后台服务启动失败，请检查 cmux 并重新连接。";
+"mac.error.resident" = "后台服务启动失败，请检查终端来源并重新连接。";
 "mac.error.sharing" = "无法启动共享，请检查端口是否被占用。";
 "mac.error.sharingUpgrade" = "请更新正在运行的 Bridge，才能在此管理共享。";
 "mac.error.pairingSelection" = "请先开启共享并选择至少一个 workspace。";
@@ -92,7 +92,7 @@
 "mac.workspaces.empty" = "此连接暂无可访问的工作区。";
 "mac.settings.title" = "设置";
 "mac.share.label" = "本机共享";
-"mac.setup.title" = "连接 cmux";
+"mac.setup.title" = "连接 term remote";
 "mac.menu.file" = "文件";
 "mac.menu.closeWindow" = "关闭窗口";
 "mac.share.address" = "地址";

@@ -21,7 +21,7 @@
 "mac.trust" = "Send pairing request";
 "mac.trustMessage" = "Verify the remote host's name and certificate fingerprint. After you send the request, its owner must approve access to the workspaces and terminals.";
 "mac.openCompanion" = "Open Companion";
-"mac.extensionHint" = "Connect, enroll and choose remote workspaces in the Companion. Start your local Bridge inside cmux first.";
+"mac.extensionHint" = "Connect, enroll and choose remote workspaces in the Companion. Start your local term remote service inside cmux first.";
 "mac.bridgeHint" = "Check the local service in Remote Settings. On the remote Mac, start pairing under Share This Mac and approve the request.";
 "mac.error.scope" = "This device needs additional workspace or terminal permissions.";
 "mac.error.unsupported" = "This host or cmux version does not support the requested mirror.";
@@ -45,7 +45,7 @@
 "mac.share.stopped" = "Sharing is off";
 "mac.share.connectionDetails" = "Connection details";
 "mac.share.port" = "Port";
-"mac.share.noWorkspaces" = "Open a workspace in cmux, then refresh.";
+"mac.share.noWorkspaces" = "Open a workspace in a terminal source, then refresh.";
 "mac.pairing.title" = "Add a Device";
 "mac.pairing.workspaceHint" = "Choose the workspaces this device may request. Existing grants stay unchanged.";
 "mac.pairing.open" = "Start Pairing";
@@ -69,10 +69,10 @@
 "mac.setup.instructions" = "For the first connection, open a new shell in cmux and run this command once. Then retry here.";
 "mac.setup.copy" = "Copy Setup Command";
 "mac.setup.retry" = "Retry Connection";
-"mac.error.setup" = "Connect this app to local cmux.";
-"mac.error.setupStorage" = "The saved cmux connection is not valid. Run setup again.";
+"mac.error.setup" = "Connect this app to a local terminal source.";
+"mac.error.setupStorage" = "The saved terminal connection is not valid. Run setup again.";
 "mac.error.starting" = "The background service is starting. Retry shortly.";
-"mac.error.resident" = "The background service could not start. Check cmux and retry setup.";
+"mac.error.resident" = "The background service could not start. Check the terminal source and retry setup.";
 "mac.error.sharing" = "Sharing could not start. Check whether the port is already in use.";
 "mac.error.sharingUpgrade" = "Upgrade the running Bridge to manage sharing here.";
 "mac.error.pairingSelection" = "Start sharing and select at least one workspace first.";
@@ -92,7 +92,7 @@
 "mac.workspaces.empty" = "No workspaces are available for this connection.";
 "mac.settings.title" = "Settings";
 "mac.share.label" = "Sharing";
-"mac.setup.title" = "Connect to cmux";
+"mac.setup.title" = "Connect to term remote";
 "mac.menu.file" = "File";
 "mac.menu.closeWindow" = "Close Window";
 "mac.share.address" = "Address";

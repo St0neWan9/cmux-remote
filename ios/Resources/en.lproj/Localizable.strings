@@ -1,6 +1,6 @@
 "app.title" = "term remote";
-"pair.intro" = "Your cmux, on your phone";
-"pair.instructions" = "Start the Bridge on your Mac. Scan its enrollment QR code or select a nearby Bridge, then approve this device on the Mac.";
+"pair.intro" = "Your terminals, on your phone";
+"pair.instructions" = "Start the term remote service on your Mac. Scan its enrollment QR code or select a nearby Mac, then approve this device on the Mac.";
 "pair.connection" = "Connection";
 "pair.host" = "Mac address";
 "pair.port" = "Port";
@@ -42,13 +42,13 @@
 "error.read_only" = "This session is read-only or its agent has stopped. Go back to the session list and refresh.";
 "error.task_unavailable" = "This task's record is no longer on the Mac.";
 "error.input_busy" = "The desktop has a draft or open question. Resolve it first.";
-"error.socket" = "Open cmux and check its socket access settings.";
+"error.socket" = "Open the terminal app and check its socket access settings.";
 "error.history" = "This history is unavailable or exceeds the initial read limit.";
 "error.file" = "This file cannot be previewed or shared from the project.";
 "error.expired" = "This request is no longer pending. Refresh the list.";
-"error.connection" = "Could not complete the request. Retry, or check your network and the Bridge on your Mac.";
+"error.connection" = "Could not complete the request. Retry, or check your network and the term remote service on your Mac.";
 "pair.scan" = "Scan pairing QR code";
-"pair.scan_instructions" = "Run cmux-remote serve --pair on your Mac. Scanning requests enrollment; it does not grant access until the owner approves.";
+"pair.scan_instructions" = "Run term-remote serve --pair on your Mac. Scanning requests enrollment; it does not grant access until the owner approves.";
 "pair.advanced" = "Advanced settings";
 "pair.cancel" = "Cancel";
 "pair.camera_unavailable" = "Camera access is unavailable. Allow camera access in Settings or use advanced pairing.";
@@ -60,13 +60,13 @@
 "error.keychain" = "The connection succeeded, but device credentials could not be saved. Check app signing.";
 "pair.awaiting_owner" = "Waiting for Mac approval";
 "pair.owner_instructions" = "Confirm this iPhone’s connection request on your Mac. Match the device identity below; this screen connects automatically after approval.";
-"pair.nearby" = "Nearby Bridges";
+"pair.nearby" = "Nearby Macs";
 "pair.searching" = "Searching the local network… QR pairing also works when discovery is unavailable.";
 "pair.trust_host" = "Confirm host identity";
 "pair.trust_instructions" = "Compare this identity with the Mac owner before requesting access. A Bonjour name alone does not establish trust.";
 "pair.confirm_identity" = "Identity matches; request access";
 "pair.import_enrollment" = "Use enrollment QR link";
-"pair.legacy_notice" = "Legacy shared-token pairing requires --legacy on the Bridge. It cannot become a separately revocable device authorization.";
+"pair.legacy_notice" = "Legacy shared-token pairing requires --legacy on the Mac service. It cannot become a separately revocable device authorization.";
 "pair.legacy_migration" = "Your old pairing uses a shared token. Scan a new enrollment QR to authorize this device separately.";
 "pair.enrollment_ended" = "Enrollment was denied, cancelled or expired. Open a new window on the Mac to try again.";
 "error.authorization" = "This device is revoked or not approved for this workspace or operation. Check its grant on the Mac.";
@@ -117,7 +117,7 @@
 "chat.rename_title" = "Rename conversation";
 "chat.rename_placeholder" = "Tab title";
 "chat.rename_save" = "Save";
-"chat.rename_note" = "The name also appears on your Mac in cmux. Leave it empty to go back to the automatic name.";
+"chat.rename_note" = "The name also appears on your Mac in the terminal. Leave it empty to go back to the automatic name.";
 "chat.recorded_turns" = "Recorded duration from %ld completed turns.";
 "chat.no_timing" = "No recorded running duration is available.";
 "chat.timing_note" = "Recorded running time excludes gaps between turns. Missing durations are not counted; response estimates use transcript timestamps.";
@@ -134,7 +134,7 @@
 "sessions.archived_at" = "Archived %@";
 "sessions.archive_empty" = "No archived conversations. A conversation you /clear moves here.";
 "connection.title" = "Connection";
-"connection.reachable" = "Bridge connection verified";
+"connection.reachable" = "Service connection verified";
 "connection.endpoint" = "Address";
 "connection.protocol" = "Protocol";
 "connection.identity" = "Host identity";
@@ -170,7 +170,7 @@
 "feed.effect.autoAccept" = "Approve the plan and let the agent accept file edits automatically.";
 "feed.effect.manual" = "Approve the plan with manual decisions.";
 "chat.hard_stop" = "Force stop";
-"chat.hard_stop_note" = "Send the hard interruption supported by cmux to this existing agent. Unfinished work may be interrupted.";
+"chat.hard_stop_note" = "Send the hard interruption supported by the provider to this existing agent. Unfinished work may be interrupted.";
 "project.empty_changes" = "No changed files.";
 "project.empty_content" = "No content to show.";
 "project.truncated" = "Content is truncated";
@@ -200,11 +200,11 @@
 "error.input_value" = "Check the input and its size.";
 "error.project" = "This session has no shareable project directory.";
 "error.operation_conflict" = "This action conflicts with an earlier request. Inspect the conversation before trying again.";
-"error.receipt_capacity" = "The Bridge operation records are full. Ask the Mac owner to inspect and manage them; restarting does not clear these records.";
-"error.receipt_storage" = "The Bridge could not safely store this action. Check storage on the Mac before continuing.";
+"error.receipt_capacity" = "The term remote operation records are full. Ask the Mac owner to inspect and manage them; restarting does not clear these records.";
+"error.receipt_storage" = "The term remote service could not safely store this action. Check storage on the Mac before continuing.";
 "feed.skip_questions" = "Skip questions";
 "sessions.no_read_grant" = "This device is not granted conversation access.";
-"error.journal" = "The Mac cannot safely save this operation. Ask its owner to check the Bridge state.";
+"error.journal" = "The Mac cannot safely save this operation. Ask its owner to check the service state.";
 "error.operation_missing" = "No operation record was found. Inspect the conversation before sending again.";
 "error.image" = "Select up to four valid PNG or JPEG images within the upload limits.";
 "image.select" = "Choose photos";
@@ -242,7 +242,7 @@
 
 "tool.detail.changed" = "This record has changed. Refresh to read the current version.";
 
-"tool.detail.unavailable" = "This Bridge does not support full tool records yet. Update the Bridge and retry.";
+"tool.detail.unavailable" = "This service does not support full tool records yet. Update it and retry.";
 
 "image.history.open" = "Open image";
 "error.image_unavailable" = "This recorded image is unavailable or exceeds preview limits.";
@@ -339,7 +339,7 @@
 "about.version" = "Version %@";
 "about.website" = "cmux-remote.trenta.dev";
 "about.source" = "Source code on GitHub";
-"about.note" = "An independent companion for cmux. Not an official cmux product.";
+"about.note" = "An independent companion for your terminal providers. Not an official cmux product.";
 "feed.title_count" = "Waiting for you (%lld)";
 "chat.copy_text" = "Copy";
 "model.switch" = "Switch model";
