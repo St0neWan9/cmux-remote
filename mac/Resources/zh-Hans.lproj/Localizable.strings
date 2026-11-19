@@ -52,6 +52,10 @@
 "mac.pairing.open" = "开始配对";
 "mac.pairing.close" = "结束配对";
 "mac.pairing.qr" = "设备配对二维码";
+"mac.pairing.enlarge" = "点击二维码可放大。";
+"mac.pairing.largeHint" = "用手机上的 term remote 扫描这个二维码。";
+"mac.pairing.copy" = "复制配对链接";
+"mac.pairing.copied" = "已复制";
 "mac.pairing.expires" = "有效期至";
 "mac.device.details" = "身份和申请范围";
 "mac.device.approve" = "批准";

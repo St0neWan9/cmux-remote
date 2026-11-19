@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import CmuxRemoteCore
 import CmuxRemoteMac
 
@@ -6,6 +7,7 @@ import CmuxRemoteMac
 struct PairingSettingsView: View {
     @Bindable var model: MacSharingModel
     private let design = MacDesignTokens()
+    @State private var copied = false
     var body: some View {
         MacPreferencePage {
             if let link = model.qrLink {
@@ -27,6 +29,11 @@ struct PairingSettingsView: View {
                                     .foregroundStyle(.secondary)
                             }
                             Button(String(localized: "mac.pairing.close", bundle: .interface)) { Task { await model.closePairing() } }.disabled(model.busy).fixedSize().padding(.top, 4)
+                            Button(copied ? String(localized: "mac.pairing.copied", bundle: .interface) : String(localized: "mac.pairing.copy", bundle: .interface)) {
+                                NSPasteboard.general.clearContents()
+                                NSPasteboard.general.setString(link, forType: .string)
+                                copied = true
+                            }.disabled(model.busy).fixedSize().onChange(of: link) { _, _ in copied = false }
                         }
                     }
                     // The label already drops this far below the row's top; the text and the code start level with it.
