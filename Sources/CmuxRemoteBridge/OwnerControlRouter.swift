@@ -116,11 +116,14 @@ struct OwnerControlRouter: Sendable {
     /// cmux workspaces plus every provider's spaces, which the owner may share
     /// with the same explicit UUID grant.
     private func availableWorkspaces() async throws -> [JSONValue] {
-        // A daemon workspace whose terminals all exited, or whose terminals no client holds any more,
-        // stays in its inventory for old conversations but cannot be shared with a new device. Desktop
-        // cmux rows carry neither liveness field and stay.
-        var rows = (try await service.workspaces()["workspaces"].array ?? [])
-            .filter { $0["live"].bool != false && $0["attached"].bool != false }
+        // A daemon workspace whose terminals all exited stays in its inventory for old conversations
+        // but cannot be shared with a new device. Attachment distinguishes an orphaned workspace only
+        // while some client is viewing one; a fully detached daemon would otherwise lose every
+        // workspace, so liveness alone decides then. Desktop cmux rows carry neither field and stay.
+        let listed = try await service.workspaces()["workspaces"].array ?? []
+        let attachmentKnown = listed.contains { $0["attached"].bool == true }
+        var rows = listed
+            .filter { $0["live"].bool != false && (!attachmentKnown || $0["attached"].bool != false) }
             .map { row -> JSONValue in
                 guard var fields = row.object else { return row }
                 if fields["source"] == nil { fields["source"] = .string("cmux") }

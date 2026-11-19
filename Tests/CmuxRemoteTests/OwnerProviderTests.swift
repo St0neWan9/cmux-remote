@@ -65,6 +65,32 @@ private struct WorkspaceListFixture: CmuxControlling {
             .object(["id": .string("22222222-2222-4222-8222-222222222222"), "title": .string("Closed"),
                      "backend": .string("cmux-tui"), "live": .bool(false)]),
             .object(["id": .string("33333333-3333-4333-8333-333333333333"), "title": .string("Orphaned"),
+                     "backend": .string("cmux-tui"), "live": .bool(true), "attached": .bool(false)]),
+            .object(["id": .string("44444444-4444-4444-8444-444444444444"), "title": .string("Active"),
+                     "backend": .string("cmux-tui"), "live": .bool(true), "attached": .bool(true)])
+        ]
+        let service = SessionService(cmux: WorkspaceListFixture(rows: rows), home: root, transcriptRoots: [root])
+        let owner = OwnerControlRouter(authority: authority, service: service)
+
+        let listed = await owner.respond(.object(["id": .string("1"), "method": .string("bridge.workspaces"), "params": .object([:])]))
+        let workspaces = listed["result"]["workspaces"].array ?? []
+        #expect(workspaces.count == 2)
+        #expect(workspaces.map { $0["title"].string } == ["Open", "Active"])
+        #expect(workspaces.first?["source"].string == "cmux")
+    }
+
+    /// A detached daemon reports no attached terminal for any workspace. Attachment then says nothing
+    /// about whether a workspace is open, so every live workspace must stay shareable.
+    @Test func ownerKeepsLiveWorkspacesWhenNoClientIsAttached() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let state = BridgeState(directory: root); try state.initialize()
+        let authority = try state.authority(name: "Owner fixture")
+        let transcript = root.appendingPathComponent("demo.jsonl")
+        try Data().write(to: transcript)
+        let rows: [JSONValue] = [
+            .object(["id": .string("33333333-3333-4333-8333-333333333333"), "title": .string("Detached"),
                      "backend": .string("cmux-tui"), "live": .bool(true), "attached": .bool(false)])
         ]
         let service = SessionService(cmux: WorkspaceListFixture(rows: rows), home: root, transcriptRoots: [root])
@@ -73,8 +99,7 @@ private struct WorkspaceListFixture: CmuxControlling {
         let listed = await owner.respond(.object(["id": .string("1"), "method": .string("bridge.workspaces"), "params": .object([:])]))
         let workspaces = listed["result"]["workspaces"].array ?? []
         #expect(workspaces.count == 1)
-        #expect(workspaces.first?["title"].string == "Open")
-        #expect(workspaces.first?["source"].string == "cmux")
+        #expect(workspaces.first?["title"].string == "Detached")
     }
 
     @Test func ownerCommandsListAndDriveAProviderTerminal() async throws {
