@@ -1,6 +1,6 @@
-"app.title" = "term remote";
+"app.title" = "Term Remote";
 "pair.intro" = "Your terminals, on your phone";
-"pair.instructions" = "Start the term remote service on your Mac. Scan its enrollment QR code or select a nearby Mac, then approve this device on the Mac.";
+"pair.instructions" = "Start the Term Remote service on your Mac. Scan its enrollment QR code or select a nearby Mac, then approve this device on the Mac.";
 "pair.connection" = "Connection";
 "pair.host" = "Mac address";
 "pair.port" = "Port";
@@ -46,7 +46,7 @@
 "error.history" = "This history is unavailable or exceeds the initial read limit.";
 "error.file" = "This file cannot be previewed or shared from the project.";
 "error.expired" = "This request is no longer pending. Refresh the list.";
-"error.connection" = "Could not complete the request. Retry, or check your network and the term remote service on your Mac.";
+"error.connection" = "Could not complete the request. Retry, or check your network and the Term Remote service on your Mac.";
 "pair.scan" = "Scan pairing QR code";
 "pair.scan_instructions" = "Run term-remote serve --pair on your Mac. Scanning requests enrollment; it does not grant access until the owner approves.";
 "pair.advanced" = "Advanced settings";
@@ -200,8 +200,8 @@
 "error.input_value" = "Check the input and its size.";
 "error.project" = "This session has no shareable project directory.";
 "error.operation_conflict" = "This action conflicts with an earlier request. Inspect the conversation before trying again.";
-"error.receipt_capacity" = "The term remote operation records are full. Ask the Mac owner to inspect and manage them; restarting does not clear these records.";
-"error.receipt_storage" = "The term remote service could not safely store this action. Check storage on the Mac before continuing.";
+"error.receipt_capacity" = "The Term Remote operation records are full. Ask the Mac owner to inspect and manage them; restarting does not clear these records.";
+"error.receipt_storage" = "The Term Remote service could not safely store this action. Check storage on the Mac before continuing.";
 "feed.skip_questions" = "Skip questions";
 "sessions.no_read_grant" = "This device is not granted conversation access.";
 "error.journal" = "The Mac cannot safely save this operation. Ask its owner to check the service state.";
@@ -315,7 +315,7 @@
 "start.waiting" = "Starting the agent on the Mac…";
 "start.opened" = "The terminal is open on the Mac. The conversation appears here once the agent is ready.";
 "capability.conversationStart" = "Start conversations";
-"error.launch_unsupported" = "Starting conversations needs the current term remote on the Mac. Update it there, then pair this iPhone again.";
+"error.launch_unsupported" = "Starting conversations needs the current Term Remote on the Mac. Update it there, then pair this iPhone again.";
 "error.directory" = "This folder cannot be used.";
 
 "diagnostics.title" = "Diagnostics";

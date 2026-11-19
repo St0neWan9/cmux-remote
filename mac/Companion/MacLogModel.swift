@@ -49,7 +49,7 @@ import CmuxRemoteCore
     func exportText(bundle: Bundle, system: ProcessInfo) -> String {
         let version = bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
         let build = bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"
-        let header = "term remote " + version + " (" + build + ") · macOS " + system.operatingSystemVersionString
+        let header = "Term Remote " + version + " (" + build + ") · macOS " + system.operatingSystemVersionString
         return ([header] + shown.map(\.text)).joined(separator: "\n") + "\n"
     }
 }

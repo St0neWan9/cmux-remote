@@ -1,4 +1,4 @@
-"mac.title" = "term remote";
+"mac.title" = "Term Remote";
 "mac.localWorkspaces" = "本地工作区";
 "mac.error.permission" = "请在 cmux 扩展权限中允许选择工作区。";
 "mac.error.localBridge" = "本机后台服务未连接，请在远端设置中重试连接。";
@@ -22,7 +22,7 @@
 "mac.trust" = "发送配对申请";
 "mac.trustMessage" = "请先核对远端主机名称和证书指纹。发送配对申请后，必须由远端主机所有者批准需要访问的空间和终端权限。";
 "mac.openCompanion" = "打开 Companion";
-"mac.extensionHint" = "在 Companion 中连接、授权并选择远程工作区。请先在本地 cmux 内启动 term remote 服务。";
+"mac.extensionHint" = "在 Companion 中连接、授权并选择远程工作区。请先在本地 cmux 内启动 Term Remote 服务。";
 "mac.bridgeHint" = "在远端设置中检查本机服务；在远端的“共享本机”中开始配对并批准申请。";
 "mac.error.scope" = "本机需要相应的空间或终端权限。";
 "mac.error.unsupported" = "当前设备或 cmux 版本不支持此镜像。";
@@ -53,7 +53,7 @@
 "mac.pairing.close" = "结束配对";
 "mac.pairing.qr" = "设备配对二维码";
 "mac.pairing.enlarge" = "点击二维码可放大。";
-"mac.pairing.largeHint" = "用手机上的 term remote 扫描这个二维码。";
+"mac.pairing.largeHint" = "用手机上的 Term Remote 扫描这个二维码。";
 "mac.pairing.copy" = "复制配对链接";
 "mac.pairing.copied" = "已复制";
 "mac.pairing.expires" = "有效期至";
@@ -64,9 +64,9 @@
 "mac.devices.empty" = "尚未授权设备。";
 "mac.device.revoke" = "撤销授权";
 "mac.device.revokeConfirm" = "撤销这台设备的访问权限？";
-"mac.menu.accessibility" = "term remote 菜单";
+"mac.menu.accessibility" = "Term Remote 菜单";
 "mac.menu.settings" = "远端设置…";
-"mac.menu.quit" = "退出 term remote";
+"mac.menu.quit" = "退出 Term Remote";
 "mac.menu.pending" = "%lld 个待批准申请";
 "mac.advanced" = "高级设置";
 "mac.stateDirectory" = "Bridge 数据目录";
@@ -97,7 +97,7 @@
 "mac.workspaces.empty" = "此连接暂无可访问的工作区。";
 "mac.settings.title" = "设置";
 "mac.share.label" = "本机共享";
-"mac.setup.title" = "连接 term remote";
+"mac.setup.title" = "连接 Term Remote";
 "mac.menu.file" = "文件";
 "mac.menu.closeWindow" = "关闭窗口";
 "mac.share.address" = "地址";

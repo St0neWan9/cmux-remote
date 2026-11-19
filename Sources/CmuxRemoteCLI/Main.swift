@@ -8,7 +8,7 @@ import CmuxRemoteClient
 struct Main {
     static func main() async {
         do { try await run() }
-        catch { let text = (error as? BridgeError)?.message ?? "term remote could not start. Check configuration and permissions."; FileHandle.standardError.write(Data((text + "\n").utf8)); exit(1) }
+        catch { let text = (error as? BridgeError)?.message ?? "Term Remote could not start. Check configuration and permissions."; FileHandle.standardError.write(Data((text + "\n").utf8)); exit(1) }
     }
     private static func run() async throws {
         let args = Array(CommandLine.arguments.dropFirst()); let command = args.first ?? "help"
@@ -29,7 +29,7 @@ struct Main {
             _ = try await CLIControlClient(executable: URL(fileURLWithPath: "/Applications/cmux.app/Contents/Resources/bin/cmux"), socketPath: socket).request("system.ping", params: [:])
             var setup = inherited; setup["CMUX_SOCKET_PATH"] = socket
             try MacSetupRepository(directory: state.directory).save(environment: setup)
-            print("term remote is connected to local cmux. Open Remote Settings to continue.")
+            print("Term Remote is connected to local cmux. Open Remote Settings to continue.")
         case "agent-hook": try AgentHookCommand().run(options: options, state: state)
         case "hooks": try HooksCommand().run(options: options, state: state)
         case "view": try await ViewCommand().run(options: options, state: state)

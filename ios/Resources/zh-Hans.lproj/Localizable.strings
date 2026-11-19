@@ -1,6 +1,6 @@
-"app.title" = "term remote";
+"app.title" = "Term Remote";
 "pair.intro" = "你的终端，在手机上";
-"pair.instructions" = "在 Mac 启动 term remote 服务。扫描配对二维码或选择附近的 Mac，然后在 Mac 批准这台设备。";
+"pair.instructions" = "在 Mac 启动 Term Remote 服务。扫描配对二维码或选择附近的 Mac，然后在 Mac 批准这台设备。";
 "pair.connection" = "连接";
 "pair.host" = "Mac 地址";
 "pair.port" = "端口";
@@ -46,7 +46,7 @@
 "error.history" = "此历史记录不可用，或超过当前读取上限。";
 "error.file" = "此文件无法预览，或不允许从该项目分享。";
 "error.expired" = "此请求已不再等待处理，请刷新列表。";
-"error.connection" = "无法完成请求，请重试，或检查网络和 Mac 上的 term remote 服务。";
+"error.connection" = "无法完成请求，请重试，或检查网络和 Mac 上的 Term Remote 服务。";
 "pair.scan" = "扫描配对二维码";
 "pair.scan_instructions" = "在 Mac 运行 term-remote serve --pair。扫码只会申请配对，主人批准后才能访问。";
 "pair.advanced" = "高级设置";
@@ -315,7 +315,7 @@
 "start.waiting" = "正在 Mac 上启动 agent…";
 "start.opened" = "终端已在 Mac 上打开，agent 准备好后会话会出现在这里。";
 "capability.conversationStart" = "开新会话";
-"error.launch_unsupported" = "开新会话需要 Mac 上装最新版 term remote。请先在 Mac 上更新，再重新配对这台 iPhone。";
+"error.launch_unsupported" = "开新会话需要 Mac 上装最新版 Term Remote。请先在 Mac 上更新，再重新配对这台 iPhone。";
 "error.directory" = "这个目录不能使用。";
 
 "diagnostics.title" = "诊断日志";

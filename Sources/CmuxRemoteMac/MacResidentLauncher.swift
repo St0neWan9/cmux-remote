@@ -50,7 +50,7 @@ public actor MacResidentLauncher {
         } else if try TuiSocketDiscovery().sockets().isEmpty {
             throw BridgeError("setup_required", "Connect this app to cmux first.")
         }
-        guard FileManager.default.isExecutableFile(atPath: executable.path) else { throw BridgeError("resident_missing", "Reinstall term remote to restore its bundled service.") }
+        guard FileManager.default.isExecutableFile(atPath: executable.path) else { throw BridgeError("resident_missing", "Reinstall Term Remote to restore its bundled service.") }
         // An adopted or freshly stopped resident that predates the bundled owner revision cannot
         // answer the newest owner methods; its sockets and mirrors move to the replacement when
         // the replacement restores them.

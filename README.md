@@ -1,6 +1,6 @@
-# term remote (formerly CmuxRemote)
+# Term Remote (formerly CmuxRemote)
 
-> term remote is the provider-neutral evolution of the CmuxRemote project: one phone and one
+> Term Remote is the provider-neutral evolution of the CmuxRemote project: one phone and one
 > Mac companion for remote terminals and the Agents running in them, from more
 > than one terminal provider. cmux is the first provider; Rex is being added.
 > The provider layer, `/v3` terminal API, Rex terminal provider, local Rex
@@ -12,14 +12,14 @@
 Read, reply to and steer the coding agent running in your Mac terminal — from
 your iPhone.
 
-term remote is an independent companion for the free, open-source
+Term Remote is an independent companion for the free, open-source
 [cmux](https://cmux.com) terminal. It pairs with one Mac, shows the conversation
 that Mac is having, and lets you answer what the agent asks while you are away
 from the desk. There is no account, no analytics, and no server run by this
 project: the phone talks to your Mac over your local network, or through a
 Cloudflare relay you deploy to your own account.
 
-term remote is not an official cmux product.
+Term Remote is not an official cmux product.
 
 <p align="center">
   <img src="docs/images/phone-workspaces.png" width="220" alt="Workspaces and conversations">
@@ -54,16 +54,16 @@ to an AI provider itself. cmux keeps owning the agents and terminals.
 
 ### 1. cmux on your Mac
 
-term remote drives the official cmux app, so install that first:
+Term Remote drives the official cmux app, so install that first:
 
 - Download: <https://cmux.com> or the [cmux repository](https://github.com/manaflow-ai/cmux)
 - Open cmux once and start a session, so it creates its own socket.
 
-### 2. term remote for Mac (the menu bar app)
+### 2. Term Remote for Mac (the menu bar app)
 
 - Download the latest `term-remote-<version>.dmg` from
   [Releases](https://github.com/St0neWan9/cmux-remote/releases).
-- Open the disk image, drag **term remote** to *Applications*, and launch it.
+- Open the disk image, drag **Term Remote** to *Applications*, and launch it.
   It lives in the menu bar, with no Dock icon.
 - The download is signed with a Developer ID and notarized by Apple. If you
   already have an older copy, quit it first and replace it.
@@ -82,10 +82,10 @@ its socket settings, or an installed cmux copy.
 
 ## Pair your iPhone
 
-1. On the Mac, open **term remote** in the menu bar → **Share This Mac**, and
+1. On the Mac, open **Term Remote** in the menu bar → **Share This Mac**, and
    turn sharing on.
 2. Open **Add a device** and start pairing; a QR code appears.
-3. On the iPhone, open term remote, scan the code, then approve that exact device
+3. On the iPhone, open Term Remote, scan the code, then approve that exact device
    on the Mac. Every device is listed under **Devices** and can be revoked on its
    own.
 4. Choose which workspaces the device may read. Sharing a folder under **Shared
@@ -128,7 +128,7 @@ project ships no relay service and no shared address.
    The script generates the key if it does not exist, deploys the Worker, stores
    the key as a Worker secret, and prints the Worker's HTTPS origin.
 
-3. On the Mac, open **term remote → Share This Mac** and fill **Cloud relay** with
+3. On the Mac, open **Term Remote → Share This Mac** and fill **Cloud relay** with
    that origin and the key file path, then save and restart sharing. The same
    pairing works for both LAN and relay.
 

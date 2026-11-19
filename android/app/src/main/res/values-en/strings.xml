@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">term remote</string>
+    <string name="app_name">Term Remote</string>
 
     <!-- Shared labels -->
     <string name="common_back">Back</string>
@@ -122,7 +122,7 @@
     <string name="pair_approved">Paired</string>
     <string name="pair_retry_saved">Already paired? Retry the saved connection</string>
     <string name="pair_awaiting_owner">Waiting for %1$s to approve</string>
-    <string name="pair_awaiting_owner_note">Open term remote → Devices on your Mac, then verify and approve this request.</string>
+    <string name="pair_awaiting_owner_note">Open Term Remote → Devices on your Mac, then verify and approve this request.</string>
     <string name="pair_awaiting_missing_hint">If this device is missing from the Mac\'s pending list, open Add Device there again and scan immediately; do not refresh that page or restart the Mac app.</string>
     <string name="pair_failed_title">Can\'t connect</string>
     <string name="pair_scan_title">Scan QR code</string>
@@ -377,7 +377,7 @@
     <string name="connection_persistent_channel_note">Keeps the link to your Macs alive for live updates.</string>
     <string name="connection_persistent_notification">Keeping the link to your Macs alive for live updates</string>
     <string name="connection_persistent_battery">Battery optimization</string>
-    <string name="connection_persistent_battery_note">If your phone still closes the connection, allow term remote to ignore battery optimization.</string>
+    <string name="connection_persistent_battery_note">If your phone still closes the connection, allow Term Remote to ignore battery optimization.</string>
     <string name="connection_persistent_battery_action">Allow</string>
     <string name="connection_background_sync">Background sync</string>
     <string name="connection_diagnostics">Diagnostics</string>

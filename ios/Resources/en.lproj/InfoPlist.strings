@@ -1,4 +1,4 @@
-"CFBundleDisplayName" = "term remote";
+"CFBundleDisplayName" = "Term Remote";
 "NSLocalNetworkUsageDescription" = "Connect to your paired cmux Bridge on your local network.";
 "NSCameraUsageDescription" = "Scan your Mac Bridge pairing code.";
 "NSMicrophoneUsageDescription" = "Record speech on this device to prepare an editable conversation draft.";
