@@ -46,7 +46,12 @@ public actor TuiControlAdapter: CmuxControlling {
             _ = try await snapshot(); return .object(["backend": .string("cmux-tui")])
         case "system.capabilities":
             return .object(["backend": .string("cmux-tui"), "protocol": .string("cmux.protocol/2"), "attachments": .bool(attachments != nil), "feed_decisions": .bool(true), "native_mirror": .bool(false)])
-        case "workspace.list": return .object(["workspaces": .array(try await snapshot().occupiedWorkspaces)])
+        case "workspace.list":
+            // A closed workspace's terminal can keep running; only workspaces a client still holds are open.
+            // An older daemon without `client.list` leaves attachment unknown and the live flag decides.
+            let attached: Set<String>? = (try? await client.resource("client.list", params: ["machine": .string("current"), "session": .string("current")], idempotencyKey: nil))?
+                .array.map { rows in Set(rows.flatMap { ($0["attached_terminal_ids"].array ?? []).compactMap(\.string) }) }
+            return .object(["workspaces": .array(try await snapshot(attachedTerminalIDs: attached).occupiedWorkspaces)])
         case "vault.sessions", "chat.sessions.dump":
             let current = try await snapshot()
             let liveIDs = Set(current.bindings.map(\.id))
@@ -436,8 +441,9 @@ public actor TuiControlAdapter: CmuxControlling {
         }
         return revision
     }
-    private func snapshot() async throws -> TuiSessionSnapshot {
-        let current = try TuiSessionSnapshot(await client.resource("session.snapshot", params: ["machine": .string("current"), "session": .string("current")], idempotencyKey: nil))
+    private func snapshot(attachedTerminalIDs: Set<String>? = nil) async throws -> TuiSessionSnapshot {
+        let current = try TuiSessionSnapshot(await client.resource("session.snapshot", params: ["machine": .string("current"), "session": .string("current")], idempotencyKey: nil),
+                                             attachedTerminalIDs: attachedTerminalIDs)
         let identity = current.machine + ":" + current.session
         guard pinnedIdentity == nil || pinnedIdentity == identity else { throw BridgeError("stale_binding", "The selected daemon identity changed; reconnect explicitly.", status: 409) }
         pinnedIdentity = identity

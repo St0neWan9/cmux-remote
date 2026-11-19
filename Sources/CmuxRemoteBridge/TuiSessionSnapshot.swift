@@ -39,7 +39,7 @@ struct TuiSessionSnapshot: Sendable {
     /// Terminals the daemon still reports as running. A conversation whose Agent stopped reporting keeps its
     /// terminal, so this is what separates a resumed Agent the daemon has forgotten from a historical one.
     let runningTerminals: Set<String>
-    init(_ raw: JSONValue) throws {
+    init(_ raw: JSONValue, attachedTerminalIDs: Set<String>? = nil) throws {
         let identity = TuiResourceIdentity()
         machine = try identity.validate(raw["machine"]["id"].string, prefix: "machine")
         session = try identity.validate(raw["session"]["id"].string, prefix: "session")
@@ -98,9 +98,22 @@ struct TuiSessionSnapshot: Sendable {
         terminalTitles = terminals.compactMapValues { $0["title"].string }
         self.tabIDs = tabIDs; self.tabNames = tabNames; self.tabPanes = tabPanes; self.tabScreens = tabScreens
         let occupied = Set(memberships.values.flatMap { $0 })
+        let runningRaw = Set(terminals.compactMap { id, row in
+            row["running"].bool == true && row["lifecycle"].string == "running" ? id : nil })
+        let liveWorkspaces = Set(runningRaw.flatMap { memberships[$0] ?? [] })
+        // A client holds the workspaces it is actually viewing. A terminal can keep running after its client
+        // closed, so attachment, when the daemon reports clients, is the better sign of an open workspace.
+        let attachedWorkspaces: Set<String>? = attachedTerminalIDs.map { ids in
+            Set(ids.flatMap { memberships[$0] ?? [] })
+        }
         self.occupiedWorkspaces = arrays["workspaces"]!.filter { occupied.contains($0["id"].string ?? "") }.map { row in
-            .object(["id": .string(identity.uuid(machine: machineID, session: sessionID, resource: row["id"].string ?? "")), "title": row["name"], "backend": .string("cmux-tui"),
-                     "directories": .array((folders[row["id"].string ?? ""] ?? []).map(JSONValue.string))])
+            let raw = row["id"].string ?? ""
+            var fields: [String: JSONValue] = ["id": .string(identity.uuid(machine: machineID, session: sessionID, resource: raw)), "title": row["name"], "backend": .string("cmux-tui"),
+                                               "directories": .array((folders[raw] ?? []).map(JSONValue.string)),
+                                               // A workspace whose terminals all exited is closed; sharing margins must not offer it.
+                                               "live": .bool(liveWorkspaces.contains(raw))]
+            if let attachedWorkspaces { fields["attached"] = .bool(attachedWorkspaces.contains(raw)) }
+            return .object(fields)
         }
         runningTerminals = Set(terminals.compactMap { id, row in
             row["running"].bool == true && row["lifecycle"].string == "running" ? identity.uuid(machine: machineID, session: sessionID, resource: id) : nil

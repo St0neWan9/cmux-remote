@@ -41,7 +41,42 @@ private actor OwnerFixtureProvider: TerminalProvider {
     }
 }
 
+private struct WorkspaceListFixture: CmuxControlling {
+    let rows: [JSONValue]
+    func request(_ method: String, params: [String: JSONValue]) async throws -> JSONValue {
+        guard method == "workspace.list" else { throw BridgeError("unsupported", "Fixture only lists workspaces.") }
+        return .object(["workspaces": .array(rows)])
+    }
+}
+
 @Suite struct OwnerProviderTests {
+    /// A closed daemon workspace stays in the phone's history but must never be offered to a new device,
+    /// and every cmux row names its source so mixed lists label both kinds the same way.
+    @Test func ownerOmitsClosedWorkspacesAndLabelsCmuxRows() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let state = BridgeState(directory: root); try state.initialize()
+        let authority = try state.authority(name: "Owner fixture")
+        let transcript = root.appendingPathComponent("demo.jsonl")
+        try Data().write(to: transcript)
+        let rows: [JSONValue] = [
+            .object(["id": .string("11111111-1111-4111-8111-111111111111"), "title": .string("Open")]),
+            .object(["id": .string("22222222-2222-4222-8222-222222222222"), "title": .string("Closed"),
+                     "backend": .string("cmux-tui"), "live": .bool(false)]),
+            .object(["id": .string("33333333-3333-4333-8333-333333333333"), "title": .string("Orphaned"),
+                     "backend": .string("cmux-tui"), "live": .bool(true), "attached": .bool(false)])
+        ]
+        let service = SessionService(cmux: WorkspaceListFixture(rows: rows), home: root, transcriptRoots: [root])
+        let owner = OwnerControlRouter(authority: authority, service: service)
+
+        let listed = await owner.respond(.object(["id": .string("1"), "method": .string("bridge.workspaces"), "params": .object([:])]))
+        let workspaces = listed["result"]["workspaces"].array ?? []
+        #expect(workspaces.count == 1)
+        #expect(workspaces.first?["title"].string == "Open")
+        #expect(workspaces.first?["source"].string == "cmux")
+    }
+
     @Test func ownerCommandsListAndDriveAProviderTerminal() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)

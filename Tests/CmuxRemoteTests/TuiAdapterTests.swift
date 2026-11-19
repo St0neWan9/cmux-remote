@@ -18,6 +18,22 @@ import CmuxRemoteCore
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700]); return root
     }
+    @Test func closedDaemonWorkspaceIsMarkedNotLive() async throws {
+        let source = TuiResourceFixture(), bridge = adapter(source)
+        let running = try await bridge.request("workspace.list", params: [:])["workspaces"].array ?? []
+        #expect(running.count == 1 && running[0]["live"].bool == true)
+        await source.stopTerminal()
+        let closed = try await bridge.request("workspace.list", params: [:])["workspaces"].array ?? []
+        #expect(closed.count == 1 && closed[0]["live"].bool == false)
+    }
+    @Test func aWorkspaceNoClientHoldsIsNotOpen() async throws {
+        let source = TuiResourceFixture(), bridge = adapter(source)
+        let attached = try await bridge.request("workspace.list", params: [:])["workspaces"].array ?? []
+        #expect(attached.first?["attached"].bool == true)
+        await source.detachClients()
+        let orphaned = try await bridge.request("workspace.list", params: [:])["workspaces"].array ?? []
+        #expect(orphaned.first?["attached"].bool == false && orphaned.first?["live"].bool == true)
+    }
     @Test func stableIDsAndHookOnlyProvenance() async throws {
         let source = TuiResourceFixture(), bridge = adapter(source)
         let first = try await bridge.request("workspace.list", params: [:])["workspaces"].array![0]["id"].string!

@@ -116,7 +116,16 @@ struct OwnerControlRouter: Sendable {
     /// cmux workspaces plus every provider's spaces, which the owner may share
     /// with the same explicit UUID grant.
     private func availableWorkspaces() async throws -> [JSONValue] {
-        var rows = try await service.workspaces()["workspaces"].array ?? []
+        // A daemon workspace whose terminals all exited, or whose terminals no client holds any more,
+        // stays in its inventory for old conversations but cannot be shared with a new device. Desktop
+        // cmux rows carry neither liveness field and stay.
+        var rows = (try await service.workspaces()["workspaces"].array ?? [])
+            .filter { $0["live"].bool != false && $0["attached"].bool != false }
+            .map { row -> JSONValue in
+                guard var fields = row.object else { return row }
+                if fields["source"] == nil { fields["source"] = .string("cmux") }
+                return .object(fields)
+            }
         if let providers, let list = try? await providers.spaces(providerID: nil) {
             let names = Dictionary(uniqueKeysWithValues: await providers.descriptors().map { ($0.id, $0.name) })
             rows += list.spaces.map { space in
