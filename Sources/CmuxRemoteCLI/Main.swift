@@ -61,7 +61,7 @@ struct Main {
             let secondary = options.contains("secondary-instance")
             if secondary {
                 guard options.value("state") != nil, let rawPort = options.value("port"), let number = Int(rawPort),
-                      number != port, options.contains("no-discovery") else {
+                      number != 7740, options.contains("no-discovery") else {
                     throw BridgeError("invalid_input", "A secondary instance needs --state, a different --port and --no-discovery.")
                 }
                 let listen = options.value("listen") ?? "127.0.0.1"
