@@ -52,6 +52,10 @@
 "mac.pairing.open" = "Start Pairing";
 "mac.pairing.close" = "End Pairing";
 "mac.pairing.qr" = "Device pairing QR code";
+"mac.pairing.enlarge" = "Click the code to enlarge it.";
+"mac.pairing.largeHint" = "Scan this code with term remote on your phone.";
+"mac.pairing.copy" = "Copy pairing link";
+"mac.pairing.copied" = "Copied";
 "mac.pairing.expires" = "Valid until";
 "mac.device.details" = "Identity and requested access";
 "mac.device.approve" = "Approve";
