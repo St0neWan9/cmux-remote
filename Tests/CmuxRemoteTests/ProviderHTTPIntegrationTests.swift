@@ -95,4 +95,44 @@ private actor V3Provider: TerminalProvider {
             throw error
         }
     }
+
+    @Test(.timeLimit(.minutes(1)))
+    func v1WorkspacesOfferGrantedProviderSpacesToTerminalViewers() async throws {
+        let registry = ProviderRegistry()
+        try await registry.register(V3Provider(spaceID: Self.spaceID, terminalID: Self.terminalID))
+        let fixture = try await LinkIntegrationFixture.create(
+            workspaces: [Self.spaceID], capabilities: [.workspaceRead, .terminalView],
+            providers: ProviderDirectory(registry: registry))
+        do {
+            let client = try RemoteClient(connection: fixture.connection); defer { client.close() }
+            let listing = try await client.get("/v1/workspaces", as: JSONValue.self)
+            let rows = listing["workspaces"].array ?? []
+            #expect(rows.count == 1)
+            #expect(rows.first?["id"].string == Self.spaceID)
+            #expect(rows.first?["title"].string == "Fixture space")
+            #expect(rows.first?["provider_id"].string != nil)
+            await fixture.stop()
+        } catch {
+            await fixture.stop()
+            throw error
+        }
+    }
+
+    @Test(.timeLimit(.minutes(1)))
+    func v1WorkspacesStayCmuxOnlyWithoutTerminalView() async throws {
+        let registry = ProviderRegistry()
+        try await registry.register(V3Provider(spaceID: Self.spaceID, terminalID: Self.terminalID))
+        let fixture = try await LinkIntegrationFixture.create(
+            workspaces: [Self.spaceID], capabilities: [.workspaceRead],
+            providers: ProviderDirectory(registry: registry))
+        do {
+            let client = try RemoteClient(connection: fixture.connection); defer { client.close() }
+            let listing = try await client.get("/v1/workspaces", as: JSONValue.self)
+            #expect(listing["workspaces"].array?.isEmpty == true)
+            await fixture.stop()
+        } catch {
+            await fixture.stop()
+            throw error
+        }
+    }
 }

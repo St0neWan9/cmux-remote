@@ -156,12 +156,25 @@ public struct BridgeRouter: Sendable {
                 data = try encode(await service.operationStatus(id: id, access: access))
             } else if method == "GET", path == ["v1", "workspaces"] {
                 try await require(client, .workspaceRead)
-                var workspaces = try await service.workspaces()
+                var listing = try await service.workspaces()
                 if let client, let authority {
                     let current = try await authority.require(client.id, capability: .workspaceRead)
-                    workspaces = .object(["workspaces": .array((workspaces["workspaces"].array ?? []).filter { allowed($0["id"].string, current) })])
+                    var rows = (listing["workspaces"].array ?? []).filter { allowed($0["id"].string, current) }
+                    // Provider spaces join the list only for clients that can open terminals; older
+                    // clients keep the cmux-only shape they know how to mirror.
+                    if let providers, current.scope.capabilities.contains(.terminalView),
+                       let spaces = try? await providers.spaces(providerID: nil) {
+                        var seen = Set(rows.compactMap { $0["id"].string?.lowercased() })
+                        for space in spaces.spaces where current.scope.workspaces.contains(space.id.lowercased())
+                            && seen.insert(space.id.lowercased()).inserted {
+                            rows.append(.object(["id": .string(space.id), "title": .string(space.title),
+                                                 "provider_id": .string(space.providerID),
+                                                 "kind": .string(space.kind ?? "space")]))
+                        }
+                    }
+                    listing = .object(["workspaces": .array(rows)])
                 }
-                data = try encode(workspaces)
+                data = try encode(listing)
             } else if method == "GET", path == ["v1", "sessions"] {
                 let sessions = try await service.sessions()
                 if let client, let authority {
