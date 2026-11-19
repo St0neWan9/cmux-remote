@@ -15,7 +15,7 @@ struct AboutView: View {
         WhitePage(title: String(localized: "about.title"), dismissal: .back) {
             VStack(alignment: .leading, spacing: 16) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(verbatim: "term remote").font(.title2.weight(.semibold))
+                    Text(verbatim: "Term Remote").font(.title2.weight(.semibold))
                     Text(String(format: String(localized: "about.version"), version))
                         .font(.footnote).foregroundStyle(.secondary)
                         .accessibilityIdentifier("about.version")

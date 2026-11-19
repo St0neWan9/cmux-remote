@@ -232,7 +232,7 @@ baseline was `95fb435`, with the inventory and harness repairs described above.
 ## TestFlight packaging
 
 The iOS release configuration follows the adjacent Valuz Fastlane flow, using
-its public team ID with term remote's independent Bundle ID and App Store
+its public team ID with Term Remote's independent Bundle ID and App Store
 profile. A manually dispatched GitHub workflow imports an existing distribution
 certificate into a temporary keychain, exports an IPA, and uploads only when
 requested. Signing secrets and the App Store Connect app record are not copied
@@ -251,7 +251,7 @@ secrets configured, and this app's Apple record/access remains to be verified.
 The owner account registered the app's first bundle ID and created a separate
 App Store Connect record for it; both are retired, see *Signing moved to the
 maintainer's individual team* below.
-The phone's invariant display name is **term remote** in English and Simplified
+The phone's invariant display name is **Term Remote** in English and Simplified
 Chinese. Its new opaque 1024-pixel icon incorporates cmux's cyan-to-violet
 chevron reference; the generation prompts and upstream provenance are recorded
 in `ios/Resources/APP-ICON.md`.
@@ -296,7 +296,7 @@ acceptance steps.
 ## Signing moved to the maintainer's individual team — 2026-10-26
 
 The iPhone app now ships under the maintainer's individual team `7G42499LWB` with
-bundle ID `cmux-remote.mobile` and its own App Store Connect record (**term remote
+bundle ID `cmux-remote.mobile` and its own App Store Connect record (**Term Remote
 for Mobile**). The account it shipped under before that — its record, team and
 Apple Distribution identity — is retired: no workflow, script or local check uses
 it. The current account's API key lives at

@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">term remote</string>
+    <string name="app_name">Term Remote</string>
 
     <!-- Shared labels -->
     <string name="common_back">返回</string>
@@ -122,7 +122,7 @@
     <string name="pair_approved">已连接</string>
     <string name="pair_retry_saved">已经配过对？重试已保存的连接</string>
     <string name="pair_awaiting_owner">等待 %1$s 批准</string>
-    <string name="pair_awaiting_owner_note">在 Mac 上打开 term remote → 设备，核对并批准这个请求。</string>
+    <string name="pair_awaiting_owner_note">在 Mac 上打开 Term Remote → 设备，核对并批准这个请求。</string>
     <string name="pair_awaiting_missing_hint">如果 Mac 的待批准列表里没有这台设备：在 Mac 上重新打开「添加设备」并立刻扫码；不要刷新或重开该页面，也不要重启 Mac 端。</string>
     <string name="pair_failed_title">无法连接</string>
     <string name="pair_scan_title">扫描二维码</string>
@@ -377,7 +377,7 @@
     <string name="connection_persistent_channel_note">保持与 Mac 的连接，持续接收更新。</string>
     <string name="connection_persistent_notification">正在保持与 Mac 的连接，持续接收更新</string>
     <string name="connection_persistent_battery">电池优化</string>
-    <string name="connection_persistent_battery_note">如果手机仍然会断开连接，请允许 term remote 忽略电池优化。</string>
+    <string name="connection_persistent_battery_note">如果手机仍然会断开连接，请允许 Term Remote 忽略电池优化。</string>
     <string name="connection_persistent_battery_action">去允许</string>
     <string name="connection_background_sync">后台同步</string>
     <string name="connection_diagnostics">诊断日志</string>

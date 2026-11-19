@@ -79,7 +79,7 @@ final class AppModel {
     init(discovery: BridgeDiscovery = BridgeDiscovery(), store: PairingStore = PairingStore(), pendingSends: PendingSendStore = PendingSendStore(),
          makeSpeechInput: @escaping @MainActor () -> any SpeechInputServing = { UnavailableSpeechInput() },
          identityKey: @escaping @MainActor () throws -> Data = { try DeviceIdentityStore().privateKey() },
-         makeEnrollment: @escaping @MainActor (SignedValue<EnrollmentBootstrap>, Data, BridgeEndpoint?, [ClientCapability]) throws -> any DeviceEnrolling = { bootstrap, key, endpoint, capabilities in try EnrollmentClient(bootstrap: bootstrap, privateKey: key, name: "term remote iPhone", kind: "iphone", capabilities: capabilities, endpoint: endpoint) },
+         makeEnrollment: @escaping @MainActor (SignedValue<EnrollmentBootstrap>, Data, BridgeEndpoint?, [ClientCapability]) throws -> any DeviceEnrolling = { bootstrap, key, endpoint, capabilities in try EnrollmentClient(bootstrap: bootstrap, privateKey: key, name: "Term Remote iPhone", kind: "iphone", capabilities: capabilities, endpoint: endpoint) },
          fetchSessions: @escaping @Sendable (RemoteClient) async throws -> [SessionDescriptor] = { try await $0.get("/v1/sessions", as: [SessionDescriptor].self) },
          fetchWorkspaces: @escaping @Sendable (RemoteClient) async throws -> [WorkspaceSummary] = { client in
              let value = try await client.get("/v1/workspaces", as: JSONValue.self)

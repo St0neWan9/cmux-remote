@@ -1,4 +1,4 @@
-"mac.title" = "term remote";
+"mac.title" = "Term Remote";
 "mac.localWorkspaces" = "Local workspaces";
 "mac.error.permission" = "Allow workspace selection in the cmux extension permissions.";
 "mac.error.localBridge" = "The local service is disconnected. Retry its connection in Remote Settings.";
@@ -22,7 +22,7 @@
 "mac.trust" = "Send pairing request";
 "mac.trustMessage" = "Verify the remote host's name and certificate fingerprint. After you send the request, its owner must approve access to the spaces and terminals.";
 "mac.openCompanion" = "Open Companion";
-"mac.extensionHint" = "Connect, enroll and choose remote workspaces in the Companion. Start your local term remote service inside cmux first.";
+"mac.extensionHint" = "Connect, enroll and choose remote workspaces in the Companion. Start your local Term Remote service inside cmux first.";
 "mac.bridgeHint" = "Check the local service in Remote Settings. On the remote Mac, start pairing under Share This Mac and approve the request.";
 "mac.error.scope" = "This device needs additional space or terminal permissions.";
 "mac.error.unsupported" = "This host or cmux version does not support the requested mirror.";
@@ -53,7 +53,7 @@
 "mac.pairing.close" = "End Pairing";
 "mac.pairing.qr" = "Device pairing QR code";
 "mac.pairing.enlarge" = "Click the code to enlarge it.";
-"mac.pairing.largeHint" = "Scan this code with term remote on your phone.";
+"mac.pairing.largeHint" = "Scan this code with Term Remote on your phone.";
 "mac.pairing.copy" = "Copy pairing link";
 "mac.pairing.copied" = "Copied";
 "mac.pairing.expires" = "Valid until";
@@ -64,9 +64,9 @@
 "mac.devices.empty" = "No devices authorized yet.";
 "mac.device.revoke" = "Revoke Access";
 "mac.device.revokeConfirm" = "Revoke this device’s access?";
-"mac.menu.accessibility" = "term remote menu";
+"mac.menu.accessibility" = "Term Remote menu";
 "mac.menu.settings" = "Remote Settings…";
-"mac.menu.quit" = "Quit term remote";
+"mac.menu.quit" = "Quit Term Remote";
 "mac.menu.pending" = "%lld pending requests";
 "mac.advanced" = "Advanced";
 "mac.stateDirectory" = "Bridge data directory";
@@ -97,7 +97,7 @@
 "mac.workspaces.empty" = "No workspaces are available for this connection.";
 "mac.settings.title" = "Settings";
 "mac.share.label" = "Sharing";
-"mac.setup.title" = "Connect to term remote";
+"mac.setup.title" = "Connect to Term Remote";
 "mac.menu.file" = "File";
 "mac.menu.closeWindow" = "Close Window";
 "mac.share.address" = "Address";
@@ -172,7 +172,7 @@
 "mac.logs.unreadable" = "The Bridge log cannot be read. Check the data directory under Advanced.";
 "mac.general.title" = "General";
 "mac.general.launchAtLogin" = "Launch at login";
-"mac.general.launchAtLogin.hint" = "Start term remote and its Bridge automatically when you log in.";
+"mac.general.launchAtLogin.hint" = "Start Term Remote and its Bridge automatically when you log in.";
 "mac.general.silentLaunch" = "Silent launch";
 "mac.general.silentLaunch.hint" = "Opening the app shows only the menu bar icon, without a window.";
 "mac.general.enabled" = "Enabled";

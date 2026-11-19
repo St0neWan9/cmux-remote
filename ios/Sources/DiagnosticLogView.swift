@@ -13,7 +13,7 @@ struct DiagnosticLogView: View {
     private var build: String {
         let info = Bundle.main.infoDictionary
         let version = info?["CFBundleShortVersionString"] as? String ?? "?", number = info?["CFBundleVersion"] as? String ?? "?"
-        return "term remote \(version) (\(number)) · iOS \(UIDevice.current.systemVersion)"
+        return "Term Remote \(version) (\(number)) · iOS \(UIDevice.current.systemVersion)"
     }
 
     var body: some View {
