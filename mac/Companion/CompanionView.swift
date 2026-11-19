@@ -80,7 +80,7 @@ struct CompanionView: View {
                     Text(String(localized: "mac.sources.empty", bundle: .interface)).foregroundStyle(.secondary)
                 } else {
                     Table(providerItems) {
-                        TableColumn(String(localized: "mac.column.workspace", bundle: .interface)) { item in
+                        TableColumn(String(localized: "mac.column.space", bundle: .interface)) { item in
                             Text(item.title).lineLimit(1).help(item.title)
                         }
                     }.tableStyle(.bordered(alternatesRowBackgrounds: true)).tableColumnHeaders(.hidden).frame(height: design.tableHeight)

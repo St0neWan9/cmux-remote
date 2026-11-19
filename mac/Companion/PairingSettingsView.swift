@@ -35,7 +35,7 @@ struct PairingSettingsView: View {
             } else {
                 MacPreferenceRow(title: String(localized: "mac.pairing.allowed", bundle: .interface), topAligned: true) {
                     Table(items) {
-                        TableColumn(String(localized: "mac.column.workspace", bundle: .interface)) { item in
+                        TableColumn(String(localized: "mac.column.space", bundle: .interface)) { item in
                             // The row is the control: the checkbox carries its label across the whole cell, so a
                             // click anywhere on a workspace flips it, the same as in the approval list.
                             Toggle(isOn: Binding(get: { model.selectedWorkspaces.contains(item.id) },
@@ -64,7 +64,7 @@ struct PairingSettingsView: View {
     /// cmux workspaces keep their name; a provider space names its source too,
     /// so a Rex session is never mistaken for a cmux workspace.
     private func workspaceTitle(_ workspace: JSONValue) -> String {
-        let title = workspace["title"].string ?? String(localized: "mac.untitled", bundle: .interface)
+        let title = workspace["title"].string ?? String(localized: "mac.untitledSpace", bundle: .interface)
         return workspace["source"].string.map { "\(title) · \($0)" } ?? title
     }
     private func setAllowed(_ allowed: Bool, for item: MacTableItem) {
