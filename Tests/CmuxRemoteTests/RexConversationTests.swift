@@ -166,7 +166,13 @@ import CmuxRemoteBridge
         await service.attachRex(source)
         let listed = try await service.sessions()
         #expect(listed.contains { $0.id == agentSession && $0.source == "rex" && $0.kind == "agent" })
-        #expect(listed.contains { $0.kind == "terminal" && $0.source == "rex" })
+        // Shell-only Rex blocks stay out of the phone's list until terminals stand on their own.
+        #expect(!listed.contains { $0.kind == "terminal" })
+        let withTerminals = RexConversationSource(provider: provider, home: home,
+                                                  transcriptRoots: [home.appendingPathComponent(".claude"), home.appendingPathComponent(".codex")],
+                                                  reader: TranscriptReader(), hookSpool: RexHookSpool(directory: hookDirectory),
+                                                  showsUnboundTerminals: true)
+        #expect(try await withTerminals.rows().contains { $0.descriptor.kind == "terminal" && $0.descriptor.source == "rex" })
         let serviceHistory = try await service.history(id: agentSession, beforeSeq: nil, limit: 20)
         #expect(serviceHistory.messages.contains { message in
             if case .prose(let prose) = message.kind { return prose.text.contains("Hello from Rex") }

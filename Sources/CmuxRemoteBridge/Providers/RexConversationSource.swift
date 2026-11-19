@@ -15,6 +15,9 @@ public actor RexConversationSource {
     private let reader: TranscriptReader
     private let roots: [URL]
     private let hookSpool: RexHookSpool?
+    /// Whether shell-only Rex blocks join the session list. Off until the phone
+    /// has a way to present a terminal without a conversation.
+    private let showsUnboundTerminals: Bool
     private let modelCatalog: ModelChoiceCatalog
     private var entries: [String: Entry] = [:]
     private var order: [String] = []
@@ -22,13 +25,14 @@ public actor RexConversationSource {
     private let maximumEntries = 200
 
     public init(provider: RexProvider, home: URL, transcriptRoots: [URL], reader: TranscriptReader,
-                hookSpool: RexHookSpool? = nil) {
+                hookSpool: RexHookSpool? = nil, showsUnboundTerminals: Bool = false) {
         self.provider = provider
         self.registry = ClaudeProcessRegistry(home: home)
         self.reader = reader
         self.roots = transcriptRoots.map { $0.resolvingSymlinksInPath().standardizedFileURL }
         self.hookSpool = hookSpool
         self.modelCatalog = ModelChoiceCatalog(home: home)
+        self.showsUnboundTerminals = showsUnboundTerminals
     }
 
     public func conversations() async throws -> [Entry] {
@@ -100,6 +104,7 @@ public actor RexConversationSource {
     /// row is listed only for clients that asked for terminalView.
     public func rows() async throws -> [Entry] {
         var result = try await conversations()
+        guard showsUnboundTerminals else { return result }
         let targets = try await provider.conversationTargets(registry: registry, roots: roots)
         var bound = Set(targets.map(\.terminal.id))
         let spaces = try await provider.spaces()
