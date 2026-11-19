@@ -1,4 +1,4 @@
-# CmuxRemote Android 0.1.9
+# TermRemote Android 0.1.9
 
 Follow-up to 0.1.8 with the list and conversation details aligned to the iPhone.
 
@@ -56,4 +56,4 @@ Follow-up to 0.1.8 with the list and conversation details aligned to the iPhone.
 Download `CmuxRemote-Android-0.1.9.apk`, open it on Android 10 or later. Same
 signing key; installs as an update.
 
-CmuxRemote is not an official cmux product.
+TermRemote is not an official cmux product.

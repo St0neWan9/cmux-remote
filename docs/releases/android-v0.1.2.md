@@ -1,4 +1,4 @@
-# CmuxRemote Android 0.1.2
+# TermRemote Android 0.1.2
 
 Adding a Mac now looks like the iPhone's page, includes a relay address, and
 the scanner is easier to aim and use at a distance.
@@ -41,4 +41,4 @@ The APK is signed by the Android release key (certificate SHA-256
 `c6fbc46c9a91a1d5338382afb72489267d041f9a6a13224589c938036aeb5066`).
 Compare the download with the attached `.sha256` file.
 
-CmuxRemote is not an official cmux product.
+TermRemote is not an official cmux product.

@@ -1,4 +1,4 @@
-# CmuxRemote Android 0.1.18
+# TermRemote Android 0.1.18
 
 Entering the app now shows that the Macs are being connected, instead of
 looking idle while the first links are dialled.
@@ -28,4 +28,4 @@ looking idle while the first links are dialled.
 Download `CmuxRemote-Android-0.1.18.apk`, open it on Android 10 or later. Same
 signing key; installs as an update.
 
-CmuxRemote is not an official cmux product.
+TermRemote is not an official cmux product.

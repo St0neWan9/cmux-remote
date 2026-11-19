@@ -1,4 +1,4 @@
-# CmuxRemote Android 0.1.32
+# TermRemote Android 0.1.32
 
 Live terminal output now reaches the phone sooner.
 
@@ -11,7 +11,7 @@ Live terminal output now reaches the phone sooner.
 
 ## Install
 
-Download `CmuxRemote-Android-0.1.32.apk`, open it on Android 10 or later. Same
+Download `TermRemote-Android-0.1.32.apk`, open it on Android 10 or later. Same
 signing key; installs as an update.
 
-CmuxRemote is not an official cmux product.
+TermRemote is not an official cmux product.

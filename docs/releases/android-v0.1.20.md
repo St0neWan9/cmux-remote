@@ -1,4 +1,4 @@
-# CmuxRemote Android 0.1.20
+# TermRemote Android 0.1.20
 
 Tool calls inside an expanded operation group sit together.
 
@@ -20,4 +20,4 @@ Tool calls inside an expanded operation group sit together.
 Download `CmuxRemote-Android-0.1.20.apk`, open it on Android 10 or later. Same
 signing key; installs as an update.
 
-CmuxRemote is not an official cmux product.
+TermRemote is not an official cmux product.

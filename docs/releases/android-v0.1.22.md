@@ -1,4 +1,4 @@
-# CmuxRemote Android 0.1.22
+# TermRemote Android 0.1.22
 
 Background task rows now align the tool type and the task title the way the
 iPhone does.
@@ -23,4 +23,4 @@ iPhone does.
 Download `CmuxRemote-Android-0.1.22.apk`, open it on Android 10 or later. Same
 signing key; installs as an update.
 
-CmuxRemote is not an official cmux product.
+TermRemote is not an official cmux product.

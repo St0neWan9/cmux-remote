@@ -1,4 +1,4 @@
-# CmuxRemote Android 0.1.21
+# TermRemote Android 0.1.21
 
 The session list no longer shows the cached-at timestamp above the Mac pills.
 
@@ -17,4 +17,4 @@ The session list no longer shows the cached-at timestamp above the Mac pills.
 Download `CmuxRemote-Android-0.1.21.apk`, open it on Android 10 or later. Same
 signing key; installs as an update.
 
-CmuxRemote is not an official cmux product.
+TermRemote is not an official cmux product.

@@ -1,4 +1,4 @@
-# CmuxRemote Android 0.1.6
+# TermRemote Android 0.1.6
 
 An approved Mac on a remote network now loads its conversations, and the list
 shows one loading indicator instead of two.
@@ -36,4 +36,4 @@ signing key; installs as an update.
 The APK is signed by the Android release key (certificate SHA-256
 `c6fbc46c9a91a1d5338382afb72489267d041f9a6a13224589c938036aeb5066`).
 
-CmuxRemote is not an official cmux product.
+TermRemote is not an official cmux product.

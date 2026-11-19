@@ -1,4 +1,4 @@
-# CmuxRemote Android 0.1.4
+# TermRemote Android 0.1.4
 
 Pairing from outside the LAN now actually reaches the relay, and a device the
 Mac has revoked says so instead of failing as a dead link.
@@ -40,4 +40,4 @@ is signed by the Android release key (certificate SHA-256
 `c6fbc46c9a91a1d5338382afb72489267d041f9a6a13224589c938036aeb5066`); compare the
 download with the attached `.sha256`.
 
-CmuxRemote is not an official cmux product.
+TermRemote is not an official cmux product.

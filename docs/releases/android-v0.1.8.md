@@ -1,4 +1,4 @@
-# CmuxRemote Android 0.1.8
+# TermRemote Android 0.1.8
 
 This release completes the Android / iPhone parity pass: every remaining item
 from the 500-row audit is either implemented or documented as a deliberate
@@ -64,4 +64,4 @@ Android platform equivalent.
 Download `CmuxRemote-Android-0.1.8.apk`, open it on Android 10 or later. Same
 signing key; installs as an update.
 
-CmuxRemote is not an official cmux product.
+TermRemote is not an official cmux product.

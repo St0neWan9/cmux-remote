@@ -1,4 +1,4 @@
-# CmuxRemote Android 0.1.17
+# TermRemote Android 0.1.17
 
 The connection now stays up in the background instead of being torn down every
 time the app leaves the screen.
@@ -42,4 +42,4 @@ time the app leaves the screen.
 Download `CmuxRemote-Android-0.1.17.apk`, open it on Android 10 or later. Same
 signing key; installs as an update.
 
-CmuxRemote is not an official cmux product.
+TermRemote is not an official cmux product.
