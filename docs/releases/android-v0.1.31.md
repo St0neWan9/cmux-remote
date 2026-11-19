@@ -1,4 +1,4 @@
-# CmuxRemote Android 0.1.31
+# TermRemote Android 0.1.31
 
 This release introduces **term remote**: the app now works with more than cmux.
 
@@ -23,4 +23,4 @@ This release introduces **term remote**: the app now works with more than cmux.
 Download `CmuxRemote-Android-0.1.31.apk`, open it on Android 10 or later. Same
 signing key; installs as an update.
 
-CmuxRemote is not an official cmux product.
+TermRemote is not an official cmux product.

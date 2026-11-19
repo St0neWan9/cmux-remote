@@ -1,4 +1,4 @@
-# CmuxRemote Android 0.1.5
+# TermRemote Android 0.1.5
 
 An approved device now reaches its Mac through the relay, and every page
 outside a conversation uses the iPhone's full-width cards.
@@ -34,4 +34,4 @@ permit of kind `approved`, not `enrollment`. The APK is signed by the Android
 release key (certificate SHA-256
 `c6fbc46c9a91a1d5338382afb72489267d041f9a6a13224589c938036aeb5066`).
 
-CmuxRemote is not an official cmux product.
+TermRemote is not an official cmux product.

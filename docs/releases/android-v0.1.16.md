@@ -1,4 +1,4 @@
-# CmuxRemote Android 0.1.16
+# TermRemote Android 0.1.16
 
 The conversation list keeps its Mac status current again, and a sent prompt no
 longer stays at the end once the transcript records it.
@@ -38,4 +38,4 @@ longer stays at the end once the transcript records it.
 Download `CmuxRemote-Android-0.1.16.apk`, open it on Android 10 or later. Same
 signing key; installs as an update.
 
-CmuxRemote is not an official cmux product.
+TermRemote is not an official cmux product.

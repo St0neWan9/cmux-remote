@@ -1,4 +1,4 @@
-# CmuxRemote Android 0.1.11
+# TermRemote Android 0.1.11
 
 Two layout fixes on wide screens and in the conversation header.
 
@@ -29,4 +29,4 @@ Two layout fixes on wide screens and in the conversation header.
 Download `CmuxRemote-Android-0.1.11.apk`, open it on Android 10 or later. Same
 signing key; installs as an update.
 
-CmuxRemote is not an official cmux product.
+TermRemote is not an official cmux product.

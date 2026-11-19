@@ -1,4 +1,4 @@
-# CmuxRemote Android 0.1.15
+# TermRemote Android 0.1.15
 
 The conversation page now follows the iPhone more closely: no stray loading
 indicator, queued prompts stay in the transcript, and drafts live inside the
@@ -45,4 +45,4 @@ composer.
 Download `CmuxRemote-Android-0.1.15.apk`, open it on Android 10 or later. Same
 signing key; installs as an update.
 
-CmuxRemote is not an official cmux product.
+TermRemote is not an official cmux product.

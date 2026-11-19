@@ -1,4 +1,4 @@
-# CmuxRemote Android 0.1.3
+# TermRemote Android 0.1.3
 
 Pairing works with older Mac builds again, and a rejected or expired code now
 says what to do.
@@ -33,4 +33,4 @@ The APK is signed by the Android release key (certificate SHA-256
 `c6fbc46c9a91a1d5338382afb72489267d041f9a6a13224589c938036aeb5066`).
 Compare the download with the attached `.sha256` file.
 
-CmuxRemote is not an official cmux product.
+TermRemote is not an official cmux product.

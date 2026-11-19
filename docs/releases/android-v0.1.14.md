@@ -1,4 +1,4 @@
-# CmuxRemote Android 0.1.14
+# TermRemote Android 0.1.14
 
 The background-task bar now follows the iPhone's single-line layout.
 
@@ -25,4 +25,4 @@ The background-task bar now follows the iPhone's single-line layout.
 Download `CmuxRemote-Android-0.1.14.apk`, open it on Android 10 or later. Same
 signing key; installs as an update.
 
-CmuxRemote is not an official cmux product.
+TermRemote is not an official cmux product.

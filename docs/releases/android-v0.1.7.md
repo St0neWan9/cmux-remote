@@ -1,4 +1,4 @@
-# CmuxRemote Android 0.1.7
+# TermRemote Android 0.1.7
 
 The Android client closes the feature and layout gaps against the iPhone app,
 and fixes the data-routing problems that only appeared with more than one Mac.
@@ -51,4 +51,4 @@ and fixes the data-routing problems that only appeared with more than one Mac.
 Download `CmuxRemote-Android-0.1.7.apk`, open it on Android 10 or later. Same
 signing key; installs as an update.
 
-CmuxRemote is not an official cmux product.
+TermRemote is not an official cmux product.
