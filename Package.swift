@@ -2,10 +2,10 @@
 import PackageDescription
 
 let package = Package(
-    name: "cmux-remote",
+    name: "term-remote",
     platforms: [.macOS(.v14), .iOS(.v17)],
     products: [
-        .executable(name: "cmux-remote", targets: ["CmuxRemoteCLI"]),
+        .executable(name: "term-remote", targets: ["CmuxRemoteCLI"]),
         .library(name: "CmuxRemoteClient", targets: ["CmuxRemoteClient"]),
         .library(name: "CmuxRemoteMac", targets: ["CmuxRemoteMac"]),
         .library(name: "CmuxRemoteBridge", targets: ["CmuxRemoteBridge"]),

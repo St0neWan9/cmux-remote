@@ -9,6 +9,8 @@ import CmuxRemoteBridge
     public private(set) var devices: [DiscoveredBridge] = []
     public private(set) var connections: [JSONValue] = []
     public private(set) var workspaces: [JSONValue] = []
+    /// Provider-neutral spaces (Rex sessions and future providers), owner-only.
+    public private(set) var providerSpaces: [JSONValue] = []
     public private(set) var selectedHostID: String?
     public private(set) var trustCandidate: DiscoveredBridge?
     public private(set) var pendingRequestID: String?
@@ -46,7 +48,14 @@ import CmuxRemoteBridge
     public func refresh() async {
         discoveryObservationID = nil; discoveryTask?.cancel(); discoveryTask = nil; discovery.stop(); devices = []
         observeDiscovery()
-        await refreshConnections(); await refreshWorkspaces(); await refreshMirrorStatus()
+        await refreshConnections(); await refreshWorkspaces(); await refreshProviders(); await refreshMirrorStatus()
+    }
+
+    /// Lists the owner's terminal sources and their spaces without reading a
+    /// terminal or changing focus.
+    public func refreshProviders() async {
+        do { providerSpaces = try await owner.request("providers.spaces", params: [:])["spaces"].array ?? [] }
+        catch { providerSpaces = [] }
     }
     public func stop() { discoveryObservationID = nil; discoveryTask?.cancel(); discoveryTask = nil; discovery.stop(); enrollmentTask?.cancel(); enrollmentTask = nil }
     public func open(hostID: String) async {

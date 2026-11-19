@@ -81,6 +81,7 @@ private val CapabilityOrder = listOf(
     "feedReply",
     "terminalRead",
     "terminalInput",
+    "terminalView",
     "conversationStart",
 )
 
@@ -103,6 +104,7 @@ private fun capabilityLabel(raw: String): String = when (raw) {
     "conversationStart" -> stringResource(R.string.connection_cap_conversation_start)
     "terminalRead" -> stringResource(R.string.connection_cap_terminal_read)
     "terminalInput" -> stringResource(R.string.connection_cap_terminal_input)
+    "terminalView" -> stringResource(R.string.connection_cap_terminal_view)
     else -> raw
 }
 

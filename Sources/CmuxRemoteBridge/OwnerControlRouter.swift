@@ -9,6 +9,9 @@ struct OwnerControlRouter: Sendable {
     var sharing: ManagedSharingService? = nil
     /// The owner's shared project folders, off unless the resident Bridge keeps them.
     var allowedDirectories: AllowedDirectoryRepository? = nil
+    /// Provider-neutral spaces join the owner's sharing selection; devices still
+    /// need an explicit grant for each derived UUID.
+    var providers: ProviderDirectory? = nil
     func respond(_ request: JSONValue) async -> JSONValue {
         let id = request["id"]
         do {
@@ -33,10 +36,43 @@ struct OwnerControlRouter: Sendable {
                 guard let chosen = params["directories"].array else { throw BridgeError("invalid_input", "Choose the folders to allow.", status: 422) }
                 try store.save(chosen.compactMap(\.string))
                 value = .object(["directories": .array(store.load().map { .string(display($0)) })])
-            case "bridge.workspaces": value = try await service.workspaces()
+            case "bridge.workspaces":
+                // The companion's mirror table is cmux-only; provider spaces are
+                // exposed separately so an unknown UUID never reaches a mirror.
+                value = try await service.workspaces()
+            case "providers.list":
+                guard let providers else { throw BridgeError("providers_unsupported", "Upgrade the Bridge to list terminal providers.") }
+                value = try json(await providers.descriptors())
+            case "providers.spaces":
+                guard let providers else { throw BridgeError("providers_unsupported", "Upgrade the Bridge to list terminal spaces.") }
+                let list = try await providers.spaces(providerID: params["provider"].string)
+                var mapped: [JSONValue] = []
+                for space in list.spaces {
+                    var object: [String: JSONValue] = ["id": .string(space.id), "provider_id": .string(space.providerID),
+                                                       "title": .string(space.title)]
+                    if let kind = space.kind { object["kind"] = .string(kind) }
+                    mapped.append(.object(object))
+                }
+                value = .object(["spaces": .array(mapped),
+                                 "provider_errors": .array(list.providerErrors.map { .string($0) })])
+            case "providers.terminals":
+                guard let providers, let space = params["space"].string else { throw BridgeError("invalid_input", "Choose a space.") }
+                value = try json(await providers.terminals(spaceID: space))
+            case "providers.screen":
+                guard let providers, let terminal = params["terminal"].string else { throw BridgeError("invalid_input", "Choose a terminal.") }
+                value = try json(await providers.snapshot(terminalID: terminal))
+            case "providers.input":
+                guard let providers, let terminal = params["terminal"].string else { throw BridgeError("invalid_input", "Choose a terminal.") }
+                let text = params["text"].string ?? ""
+                let submit = params["submit"].bool ?? false
+                let operation = params["operation_id"].string.flatMap(UUID.init(uuidString:)) ?? UUID()
+                let receipt = try await providers.send(terminalID: terminal,
+                                                       request: TerminalInputRequest(text: text, submit: submit, operationID: operation),
+                                                       clientID: "owner", authorize: {})
+                value = try json(receipt)
             case "enrollment.open":
                 guard let host = params["host"].string, let port = params["port"].int else { throw BridgeError("invalid_input", "Choose the host endpoint.") }
-                let available = try await service.workspaces()["workspaces"].array ?? []
+                let available = try await availableWorkspaces()
                 let existingIDs = Set(available.compactMap { $0["id"].string?.lowercased() })
                 let chosen = params["workspaces"].array?.compactMap(\.string).map { $0.lowercased() } ?? Array(existingIDs)
                 guard Set(chosen).isSubset(of: existingIDs) else { throw BridgeError("invalid_scope", "Choose current cmux workspaces.") }
@@ -75,6 +111,15 @@ struct OwnerControlRouter: Sendable {
         }
     }
     private func json<T: Encodable>(_ value: T) throws -> JSONValue { try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(value)) }
+    /// cmux workspaces plus every provider's spaces, which the owner may share
+    /// with the same explicit UUID grant.
+    private func availableWorkspaces() async throws -> [JSONValue] {
+        var rows = try await service.workspaces()["workspaces"].array ?? []
+        if let providers, let list = try? await providers.spaces(providerID: nil) {
+            rows += list.spaces.map { .object(["id": .string($0.id), "title": .string($0.title)]) }
+        }
+        return Array(rows.prefix(100))
+    }
     /// The home directory shows as `~` wherever a folder is named.
     private func display(_ url: URL) -> String {
         let home = FileManager.default.homeDirectoryForCurrentUser.path

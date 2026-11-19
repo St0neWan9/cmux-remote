@@ -9,6 +9,8 @@ struct SessionListView: View {
     @State private var showFeed = false
     @State private var showConversation = false
     @State private var selectedConversation: ConversationModel?
+    @State private var showTerminal = false
+    @State private var selectedTerminal: HostedSession?
     @State private var selectedHostName = ""
     @State private var connectionHostID: String?
     @State private var feedHostID: String?
@@ -175,6 +177,12 @@ struct SessionListView: View {
                 }
             }
 
+            .navigationDestination(isPresented: $showTerminal) {
+                if let selectedTerminal, let link = model.link(for: selectedTerminal.hostID) {
+                    TerminalSessionView(session: selectedTerminal.session, client: link.client, hostName: selectedTerminal.hostName)
+                }
+            }
+
             .navigationDestination(isPresented: $showFeed) { if let id = feedHostID, let link = model.link(for: id) { FeedView(client: link.client) } }
             .navigationDestination(isPresented: $showAbout) { AboutView() }
 
@@ -221,6 +229,11 @@ struct SessionListView: View {
     private func openConversation(_ hosted: HostedSession) {
         diagLog(.info, category: "open", "tapped \(hosted.session.id.prefix(24)) state=\(hosted.session.state)")
         guard let link = model.link(for: hosted.hostID) else { return }
+        if hosted.session.kind == "terminal" {
+            selectedTerminal = hosted
+            showTerminal = true
+            return
+        }
         selectedConversation = model.conversation(session: hosted.session, client: link.client)
         selectedHostName = hosted.hostName
         showConversation = true
@@ -278,6 +291,7 @@ struct SessionListView: View {
                 }
                 HStack(spacing: 8) {
                     Text(session.agent.capitalized)
+                    if session.source == "rex" { Text("Rex").fontWeight(.semibold) }
                     if let host { Text(host).lineLimit(1) }
                     if let updated = session.updatedAt { Text(updated, format: .relative(presentation: .named)).lineLimit(1) }
                     // A conversation that can be reopened says so, rather than reading as plain history.

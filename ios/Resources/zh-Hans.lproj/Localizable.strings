@@ -1,4 +1,4 @@
-"app.title" = "Cmux Remote";
+"app.title" = "term remote";
 "pair.intro" = "在手机上使用你的 cmux";
 "pair.instructions" = "在 Mac 启动 Bridge。扫描配对二维码或选择附近的 Bridge，然后在 Mac 批准这台设备。";
 "pair.connection" = "连接";
@@ -315,7 +315,7 @@
 "start.waiting" = "正在 Mac 上启动 agent…";
 "start.opened" = "终端已在 Mac 上打开，agent 准备好后会话会出现在这里。";
 "capability.conversationStart" = "开新会话";
-"error.launch_unsupported" = "开新会话需要 Mac 上装最新版 CmuxRemote。请先在 Mac 上更新，再重新配对这台 iPhone。";
+"error.launch_unsupported" = "开新会话需要 Mac 上装最新版 term remote。请先在 Mac 上更新，再重新配对这台 iPhone。";
 "error.directory" = "这个目录不能使用。";
 
 "diagnostics.title" = "诊断日志";
@@ -353,3 +353,4 @@
 "error.agent_busy" = "请等 Agent 完成当前回合后再切换模型。";
 "model.confirm_title" = "切换到这个模型？";
 "model.confirm_note" = "这个对话很长，换成 %@ 后，Claude Code 要用新模型把整个对话重新读一遍，下一条回复会更慢、消耗更多 token。";
+"capability.terminalView" = "终端查看";

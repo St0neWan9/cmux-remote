@@ -1,4 +1,4 @@
-"mac.title" = "CmuxRemote";
+"mac.title" = "term remote";
 "mac.localWorkspaces" = "Local workspaces";
 "mac.error.permission" = "Allow workspace selection in the cmux extension permissions.";
 "mac.error.localBridge" = "The local service is disconnected. Retry its connection in Remote Settings.";
@@ -59,9 +59,9 @@
 "mac.devices.empty" = "No devices authorized yet.";
 "mac.device.revoke" = "Revoke Access";
 "mac.device.revokeConfirm" = "Revoke this device’s access?";
-"mac.menu.accessibility" = "CmuxRemote menu";
+"mac.menu.accessibility" = "term remote menu";
 "mac.menu.settings" = "Remote Settings…";
-"mac.menu.quit" = "Quit CmuxRemote";
+"mac.menu.quit" = "Quit term remote";
 "mac.menu.pending" = "%lld pending requests";
 "mac.advanced" = "Advanced";
 "mac.stateDirectory" = "Bridge data directory";
@@ -166,7 +166,7 @@
 "mac.logs.unreadable" = "The Bridge log cannot be read. Check the data directory under Advanced.";
 "mac.general.title" = "General";
 "mac.general.launchAtLogin" = "Launch at login";
-"mac.general.launchAtLogin.hint" = "Start CmuxRemote and its Bridge automatically when you log in.";
+"mac.general.launchAtLogin.hint" = "Start term remote and its Bridge automatically when you log in.";
 "mac.general.silentLaunch" = "Silent launch";
 "mac.general.silentLaunch.hint" = "Opening the app shows only the menu bar icon, without a window.";
 "mac.general.enabled" = "Enabled";
@@ -178,3 +178,7 @@
 "mac.menu.copy" = "Copy";
 "mac.menu.paste" = "Paste";
 "mac.menu.selectAll" = "Select All";
+"mac.sources" = "Terminal sources";
+"mac.sources.empty" = "No terminal sources are available.";
+"mac.sources.note" = "Spaces from every connected provider. Choose one when sharing this Mac with a phone.";
+"mac.capability.terminalView" = "Terminal view";

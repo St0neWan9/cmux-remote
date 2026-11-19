@@ -13,7 +13,7 @@ struct AboutSettingsView: View {
     var body: some View {
         MacPreferencePage {
             MacPreferenceRow(title: String(localized: "mac.title", bundle: .interface)) {
-                Text(verbatim: "Cmux Remote \(version)")
+                Text(verbatim: "term remote \(version)")
                     .textSelection(.enabled)
                     .accessibilityIdentifier("mac.about.version")
                 MacPreferenceNote(text: String(localized: "mac.about.note", bundle: .interface))

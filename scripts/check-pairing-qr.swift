@@ -6,7 +6,7 @@ import Vision
 let state = CommandLine.arguments[1]
 let port = CommandLine.arguments.count > 2 ? CommandLine.arguments[2] : "7740"
 let process = Process(); let output = Pipe()
-process.executableURL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath + "/.build/debug/cmux-remote")
+process.executableURL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath + "/.build/debug/term-remote")
 process.arguments = ["pairing", "--state", state, "--host", "127.0.0.1", "--port", port]
 process.standardOutput = output; try process.run()
 let data = output.fileHandleForReading.readDataToEndOfFile(); process.waitUntilExit()

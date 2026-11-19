@@ -23,6 +23,10 @@ data class SessionItem(
     val resumable: Boolean = false,
     /** The Mac's display name, shown in a flat list that mixes Macs. */
     val hostName: String? = null,
+    /** The provider kind, such as "rex"; null for the original cmux backends. */
+    val source: String? = null,
+    /** "agent" or "terminal"; older Bridges omit it. */
+    val kind: String = "agent",
     /** When `/clear` replaced the conversation: it is listed in the Archive only, with this time under its title. */
     val clearedAt: java.time.Instant? = null,
 )

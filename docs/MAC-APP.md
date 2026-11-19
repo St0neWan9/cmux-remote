@@ -7,7 +7,7 @@ UI tokens, component rules, density, states and interaction copy are defined in
 out the menu or settings pages.
 
 Both the source Mac and viewing Mac install the same **CmuxRemote** menu bar
-application (`~/Applications/CmuxRemote.app`). It can share this Mac and connect to other Macs at the same time.
+application (`~/Applications/TermRemote.app`). It can share this Mac and connect to other Macs at the same time.
 The menu bar icon belongs to macOS. This is an independent application using the
 official cmux APIs, not an ExtensionKit sidebar or an injected cmux settings page.
 The official native sidebar, Remote workspace group, terminal mirroring, identity

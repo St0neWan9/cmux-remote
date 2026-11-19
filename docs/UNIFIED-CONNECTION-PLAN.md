@@ -55,7 +55,7 @@ not make the first Mac backend portable or imply that cmux-tui is already suppor
 
 ## One executable and command families
 
-Install the same `cmux-remote` executable on both Macs. Extend that executable
+Install the same `term-remote` executable on both Macs. Extend that executable
 with host, client, owner-control, and viewer commands; do not create a second
 independent Bridge with another identity store, enrollment protocol, or cache.
 Command handlers remain thin composition entrypoints over shared modules.

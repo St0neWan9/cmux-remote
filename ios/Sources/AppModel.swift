@@ -212,17 +212,25 @@ final class AppModel {
         guard enrollmentGeneration == generation else { return }
         error = nil; loading = true
         do {
-            var enrollment = try makeEnrollment(bootstrap, identityKey(), endpoint, EnrollmentClient.phoneCapabilities)
-            pendingEnrollment = enrollment
-            let status: EnrollmentStatus
-            do { status = try await enrollment.submit() }
-            catch let failure as BridgeError where failure.code == "outcome_unknown" && enrollment.request.value.scope.capabilities.contains(.conversationStart) {
-                // An older Bridge closes the link on a capability it cannot decode; ask again without starting sessions.
-                guard enrollmentGeneration == generation, pendingEnrollment === enrollment else { enrollment.close(); return }
-                enrollment.close()
-                enrollment = try makeEnrollment(bootstrap, identityKey(), endpoint, EnrollmentClient.previousPhoneCapabilities)
-                pendingEnrollment = enrollment
-                status = try await enrollment.submit()
+            // An older Bridge closes the link on a capability it cannot decode;
+            // ask again with the narrowest set it understands.
+            let attempts = [EnrollmentClient.phoneCapabilities, EnrollmentClient.phoneCapabilitiesWithoutStart,
+                            EnrollmentClient.previousPhoneCapabilities, EnrollmentClient.legacyPhoneCapabilities]
+            var enrollment: (any DeviceEnrolling)?
+            var status: EnrollmentStatus?
+            var lastError: (any Error)?
+            for capabilities in attempts {
+                guard enrollmentGeneration == generation else { enrollment?.close(); return }
+                let candidate = try makeEnrollment(bootstrap, identityKey(), endpoint, capabilities)
+                enrollment = candidate; pendingEnrollment = candidate
+                do { status = try await candidate.submit(); break }
+                catch let failure as BridgeError where failure.code == "outcome_unknown" || failure.code == "invalid_enrollment" {
+                    candidate.close(); pendingEnrollment = nil; lastError = failure; continue
+                }
+            }
+            guard let enrollment, let status else {
+                pendingEnrollment?.close(); pendingEnrollment = nil
+                throw lastError ?? BridgeError("invalid_enrollment", "This Mac could not enroll the device.", status: 400)
             }
             guard enrollmentGeneration == generation, pendingEnrollment === enrollment else { enrollment.close(); return }
             enrollmentState = status.state; loading = false

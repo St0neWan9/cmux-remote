@@ -16,8 +16,8 @@ Swift project needs neither CocoaPods nor an extension profile.
 | Bundle ID | `cmux-remote.mobile` |
 | Apple team | `7G42499LWB`, the maintainer's individual team |
 | Marketing version | `0.1.0` |
-| Phone display name | `Cmux Remote` |
-| App Store Connect name | `Cmux Remote for Mobile` |
+| Phone display name | `term remote` |
+| App Store Connect name | `term remote for Mobile` |
 | App Store Connect app ID | `6827037964` |
 | App Store profile name | `cmux-remote mobile App Store` |
 

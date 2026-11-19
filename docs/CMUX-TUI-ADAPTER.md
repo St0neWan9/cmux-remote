@@ -21,9 +21,9 @@ and no terminal emulator is added to the phone.
 ## Startup and discovery
 
 ```sh
-cmux-remote serve --pair
+term-remote serve --pair
 # Optional exact socket for a daemon using a non-default runtime directory:
-cmux-remote serve --tui-socket /absolute/path/to/daemon.sock --pair
+term-remote serve --tui-socket /absolute/path/to/daemon.sock --pair
 ```
 
 Daemon sockets are discovered in private same-user `cmux-tui-<uid>` and

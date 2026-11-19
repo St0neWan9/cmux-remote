@@ -464,7 +464,7 @@ private fun DrawerSessionRow(
                 else -> null
             }
             Text(
-                listOfNotNull(session.agent, session.hostName.takeIf { showMac }, age, label).filter { it.isNotBlank() }.joinToString(" · "),
+                listOfNotNull(session.agent, if (session.source == "rex") "Rex" else null, if (session.kind == "terminal") "Terminal" else null, session.hostName.takeIf { showMac }, age, label).filter { it.isNotBlank() }.joinToString(" · "),
                 color = MobileDesign.Muted,
                 style = MaterialTheme.typography.labelMedium,
                 maxLines = 1,

@@ -13,7 +13,7 @@ import CmuxRemoteMac
     private var statusMenu: RemoteStatusMenu?
     private var applicationMenu: RemoteStatusMenu?
     override init() {
-        model = MacAppModel(executable: Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/cmux-remote"), home: FileManager.default.homeDirectoryForCurrentUser, preferences: .standard)
+        model = MacAppModel(executable: Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/term-remote"), home: FileManager.default.homeDirectoryForCurrentUser, preferences: .standard)
         super.init()
     }
     func applicationDidFinishLaunching(_ notification: Notification) {

@@ -233,7 +233,7 @@ class BridgeClient(
          * two never disagree about escaping.
          */
         fun uri(path: String, query: Map<String, String>): String {
-            if (!path.startsWith("/v2/") || path.contains("..")) {
+            if ((!path.startsWith("/v2/") && !path.startsWith("/v3/")) || path.contains("..")) {
                 throw ProtocolException("invalid_route", "Invalid resource path.")
             }
             val suffix = if (query.isEmpty()) "" else query.toSortedMap().entries.joinToString("&", prefix = "?") { (key, value) ->

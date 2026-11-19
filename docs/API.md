@@ -27,6 +27,25 @@ Version 2 uses a device-signed `Authorization: CmuxV2` proof and approved worksp
 | GET /v1/sessions/:id/file?path= | constrained local project file | bounded text and relative path |
 | GET /v1/operations/:operation_id | owner-only persisted operation journal | current device's scoped accepted/unknown status |
 
+## Provider-neutral resources (`/v3`)
+
+The provider-neutral model is described in [TERM-REMOTE.md](TERM-REMOTE.md). These routes require signed v2 enrollment; legacy shared-token clients cannot use them. The WebSocket link and both `RemoteClient` implementations accept `/v3` paths.
+
+| Route | Capability | Result |
+| --- | --- | --- |
+| GET /v3/providers | enrolled device | providers with at least one granted space, status and features |
+| GET /v3/spaces?provider= | workspaceRead | spaces the device may see |
+| GET /v3/spaces/:space/layout | terminalRead | provider-neutral layout nodes |
+| GET /v3/spaces/:space/terminals | terminalRead | terminals with title, process, cwd and state |
+| GET /v3/terminals/:terminal/screen | terminalRead | bounded text screen and opaque revision |
+| POST /v3/terminals/:terminal/input | terminalInput | `{text, submit, operation_id}` → mutation receipt |
+
+Space and terminal IDs are derived UUIDs. `/v1`/`/v2` remain the cmux compatibility projection; provider resources never appear there.
+
+`GET /v1/sessions` now merges proved provider conversations. `SessionDescriptor` gains optional `kind` (`agent` or `terminal`) and `source` (`cmux_desktop`, `rex`, ...); older Bridges omit both and decoders default to an agent row. A `kind: "terminal"` row is listed only to a device whose grant includes `terminalView`. Rex conversations use the normal history, preview, send, interrupt, models and resume routes; their `workspaceID` is the derived Rex session UUID and `surfaceID` is the terminal UUID, so the existing per-workspace grants apply unchanged. Rex attachments, project files, Git and background tasks are unsupported in this phase and answer stable `unsupported` codes.
+
+Owner-only commands list and drive the same resources without a device grant: `providers spaces`, `providers terminals --space`, `view --space|--terminal`, and `hooks status|install|remove` (see [REX-SERVER-ADAPTER.md](REX-SERVER-ADAPTER.md)). Terminal rows require the owner to approve `terminalView` (plus `terminalRead`/`terminalInput` for reading and typing); Rex conversations require `conversationRead`/`conversationControl` on the derived space UUID.
+
 `GET /v2/sessions/:id/archive` pages a transcript by byte offset instead of reading it whole. Without a cursor, `tail` selects how many of the newest messages the first page returns (default 100, maximum 200) and reading starts at EOF; with `cursor`, `limit` selects the next older page. Each request reads only one bounded chunk ending at the requested offset. A page is bounded to 200 messages and about 1 MiB, and `next_cursor` encodes the page's generation plus the byte offset of its first returned line. `complete` is true only when that offset is zero. Archive messages carry the byte offset of the line that produced them as their sequence number, and their `generation` is the path's stable generation: it survives Bridge restarts and window movement, and changes only when the record is replaced, truncated, or shrinks. A cursor from a different generation answers `history_cursor_stale` (409). `history_too_large` (413) is reserved for a configured chunk larger than the supported bound; a large record is paged, never refused for its size. Tool-detail and image references issued by an archive page resolve while the message is inside the ordinary bounded history window.
 
 A session row carries `clearedAt` (ISO 8601) when `/clear` replaced the conversation. `/clear` starts a new Agent session in the same terminal. The old transcript is left unchanged, and the new transcript opens with the `/clear` command, dated when it ran. The replaced conversation is the one on that terminal whose last message is the latest one at or before the clear. If a conversation was used after the clear (resumed), or is still live, it carries no `clearedAt`; if it falls before several clears, it takes the earliest. Its time is that clear's. An archived row on a terminal now held by another live Agent is `ended`: the prompt on that screen belongs to the new Agent, not to the archived row. The phones list these conversations only under their Archive filter, with that time under the title. Older Bridges omit the field.

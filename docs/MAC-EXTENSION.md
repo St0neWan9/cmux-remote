@@ -5,7 +5,7 @@ The new Mac entry point is a unified menu bar application. See
 graphical sharing, pairing/approval, saved hosts and mirroring. The CLI flows
 below remain supported for automation and existing installations.
 
-The Mac Companion and resident `cmux-remote` Bridge integrate with the official
+The Mac Companion and resident `term-remote` Bridge integrate with the official
 cmux **Default Workspaces** sidebar. Local workspaces keep their original rows,
 menus, selection and appearance. The Bridge places remote projections in a native
 **Remote** group below them, using `workspace.group.*` and a complete group-block
@@ -60,14 +60,14 @@ has no nearby services, using their pinned endpoint and existing grant.
 
 ## Start both resident Bridges
 
-Build/use the same updated `cmux-remote` executable on both Macs. On each Mac,
+Build/use the same updated `term-remote` executable on both Macs. On each Mac,
 start `serve` inside an official cmux terminal when its socket mode is `cmuxOnly`:
 
-On a Mac with no Bridge state yet, run `.build/debug/cmux-remote init` once before
+On a Mac with no Bridge state yet, run `.build/debug/term-remote init` once before
 `serve`. Do not reinitialize or replace an existing paired state directory.
 
 ```sh
-.build/debug/cmux-remote serve --listen 0.0.0.0
+.build/debug/term-remote serve --listen 0.0.0.0
 ```
 
 The server defaults to loopback without this explicit LAN listen option. Bonjour
@@ -80,7 +80,7 @@ When adding this Mac, open enrollment on the remote host, optionally confined to
 one current workspace:
 
 ```sh
-.build/debug/cmux-remote enrollment open --workspace <remote-workspace-UUID>
+.build/debug/term-remote enrollment open --workspace <remote-workspace-UUID>
 ```
 
 Select the host in the Companion opened from the sidebar. Confirm the host identity/certificate
@@ -88,8 +88,8 @@ fingerprint explicitly before sending an enrollment request. On the remote host,
 inspect the exact request and approve only its requested workspace/capabilities:
 
 ```sh
-.build/debug/cmux-remote enrollment pending
-.build/debug/cmux-remote enrollment approve <request-UUID> \
+.build/debug/term-remote enrollment pending
+.build/debug/term-remote enrollment approve <request-UUID> \
   --workspace <remote-workspace-UUID> \
   --capability workspaceRead --capability terminalRead --capability terminalInput
 ```
@@ -105,11 +105,11 @@ and this Mac's signing key remain in owner-only files outside the repository.
 The same flow is also available from the local CLI:
 
 ```sh
-.build/debug/cmux-remote discover
-.build/debug/cmux-remote connect HOST_ID --trust-certificate VERIFIED_SHA256
-.build/debug/cmux-remote connect status
-.build/debug/cmux-remote connect cancel
-.build/debug/cmux-remote connect forget HOST_ID
+.build/debug/term-remote discover
+.build/debug/term-remote connect HOST_ID --trust-certificate VERIFIED_SHA256
+.build/debug/term-remote connect status
+.build/debug/term-remote connect cancel
+.build/debug/term-remote connect forget HOST_ID
 ```
 
 New hosts require explicit fingerprint confirmation and remote owner approval;
@@ -129,12 +129,12 @@ The local Bridge checks terminal replay support before attaching its viewers;
 it does not start another remote Agent:
 
 ```sh
-.build/debug/cmux-remote mirror workspace --host <saved-host-ID> \
+.build/debug/term-remote mirror workspace --host <saved-host-ID> \
   --workspace <remote-workspace-UUID>
-.build/debug/cmux-remote mirror catalog
-.build/debug/cmux-remote mirror list
-.build/debug/cmux-remote mirror status
-.build/debug/cmux-remote mirror sync --host <saved-host-ID> --workspace <remote-workspace-UUID>
+.build/debug/term-remote mirror catalog
+.build/debug/term-remote mirror list
+.build/debug/term-remote mirror status
+.build/debug/term-remote mirror sync --host <saved-host-ID> --workspace <remote-workspace-UUID>
 ```
 
 `mirror view --projection <UUID>` is started by the local Bridge inside each

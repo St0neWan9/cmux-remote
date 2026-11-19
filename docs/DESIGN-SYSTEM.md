@@ -1,4 +1,4 @@
-# Cmux Remote Mac 设计系统
+# term remote Mac 设计系统
 
 ## 共同产品规范（0.3）
 

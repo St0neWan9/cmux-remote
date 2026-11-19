@@ -74,7 +74,7 @@ actor LinkServerSession {
             case "request", "subscribe":
                 guard requests[frame.id] == nil, subscriptions[frame.id] == nil, requests.count < 8,
                       let method = frame.method, ["GET", "POST"].contains(method), let uri = frame.uri,
-                      uri.hasPrefix("/v2/"), let clientID else { throw BridgeError("invalid_request", "Invalid resource request or full link.") }
+                      uri.hasPrefix("/v2/") || uri.hasPrefix("/v3/"), let clientID else { throw BridgeError("invalid_request", "Invalid resource request or full link.") }
                 BridgeLog.shared.debug("link", "link request id=\(frame.id.prefix(8)) \(frame.kind) \(method) \(uri.split(separator: "?").first.map(String.init) ?? uri)")
                 try router.verifyChannelIdentity(frame, clientID: clientID)
                 if frame.kind == "subscribe" {

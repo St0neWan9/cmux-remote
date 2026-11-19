@@ -20,7 +20,7 @@ Intel.
 
 3. The **macOS release** workflow runs `scripts/verify.sh`, packages with
    `--notarize`, and creates the `vX.Y.Z` GitHub Release with
-   `CmuxRemote-X.Y.Z.dmg`, `CmuxRemote-X.Y.Z.zip` and `SHA256SUMS.txt`.
+   `term-remote-X.Y.Z.dmg`, `term-remote-X.Y.Z.zip` and `SHA256SUMS.txt`.
 
 The marketing version comes from the tag; the build number is the workflow run
 number. To produce signed, notarized artifacts without publishing, dispatch the
@@ -30,7 +30,7 @@ workflow manually with a version; the files are kept as a 7-day run artifact.
 
 `scripts/package-macos.sh`:
 
-- builds the app and the bundled `cmux-remote` helper as universal
+- builds the app and the bundled `term-remote` helper as universal
   (`arm64 x86_64`) Release binaries and rejects either if it is single-arch or
   requires a macOS newer than 14.0;
 - signs inside-out with the hardened runtime and a secure timestamp, by

@@ -22,7 +22,7 @@ final class WebSocketTransport: ResourceTransport {
     func close() { let connection = connection; Task { await connection.close() } }
     deinit { let connection = connection; Task { await connection.close() } }
     private func resourceURI(_ path: String, query: [String: String]) throws -> String {
-        guard path.hasPrefix("/v2/"), !path.contains("..") else { throw BridgeError("invalid_route", "Invalid link resource route.") }
+        guard path.hasPrefix("/v2/") || path.hasPrefix("/v3/"), !path.contains("..") else { throw BridgeError("invalid_route", "Invalid link resource route.") }
         var parts = URLComponents(); parts.path = path
         parts.queryItems = query.isEmpty ? nil : query.sorted { $0.key < $1.key }.map { URLQueryItem(name: $0.key, value: $0.value) }
         return parts.percentEncodedPath + (parts.percentEncodedQuery.map { "?" + $0 } ?? "")

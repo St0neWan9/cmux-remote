@@ -13,6 +13,7 @@ extension ClientCapability {
         case .terminalRead: return String(localized: "capability.terminalRead")
         case .terminalInput: return String(localized: "capability.terminalInput")
         case .conversationStart: return String(localized: "capability.conversationStart")
+        case .terminalView: return String(localized: "capability.terminalView")
         @unknown default: return String(localized: "capability.additional")
         }
     }

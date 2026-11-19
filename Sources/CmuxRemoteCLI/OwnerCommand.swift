@@ -35,6 +35,13 @@ struct OwnerCommand {
             params = ["request_id": .string(options.args[1]), "scope": try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(scope))]
         case "enrollment.deny": guard options.args.count >= 2 else { throw BridgeError("invalid_input", "Choose an exact request ID.") }; params["request_id"] = .string(options.args[1])
         case "clients.revoke": guard options.args.count >= 2 else { throw BridgeError("invalid_input", "Choose an exact client ID.") }; params["client_id"] = .string(options.args[1])
+        case "providers.list":
+            break
+        case "providers.spaces":
+            if let provider = options.value("provider") { params["provider"] = .string(provider) }
+        case "providers.terminals":
+            guard let space = options.value("space") else { throw BridgeError("invalid_input", "Choose a space.") }
+            params["space"] = .string(space)
         case "enrollment.pending", "enrollment.close", "clients.list": break
         default: throw BridgeError("invalid_input", "Unknown local owner command.")
         }

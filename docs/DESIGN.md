@@ -1,112 +1,301 @@
-# cmux-remote design
+# term remote design
 
-This document describes the companion architecture. The implemented unified connection layer is specified in [Connection v2](CONNECTION-V2.md). The development Mac sidebar/snapshot-mirror implementation is described in [the Mac guide](MAC-EXTENSION.md); live acceptance and remaining continuity work are tracked in [the unified connection plan](UNIFIED-CONNECTION-PLAN.md).
+This document is the top-level design for **term remote**, a companion for
+remote terminals and the Agents that run in them. The provider-neutral model and
+its migration are specified in [TERM-REMOTE.md](TERM-REMOTE.md). The Rex
+provider is specified in [REX-SERVER-ADAPTER.md](REX-SERVER-ADAPTER.md). The
+implemented connection layer remains specified by
+[Connection v2](CONNECTION-V2.md). The Mac companion and native-sidebar
+projection are described in [the Mac guide](MAC-EXTENSION.md); live acceptance
+and continuity work are tracked in
+[the unified connection plan](UNIFIED-CONNECTION-PLAN.md).
 
-The planned LAN/cloud WebSocket transport migration is specified in
-[WebSocket and Cloudflare relay](WEBSOCKET-RELAY.md). It is a design proposal;
-the current client still uses HTTPS and foreground snapshot polling.
+The cmux-first framing this document used before 2026-11-19 is superseded.
+cmux is now the first terminal provider, not the product model.
+
+Implementation status in this working tree: the provider-neutral Core model,
+`/v3` terminal routes, the `cmux` and `Rex` terminal providers, `/v3` link
+transport, Rex conversations through Claude's registry or opt-in Agent hooks,
+the merged phone session routes, an iOS terminal screen, the owner provider
+commands and isolated tests exist. Remote Rex transcripts, the full Sources UI and
+the rename are not yet implemented.
 
 ## Scope
 
-One repository contains a Swift Mac CLI/Bridge, shared wire models, a Swift client, and a native SwiftUI iPhone app. The first backend is the installed official cmux Mac app. The phone and Mac are on a reachable LAN. No cloud account, public relay, provider API integration, terminal emulator on the phone, or modification of cmux is required.
+One repository contains a Swift Mac CLI/Bridge, shared wire models, a Swift
+client, a native SwiftUI iPhone app, an Android app and a macOS companion. The
+Bridge connects to one or more **terminal providers**:
 
-The Bridge reads local transcript/project data to fill holes in the official local API. This is distinct from claiming that every value is available over cmux's socket. It never starts a second agent runtime. Provider-format support is pinned and tested.
+- the official cmux Mac app's local API;
+- cmux-tui daemons discovered on the same Mac;
+- Rex servers, local or remote.
+
+The phone and the companion never connect to a provider directly. They speak to
+the Bridge over signed `/v3` resources and the existing pinned WebSocket link.
+There is no cloud account, public relay requirement, provider API connection or
+terminal emulator on the phone.
 
 ## Boundaries and layout
 
-`CmuxRemoteCore` contains Sendable Codable DTOs, JSON values and pure policies. It reuses the pinned `CmuxAgentChat` parsing/model library. `CmuxRemoteBridge` owns socket I/O, the local session registry, transcript reads, constrained project file access, Git queries and TLS HTTP serving. `CmuxRemoteClient` owns HTTPS, certificate pinning and response decoding. `CmuxRemoteCLI` is the composition root. `ios/` owns observable app state and SwiftUI screens.
+`CmuxRemoteCore` contains Sendable Codable DTOs, the provider-neutral model,
+JSON values and pure policies. It reuses the pinned `CmuxAgentChat` parser/model
+library. `CmuxRemoteBridge` owns provider connections, the provider registry and
+directory, transcript reads, constrained project file access, Git queries and
+TLS HTTP serving. `CmuxRemoteClient` owns HTTPS, certificate pinning and response
+decoding. `CmuxRemoteCLI` is the composition root. `ios/`, `android/` and `mac/`
+own app state and screens.
 
-Dependencies form a DAG: executable/server/client/UI -> Core -> upstream parsing/model code. No AppKit or Ghostty dependency enters the phone. The HTTP API is language-neutral; backends implement the same domain operations with explicit capability differences. The [local cmux-tui adapter](CMUX-TUI-ADAPTER.md) adds direct access to daemon-owned SSH Agents without an A-to-B-to-A dependency.
+Dependencies form a DAG: executable/server/client/UI -> Core -> upstream
+parsing/model code. No AppKit or Ghostty dependency enters the phone. The HTTP
+API is language-neutral; providers implement the same generic operations with
+explicit capability differences.
 
-Mac mirrors keep a local ownership registry for their projected surface IDs and
-remote producer epochs. A bounded metadata watcher reconciles source split/tab
-changes through fixed local `surface.move`, `surface.split_off`, `surface.reorder`,
-creation and close operations. It preserves existing viewer processes and never
-issues remote structural mutations. Local membership changes and unknown write
-outcomes pause the transaction for inspection; no blind layout retry occurs.
-Detached producer records are retained only for owned projection cleanup and
-cannot receive input. Manual detach pauses updates; a disappeared source may be
-removed from the mirror, while a replaced source requires explicit attachment.
+## Provider model
 
-The requested Mac navigation preserves the official native sidebar and adds a
-native Remote group below local workspaces. It uses local workspace-group APIs;
-ExtensionKit replacement sidebars are not the product integration. Default Mac
-builds no longer embed that prototype. Native rows use cmux's own styling and
-interaction handlers. Scoped metadata creates pending native rows using a fixed
-local viewer command. A bounded private owner-channel wait observes native
-selection; selection then rechecks the saved grant and local binding before
-attaching into that same workspace. Inventory refresh never reads terminal
-contents or changes focus. Creation and attachment intents are persisted before
-native mutations; unknown results pause without blind retries. Completed
-attachments persist bounded owner-only topology/producer metadata without
-credentials or terminal content. Restart recovery verifies fresh host authority,
-local membership and producer epochs before publishing the same view IDs.
-A partial layout transaction removes its recovery checkpoint before writes;
-unknown outcomes are not automatically resumed.
+The model has one vocabulary for every backend:
+
+| Type | Meaning |
+| --- | --- |
+| `Provider` | A terminal backend instance: cmux desktop, a cmux-tui daemon or a Rex server |
+| `Host` | The machine a provider runs on |
+| `Space` | A project-level container; the unit of navigation, sharing and grants |
+| `Terminal` | One terminal screen with an input channel |
+| `Layout` | A presentation arrangement of terminals inside a space |
+| `Conversation` | One Agent session, identified by the Agent's own session id |
+| `Binding` | Proof that a conversation currently runs in a terminal |
+| `Capability` | What a provider, space, terminal or conversation supports |
+| `Operation` | A durable, idempotent-by-identity mutation |
+
+Mapping:
+
+| term remote | cmux | Rex |
+| --- | --- | --- |
+| Provider | cmux desktop or a cmux-tui daemon | Rex server |
+| Space | Workspace | Session |
+| Terminal | Surface | Terminal block |
+| Layout | Pane tree | Window/layer split tree |
+| Conversation | Agent session bound to workspace + surface | Agent session bound to block |
+| Binding proof | cmux registry / agent hooks | Agent hooks or Claude's process registry |
+
+A provider's window, pane or layer is a layout node. It is not a grant, a
+conversation identity or a phone-list row. A cmux workspace UUID is reused as
+the `SpaceID` for compatibility; other providers derive stable UUIDs. All grant
+IDs remain UUIDs, so the existing `ClientScope` and enrollment payloads keep
+working. Existing wire capability names are retained; `workspaceRead` now means
+"read a generic Space".
 
 ## Pairing and authority
 
-The Bridge maintains a persistent Ed25519 host identity and separately enrolled device identities. Version 2 QR codes bind an expiring enrollment window to the host public key, exact TLS certificate fingerprint, endpoint and owner-selected workspace IDs; they do not contain a permanent shared credential. Device requests prove possession of their key and need the Mac owner's explicit approval. Signed grants are persisted in an owner-only host registry. Each request proves its identity, exact content, nonce and fresh server epoch; scope and revocation are checked at the resource and final binding boundaries. See [Connection v2](CONNECTION-V2.md) for the cryptographic/wire contract and migration.
+The Bridge maintains a persistent Ed25519 host identity and separately enrolled
+device identities. Version 2 QR codes bind an expiring enrollment window to the
+host public key, exact TLS certificate fingerprint, endpoint and owner-selected
+space IDs; they do not contain a permanent shared credential. Device requests
+prove possession of their key and need the Mac owner's explicit approval. Signed
+grants are persisted in an owner-only host registry. Each request proves its
+identity, exact content, nonce and fresh server epoch; scope and revocation are
+checked at the resource and final binding boundaries. See
+[Connection v2](CONNECTION-V2.md) for the cryptographic/wire contract.
 
-Bonjour is reachability metadata, not trust. The iPhone saves device-only Keychain identity and host trust, restores grants, and can relocate a known host after verifying the unchanged identity and TLS pin. Certificate changes require explicit enrollment; there is no unverified renewal shortcut. The local admin Unix socket is separate from HTTPS and owns approval/revocation. Legacy shared-token routes require an explicit `--legacy` opt-in.
+Bonjour is reachability metadata, not trust. The iPhone saves device-only
+Keychain identity and host trust, restores grants, and can relocate a known host
+after verifying the unchanged identity and TLS pin. Certificate changes require
+explicit enrollment; there is no unverified renewal shortcut. The local admin
+Unix socket is separate from HTTPS and owns approval/revocation, provider
+management and hook installation. Legacy shared-token routes require an explicit
+`--legacy` opt-in.
 
-There is no generic remote cmux RPC proxy. No browsing operation selects or focuses a desktop workspace. Official CLI requests keep prompt data in private stdin. Under `cmuxOnly`, launch the Bridge inside a cmux terminal; using the bundled CLI does not bypass process ancestry checks. The Bridge never enables `allowAll`.
+There is no generic provider RPC proxy. No browsing operation selects or focuses
+a desktop space. Provider methods are fixed, typed operations. The Bridge never
+enables cmux `allowAll`, starts a second Agent runtime or gives a device a
+provider's raw method surface.
 
-## Session discovery
+## Providers and discovery
 
-List only sessions with cmux provenance: an explicit workspace/surface binding from the local `chat.sessions.dump` registry or an authoritative `agent` hook event. `vault.sessions` also contains conversations started outside cmux; use it only to enrich already identified cmux sessions with titles, history and file locations. Matching cwd, title or chronological proximity does not establish provenance. If the diagnostic method is unavailable and no hook binding was observed, show an empty list rather than global history. A conversation is identified by its Agent session, not by the terminal it runs in: the same session reopened in a new terminal keeps one identity, because the phone follows the Agent. A conversation whose Agent has exited is resumable only when the Bridge can prove all of: the Agent session has a transcript under a configured root, that transcript records the directory the Agent itself ran in, the workspace the conversation belonged to still exists, and — when the terminal is still running — the terminal's rendered screen no longer shows that Agent's own prompt. A screen that cannot be read proves nothing, so a running terminal in that state is neither writable nor resumable: typing into the shell that replaced an Agent would execute the phone's text as a command, and reopening a session the Agent still holds would run two processes on it. Resuming starts a fixed `<agent> --resume <session-id>` (Codex: `codex resume <session-id>`) in a new terminal in that workspace, with the session id taken from the Bridge's own binding and never from the client; it requires `conversationStart`, since it starts a process. A conversation that fails any of those checks stays read-only. A device granted `conversationStart` may open a new conversation in an approved desktop workspace: cmux opens a terminal there and types a fixed `claude` or `codex` command (see API.md, "Starting conversations"). The agent still runs inside cmux; no separate agent runtime or provider connection is created. cmux restart/rebind invalidates cached bindings; actions verify that the exact workspace/surface still exists and runs an agent.
+Each provider instance has a stable `ProviderID` and a declared capability set.
+The provider registry isolates failures: an unavailable provider contributes a
+stable `provider_errors` entry and never falls through to another provider's
+resources.
 
-The registry excludes unsupported providers and files outside configured transcript roots. The first list is bounded by the underlying Vault API; the response reports this discovery limit. Reading a historical session never creates or resumes an agent.
+- **cmux desktop** uses the local socket and the existing authenticated domain
+  methods. Its spaces are workspaces, its terminals are terminal surfaces and
+  its history is the local transcript.
+- **cmux-tui** daemons use their public protocol and their own identity. Existing
+  workspace UUID grants and the daemon adapter remain valid.
+- **Rex** uses a Unix socket or a tailnet endpoint. Its spaces are sessions and
+  its terminals are terminal blocks. The Bridge is the only Rex client; it never
+  exposes a Rex method, endpoint or raw id to a device.
+
+Provider-specific discovery never grants authority. The owner selects the spaces
+to share, and approval records exact capabilities.
+
+## Conversations and provenance
+
+A conversation is listed only with an authoritative binding: an explicit
+workspace/surface binding (cmux) or a verified Agent process (cmux-tui), an
+Agent hook that carries the provider terminal identity (Rex), or Claude Code's
+own process registry plus the provider's live process tree. Matching cwd, title
+or chronological proximity does not establish provenance.
+
+For a Rex block, a hook runs inside the block with `REX_SESSION` and `REX_BLOCK`
+in its environment; the hook helper records ids only. Without hooks, Claude
+binds through `<pid>.json`; Codex remains terminal-only. A conversation whose
+Agent has exited is resumable only when the transcript under a configured root
+records the Agent's own directory, the space still exists, and a running
+terminal no longer shows that Agent's prompt. A screen that cannot be read
+proves nothing. Resuming starts a fixed `<agent> --resume <session-id>` (Codex:
+`codex resume <session-id>`) in a new terminal in that space, with the session
+id taken from the Bridge's binding and never from the client. It requires
+`conversationStart`.
+
+Starting a conversation requires `conversationStart` and opens a fixed `claude`
+or `codex` command in an approved space through the provider's own start
+operation. The Agent still runs inside the provider; no separate Agent runtime
+or provider connection is created.
 
 ## History and live preview
 
-Read complete JSONL lines only, retaining an unfinished trailing fragment. Reuse upstream Claude/Codex parsing, including tool-use/result updates and artifact references. Final messages replace matching IDs rather than append duplicates. An inode change or truncation creates a new transcript generation and tells clients to re-anchor. History pages preserve equal-sequence groups and report clipping limits honestly. Large input is capped; no endpoint silently promises infinite history.
+Read complete JSONL lines only, retaining an unfinished trailing fragment. Reuse
+upstream Claude/Codex parsing, including tool-use/result updates and artifact
+references. Final messages replace matching IDs rather than append duplicates.
+An inode change or truncation creates a new transcript generation and tells
+clients to re-anchor. History pages preserve equal-sequence groups and report
+clipping limits honestly. The archive reads one bounded byte chunk ending at the
+requested cursor.
 
-The archive reads one bounded byte chunk ending at the requested cursor and parses only that chunk, so a large transcript costs a chunk rather than a whole-file scan. The chunk size is constructor-injected (8 MiB by default) and bounded; exceeding the bound is the only `history_too_large` case. Each message's sequence number is the byte offset of the line that produced it, so pages stay stable and monotonic without walking the record from its first byte; a cursor names the byte offset of the page's first returned line. Its generation is kept per path in owner-only Bridge state and survives restarts, window steps and appends; it is replaced only by an inode or creation-date change, or when the file shrinks. Archive cursors carry that generation and are refused with `history_cursor_stale` once it changes, rather than combining records from two revisions. Tool details and images resolve through the ordinary bounded history window; a record outside that window is not re-read by the archive.
+Local providers read the transcript path directly. A remote Rex provider
+downloads the transcript through Rex into an owner-only bounded cache, verifies
+the prefix before appending, and feeds the same parser. A whole-file download is
+the only remote strategy in the first phase; history refreshes on open and on an
+explicit pull, not on every foreground tick.
 
-A bound live session can appear before its first prompt creates the JSONL file. If its approved transcript path has never been observed and is still absent, return an empty history with a stable pending generation. Creating the file starts a real transcript generation on the next read. Do not create files, synthesize messages, or treat permission failures, ended sessions, or deletion of an already observed transcript as a new empty conversation. Authorization and binding checks apply to empty history too.
+The archive cursor binds the transcript path's generation. Tool details and
+images resolve through the ordinary bounded history window; a record outside
+that window is not re-read by the archive.
 
-The local socket cannot supply official `chat.message` streaming previews. For an open, verified live session, the Bridge reads `surface.read_text` and applies upstream `AgentChatProseScreenExtractor`. It emits a replaceable preview, not token deltas. A missing anchor produces no preview; a terminal/UI change can reduce fidelity. The committed transcript is authoritative. The phone's initial implementation refreshes snapshots on a bounded foreground cadence, so response growth appears without terminal rendering. This polling is a compatibility mechanism for a missing subscription API, is cancellable on navigation/background, and is never a synchronization sleep inside a request. Android's opt-in persistent-connection foreground service is the one background exception: while the user has it on, it keeps the same bounded links and slow poll alive so updates arrive with the app away, and it stops with the task.
+A live bound session can appear before its first prompt creates the JSONL file.
+If its approved transcript path has never been observed and is still absent,
+return an empty history with a stable pending generation. Do not create files,
+synthesize messages, or treat permission failures, ended sessions, or deletion
+of an already observed transcript as a new empty conversation.
 
-`events.stream` uses a separate cmux connection from ordinary RPC. Its boot ID and sequence support reconnect/catch-up. Redacted event payloads trigger snapshot reads; they do not replace chat history. Slow-consumer/replay gaps trigger resynchronization. Do not route chat/project bodies into cmux's telemetry log.
+The Bridge reads the provider's current screen and applies the upstream
+`AgentChatProseScreenExtractor` for a replaceable preview, not token deltas. A
+missing anchor produces no preview. The committed transcript is authoritative.
+Phone polling is a bounded, cancellable compatibility mechanism, not a
+synchronization sleep. Android's opt-in foreground service is the one background
+exception and stops with the task.
 
-The event monitor reconnects its dedicated cmux connection with bounded backoff.
-It invalidates hook-derived writable bindings on disconnect, refreshes snapshots,
-and resumes from a private boot/sequence cursor. Boot changes and replay gaps
-clear that cursor and require a fresh snapshot. Cursor persistence follows event
-acceptance; no event bodies or credentials enter the cursor file. A cold
-subscription refreshes after acknowledgement to cover its snapshot/subscription
-boundary. Phone history polling remains independent; bounded phone subscriptions
-and their own cursors are still follow-up work.
+`events.stream` and provider subscriptions use a separate connection from
+ordinary RPC where the provider supports them. Boot IDs and sequences support
+reconnect and catch-up. Slow-consumer/replay gaps trigger resynchronization. No
+chat or project body enters telemetry.
 
 ## Writes and idempotency
 
-The phone generates one operation UUID per logical send, interrupt or decision. Chat, Feed and terminal input share a durable owner-only mutation ledger keyed by approved device identity and operation UUID. Before backend execution, the Bridge appends and flushes an intent containing only a canonical payload digest, target workspace and required capability. Confirmation appends and flushes its receipt. Restart reloads completed receipts; unfinished or outcome-unknown intents remain unknown and are never executed again under the same key. Reading a cached receipt still rechecks current scope/revocation. Different payloads under the same device/operation key are rejected.
+The phone generates one operation UUID per logical send, interrupt or decision.
+Chat, Feed and terminal input share one durable owner-only mutation ledger keyed
+by approved device identity and operation UUID. Before provider execution, the
+Bridge appends and flushes an intent containing only a canonical payload digest,
+target space and required capability. Confirmation appends and flushes its
+receipt. Restart reloads completed receipts; unfinished or outcome-unknown
+intents remain unknown and are never executed again under the same key. Reading
+a cached receipt still rechecks current scope/revocation. Different payloads
+under the same device/operation key are rejected.
 
-The journal is bounded to 16,384 operation keys and 16 MiB, with no automatic eviction that would make old mutations executable again. Full, corrupted, truncated or unavailable storage stops writes. Prompts, terminal input and credentials are not stored in it. No automatic POST retry is added. This is durable protection against repeated attempts, not an atomic exactly-once transaction with cmux or proof that an Agent processed input. Explicit negative backend acknowledgements remain unknown; a lost completion write also retains an unknown intent. Old versions' in-memory receipts cannot be reconstructed by this implementation.
+The journal is bounded to 16,384 operation keys and 16 MiB, with no automatic
+eviction that would make old mutations executable again. Prompts, terminal input
+and credentials are not stored in it. No automatic POST retry is added. This is
+durable protection against repeated attempts, not an exactly-once transaction
+with a provider.
 
-A model switch uses the agent's own command and the same ledger. Claude Code receives `/model <name>` as a send; Codex, whose command takes no argument, has its picker walked with each move verified on screen and the choice confirmed for its session only. No model, provider or credential setting is written by the Bridge. Only an agent waiting at its prompt is switched.
+A model switch uses the Agent's own command and the same ledger. Claude Code
+receives `/model <name>` as a send; Codex's picker is walked with each move
+verified on screen. Only an Agent waiting at its prompt is switched. No model,
+provider or credential setting is written by the Bridge.
 
-Feed replies require a currently pending matching request and its supported kind. Ordinary Codex hook telemetry cannot be upgraded into an actionable approval by the Bridge. Unsupported actions remain visibly unsupported; numeric-key answering is not presented as a reliable generic approval adapter.
+Feed replies require a currently pending matching request, its supported kind
+and a provider that implements Feed. Ordinary provider telemetry cannot be
+upgraded into an actionable approval. Unsupported actions remain visibly
+unsupported.
 
-## Files and changes
+## Files, changes and images
 
-Files are read from an explicitly known session project root. Canonical path containment is checked after resolving symlinks; traversal, directories, special files, hidden credential stores, oversized reads and projects rooted at a user's home directory are denied. The route accepts a relative path, never an arbitrary host path. Artifacts outside the root are not exported automatically.
+Files are read from an explicitly known conversation project root. Canonical
+path containment is checked after resolving symlinks; traversal, directories,
+special files, hidden credential stores, oversized reads and projects rooted at
+a user's home directory are denied. The route accepts a relative path, never an
+arbitrary host path. Artifacts outside the root are not exported automatically.
 
-Run Git directly with argument arrays, no shell interpolation, and use `--` for paths. Git execution disables external diff and textconv; responses are bounded. Return changed file metadata and unified diff. The first implementation shows text file previews; media galleries/Quick Look remain an extension. Transcript-derived file edits remain visible as chat cards independently of current Git state.
+Run Git directly with argument arrays, no shell interpolation, and use `--` for
+paths. Git execution disables external diff and textconv; responses are bounded.
+Return changed file metadata and unified diff. Transcript-derived file edits
+remain visible as chat cards independently of current Git state. A remote
+provider that cannot prove local project access hides these actions instead of
+degrading silently.
 
-## API and phone UX
+Images are validated, bounded and scoped like the existing conversation
+attachments. Recorded transcript images resolve through the bounded history
+window; a remote transcript's referenced files may be unavailable and must be
+shown as unavailable rather than broken.
 
-Signed, scoped HTTPS `/v2` endpoints return structured resources and stable errors. Pairing -> sessions -> conversation. Conversation shows prose/Markdown, collapsed tool/thought cards, file-edit diffs, live preview, composer, stop, and links to project changes. A separate pending-actions list renders supported questions, permission and plan decisions. Home refresh and reconnect do not change desktop focus. The phone uses native NavigationStack, a selectable scrollable conversation, trailing user bubbles, full-width agent Markdown, collapsed activity groups, a latest-message jump button and a floating send/stop composer. Files and Feed actions remain in native menus. English/Simplified Chinese strings are localized.
+## API and UX
 
-HIG references: https://developer.apple.com/design/human-interface-guidelines/navigation-and-search and https://developer.apple.com/design/human-interface-guidelines/text-fields. The web retrieval returned JavaScript-only pages in this environment; native components are used conservatively and a visual/device pass is required before distribution.
+Signed, scoped `/v3` endpoints return structured providers, spaces, terminals,
+layouts, screens and conversations with stable errors. The existing `/v1`/`/v2`
+routes remain a cmux-provider compatibility projection for older clients.
+Pairing -> sources -> spaces -> conversation/terminal is the navigation model.
+Conversation shows prose/Markdown, collapsed tool/thought cards, file-edit
+diffs, live preview, composer, stop, and links to project changes when the
+provider supports them. A separate pending-actions list renders supported
+questions, permission and plan decisions. Home refresh and reconnect do not
+change provider focus. The phone uses native NavigationStack, a selectable
+scrollable conversation, trailing user bubbles, full-width agent Markdown,
+collapsed activity groups, a latest-message jump button and a floating send/stop
+composer. Terminals without a conversation use a native text screen. English and
+Simplified Chinese strings are localized.
 
-## Delivery milestones
+The Mac companion is Sources-first: provider cards, a space/terminal tree, a
+generic viewer, sharing and enrollment, and an optional native cmux sidebar
+projection. A user with only Rex does not need cmux. The viewer polls a bounded
+snapshot and never owns or resizes the remote terminal.
 
-1. Pin upstream provenance, define wire schema, document capabilities and authority.
-2. Implement authenticated TLS server, socket client, history discovery/parsing, actions, project reads and Git.
-3. Implement paired native iPhone app and localized chat/action/file views in the same repository.
-4. Exercise synthetic socket + HTTP + phone client integration, adversarial path/pinning/idempotency/history tests, and compile the Simulator app.
-5. Verify a real official cmux instance and a physical phone when available; disclose exact missing gates. No official cmux process is restarted or changed for this verification.
+HIG references: https://developer.apple.com/design/human-interface-guidelines/navigation-and-search and https://developer.apple.com/design/human-interface-guidelines/text-fields.
 
-In progress: image selection/history preview, event-driven phone updates and receipt recovery UI, tracked by [PHONE-COMPLETION-PLAN.md](PHONE-COMPLETION-PLAN.md). Physical-phone camera/network handoff and Windows/Linux backend adapters need their own acceptance. The Mac app ships as a Developer ID signed, notarized GitHub Release; see [MAC-RELEASE.md](MAC-RELEASE.md). The [unified connection plan](UNIFIED-CONNECTION-PLAN.md) sequences shared discovery/enrollment and the proposed Mac mirror feasibility gate. None is reported complete merely because its interface is documented.
+## Security
+
+- The Bridge is the only network-facing component. Providers are owner-configured.
+- Device grants are per space UUID and capability; provider management and hook
+  installation are owner-only.
+- Fixed operations only. No generic RPC proxy, shell string, arbitrary path or
+  caller-selected provider method.
+- A binding is revalidated before every write. A terminal whose screen has
+  returned to a shell is read-only.
+- A provider failure is isolated; it cannot make another provider's target
+  writable or hide another provider's data.
+- No provider credential, screen body or transcript body enters logs, fixtures,
+  crash reports or public text.
+- Rex's whole-server authority is narrowed to the operations listed in its
+  provider specification; destructive layout/server methods are excluded.
+- Plain anonymous HTTP provider endpoints are refused unless the owner opts in
+  with a warning; a private VPN or tailnet is the recommended path.
+
+## Delivery stages
+
+1. Introduce the generic model and wrap the existing cmux backend as the first
+   provider. `/v1`/`/v2` stay unchanged.
+2. Add the Rex provider and the directory. Serve `/v3` alongside the old routes.
+3. Sources-first companion, generic viewer, optional cmux sidebar projection.
+4. Source-aware phone lists, terminal view, capability-driven actions.
+5. Remote Rex, hook installer, Codex, VT/streaming, Feed decisions where
+   supported.
+
+The product name is term remote. Bundle identifiers, App Group identifiers,
+Keychain services and release automation are renamed only in a separate,
+owner-approved migration with a read-old/write-new path; see
+[TERM-REMOTE.md](TERM-REMOTE.md).
+
+In progress: the provider-neutral model, the `/v3` API, the Rex provider,
+source-aware phone UI and the staged rename. Physical-phone camera/network
+handoff, remote Rex on another machine and Windows/Linux server behaviour need
+their own acceptance. None is reported complete merely because its interface is
+documented.

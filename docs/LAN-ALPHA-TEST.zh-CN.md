@@ -85,7 +85,7 @@ if [ -e "$HOME/Applications/CmuxRemoteMac.app" ]; then
 fi
 ditto "$HOME/cmux-alpha/candidate-20261012/CmuxRemoteMac.app" \
   "$HOME/Applications/CmuxRemoteMac.app"
-cp "$HOME/cmux-alpha/candidate-20261012/cmux-remote" \
+cp "$HOME/cmux-alpha/candidate-20261012/term-remote" \
   "$HOME/.local/bin/cmux-remote-alpha"
 chmod +x "$HOME/.local/bin/cmux-remote-alpha"
 INSTALL
@@ -107,7 +107,7 @@ fi
 "$HOME/.local/bin/cmux-remote-alpha" serve --port 7782
 ```
 
-预期：显示 `cmux-remote listening on https://127.0.0.1:7782`，进程保持前台运行。
+预期：显示 `term-remote listening on https://127.0.0.1:7782`，进程保持前台运行。
 B 只监听本机。保留默认 Bonjour 发现，才能在 Companion 中发现 A。
 当前 `--no-discovery` 同时关闭广播和附近主机发现，本轮不要添加该选项。
 必须在 cmux 内启动，以符合 `cmuxOnly` 的进程来源检查。

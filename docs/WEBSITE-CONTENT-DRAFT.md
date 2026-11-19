@@ -1,4 +1,4 @@
-# Cmux Remote 网站模块与文案草案
+# term remote 网站模块与文案草案
 
 版本：v1 · 2026-10-15 · 结构已确认，已按此方向应用到独立网站；具体上线文案以 website/index.html 为准。
 
@@ -18,15 +18,15 @@
 
 ### 页面文案
 
-眉题：**Cmux Remote · 远程 Agent 开发**
+眉题：**term remote · 远程 Agent 开发**
 
 主标题：**Agent 在远端，开发在手边。**
 
 正文：在远端设备上运行 cmux 与 Companion，从 Mac 接入终端与工作区，从 iPhone 继续对话、检查改动、处理授权。代码与 Agent 留在远端，你可以换一个地方继续开发。
 
-主按钮：**下载 Cmux Remote Mac**
+主按钮：**下载 term remote Mac**
 
-次按钮：**Cmux Remote iOS 安装指南**
+次按钮：**term remote iOS 安装指南**
 
 辅助标签：**开源 / 独立运行 / 可自建中转**
 
@@ -54,7 +54,7 @@
 
 卡片 A 链接：**了解 cmux ssh**
 
-卡片 B 标记：**Cmux Remote Companion**
+卡片 B 标记：**term remote Companion**
 
 卡片 B 标题：**把远端工作区，带进本地 cmux。**
 
@@ -96,7 +96,7 @@
 
 场景三：**处理等待中的操作** — 回应支持的授权请求与问题，需要时停止当前任务。
 
-按钮：**Cmux Remote iOS 安装指南**
+按钮：**term remote iOS 安装指南**
 
 ### 画面建议
 
@@ -138,7 +138,7 @@ Codex 仅用于说明交互参照，不使用官方品牌背书。桌面 Agent T
 
 标题：**代码开源，独立运行。**
 
-正文：Cmux Remote 是为 cmux 构建的独立 macOS Companion 与 iOS 客户端。通过公开接口协作，无需修改或替换官方 cmux。项目代码、客户端与中转服务均开源，需要中转时由你自行部署。
+正文：term remote 是为 cmux 构建的独立 macOS Companion 与 iOS 客户端。通过公开接口协作，无需修改或替换官方 cmux。项目代码、客户端与中转服务均开源，需要中转时由你自行部署。
 
 短句：**非 cmux 官方产品。Agent 继续在你的远端设备上运行。**
 
@@ -154,15 +154,15 @@ Codex 仅用于说明交互参照，不使用官方品牌背书。桌面 Agent T
 
 标题：**把远端设备，接到你的开发日常。**
 
-步骤一：**准备远端 Mac** — 安装 cmux 与 Cmux Remote Companion，完成首次连接设置，运行你的 Agent，并开启需要共享的工作区。
+步骤一：**准备远端 Mac** — 安装 cmux 与 term remote Companion，完成首次连接设置，运行你的 Agent，并开启需要共享的工作区。
 
 步骤二：**选择接入设备** — 在 Mac 上使用 cmux ssh 或 Companion 工作区镜像；在 iPhone 上添加远端主机，完成配对。
 
 步骤三：**确认权限，开始开发** — Companion 首次接入由主机确认设备与工作区权限；需要从外网用 iPhone 连接时，再配置自建中转。
 
-主按钮：**下载 Cmux Remote Mac**
+主按钮：**下载 term remote Mac**
 
-次按钮：**Cmux Remote iOS 安装指南**
+次按钮：**term remote iOS 安装指南**
 
 辅助链接：**Mac 连接指南** · **Relay Server 部署指南**
 
@@ -172,9 +172,9 @@ Codex 仅用于说明交互参照，不使用官方品牌背书。桌面 Agent T
 
 ## 08 · FAQ：解决会影响选择的问题
 
-### Cmux Remote 和 cmux 是什么关系？
+### term remote 和 cmux 是什么关系？
 
-Cmux Remote 是独立开源项目，非 cmux 官方产品。Companion 使用公开接口与 cmux 协作，无需修改或替换官方应用。
+term remote 是独立开源项目，非 cmux 官方产品。Companion 使用公开接口与 cmux 协作，无需修改或替换官方应用。
 
 ### 已经有 cmux ssh，为什么还需要 Companion？
 
@@ -182,7 +182,7 @@ cmux ssh 提供原生 SSH 工作方式。Companion 增加远端工作区镜像�
 
 ### Agent 和代码到底运行在哪里？
 
-继续运行并保存在远端设备上。Mac 和 iPhone 接入远端已有的开发环境；Cmux Remote 不另建一套模型服务或 Agent 运行环境。
+继续运行并保存在远端设备上。Mac 和 iPhone 接入远端已有的开发环境；term remote 不另建一套模型服务或 Agent 运行环境。
 
 ### iOS 客户端支持哪些 Agent？
 
@@ -198,7 +198,7 @@ cmux ssh 提供原生 SSH 工作方式。Companion 增加远端工作区镜像�
 
 ## 页脚
 
-**Cmux Remote**
+**term remote**
 
 独立开源项目 · 非 cmux 官方产品 · GPL-3.0-or-later
 
@@ -218,7 +218,7 @@ GitHub · 安装指南 · Relay Server 部署指南
 | VPN / Tailscale 自动发现 | 分开写“网络可达直连”与“支持发现的网络自动发现”，提供地址添加兜底 | [CONNECTION-V2.md](CONNECTION-V2.md) 的 Bonjour 发现；Tailscale 上的 mDNS 不能默认等同于普通局域网发现，参见 [上游服务发现讨论](https://github.com/tailscale/tailscale/issues/1013) |
 | Relay Server 实现状态 | 写已有自建能力，不许诺全球测速结果；图示限定文档覆盖的手机链路 | [WEBSOCKET-RELAY.md](WEBSOCKET-RELAY.md) 后部续做记录已有实现、测试与公网目录记录；不能仅凭早期“计划”段落说中转未实现，也不能据此说真机全流程都已验收 |
 | 设备与系统范围 | 首页总体用“远端设备”；当前安装步骤明确远端 Mac，其他系统入口以后按发布支持补充 | [MAC-APP.md](MAC-APP.md)、[CMUX-TUI-ADAPTER.md](CMUX-TUI-ADAPTER.md) |
-| 品牌、颜色与设备比例 | Cmux Remote / Mac / iPhone；暖中性底色与蓝色强调；同框设备统一物理比例 | [共同产品设计系统](../DESIGN.md)、[Mac 设计系统](DESIGN-SYSTEM.md)、[iOS 设计系统](IOS-DESIGN-SYSTEM.md) |
+| 品牌、颜色与设备比例 | term remote / Mac / iPhone；暖中性底色与蓝色强调；同框设备统一物理比例 | [共同产品设计系统](../DESIGN.md)、[Mac 设计系统](DESIGN-SYSTEM.md)、[iOS 设计系统](IOS-DESIGN-SYSTEM.md) |
 
 ## 下一轮评审顺序
 

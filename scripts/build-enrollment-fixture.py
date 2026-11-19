@@ -15,7 +15,7 @@ flags = command['otherArguments']
 for index, flag in enumerate(flags[:-1]):
     if flag == '-Xcc':
         args += ['-Xcc', flags[index + 1]]
-link = build / 'cmux-remote.product/Objects.LinkFileList'
+link = build / 'term-remote.product/Objects.LinkFileList'
 args += [line for line in shlex.split(link.read_text())
          if '/CmuxRemoteCLI.build/' not in line and '/Modules/CmuxRemoteCLI.o' not in line]
 result = subprocess.run(args + ['-o', str(root / '.build/enrollment-fixture')], cwd=root)

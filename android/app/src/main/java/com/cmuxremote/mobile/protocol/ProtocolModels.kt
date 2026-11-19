@@ -108,7 +108,8 @@ enum class ClientCapability(val raw: String) {
     FeedReply("feedReply"),
     ConversationStart("conversationStart"),
     TerminalRead("terminalRead"),
-    TerminalInput("terminalInput");
+    TerminalInput("terminalInput"),
+    TerminalView("terminalView");
 
     companion object {
         fun from(raw: String): ClientCapability? = entries.firstOrNull { it.raw == raw }

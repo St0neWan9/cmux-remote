@@ -4,6 +4,8 @@ import Foundation
 public enum ClientCapability: String, Codable, Sendable, CaseIterable {
     case workspaceRead, conversationRead, projectRead, conversationControl, feedRead, feedReply
     case terminalRead, terminalInput
+    /// Lists a terminal that has no proved Agent as a first-class row. Older clients never request it.
+    case terminalView
     /// Opens a new terminal running a fixed agent command in an already-approved workspace.
     case conversationStart
 }

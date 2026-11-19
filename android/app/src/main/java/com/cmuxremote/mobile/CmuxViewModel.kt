@@ -3,7 +3,10 @@ package com.cmuxremote.mobile
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.cmuxremote.mobile.bridge.AndroidCapabilities
 import com.cmuxremote.mobile.bridge.AndroidCapabilitiesBeforeStart
+import com.cmuxremote.mobile.bridge.AndroidCapabilitiesBeforeTerminal
+import com.cmuxremote.mobile.bridge.AndroidCapabilitiesLegacy
 import com.cmuxremote.mobile.bridge.Enrollment
 import com.cmuxremote.mobile.bridge.LiveUpdates
 import com.cmuxremote.mobile.bridge.PendingEnrollment
@@ -26,6 +29,7 @@ import com.cmuxremote.mobile.protocol.EnrollmentBootstrap
 import com.cmuxremote.mobile.protocol.Identity
 import com.cmuxremote.mobile.protocol.EnrollmentStatus
 import com.cmuxremote.mobile.protocol.ProtocolException
+import com.cmuxremote.mobile.protocol.int
 import com.cmuxremote.mobile.protocol.string
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -170,6 +174,16 @@ data class ConversationUi(
         get() = com.cmuxremote.mobile.data.TurnClock.since(activeResponse, sentTurnRunning, sentTurnAt, turnStartedAt)
 }
 
+/** A provider-neutral terminal without a proved Agent; the screen is plain text. */
+data class TerminalUi(
+    val session: SessionDescriptor,
+    val text: String = "",
+    val columns: Int = 0,
+    val rows: Int = 0,
+    val error: String? = null,
+    val busy: Boolean = false,
+)
+
 /** One conversation together with the Mac it lives on. */
 data class HostedSession(
     val hostID: String,
@@ -246,6 +260,9 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
     val shell: StateFlow<ShellState> = _shell.asStateFlow()
     private val _conversation = MutableStateFlow<ConversationUi?>(null)
     val conversation: StateFlow<ConversationUi?> = _conversation.asStateFlow()
+    private val _terminal = MutableStateFlow<TerminalUi?>(null)
+    val terminal: StateFlow<TerminalUi?> = _terminal.asStateFlow()
+    private var terminalPoll: Job? = null
     /** The open conversation's identity: one Mac plus one session id. */
     private val _selectedKey = MutableStateFlow<String?>(null)
     val selectedKey: StateFlow<String?> = _selectedKey.asStateFlow()
@@ -999,30 +1016,33 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
         beginPairing {
-            var enrollment = Enrollment.begin(code, store.privateKey())
-            val status = try {
-                enrollment.submit()
-            } catch (error: ProtocolException) {
-                // A Bridge older than this client cannot decode the "android" kind and
-                // closes the request; the iPhone kind means the same thing to it.
-                if (error.code !in setOf("invalid_enrollment", "outcome_unknown")) throw error
-                // Bridges before this client reject both the android kind and the
-                // conversationStart capability; retry as the kind and scope they know.
-                com.cmuxremote.mobile.data.Diagnostics.log(
-                    com.cmuxremote.mobile.data.Diagnostics.Level.Info,
-                    "enrollment",
-                    "Bridge rejected the android request; retrying as iphone without conversationStart",
-                )
-                enrollment.close()
-                enrollment = Enrollment.begin(
-                    code,
-                    store.privateKey(),
-                    clientKind = "iphone",
-                    capabilities = AndroidCapabilitiesBeforeStart,
-                )
-                enrollment.submit()
+            // An older Bridge closes the request on a kind or capability it cannot
+            // decode; retry with the next smaller scope it understands.
+            val attempts = listOf(
+                "android" to AndroidCapabilities,
+                "iphone" to AndroidCapabilitiesBeforeTerminal,
+                "iphone" to AndroidCapabilitiesLegacy,
+            )
+            var chosen: PendingEnrollment? = null
+            var status: EnrollmentStatus? = null
+            var last: ProtocolException? = null
+            for ((clientKind, capabilities) in attempts) {
+                val candidate = Enrollment.begin(code, store.privateKey(), clientKind = clientKind,
+                    capabilities = capabilities)
+                try { status = candidate.submit(); chosen = candidate; break }
+                catch (error: ProtocolException) {
+                    if (error.code !in setOf("invalid_enrollment", "outcome_unknown")) throw error
+                    candidate.close(); last = error
+                    com.cmuxremote.mobile.data.Diagnostics.log(
+                        com.cmuxremote.mobile.data.Diagnostics.Level.Info,
+                        "enrollment",
+                        "Bridge rejected $clientKind request with ${capabilities.size} capabilities; retrying",
+                    )
+                }
             }
-            enrollment to status
+            val enrollment = chosen ?: throw (last ?: ProtocolException(
+                "invalid_enrollment", "This Bridge could not enroll the device.", 400))
+            enrollment to status!!
         }
     }
 
@@ -1811,6 +1831,8 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
 
     fun open(session: SessionDescriptor) {
         val current = repository ?: return
+        if (session.kind == "terminal") { openTerminal(session, current); return }
+        terminalPoll?.cancel(); terminalPoll = null; _terminal.value = null
         com.cmuxremote.mobile.data.Diagnostics.log(
             com.cmuxremote.mobile.data.Diagnostics.Level.Debug,
             "open",
@@ -2043,11 +2065,67 @@ class CmuxViewModel(application: Application) : AndroidViewModel(application) {
     fun close() {
         backfill?.cancel()
         _conversation.value = null
+        terminalPoll?.cancel(); terminalPoll = null; _terminal.value = null
         _selectedKey.value = null
         _feedOpen.value = false
         openHostID = null
         _pendingOperation.value = null
         watchOpenSession(null)
+    }
+
+    /// A terminal row is a live text screen, not a conversation: it polls the
+    /// provider-neutral screen and sends explicit operations.
+    private fun openTerminal(session: SessionDescriptor, current: BridgeRepository) {
+        backfill?.cancel()
+        val host = hosts.firstOrNull { it.repository === current }
+        openHostID = host?.id
+        _selectedKey.value = host?.let { it.id + ":" + session.id }
+        _conversation.value = null
+        _pendingOperation.value = null
+        terminalPoll?.cancel()
+        _terminal.value = TerminalUi(session = session)
+        terminalPoll = viewModelScope.launch {
+            while (isActive) {
+                val id = session.surfaceID ?: break
+                try {
+                    val screen = current.terminalScreen(id)
+                    _terminal.update { ui ->
+                        if (ui?.session?.id != session.id) ui else ui.copy(
+                            text = screen.string("text").orEmpty(),
+                            columns = screen.int("columns") ?: 0,
+                            rows = screen.int("rows") ?: 0,
+                            error = null,
+                        )
+                    }
+                } catch (error: Exception) {
+                    _terminal.update { ui ->
+                        if (ui?.session?.id != session.id) ui else ui.copy(error = error.userMessage())
+                    }
+                }
+                delay(1_000)
+            }
+        }
+    }
+
+    fun terminalInput(text: String, submit: Boolean) {
+        val id = _terminal.value?.session?.surfaceID ?: return
+        val current = repository ?: return
+        viewModelScope.launch {
+            _terminal.update { it?.copy(busy = true) }
+            try {
+                current.terminalInput(id, text, submit)
+                _terminal.update { it?.copy(busy = false, error = null) }
+            } catch (error: Exception) {
+                _terminal.update { it?.copy(busy = false, error = error.userMessage()) }
+            }
+        }
+    }
+
+    fun closeTerminal() {
+        terminalPoll?.cancel(); terminalPoll = null
+        _terminal.value = null
+        _selectedKey.value = null
+        openHostID = null
     }
 
     fun openFeed() = openFeed(hostID = null)

@@ -29,22 +29,22 @@ out="$PWD/.build/macos-release"
 dist="$out/dist"
 rm -rf "$out"
 mkdir -p "$dist"
-echo "Packaging CmuxRemote $version ($build)"
+echo "Packaging term remote $version ($build)"
 
 python3 scripts/generate-macos-project.py >/dev/null
-swift build -c release --arch arm64 --arch x86_64 --product cmux-remote
-helper_source="$(swift build -c release --arch arm64 --arch x86_64 --show-bin-path)/cmux-remote"
+swift build -c release --arch arm64 --arch x86_64 --product term-remote
+helper_source="$(swift build -c release --arch arm64 --arch x86_64 --show-bin-path)/term-remote"
 xcodebuild -project mac/CmuxRemoteMac.xcodeproj -scheme CmuxRemoteMac -configuration Release \
   -destination 'generic/platform=macOS' -derivedDataPath "$out/DerivedData" \
   ARCHS='arm64 x86_64' ONLY_ACTIVE_ARCH=NO CODE_SIGNING_ALLOWED=NO \
   "MARKETING_VERSION=$version" "CURRENT_PROJECT_VERSION=$build" build
 
-app="$out/CmuxRemote.app"
-ditto "$out/DerivedData/Build/Products/Release/CmuxRemote.app" "$app"
+app="$out/TermRemote.app"
+ditto "$out/DerivedData/Build/Products/Release/TermRemote.app" "$app"
 mkdir -p "$app/Contents/Helpers"
-cp "$helper_source" "$app/Contents/Helpers/cmux-remote"
-main_binary="$app/Contents/MacOS/CmuxRemote"
-helper="$app/Contents/Helpers/cmux-remote"
+cp "$helper_source" "$app/Contents/Helpers/term-remote"
+main_binary="$app/Contents/MacOS/TermRemote"
+helper="$app/Contents/Helpers/term-remote"
 
 for binary in "$main_binary" "$helper"; do
   archs="$(lipo -archs "$binary")"
@@ -129,16 +129,16 @@ if [[ "$notarize" == 1 ]]; then
   spctl --assess --type execute --verbose=2 "$app"
 fi
 
-ditto -c -k --keepParent "$app" "$dist/CmuxRemote-$version.zip"
+ditto -c -k --keepParent "$app" "$dist/term-remote-$version.zip"
 
 dmg_root="$out/dmg"
 mkdir -p "$dmg_root"
-ditto "$app" "$dmg_root/CmuxRemote.app"
+ditto "$app" "$dmg_root/TermRemote.app"
 ln -s /Applications "$dmg_root/Applications"
-dmg="$dist/CmuxRemote-$version.dmg"
+dmg="$dist/term-remote-$version.dmg"
 # hdiutil occasionally reports a busy device on CI runners; retry a bounded number of times.
 for attempt in 1 2 3; do
-  if hdiutil create -volname "CmuxRemote $version" -srcfolder "$dmg_root" -fs HFS+ -format UDZO -ov "$dmg"; then break; fi
+  if hdiutil create -volname "term remote $version" -srcfolder "$dmg_root" -fs HFS+ -format UDZO -ov "$dmg"; then break; fi
   [[ "$attempt" == 3 ]] && exit 1
   sleep 5
 done
@@ -149,6 +149,6 @@ if [[ "$notarize" == 1 ]]; then
   spctl --assess --type open --context context:primary-signature --verbose=2 "$dmg"
 fi
 
-(cd "$dist" && shasum -a 256 "CmuxRemote-$version.dmg" "CmuxRemote-$version.zip" > SHA256SUMS.txt)
+(cd "$dist" && shasum -a 256 "term-remote-$version.dmg" "term-remote-$version.zip" > SHA256SUMS.txt)
 cat "$dist/SHA256SUMS.txt"
 echo "Artifacts in $dist"

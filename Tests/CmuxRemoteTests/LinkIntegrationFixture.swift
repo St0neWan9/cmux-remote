@@ -13,7 +13,10 @@ struct LinkIntegrationFixture: Sendable {
     let connection: AuthorizedConnection
     let transcript: URL
     let enrollmentRequest: SignedValue<EnrollmentRequest>
-    static func create(text: String = "Ready", recordCount: Int = 1) async throws -> LinkIntegrationFixture {
+    static func create(text: String = "Ready", recordCount: Int = 1,
+                       workspaces: [String] = ["11111111-1111-1111-1111-111111111111"],
+                       capabilities: [ClientCapability] = [.workspaceRead, .conversationRead, .projectRead, .conversationControl, .feedRead, .feedReply],
+                       providers: ProviderDirectory? = nil) async throws -> LinkIntegrationFixture {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let state = BridgeState(directory: root); try state.initialize()
         let authority = try state.authority(name: "Link fixture")
@@ -28,14 +31,13 @@ struct LinkIntegrationFixture: Sendable {
         let service = SessionService(cmux: cmux, home: root.appendingPathComponent("home"), transcriptRoots: [root])
         let ready = AsyncThrowingStream<Int, any Error>.makeStream()
         let server = Task {
-            do { try await HTTPServer().run(host: "127.0.0.1", port: 0, certificate: state.certificate, key: state.key, router: BridgeRouter(service: service, authority: authority), onListening: { ready.continuation.yield($0); ready.continuation.finish() }) }
+            do { try await HTTPServer().run(host: "127.0.0.1", port: 0, certificate: state.certificate, key: state.key, router: BridgeRouter(service: service, authority: authority, providers: providers), onListening: { ready.continuation.yield($0); ready.continuation.finish() }) }
             catch { ready.continuation.finish(throwing: error); throw error }
         }
         do {
             var iterator = ready.stream.makeAsyncIterator(); let port = try #require(try await iterator.next())
-            let workspace = "11111111-1111-1111-1111-111111111111"
-            let bootstrap = try await authority.open(endpoint: BridgeEndpoint(host: "127.0.0.1", port: port), workspaces: [workspace])
-            let enrollment = try EnrollmentClient(bootstrap: bootstrap, privateKey: IdentityCryptography().generatePrivateKey(), name: "Fixture client", kind: "iphone")
+            let bootstrap = try await authority.open(endpoint: BridgeEndpoint(host: "127.0.0.1", port: port), workspaces: workspaces)
+            let enrollment = try EnrollmentClient(bootstrap: bootstrap, privateKey: IdentityCryptography().generatePrivateKey(), name: "Fixture client", kind: "iphone", capabilities: capabilities)
             defer { enrollment.close() }
             _ = try await enrollment.submit()
             try await authority.approve(requestID: enrollment.request.value.requestID, scope: enrollment.request.value.scope)

@@ -217,7 +217,9 @@ private actor DeferredToolPage {
             return PreviousBridgeEnrollment(request: try crypto.sign(value, domain: "enrollment-request", privateKey: key))
         }, enrollmentTicks: { (previousTicks.stream, {}) })
         await previous.enrollQR(qr); previous.pauseEnrollment()
-        if asked.values != [EnrollmentClient.phoneCapabilities, EnrollmentClient.previousPhoneCapabilities] { failures.append("Enrollment did not fall back for an older Bridge: \(asked.values)") }
+        if asked.values != [EnrollmentClient.phoneCapabilities, EnrollmentClient.phoneCapabilitiesWithoutStart] {
+            failures.append("Enrollment did not fall back for an older Bridge: \(asked.values)")
+        }
         if previous.enrollmentState != "pending" || previous.error != nil { failures.append("Older Bridge enrollment did not reach pending: \(previous.enrollmentState) \(previous.error ?? "")") }
 
         let client = RemoteClient(pairing: try PairingConfiguration(host: "localhost", port: 1, token: String(repeating: "0", count: 32), certificateSHA256: String(repeating: "0", count: 64)))

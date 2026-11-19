@@ -91,7 +91,21 @@ val AndroidCapabilities: List<ClientCapability> = listOf(
     ClientCapability.FeedRead,
     ClientCapability.FeedReply,
     ClientCapability.ConversationStart,
+    ClientCapability.TerminalRead,
+    ClientCapability.TerminalInput,
+    ClientCapability.TerminalView,
 )
+
+/** A Bridge that knows the conversation set but not provider terminals. */
+val AndroidCapabilitiesBeforeTerminal: List<ClientCapability> = AndroidCapabilities - setOf(
+    ClientCapability.TerminalRead,
+    ClientCapability.TerminalInput,
+    ClientCapability.TerminalView,
+)
+
+/** A Bridge before this client's session-start capability. */
+val AndroidCapabilitiesLegacy: List<ClientCapability> =
+    AndroidCapabilitiesBeforeTerminal - ClientCapability.ConversationStart
 
 /**
  * A Bridge older than conversationStart rejects the whole request over the unknown

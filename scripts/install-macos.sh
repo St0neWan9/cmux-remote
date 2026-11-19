@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
-source_app="$PWD/.build/macos/Build/Products/Debug/CmuxRemote.app"
-destination="${CMUX_REMOTE_MAC_DESTINATION:-$HOME/Applications/CmuxRemote.app}"
+source_app="$PWD/.build/macos/Build/Products/Debug/TermRemote.app"
+destination="${CMUX_REMOTE_MAC_DESTINATION:-$HOME/Applications/TermRemote.app}"
 # Earlier installs used other bundle names; retire only those exact bundles of this app.
-legacy_apps=("$HOME/Applications/CmuxRemoteMac.app" "$HOME/Applications/Cmux Remote.app")
+legacy_apps=("$HOME/Applications/CmuxRemoteMac.app" "$HOME/Applications/Cmux Remote.app" "$HOME/Applications/CmuxRemote.app")
 expected="cmux-remote.desktop"
 test -d "$source_app" || { echo "Run scripts/build-macos.sh first." >&2; exit 1; }
 test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$source_app/Contents/Info.plist")" = "$expected"
@@ -16,8 +16,8 @@ fi
 mkdir -p "$(dirname "$destination")"
 staging_dir="$(mktemp -d "$(dirname "$destination")/cmux-remote-install.XXXXXX")"
 trap 'rm -rf "$staging_dir"' EXIT
-ditto "$source_app" "$staging_dir/CmuxRemote.app"
-codesign --verify --deep --strict "$staging_dir/CmuxRemote.app"
+ditto "$source_app" "$staging_dir/TermRemote.app"
+codesign --verify --deep --strict "$staging_dir/TermRemote.app"
 # Retire only this project's replacement sidebar and swap a clean bundle.
 for old_extension in "$destination/Contents/Extensions/RemoteSidebar.appex" "${legacy_apps[0]}/Contents/Extensions/RemoteSidebar.appex" "$PWD/.build/macos/Build/Products/Debug/RemoteSidebar.appex"; do
   if [[ -d "$old_extension" ]]; then pluginkit -r "$old_extension" || true; fi
@@ -25,7 +25,7 @@ done
 launchservices="/System/Library/Frameworks/CoreServices.framework/Versions/Current/Frameworks/LaunchServices.framework/Versions/Current/Support/lsregister"
 if [[ "$source_app" != "$destination" ]]; then "$launchservices" -u "$source_app"; fi
 if [[ -e "$destination" ]]; then mv "$destination" "$staging_dir/previous.app"; fi
-if ! mv "$staging_dir/CmuxRemote.app" "$destination"; then
+if ! mv "$staging_dir/TermRemote.app" "$destination"; then
   if [[ -d "$staging_dir/previous.app" ]]; then mv "$staging_dir/previous.app" "$destination"; fi
   exit 1
 fi

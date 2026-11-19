@@ -75,6 +75,19 @@ struct CompanionView: View {
                     Text(String(localized: "mac.noWorkspacesMessage", bundle: .interface)).foregroundStyle(.secondary)
                 }
             }
+            MacPreferenceRow(title: String(localized: "mac.sources", bundle: .interface), topAligned: !model.providerSpaces.isEmpty) {
+                if model.providerSpaces.isEmpty {
+                    Text(String(localized: "mac.sources.empty", bundle: .interface)).foregroundStyle(.secondary)
+                } else {
+                    Table(providerItems) {
+                        TableColumn(String(localized: "mac.column.workspace", bundle: .interface)) { item in
+                            Text(item.title).lineLimit(1).help(item.title)
+                        }
+                    }.tableStyle(.bordered(alternatesRowBackgrounds: true)).tableColumnHeaders(.hidden).frame(height: design.tableHeight)
+                    MacPreferenceNote(text: String(localized: "mac.sources.note", bundle: .interface))
+                }
+                Button(String(localized: "mac.refresh", bundle: .interface)) { Task { await model.refreshProviders() } }.fixedSize()
+            }
         }
         .sheet(isPresented: Binding(get: { model.trustCandidate != nil }, set: { if !$0 { model.declineTrust() } })) {
             if let device = model.trustCandidate {
@@ -103,6 +116,11 @@ struct CompanionView: View {
             if tag.hasPrefix("saved:") { let id = String(tag.dropFirst(6)); Task { await model.open(hostID: id) } }
             else if let device = model.devices.first(where: { "nearby:" + $0.host.id == tag }) { Task { await model.select(device) } }
         })
+    }
+    private var providerItems: [MacTableItem] {
+        model.providerSpaces.compactMap { space in
+            space["id"].string.map { MacTableItem(id: $0, title: space["title"].string ?? $0) }
+        }
     }
     private var workspaceItems: [MacTableItem] {
         model.workspaces.compactMap { workspace in

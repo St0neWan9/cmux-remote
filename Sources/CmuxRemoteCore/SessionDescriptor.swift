@@ -17,10 +17,15 @@ public struct SessionDescriptor: Codable, Sendable, Identifiable, Equatable {
     /// When `/clear` replaced this conversation with a new Agent session in the same terminal. The phone keeps such
     /// conversations in its Archive list rather than its main one. Older Bridges omit it.
     public var clearedAt: Date?
+    /// "agent" for a conversation, "terminal" for a live terminal with no proved Agent. Older Bridges omit it.
+    public var kind: String
+    /// The provider kind that produced the row, such as "cmux_desktop" or "rex". Older Bridges omit it.
+    public var source: String?
     public var writable: Bool { workspaceID != nil && surfaceID != nil && state != "ended" }
-    public init(id: String, agent: String, title: String, cwd: String?, workspaceID: String? = nil, surfaceID: String? = nil, state: String = "unknown", updatedAt: Date? = nil, resumable: Bool = false, clearedAt: Date? = nil) {
+    public init(id: String, agent: String, title: String, cwd: String?, workspaceID: String? = nil, surfaceID: String? = nil, state: String = "unknown", updatedAt: Date? = nil, resumable: Bool = false, clearedAt: Date? = nil, kind: String = "agent", source: String? = nil) {
         self.id = id; self.agent = agent; self.title = title; self.cwd = cwd; self.updatedAt = updatedAt
         self.workspaceID = workspaceID; self.surfaceID = surfaceID; self.state = state; self.resumable = resumable; self.clearedAt = clearedAt
+        self.kind = kind; self.source = source
     }
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -30,5 +35,7 @@ public struct SessionDescriptor: Codable, Sendable, Identifiable, Equatable {
         state = try c.decode(String.self, forKey: .state); updatedAt = try c.decodeIfPresent(Date.self, forKey: .updatedAt)
         resumable = try c.decodeIfPresent(Bool.self, forKey: .resumable) ?? false
         clearedAt = try c.decodeIfPresent(Date.self, forKey: .clearedAt)
+        kind = try c.decodeIfPresent(String.self, forKey: .kind) ?? "agent"
+        source = try c.decodeIfPresent(String.self, forKey: .source)
     }
 }

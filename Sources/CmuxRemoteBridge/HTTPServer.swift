@@ -45,7 +45,7 @@ public struct HTTPServer: Sendable {
                         }
                     } catch { return channel.eventLoop.makeFailedFuture(error) }
                 }.bind(host: host, port: port).get()
-            print("cmux-remote listening on https://\(host):\(port)")
+            print("term-remote listening on https://\(host):\(port)")
             onListening?(server.localAddress?.port ?? port)
             try await withTaskCancellationHandler {
                 try await server.closeFuture.get()

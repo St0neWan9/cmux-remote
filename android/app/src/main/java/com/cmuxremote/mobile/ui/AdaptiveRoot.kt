@@ -64,6 +64,7 @@ import com.cmuxremote.mobile.ui.theme.MobileDesign
 fun CmuxApp(viewModel: CmuxViewModel) {
     val shell by viewModel.shell.collectAsStateWithLifecycle()
     val conversation by viewModel.conversation.collectAsStateWithLifecycle()
+    val terminal by viewModel.terminal.collectAsStateWithLifecycle()
     val hinge = rememberHingeState()
     val browserCollapsed by viewModel.browserCollapsed.collectAsStateWithLifecycle()
     val feedOpen by viewModel.feedOpen.collectAsStateWithLifecycle()
@@ -584,6 +585,12 @@ fun CmuxApp(viewModel: CmuxViewModel) {
                         } else if (conversation != null) {
                             BackHandler { viewModel.close() }
                             PushIn { conversationPane(Modifier.fillMaxSize(), { viewModel.close() }) }
+                        } else if (terminal != null) {
+                            BackHandler { viewModel.closeTerminal() }
+                            PushIn {
+                                TerminalScreen(terminal!!, onBack = { viewModel.closeTerminal() },
+                                    onSend = viewModel::terminalInput, modifier = Modifier.fillMaxSize())
+                            }
                         } else {
                             SessionListScreen(
                                 model = listModel,
@@ -654,6 +661,9 @@ fun CmuxApp(viewModel: CmuxViewModel) {
                                 error = feedError ?: state.error,
                                 onRefresh = viewModel::refresh,
                             )
+                        } else if (terminal != null) {
+                            TerminalScreen(terminal!!, onBack = { viewModel.closeTerminal() },
+                                onSend = viewModel::terminalInput, modifier = Modifier.weight(1f))
                         } else {
                             conversationPane(
                                 Modifier.weight(1f),
@@ -676,10 +686,15 @@ fun CmuxApp(viewModel: CmuxViewModel) {
                             )
                             VerticalLine()
                         }
-                        conversationPane(
-                            Modifier.weight(1f),
-                            if (browserCollapsed) ({ viewModel.setBrowserCollapsed(false) }) else null,
-                        )
+                        if (terminal != null) {
+                            TerminalScreen(terminal!!, onBack = { viewModel.closeTerminal() },
+                                onSend = viewModel::terminalInput, modifier = Modifier.weight(1f))
+                        } else {
+                            conversationPane(
+                                Modifier.weight(1f),
+                                if (browserCollapsed) ({ viewModel.setBrowserCollapsed(false) }) else null,
+                            )
+                        }
                         VerticalLine()
                         SupportingPane(
                             messages = conversation?.messages ?: emptyList(),
@@ -689,7 +704,11 @@ fun CmuxApp(viewModel: CmuxViewModel) {
 
                     is PaneLayout.Tabletop -> Box(insets) {
                         val open = conversation
-                        if (open == null) {
+                        if (terminal != null) {
+                            BackHandler { viewModel.closeTerminal() }
+                            TerminalScreen(terminal!!, onBack = { viewModel.closeTerminal() },
+                                onSend = viewModel::terminalInput, modifier = Modifier.fillMaxSize())
+                        } else if (open == null) {
                             SessionListScreen(
                                 model = if (compactDense) listModel.copy(sessions = listModel.sessions) else listModel,
                                 actions = listActions,
@@ -965,6 +984,8 @@ private fun present(hosted: com.cmuxremote.mobile.HostedSession, context: androi
         workspaceKey = session.workspaceID ?: "",
         hostKey = hosted.hostID,
         hostName = hosted.hostName,
+        source = session.source,
+        kind = session.kind,
         updatedAt = runCatching { java.time.Instant.parse(session.updatedAt) }.getOrNull(),
         clearedAt = session.clearedAt?.let { runCatching { java.time.Instant.parse(it) }.getOrNull() },
         cwd = session.cwd,
@@ -987,6 +1008,8 @@ private fun presentLegacy(session: SessionDescriptor, context: android.content.C
     agent = session.agent.replaceFirstChar { it.uppercase() },
     age = relativeAge(session.updatedAt, context),
     workspaceKey = session.workspaceID ?: "",
+    source = session.source,
+    kind = session.kind,
     updatedAt = runCatching { java.time.Instant.parse(session.updatedAt) }.getOrNull(),
     clearedAt = session.clearedAt?.let { runCatching { java.time.Instant.parse(it) }.getOrNull() },
     cwd = session.cwd,

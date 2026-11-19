@@ -8,13 +8,16 @@ public struct BridgeRouter: Sendable {
     private let authority: ConnectionAuthority?
     private let mirrors: RemoteMirrorService?
     private let launcher: SessionLauncher?
+    private let providers: ProviderDirectory?
     /// Messages a history subscription's tick reads to see whether the conversation changed.
     static let subscriptionTail = 30
     /// An explicitly selected legacy router, retained for migration and fixtures.
     /// A fixture's launcher acts with owner authority, since the legacy token is the owner's own.
-    public init(service: SessionService, token: String, launcher: SessionLauncher? = nil) { self.service = service; legacyToken = token; authority = nil; mirrors = nil; self.launcher = launcher }
-    public init(service: SessionService, authority: ConnectionAuthority, legacyToken: String? = nil, mirrors: RemoteMirrorService? = nil, launcher: SessionLauncher? = nil) {
-        self.service = service; self.authority = authority; self.legacyToken = legacyToken; self.mirrors = mirrors; self.launcher = launcher
+    public init(service: SessionService, token: String, launcher: SessionLauncher? = nil) { self.service = service; legacyToken = token; authority = nil; mirrors = nil; self.launcher = launcher; providers = nil }
+    public init(service: SessionService, authority: ConnectionAuthority, legacyToken: String? = nil, mirrors: RemoteMirrorService? = nil,
+                launcher: SessionLauncher? = nil, providers: ProviderDirectory? = nil) {
+        self.service = service; self.authority = authority; self.legacyToken = legacyToken; self.mirrors = mirrors
+        self.launcher = launcher; self.providers = providers
     }
     public func respond(method: String, uri: String, authorization: String?, body: Data) async -> (Int, Data) {
         let response = await respondResource(method: method, uri: uri, authorization: authorization, body: body)
@@ -57,7 +60,16 @@ public struct BridgeRouter: Sendable {
             var path = components.path.split(separator: "/").map(String.init)
             let query = Dictionary((components.queryItems ?? []).map { ($0.name, $0.value ?? "") }, uniquingKeysWith: { _, last in last })
             let client: EnrolledClient?
-            if path.first == "v2", let authority {
+            var isV3 = false
+            if path.first == "v3", let authority, providers != nil {
+                if let subscriptionClientID {
+                    guard method == "GET", body.isEmpty else { throw BridgeError("invalid_route", "Invalid subscription read.", status: 400) }
+                    client = try await authority.currentClient(subscriptionClientID)
+                } else {
+                    client = try await authority.authorize(header: authorization, method: method, uri: uri, body: body)
+                }
+                isV3 = true
+            } else if path.first == "v2", let authority {
                 if method == "GET", path == ["v2", "identity"] { return HTTPResourceResponse.json(try encode(await authority.announcement())) }
                 if method == "GET", path == ["v2", "enrollment", "bootstrap"] { return HTTPResourceResponse.json(try encode(await authority.bootstrap())) }
                 if method == "POST", path.count == 3, path[1] == "enrollment" {
@@ -82,6 +94,10 @@ public struct BridgeRouter: Sendable {
             if let client, let authority {
                 access = SessionAccess(clientID: client.id, checkAll: { capabilities, workspace in _ = try await authority.require(client.id, capabilities: capabilities, workspace: workspace) }) { capability, workspace in _ = try await authority.require(client.id, capability: capability, workspace: workspace) }
             } else { access = nil }
+            if isV3 {
+                guard let client else { throw BridgeError("unauthorized", "Enroll this device to continue.", status: 401) }
+                return try await respondV3(method: method, path: path, query: query, body: body, client: client)
+            }
             let data: Data
             var image = false
             if method == "GET", path == ["v1", "relay"] {
@@ -147,10 +163,18 @@ public struct BridgeRouter: Sendable {
                 }
                 data = try encode(workspaces)
             } else if method == "GET", path == ["v1", "sessions"] {
-                try await require(client, .conversationRead)
                 let sessions = try await service.sessions()
-                if let client, let authority { let current = try await authority.require(client.id, capability: .conversationRead); data = try encode(sessions.filter { allowed($0.workspaceID, current) }) }
-                else { data = try encode(sessions) }
+                if let client, let authority {
+                    let current: EnrolledClient
+                    do { current = try await authority.require(client.id, capability: .conversationRead) }
+                    catch { current = try await authority.require(client.id, capability: .terminalView) }
+                    let conversations = current.scope.capabilities.contains(.conversationRead)
+                    let terminals = current.scope.capabilities.contains(.terminalView)
+                    data = try encode(sessions.filter { session in
+                        guard allowed(session.workspaceID, current) else { return false }
+                        return session.kind == "terminal" ? terminals : conversations
+                    })
+                } else { data = try encode(sessions.filter { $0.kind != "terminal" }) }
             } else if method == "GET", path == ["v1", "feed"] {
                 try await require(client, .feedRead)
                 var feed = try await service.feed()
@@ -239,6 +263,63 @@ public struct BridgeRouter: Sendable {
             if method == "POST" { BridgeLog.shared.warning("mutation", "POST \(uri) refused code=\(failure.code) status=\(failure.status) message=\(failure.message)") }
             return HTTPResourceResponse(status: failure.status, data: (try? encode(["error": failure])) ?? Data(), contentType: "application/json; charset=utf-8")
         }
+    }
+    /// Provider-neutral resources. Device authorization happens here; the
+    /// directory resolves UUIDs and the provider performs the fixed operation.
+    private func respondV3(method: String, path: [String], query: [String: String], body: Data,
+                           client: EnrolledClient) async throws -> HTTPResourceResponse {
+        guard let authority, let providers else {
+            throw BridgeError("provider_api_unavailable", "The terminal provider API is not enabled.", status: 404)
+        }
+        if method == "GET", path == ["v3", "providers"] {
+            let current = try await authority.require(client.id, capability: .workspaceRead)
+            var visible: [ProviderDescriptor] = []
+            for provider in await providers.descriptors() {
+                guard let list = try? await providers.spaces(providerID: provider.id),
+                      list.spaces.contains(where: { current.scope.workspaces.contains($0.id.lowercased()) }),
+                      let refreshed = await providers.descriptor(providerID: provider.id) else { continue }
+                visible.append(refreshed)
+            }
+            return HTTPResourceResponse.json(try encode(visible))
+        }
+        if method == "GET", path == ["v3", "spaces"] {
+            let current = try await authority.require(client.id, capability: .workspaceRead)
+            let list = try await providers.spaces(providerID: query["provider"])
+            let spaces = list.spaces.filter { current.scope.workspaces.contains($0.id.lowercased()) }
+            return HTTPResourceResponse.json(try encode(SpaceList(spaces: spaces, providerErrors: list.providerErrors)))
+        }
+        if method == "GET", path.count == 4, path[0...1] == ["v3", "spaces"] {
+            let space = path[2]
+            switch path[3] {
+            case "layout":
+                _ = try await authority.require(client.id, capability: .terminalRead, workspace: space)
+                return HTTPResourceResponse.json(try encode(await providers.layout(spaceID: space)))
+            case "terminals":
+                _ = try await authority.require(client.id, capability: .terminalRead, workspace: space)
+                return HTTPResourceResponse.json(try encode(await providers.terminals(spaceID: space)))
+            default: break
+            }
+        }
+        if path.count == 4, path[0...1] == ["v3", "terminals"] {
+            let terminal = path[2]
+            let space = try await providers.spaceID(forTerminal: terminal)
+            if method == "GET", path[3] == "screen" {
+                _ = try await authority.require(client.id, capability: .terminalRead, workspace: space)
+                let snapshot = try await providers.snapshot(terminalID: terminal)
+                _ = try await authority.require(client.id, capability: .terminalRead, workspace: space)
+                return HTTPResourceResponse.json(try encode(snapshot))
+            }
+            if method == "POST", path[3] == "input" {
+                _ = try await authority.require(client.id, capability: .terminalInput, workspace: space)
+                let request = try JSONDecoder().decode(TerminalInputRequest.self, from: body)
+                let clientID = client.id
+                let receipt = try await providers.send(terminalID: terminal, request: request, clientID: clientID) {
+                    _ = try await authority.require(clientID, capability: .terminalInput, workspace: space)
+                }
+                return HTTPResourceResponse.json(try encode(receipt))
+            }
+        }
+        throw BridgeError("not_found", "This resource is not available.", status: 404)
     }
     private func allowed(_ workspace: String?, _ client: EnrolledClient) -> Bool { workspace.map { client.scope.workspaces.contains($0.lowercased()) } ?? false }
     private func require(_ client: EnrolledClient?, _ capability: ClientCapability, workspace: String? = nil) async throws {

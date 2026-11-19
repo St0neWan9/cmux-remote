@@ -136,14 +136,17 @@ actor RemoteClientRuntime {
     }
     private func authorized(_ path: String, method: String) async throws -> AuthorizedRequest {
         guard !closed else { throw URLError(.cancelled) }
-        guard path.hasPrefix("/v1/") else { throw BridgeError("invalid_route", "Invalid resource path.") }
+        guard path.hasPrefix("/v1/") || path.hasPrefix("/v2/") || path.hasPrefix("/v3/") else {
+            throw BridgeError("invalid_route", "Invalid resource path.")
+        }
         let transport = transport; let connection = connection; let pairing = pairing
         if let connection {
             // The epoch is stable per Bridge process; fetch it once per live link to save a relay round-trip.
             let announcement = try await currentAnnouncement(transport: transport, connection: connection)
             try Task.checkCancellation()
             let crypto = IdentityCryptography()
-            return AuthorizedRequest(transport: transport, path: "/v2/" + path.dropFirst(4), authorization: { uri, bytes in
+            let signedPath = path.hasPrefix("/v1/") ? "/v2/" + path.dropFirst(4) : path
+            return AuthorizedRequest(transport: transport, path: signedPath, authorization: { uri, bytes in
                 let proof = RequestProof(epoch: announcement.value.epoch, hostID: connection.host.id, clientID: connection.grant.value.clientID, method: method, uri: uri, bodySHA256: crypto.digest(bytes), nonce: UUID().uuidString, timestamp: Int(Date().timeIntervalSince1970))
                 return "CmuxV2 " + (try JSONEncoder().encode(crypto.sign(proof, domain: "request", privateKey: connection.privateKey))).base64EncodedString()
             })

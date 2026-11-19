@@ -8,14 +8,14 @@ Run inside a cmux terminal when the socket mode is `cmuxOnly`:
 
 ```sh
 swift build
-.build/debug/cmux-remote serve --pair
+.build/debug/term-remote serve --pair
 ```
 
 This initializes private state if needed, starts HTTPS and local administration, advertises `_cmux-remote._tcp` on the LAN and prints the enrollment QR. The window defaults to five minutes. The iPhone scans the code and requests approval. The Mac owner inspects the pending client and approves its exact request:
 
 ```sh
-.build/debug/cmux-remote enrollment pending
-.build/debug/cmux-remote enrollment approve REQUEST_ID --workspace WORKSPACE_UUID --control
+.build/debug/term-remote enrollment pending
+.build/debug/term-remote enrollment approve REQUEST_ID --workspace WORKSPACE_UUID --control
 ```
 
 Use a current UUID from the requested scope. Repeat `--workspace` to approve more than one. Omitting `--control` grants viewing, project reads and Feed reads. `--control` adds conversation control and Feed replies, plus starting conversations (`conversationStart`) when the device requested it; it does not implicitly add terminal mirroring or terminal input. The Mac approval page shows starting conversations as a separate checkbox, checked by default. Other clients can explicitly request separate capabilities, and the owner can use repeated `--capability` flags. An approval can narrow a request's scope and cannot expand it.
@@ -23,11 +23,11 @@ Use a current UUID from the requested scope. Repeat `--workspace` to approve mor
 The state directory defaults to `~/.local/state/cmux-remote`. When using a custom `--state`, use it consistently for every command. Further owner commands:
 
 ```sh
-cmux-remote enrollment open --workspace WORKSPACE_UUID
-cmux-remote enrollment deny REQUEST_ID
-cmux-remote enrollment close
-cmux-remote clients list
-cmux-remote clients revoke CLIENT_ID
+term-remote enrollment open --workspace WORKSPACE_UUID
+term-remote enrollment deny REQUEST_ID
+term-remote enrollment close
+term-remote clients list
+term-remote clients revoke CLIENT_ID
 ```
 
 `pairing` is an alias for opening a new enrollment window on the running service. Owner operations are restricted to its owner-only Unix socket, never an HTTPS route. A kernel lease prevents a second process from owning the same registry and admin socket. A new process starts with enrollment closed; existing approved clients restore authorization without reopening it.

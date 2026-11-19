@@ -235,7 +235,7 @@ Cloudflare 官方 DO 接收消息上限为 32 MiB；不能因此把应用上限�
 当前代码支持的启动参数：
 
 ```sh
-cmux-remote serve --relay https://YOUR-RELAY.workers.dev \
+term-remote serve --relay https://YOUR-RELAY.workers.dev \
   --relay-key-file /absolute/private/path/relay-registration-key --pair
 ```
 

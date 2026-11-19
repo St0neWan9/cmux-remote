@@ -1006,7 +1006,7 @@
 | D110 | 时长单位走本地化格式串：`iOS/ResponseRunLabel.swift:15-20`、`iOS/LiveRunLabel.swift:38-43` | 硬编码 `s`/`m`/`h` 且 `Locale.US`：`Android/ui/TextAndTiming.kt:288-301`、`Android/ui/ConversationScreen.kt:784` | ❌ |
 | D111 | RTL：原生返回手势检查 `effectiveUserInterfaceLayoutDirection`：`iOS/InteractivePopController.swift:42` | `supportsRtl=true`：`Manifest:25`；但抽屉/手势均按 leading/正 x 假设，未找到 RTL 手势处理 | 🟡 |
 | D112 | 权限用途说明本地化：`iOSRes/en.lproj/InfoPlist.strings:1-5`、`iOSRes/zh-Hans.lproj/InfoPlist.strings:1-5` | 系统权限弹窗文案由 OS 提供，无应用内用途串 | 🟡 |
-| D113 | 显示名 “Cmux Remote” 本地化：`iOSRes/*.lproj/InfoPlist.strings:1`、`ios/CmuxRemote.xcodeproj/project.pbxproj:348` | `app_name` = “Cmux Remote”：`ARes/values/strings.xml:2`、`ARes/values-en/strings.xml:2` | ✅ |
+| D113 | 显示名 “term remote” 本地化：`iOSRes/*.lproj/InfoPlist.strings:1`、`ios/CmuxRemote.xcodeproj/project.pbxproj:348` | `app_name` = “term remote”：`ARes/values/strings.xml:2`、`ARes/values-en/strings.xml:2` | ✅ |
 
 ### 5.13 启动页、应用图标、隐私与权限
 

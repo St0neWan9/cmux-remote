@@ -33,6 +33,10 @@ data class SessionDescriptor(
     val resumable: Boolean,
     /** When `/clear` replaced this conversation; the phone keeps it in the Archive. Older Bridges omit it. */
     val clearedAt: String? = null,
+    /** "agent" or "terminal"; older Bridges omit it. */
+    val kind: String = "agent",
+    /** The provider kind, such as "rex"; older Bridges omit it. */
+    val source: String? = null,
 ) {
     val writable: Boolean get() = workspaceID != null && surfaceID != null && state != "ended"
     val working: Boolean get() = state.startsWith("working")
@@ -234,6 +238,22 @@ class BridgeRepository(val connection: AuthorizedConnection, private val client:
 
     /** The epoch the next signed read would use; the link binds its subscriptions to it. */
     suspend fun epoch(): String = client.currentEpoch()
+
+    /** A bounded terminal screen from a provider-neutral terminal row. */
+    suspend fun terminalScreen(terminalID: String): JsonObject =
+        client.call("GET", "/v3/terminals/$terminalID/screen") as? JsonObject
+            ?: throw ProtocolException("invalid_response", "The terminal screen was not an object.", 502)
+
+    /** One durable terminal input; the Bridge journals it before dispatch. */
+    suspend fun terminalInput(terminalID: String, text: String, submit: Boolean): JsonObject {
+        val body = buildJsonObject {
+            put("text", JsonPrimitive(text))
+            put("submit", JsonPrimitive(submit))
+            put("operation_id", JsonPrimitive(UUID.randomUUID().toString()))
+        }
+        return client.call("POST", "/v3/terminals/$terminalID/input", body = body.toString().toByteArray()) as? JsonObject
+            ?: JsonObject(emptyMap())
+    }
 
     /**
      * This device's current approved relay permit, signed by the host.

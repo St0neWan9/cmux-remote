@@ -8,10 +8,14 @@ public final class EnrollmentClient: DeviceEnrolling {
     private let endpoint: BridgeEndpoint
     private let privateKey: Data
     private let transport: any ResourceTransport
-    /// What the iPhone asks for. A Bridge older than session starting cannot decode `conversationStart`.
-    public static let phoneCapabilities: [ClientCapability] = [.workspaceRead, .conversationRead, .projectRead, .conversationControl, .feedRead, .feedReply, .conversationStart]
-    /// The request an older Bridge accepts.
-    public static let previousPhoneCapabilities: [ClientCapability] = [.workspaceRead, .conversationRead, .projectRead, .conversationControl, .feedRead, .feedReply]
+    /// What the iPhone asks for. A Bridge older than session starting or terminal
+    /// view cannot decode those capabilities, so the app retries with narrower sets.
+    public static let phoneCapabilities: [ClientCapability] = [.workspaceRead, .conversationRead, .projectRead, .conversationControl, .feedRead, .feedReply, .conversationStart, .terminalRead, .terminalInput, .terminalView]
+    public static let phoneCapabilitiesWithoutStart: [ClientCapability] = phoneCapabilities.filter { $0 != .conversationStart }
+    /// A Bridge that knows session starting but not provider terminals.
+    public static let previousPhoneCapabilities: [ClientCapability] = [.workspaceRead, .conversationRead, .projectRead, .conversationControl, .feedRead, .feedReply, .conversationStart]
+    /// The request the oldest supported Bridge accepts.
+    public static let legacyPhoneCapabilities: [ClientCapability] = [.workspaceRead, .conversationRead, .projectRead, .conversationControl, .feedRead, .feedReply]
     public convenience init(bootstrap: SignedValue<EnrollmentBootstrap>, privateKey: Data, name: String, kind: String, capabilities: [ClientCapability] = [.workspaceRead, .conversationRead, .projectRead, .conversationControl, .feedRead, .feedReply], endpoint: BridgeEndpoint? = nil, now: Int = Int(Date().timeIntervalSince1970)) throws {
         try self.init(bootstrap: bootstrap, privateKey: privateKey, name: name, kind: kind, capabilities: capabilities, endpoint: endpoint, now: now, relayDial: { LinkSocket(url: $0, headers: $1, timeout: 15) })
     }

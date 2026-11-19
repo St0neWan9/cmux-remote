@@ -9,6 +9,8 @@ public actor SessionService {
         let transcript: String?
         /// Live only because its terminal still shows an Agent prompt, with no hook proving it is this Agent's.
         var revived = false
+        /// "cmux" for the existing backends, "rex" for a proved Rex conversation.
+        var source = "cmux"
     }
     private let cmux: any CmuxControlling
     private let transcriptRoots: [URL]
@@ -32,6 +34,7 @@ public actor SessionService {
     private let taskLocator: BackgroundTaskLocator
     private let modelSwitch = CodexModelSwitch()
     private let claudeConfirmation = ClaudeModelConfirmation()
+    private var rex: RexConversationSource?
 
     public init(cmux: any CmuxControlling, home: URL, transcriptRoots: [URL], mutations: MutationLedger? = nil, journal: MutationJournal? = nil, aliases: SessionAliasStore? = nil,
                 taskLocator: BackgroundTaskLocator = BackgroundTaskLocator(), reader: TranscriptReader = TranscriptReader()) {
@@ -41,12 +44,17 @@ public actor SessionService {
         self.reader = reader
     }
 
+    /// Attaches the proved Rex conversation source after the provider registry is
+    /// ready. Until then every list and action behaves exactly as before.
+    public func attachRex(_ source: RexConversationSource) { rex = source }
+
 
     /// What one background task produced: the asynchronous Agent's own conversation, or a detached command's output.
     /// The task's record lives outside the conversation, so the read is bounded and paged like any other text.
     public func backgroundTask(id: String, taskID: String, offset: Int, limit: Int, beforeSeq: Int? = nil, discovered: Bool = false, access: SessionAccess? = nil) async throws -> BackgroundTaskContent {
         guard BackgroundTaskLocator.isValid(taskID), offset >= 0 else { throw BridgeError("invalid_input", "Choose a task and a valid text offset.", status: 422) }
         let record = try await authorizedRecord(id, capability: .conversationRead, discovered: discovered, access: access)
+        if record.source == "rex" { throw BridgeError("unsupported", "Rex background tasks are not exposed by the Bridge yet.", status: 422) }
         guard let path = record.transcript else { throw BridgeError("task_unavailable", "No readable conversation record is available.", status: 404) }
         let listed = try await reader.history(path: path, agent: record.descriptor.agent, beforeSeq: nil, limit: 1,
                                               allowsUncreatedTranscript: record.descriptor.writable, reportsBackgroundTasks: record.descriptor.writable)
@@ -295,6 +303,13 @@ public actor SessionService {
             opened[id] = (facts.lastMessage, facts.clearedFrom)
         }
         await reconcileResumedSessions(&discovered)
+        if let rex, let proved = try? await rex.rows() {
+            for entry in proved where discovered[entry.descriptor.id] == nil {
+                // A cmux binding for the same Agent session wins; a Rex one is
+                // listed only while its process/registry proof exists.
+                discovered[entry.descriptor.id] = Record(descriptor: entry.descriptor, transcript: entry.transcript, source: "rex")
+            }
+        }
         records = discovered
         for (id, record) in records {
             guard let old = record.descriptor.surfaceID.map({ tabTitles[$0.lowercased()] }), let title = old else { continue }
@@ -392,6 +407,12 @@ public actor SessionService {
     /// - Parameter discovered: The caller resolved this id against a fresh discovery for the same request.
     public func history(id: String, beforeSeq: Int?, limit: Int, discovered: Bool = false, access: SessionAccess? = nil) async throws -> ConversationSnapshot {
         let record = try await authorizedRecord(id, capability: .conversationRead, discovered: discovered, access: access)
+        if record.source == "rex" {
+            guard let rex else { throw BridgeError("history_unavailable", "No readable conversation record is available.", status: 404) }
+            let result = try await rex.history(id, beforeSeq: beforeSeq, limit: limit)
+            try await recheck(record, capability: .conversationRead, access: access)
+            return result
+        }
         guard let path = record.transcript else { throw BridgeError("history_unavailable", "No readable conversation record is available.", status: 404) }
         let reader = reader; let agent = record.descriptor.agent
         // A detached task dies with the agent process that started it, so a session no longer bound to a
@@ -406,6 +427,12 @@ public actor SessionService {
     /// A byte-offset-paged window of the transcript, from the newest record or from an opaque archive cursor.
     public func archive(id: String, tail: Int?, cursor: String?, limit: Int, discovered: Bool = false, access: SessionAccess? = nil) async throws -> ConversationArchivePage {
         let record = try await authorizedRecord(id, capability: .conversationRead, discovered: discovered, access: access)
+        if record.source == "rex" {
+            guard let rex else { throw BridgeError("history_unavailable", "No readable conversation record is available.", status: 404) }
+            let result = try await rex.archive(id, tail: tail, cursor: cursor, limit: limit)
+            try await recheck(record, capability: .conversationRead, access: access)
+            return result
+        }
         guard let path = record.transcript else { throw BridgeError("history_unavailable", "No readable conversation record is available.", status: 404) }
         let result = try await reader.archive(path: path, agent: record.descriptor.agent, tail: tail, cursor: cursor, limit: limit,
                                               reportsBackgroundTasks: record.descriptor.writable)
@@ -417,6 +444,13 @@ public actor SessionService {
     public func toolText(id: String, messageID: String, generation: String, field: String,
                          offset: Int, contentID: String?, limit: Int, discovered: Bool = false, access: SessionAccess? = nil) async throws -> ToolTextPage {
         let record = try await authorizedRecord(id, capability: .conversationRead, discovered: discovered, access: access)
+        if record.source == "rex" {
+            guard let rex else { throw BridgeError("history_unavailable", "No readable conversation record is available.", status: 404) }
+            let result = try await rex.toolText(id, messageID: messageID, generation: generation, field: field,
+                                               offset: offset, contentID: contentID, limit: limit)
+            try await recheck(record, capability: .conversationRead, access: access)
+            return result
+        }
         guard let path = record.transcript else { throw BridgeError("history_unavailable", "No readable conversation record is available.", status: 404) }
         let result = try await reader.toolText(path: path, agent: record.descriptor.agent, messageID: messageID,
                                              generation: generation, field: field, offset: offset, contentID: contentID, limit: limit)
@@ -427,6 +461,12 @@ public actor SessionService {
     /// Reads only a transcript-bound image; project bytes additionally require project-read authority.
     public func image(id: String, referenceID: String, generation: String, discovered: Bool = false, access: SessionAccess? = nil) async throws -> Data {
         let record = try await authorizedRecord(id, capability: .conversationRead, discovered: discovered, access: access)
+        if record.source == "rex" {
+            guard let rex else { throw BridgeError("image_unavailable", "No recorded image is available.", status: 404) }
+            let bytes = try await rex.image(id, referenceID: referenceID, generation: generation)
+            try await recheck(record, capability: .conversationRead, access: access)
+            return bytes
+        }
         guard let path = record.transcript else { throw BridgeError("image_unavailable", "No recorded image is available.", status: 404) }
         let image = try await reader.image(path: path, agent: record.descriptor.agent, referenceID: referenceID, generation: generation)
         let bytes: Data
@@ -459,6 +499,12 @@ public actor SessionService {
     public func preview(id: String, discovered: Bool = false, access: SessionAccess? = nil) async throws -> PreviewSnapshot {
         if !discovered { _ = try await sessions() }
         let record = try await authorizedRecord(id, capability: .conversationRead, discovered: discovered, access: access)
+        if record.source == "rex" {
+            guard let rex else { return PreviewSnapshot(text: nil, available: false) }
+            let result = try await rex.preview(id)
+            try await recheck(record, capability: .conversationRead, access: access)
+            return result
+        }
         guard record.descriptor.writable, let surface = record.descriptor.surfaceID else { return PreviewSnapshot(text: nil, available: false) }
         let snapshot = try await cmux.request("surface.read_text", params: ["surface_id": .string(surface)])
         let lines = (snapshot["text"].string ?? "").components(separatedBy: .newlines)
@@ -477,6 +523,25 @@ public actor SessionService {
         let payload: JSONValue = request.attachments.isEmpty ? .string(request.text) : .object(["text": .string(request.text), "attachments": try JSONDecoder().decode(JSONValue.self, from: encoder.encode(request.attachments))])
         let signature = try MutationLedger.fingerprint(action: "send", resource: id, payload: payload)
         if let receipt = try await existing(request.operationID, signature: signature, legacySignature: legacySignature, access: access) { return receipt }
+        if let record = try await rexRecord(id) {
+            guard let rex else { throw BridgeError("read_only", "This conversation has no live Rex backend.", status: 409) }
+            guard record.descriptor.kind != "terminal" else {
+                throw BridgeError("unsupported", "Use the terminal input route for a Rex terminal.", status: 422)
+            }
+            guard request.attachments.isEmpty else { throw BridgeError("unsupported", "This Rex conversation does not accept image attachments.", status: 422) }
+            guard record.descriptor.writable, let workspace = record.descriptor.workspaceID else {
+                throw BridgeError("read_only", "This Rex conversation has no verified running terminal.", status: 409)
+            }
+            try await access?.require(.conversationControl, workspace: workspace)
+            if let receipt = try await begin(request.operationID, signature: signature, workspace: workspace,
+                                             capability: .conversationControl, legacySignature: legacySignature, access: access) { return receipt }
+            do {
+                try await rex.sendText(id, text: request.text) {
+                    try await access?.require(.conversationControl, workspace: workspace)
+                }
+                return try await complete(request.operationID, access: access)
+            } catch { throw mutationError(error) }
+        }
         // The daemon backend clears its own Agent input for a phone send; the desktop backend still requires an empty prompt.
         let session = try await verifiedBinding(id, requiresEmptyPrompt: !id.hasPrefix("tui:"), access: access)
         if let receipt = try await begin(request.operationID, signature: signature, workspace: session.workspaceID, capability: .conversationControl, legacySignature: legacySignature, access: access) { return receipt }
@@ -493,7 +558,11 @@ public actor SessionService {
     /// The models this conversation's agent offers on this Mac.
     public func models(id: String, discovered: Bool = false, access: SessionAccess? = nil) async throws -> ModelChoiceList {
         let record = try await authorizedRecord(id, capability: .conversationRead, discovered: discovered, access: access)
-        let list = modelCatalog.choices(agent: record.descriptor.agent)
+        let list: ModelChoiceList
+        if record.source == "rex" {
+            guard let rex else { throw BridgeError("models_unavailable", "No model list is available.", status: 404) }
+            list = try await rex.models(id)
+        } else { list = modelCatalog.choices(agent: record.descriptor.agent) }
         try await recheck(record, capability: .conversationRead, access: access)
         return list
     }
@@ -507,6 +576,23 @@ public actor SessionService {
         let name = try AgentModelName.validated(request.model)
         let signature = try MutationLedger.fingerprint(action: "model", resource: id, payload: .object(["model": .string(name), "confirm": .bool(request.confirm)]))
         if let receipt = try await existing(request.operationID, signature: signature, access: access) { return receipt }
+        if let record = try await rexRecord(id) {
+            guard let rex, let workspace = record.descriptor.workspaceID else {
+                throw BridgeError("read_only", "This Rex conversation has no verified running terminal.", status: 409)
+            }
+            guard record.descriptor.kind != "terminal" else {
+                throw BridgeError("unsupported", "A Rex terminal has no model switch.", status: 422)
+            }
+            try await access?.require(.conversationControl, workspace: workspace)
+            if let receipt = try await begin(request.operationID, signature: signature, workspace: workspace,
+                                             capability: .conversationControl, access: access) { return receipt }
+            do {
+                try await rex.switchModel(id, model: name, confirm: request.confirm) {
+                    try await access?.require(.conversationControl, workspace: workspace)
+                }
+                return try await complete(request.operationID, access: access)
+            } catch { throw mutationError(error) }
+        }
         let session = try await verifiedBinding(id, requiresEmptyPrompt: !id.hasPrefix("tui:"), access: access)
         guard ["claude", "codex"].contains(session.agent) else { throw BridgeError("unsupported", "This agent cannot switch models from the phone.", status: 422) }
         guard !session.state.hasPrefix("working") else { throw BridgeError("agent_busy", "Wait for the Agent to finish its turn before switching models.", status: 409) }
@@ -549,6 +635,23 @@ public actor SessionService {
         let title = try SessionTitle.validated(request.title)
         let signature = try MutationLedger.fingerprint(action: "title", resource: id, payload: .object(["title": .string(title)]))
         if let receipt = try await existing(request.operationID, signature: signature, access: access) { return receipt }
+        if let record = try await rexRecord(id) {
+            guard let rex, let workspace = record.descriptor.workspaceID else {
+                throw BridgeError("read_only", "This Rex conversation has no live terminal.", status: 409)
+            }
+            guard record.descriptor.kind != "terminal" else {
+                throw BridgeError("unsupported", "A Rex terminal has no conversation title.", status: 422)
+            }
+            try await access?.require(.conversationControl, workspace: workspace)
+            if let receipt = try await begin(request.operationID, signature: signature, workspace: workspace,
+                                             capability: .conversationControl, access: access) { return receipt }
+            do {
+                try await rex.rename(id, title: title) {
+                    try await access?.require(.conversationControl, workspace: workspace)
+                }
+                return try await complete(request.operationID, access: access)
+            } catch { throw mutationError(error) }
+        }
         let session = try await verifiedBinding(id, requiresEmptyPrompt: false, access: access)
         if let receipt = try await begin(request.operationID, signature: signature, workspace: session.workspaceID, capability: .conversationControl, access: access) { return receipt }
         try await validateMutationBinding(session, access: access)
@@ -594,6 +697,21 @@ public actor SessionService {
         if let receipt = try await existing(operationID, signature: signature, access: access) { return receipt }
         _ = try await sessions()
         let value = try await record(id).descriptor
+        if records[id]?.source == "rex" {
+            guard let rex else { throw BridgeError("read_only", "This conversation has no Rex backend.", status: 409) }
+            guard value.resumable, let workspace = value.workspaceID else {
+                throw BridgeError("read_only", "This conversation has no Agent session left to reopen.", status: 409)
+            }
+            try await access?.require(.conversationStart, workspace: workspace)
+            if let receipt = try await begin(operationID, signature: signature, workspace: workspace,
+                                             capability: .conversationStart, access: access) { return receipt }
+            do {
+                _ = try await rex.resume(id) {
+                    try await access?.require(.conversationStart, workspace: workspace)
+                }
+                return try await complete(operationID, access: access)
+            } catch { throw mutationError(error) }
+        }
         guard value.resumable, let workspace = value.workspaceID else { throw BridgeError("read_only", "This conversation has no Agent session left to reopen.", status: 409) }
         // Reopening starts a process in the workspace, so it needs the same grant as starting one.
         try await access?.require(.conversationStart, workspace: workspace)
@@ -675,6 +793,23 @@ public actor SessionService {
         let legacySignature = "interrupt:\(id):\(request.hard)"
         let signature = try MutationLedger.fingerprint(action: "interrupt", resource: id, payload: .bool(request.hard))
         if let receipt = try await existing(request.operationID, signature: signature, legacySignature: legacySignature, access: access) { return receipt }
+        if let record = try await rexRecord(id) {
+            guard let rex, let workspace = record.descriptor.workspaceID else {
+                throw BridgeError("read_only", "This Rex conversation has no verified running terminal.", status: 409)
+            }
+            guard record.descriptor.kind != "terminal" else {
+                throw BridgeError("unsupported", "Use the terminal input route for a Rex terminal.", status: 422)
+            }
+            try await access?.require(.conversationControl, workspace: workspace)
+            if let receipt = try await begin(request.operationID, signature: signature, workspace: workspace,
+                                             capability: .conversationControl, legacySignature: legacySignature, access: access) { return receipt }
+            do {
+                try await rex.interrupt(id, hard: request.hard) {
+                    try await access?.require(.conversationControl, workspace: workspace)
+                }
+                return try await complete(request.operationID, access: access)
+            } catch { throw mutationError(error) }
+        }
         let session = try await verifiedBinding(id, requiresEmptyPrompt: false, access: access)
         if let receipt = try await begin(request.operationID, signature: signature, workspace: session.workspaceID, capability: .conversationControl, legacySignature: legacySignature, access: access) { return receipt }
         try await validateMutationBinding(session, access: access)
@@ -733,6 +868,7 @@ public actor SessionService {
 
     public func file(id: String, path: String, discovered: Bool = false, access: SessionAccess? = nil) async throws -> TextFileSnapshot {
         let record = try await authorizedRecord(id, capability: .projectRead, discovered: discovered, access: access)
+        if record.source == "rex" { throw BridgeError("unsupported", "Rex project files are not exposed by the Bridge yet.", status: 422) }
         guard let cwd = record.descriptor.cwd else { throw BridgeError("project_unavailable", "This conversation has no project directory.", status: 404) }
         let file = try files.resolve(root: cwd, relativePath: path)
         let data = try Data(contentsOf: file)
@@ -742,6 +878,7 @@ public actor SessionService {
     }
     public func changes(id: String, discovered: Bool = false, access: SessionAccess? = nil) async throws -> JSONValue {
         let record = try await authorizedRecord(id, capability: .projectRead, discovered: discovered, access: access)
+        if record.source == "rex" { throw BridgeError("unsupported", "Rex project changes are not exposed by the Bridge yet.", status: 422) }
         let cwd = try projectRoot(record)
         let output = try await GitReader().run(directory: cwd, arguments: ["status", "--porcelain=v1", "-z", "--untracked-files=normal"])
         try await recheck(record, capability: .projectRead, access: access)
@@ -749,6 +886,7 @@ public actor SessionService {
     }
     public func diff(id: String, path: String?, discovered: Bool = false, access: SessionAccess? = nil) async throws -> TextFileSnapshot {
         let record = try await authorizedRecord(id, capability: .projectRead, discovered: discovered, access: access)
+        if record.source == "rex" { throw BridgeError("unsupported", "Rex project diffs are not exposed by the Bridge yet.", status: 422) }
         let cwd = try projectRoot(record)
         let listed = try await GitReader().run(directory: cwd, arguments: ["diff", "--no-ext-diff", "--no-textconv", "--name-only", "-z", "HEAD", "--"])
         let changed = listed.split(separator: "\0").map(String.init)
@@ -778,6 +916,12 @@ public actor SessionService {
     private func record(_ id: String) async throws -> Record {
         if records[id] == nil { _ = try await sessions() }
         guard let record = records[id] else { throw BridgeError("session_not_found", "This conversation is no longer available.", status: 404) }
+        return record
+    }
+    /// The record only when its proof comes from Rex; cmux keeps its existing path.
+    private func rexRecord(_ id: String) async throws -> Record? {
+        if records[id] == nil { _ = try await sessions() }
+        guard let record = records[id], record.source == "rex" else { return nil }
         return record
     }
     private func verifiedBinding(_ id: String, requiresEmptyPrompt: Bool, access: SessionAccess?) async throws -> SessionDescriptor {

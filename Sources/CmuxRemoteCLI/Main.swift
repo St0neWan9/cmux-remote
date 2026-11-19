@@ -8,7 +8,7 @@ import CmuxRemoteClient
 struct Main {
     static func main() async {
         do { try await run() }
-        catch { let text = (error as? BridgeError)?.message ?? "cmux-remote could not start. Check configuration and permissions."; FileHandle.standardError.write(Data((text + "\n").utf8)); exit(1) }
+        catch { let text = (error as? BridgeError)?.message ?? "term remote could not start. Check configuration and permissions."; FileHandle.standardError.write(Data((text + "\n").utf8)); exit(1) }
     }
     private static func run() async throws {
         let args = Array(CommandLine.arguments.dropFirst()); let command = args.first ?? "help"
@@ -29,11 +29,14 @@ struct Main {
             _ = try await CLIControlClient(executable: URL(fileURLWithPath: "/Applications/cmux.app/Contents/Resources/bin/cmux"), socketPath: socket).request("system.ping", params: [:])
             var setup = inherited; setup["CMUX_SOCKET_PATH"] = socket
             try MacSetupRepository(directory: state.directory).save(environment: setup)
-            print("cmux Remote is connected to local cmux. Open Remote Settings to continue.")
+            print("term remote is connected to local cmux. Open Remote Settings to continue.")
+        case "agent-hook": try AgentHookCommand().run(options: options, state: state)
+        case "hooks": try HooksCommand().run(options: options, state: state)
+        case "view": try await ViewCommand().run(options: options, state: state)
         case "discover", "connect": try await ConnectionCommand().run(command: command, options: options, state: state)
         case "mirror": try await MirrorCommand().run(options: options, state: state)
         case "init": try state.initialize(); print("Initialized private TLS and pairing state.")
-        case "enrollment", "clients": try await OwnerCommand().run(family: command, options: options, state: state, port: port)
+        case "enrollment", "clients", "providers": try await OwnerCommand().run(family: command, options: options, state: state, port: port)
         case "pairing" where !options.contains("legacy"):
             var args = ["open"] + options.args
             if options.value("port") == nil { args += ["--port", String(port)] }
@@ -52,7 +55,21 @@ struct Main {
             if (options.contains("pair") || command == "resident"), !FileManager.default.fileExists(atPath: state.directory.appendingPathComponent("token").path) { try state.initialize() }
             BridgeLog.shared.configure(directory: state.directory)
             BridgeLog.shared.info("bridge", "\(command) starting pid=\(ProcessInfo.processInfo.processIdentifier)")
-            let machine = try BridgeMachineLease(home: home)
+            // A development-only secondary Bridge may run beside the owner's
+            // resident when it is already loopback-only and uses its own state
+            // and port. It never advertises Bonjour or touches the owner state.
+            let secondary = options.contains("secondary-instance")
+            if secondary {
+                guard options.value("state") != nil, let rawPort = options.value("port"), let number = Int(rawPort),
+                      number != port, options.contains("no-discovery") else {
+                    throw BridgeError("invalid_input", "A secondary instance needs --state, a different --port and --no-discovery.")
+                }
+                let listen = options.value("listen") ?? "127.0.0.1"
+                guard ["127.0.0.1", "::1", "localhost"].contains(listen) else {
+                    throw BridgeError("invalid_input", "A secondary instance may listen only on loopback.")
+                }
+            }
+            let machine = secondary ? nil : try BridgeMachineLease(home: home)
             let lease = try BridgeRunLease(directory: state.directory)
             defer { withExtendedLifetime((machine, lease)) {} }
             let mutations = MutationLedger(directory: state.directory)
@@ -115,7 +132,45 @@ struct Main {
             let allowedDirectories = AllowedDirectoryRepository(directory: state.directory)
             let launcher = SessionLauncher(cmux: cmux, home: home, mutations: mutations, sessions: { try await service.sessions() },
                                            sharedRoots: { allowedDirectories.load() })
-            let router = BridgeRouter(service: service, authority: authority, legacyToken: options.contains("legacy") ? try state.token() : nil, mirrors: RemoteMirrorService(cmux: cmux, mutations: mutations), launcher: launcher)
+            let mirrors = RemoteMirrorService(cmux: cmux, mutations: mutations)
+            let registry = ProviderRegistry()
+            if let localDesktop {
+                let descriptor = ProviderDescriptor(
+                    id: ProviderIdentity.providerID(kind: .cmuxDesktop, instance: authority.host.id),
+                    kind: .cmuxDesktop, name: "cmux", hostID: authority.host.id, hostName: authority.host.name,
+                    capabilities: [.spaces, .layout, .terminals, .screen, .input])
+                try await registry.register(CmuxProvider(descriptor: descriptor, cmux: localDesktop,
+                                                          mirrors: RemoteMirrorService(cmux: localDesktop, mutations: mutations)))
+            }
+            var rexForConversations: RexProvider?
+            if !options.contains("no-rex") {
+                let configured = options.values("rex-endpoint")
+                if configured.isEmpty {
+                    let socket = home.appendingPathComponent("Library/Application Support/rex/server.sock").path
+                    if FileManager.default.fileExists(atPath: socket) {
+                        let provider = RexProvider(endpoint: .unix(path: socket), label: "Rex", mutations: mutations)
+                        try await registry.register(provider)
+                        rexForConversations = provider
+                    }
+                } else {
+                    let labels = options.values("rex-label")
+                    for (index, raw) in configured.enumerated() {
+                        let endpoint = try RexEndpoint.parse(raw)
+                        let label = index < labels.count ? labels[index] : (configured.count == 1 ? "Rex" : "Rex \(index + 1)")
+                        let provider = RexProvider(endpoint: endpoint, label: label, mutations: mutations)
+                        try await registry.register(provider)
+                        if rexForConversations == nil { rexForConversations = provider }
+                    }
+                }
+            }
+            if let rexForConversations {
+                await service.attachRex(RexConversationSource(
+                    provider: rexForConversations, home: home, transcriptRoots: transcriptRoots, reader: reader,
+                    hookSpool: RexHookSpool(directory: state.directory.appendingPathComponent("rex-hooks", isDirectory: true))))
+            }
+            let providers = ProviderDirectory(registry: registry)
+            let router = BridgeRouter(service: service, authority: authority, legacyToken: options.contains("legacy") ? try state.token() : nil,
+                                      mirrors: mirrors, launcher: launcher, providers: providers)
             let relayRepository = RelayConfigurationRepository(directory: state.directory)
             if let origin = options.value("relay") {
                 if origin == "off" { try relayRepository.remove() }
@@ -133,11 +188,15 @@ struct Main {
             } else { relay = nil; relayKeyFile = nil }
             let sharing = ManagedSharingService(state: state, authority: authority, router: router,
                 listen: options.value("listen") ?? (command == "resident" || options.contains("pair") ? "0.0.0.0" : "127.0.0.1"), port: port, advertise: !options.contains("no-discovery"), relay: relay, relayKeyFile: relayKeyFile,
-                workspaces: { try await service.workspaces()["workspaces"].array?.compactMap { $0["id"].string } ?? [] },
+                workspaces: {
+                    let native = try await service.workspaces()["workspaces"].array?.compactMap { $0["id"].string } ?? []
+                    let mapped = (try? await providers.spaces(providerID: nil))?.spaces.map(\.id) ?? []
+                    return Array(Set(native + mapped)).sorted().prefix(100).map { $0 }
+                },
                 remembersChoice: command == "resident")
             let ready = AsyncThrowingStream<Void, any Error>.makeStream()
             let owner = Task {
-                do { try await OwnerControlServer().run(path: state.directory.appendingPathComponent("owner.sock").path, authority: authority, service: service, mac: mac, sharing: sharing, allowedDirectories: allowedDirectories, onListening: { ready.continuation.yield(()); ready.continuation.finish() }) }
+                do { try await OwnerControlServer().run(path: state.directory.appendingPathComponent("owner.sock").path, authority: authority, service: service, mac: mac, sharing: sharing, allowedDirectories: allowedDirectories, providers: providers, onListening: { ready.continuation.yield(()); ready.continuation.finish() }) }
                 catch { ready.continuation.finish(throwing: error); throw error }
             }
             defer { owner.cancel() }
@@ -146,7 +205,9 @@ struct Main {
             let qr: String?
             if options.contains("pair") {
                 guard let host = options.value("host") ?? LANAddressResolver().address() ?? (relay != nil ? "localhost" : nil) else { throw BridgeError("lan_unavailable", "No private LAN address was found. Connect to Wi-Fi or pass --host.") }
-                let workspaces = try await service.workspaces()["workspaces"].array?.compactMap { $0["id"].string } ?? []
+                let native = try await service.workspaces()["workspaces"].array?.compactMap { $0["id"].string } ?? []
+                let mapped = (try? await providers.spaces(providerID: nil))?.spaces.map(\.id) ?? []
+                let workspaces = Array(Set(native + mapped)).sorted().prefix(100).map { $0 }
                 let bootstrap = try await authority.open(endpoint: BridgeEndpoint(host: host, port: port), workspaces: workspaces)
                 qr = try TerminalQRCode().render(EnrollmentLinkCodec().encode(bootstrap))
             } else { qr = nil }
@@ -159,7 +220,7 @@ struct Main {
             let sources = try await SourceBackends(options: options, environment: runtimeEnvironment, home: home, transcripts: roots, directory: nil, mutations: MutationLedger())
             _ = try await sources.controller.request("system.ping", params: [:]); print("Local cmux backends are reachable.")
         default:
-            print("cmux-remote setup|resident|init|serve|pairing|enrollment|clients|discover|connect|mirror|doctor [--tui-socket PATH] [--relay HTTPS_ORIGIN|off] [--relay-key-file PATH] [--pair] [--legacy] [--no-discovery] [--state PATH] [--socket PATH] [--cli PATH] [--direct-socket] [--listen HOST] [--host HOST] [--port PORT] [--format json] [--demo]")
+            print("term-remote setup|resident|init|serve|pairing|enrollment|clients|providers|view|hooks|agent-hook|discover|connect|mirror|doctor [--tui-socket PATH] [--relay HTTPS_ORIGIN|off] [--relay-key-file PATH] [--rex-endpoint URL] [--rex-label LABEL] [--no-rex] [--secondary-instance] [--pair] [--legacy] [--no-discovery] [--state PATH] [--socket PATH] [--cli PATH] [--direct-socket] [--listen HOST] [--host HOST] [--port PORT] [--format json] [--demo]")
         }
     }
 }
