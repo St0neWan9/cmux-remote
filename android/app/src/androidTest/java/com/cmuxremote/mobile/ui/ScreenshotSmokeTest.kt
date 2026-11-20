@@ -9,7 +9,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import com.cmuxremote.mobile.data.FeedItem
 import com.cmuxremote.mobile.data.FeedOption
 import com.cmuxremote.mobile.data.FeedQuestion
-import com.cmuxremote.mobile.ui.theme.CmuxTheme
+import com.cmuxremote.mobile.ui.theme.TermRemoteTheme
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -22,7 +22,7 @@ class ScreenshotSmokeTest {
     @Test
     fun theFeedRendersPixels() {
         compose.setContent {
-            CmuxTheme {
+            TermRemoteTheme {
                 FeedScreen(
                     items = listOf(
                         FeedItem(
@@ -50,7 +50,7 @@ class ScreenshotSmokeTest {
     @Test
     fun theComposerRendersPixels() {
         compose.setContent {
-            CmuxTheme {
+            TermRemoteTheme {
                 ComposerArea(
                     draft = "Hello",
                     onDraftChange = {},
@@ -70,7 +70,7 @@ class ScreenshotSmokeTest {
     @Test
     fun theDrawerRendersPixels() {
         compose.setContent {
-            CmuxTheme {
+            TermRemoteTheme {
                 DrawerContent(
                     model = SessionListModel(
                         sessions = listOf(

@@ -46,7 +46,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.cmuxremote.mobile.ConversationUi
-import com.cmuxremote.mobile.CmuxViewModel
+import com.cmuxremote.mobile.TermRemoteViewModel
 import com.cmuxremote.mobile.GroupUi
 import com.cmuxremote.mobile.R
 import com.cmuxremote.mobile.ShellState
@@ -61,7 +61,7 @@ import com.cmuxremote.mobile.ui.theme.MobileDesign
 /** The whole app: pairing, then the adaptive browser and conversation shell. */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
-fun CmuxApp(viewModel: CmuxViewModel) {
+fun TermRemoteApp(viewModel: TermRemoteViewModel) {
     val shell by viewModel.shell.collectAsStateWithLifecycle()
     val conversation by viewModel.conversation.collectAsStateWithLifecycle()
     val terminal by viewModel.terminal.collectAsStateWithLifecycle()
@@ -945,7 +945,7 @@ fun CmuxApp(viewModel: CmuxViewModel) {
 private fun DetailPane(
     conversation: ConversationUi?,
     modifier: Modifier,
-    viewModel: CmuxViewModel,
+    viewModel: TermRemoteViewModel,
 ) {
     Box(modifier.fillMaxHeight()) {
         if (conversation == null) {

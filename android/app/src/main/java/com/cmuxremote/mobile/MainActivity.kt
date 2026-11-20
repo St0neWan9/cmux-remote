@@ -11,15 +11,15 @@ import androidx.activity.viewModels
 import androidx.activity.enableEdgeToEdge
 import androidx.core.content.ContextCompat
 import com.cmuxremote.mobile.background.PersistentConnectionService
-import com.cmuxremote.mobile.ui.CmuxApp
-import com.cmuxremote.mobile.ui.theme.CmuxTheme
+import com.cmuxremote.mobile.ui.TermRemoteApp
+import com.cmuxremote.mobile.ui.theme.TermRemoteTheme
 
 class MainActivity : ComponentActivity() {
     /** The ongoing connection notification is the service's, but the system asks first. */
     private val notificationPermission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
-    private val model: CmuxViewModel by viewModels()
+    private val model: TermRemoteViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -56,8 +56,8 @@ class MainActivity : ComponentActivity() {
             (direct ?: fromFile)?.let(model::pair)
         }
         setContent {
-            CmuxTheme {
-                CmuxApp(model)
+            TermRemoteTheme {
+                TermRemoteApp(model)
             }
         }
     }

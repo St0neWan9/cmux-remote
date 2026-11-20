@@ -7,7 +7,7 @@ import androidx.compose.ui.test.performClick
 import com.cmuxremote.mobile.model.SessionItem
 import com.cmuxremote.mobile.model.SessionTrailing
 import com.cmuxremote.mobile.ui.components.SessionRow
-import com.cmuxremote.mobile.ui.theme.CmuxTheme
+import com.cmuxremote.mobile.ui.theme.TermRemoteTheme
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -21,7 +21,7 @@ class SessionRowSemanticsTest {
     fun aSessionRowIsOneTappableTarget() {
         var tapped = false
         compose.setContent {
-            CmuxTheme {
+            TermRemoteTheme {
                 SessionRow(
                     session = SessionItem(
                         id = "s1",
