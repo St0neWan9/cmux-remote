@@ -56,6 +56,10 @@ public actor TranscriptReader {
         var state: BackgroundTaskTracker.State
     }
     private var archiveTaskScans: [String: ArchiveTaskScan] = [:]
+    /// Records whose first window scan is running off the actor. A scan of a long record takes seconds, and the
+    /// actor serves every conversation, so the newest page never waits for one.
+    private var archiveScansInFlight: Set<String> = []
+    private static let archiveScanConcurrency = 2
     private static let capacity = 32
     /// How long a retried background agent's own record counts as proof that it is running again.
     private static let resumeWindow: TimeInterval = 900
@@ -134,12 +138,14 @@ public actor TranscriptReader {
     }
     /// Where a read of this size starts: the newest bytes within the window, in whole steps so record
     /// numbers stay put while the file grows.
-    private func windowStart(size: Int) -> Int {
+    // Reads only immutable settings, so the background task scan can call it off the actor.
+    nonisolated private func windowStart(size: Int) -> Int {
         size > windowLimit ? (size - windowLimit + windowStep - 1) / windowStep * windowStep : 0
     }
     /// The newest complete lines of a transcript within the read window, where that window starts, and the
     /// absolute offset of the returned data's first byte.
-    private func window(path: String, size: Int) throws -> (data: Data, start: Int, offset: Int) {
+    // Reads only immutable settings, so the background task scan can call it off the actor.
+    nonisolated private func window(path: String, size: Int) throws -> (data: Data, start: Int, offset: Int) {
         let start = windowStart(size: size)
         let handle = try FileHandle(forReadingFrom: URL(fileURLWithPath: path)); defer { try? handle.close() }
         // One byte before the window shows whether it begins on a line boundary.
@@ -286,42 +292,63 @@ public actor TranscriptReader {
         return observation
     }
     /// The detached calls still open in one window, paired from launches, stops and completion notices.
-    private func scannedLaunches(_ data: Data) -> BackgroundTaskTracker.State {
+    // Reads only immutable settings, so the background task scan can call it off the actor.
+    nonisolated private func scannedLaunches(_ data: Data) -> BackgroundTaskTracker.State {
         var state = BackgroundTaskTracker.State()
         guard let end = data.lastIndex(of: 10) else { return state }
         let lines = String(decoding: data[...end], as: UTF8.self).split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
         BackgroundTaskTracker().consume(lines, into: &state)
         return state
     }
-    /// The tasks still running for the archive's newest page, from launches anywhere in the read window.
-    private func archiveRunningTasks(path: String, inode: String, size: Int) throws -> [BackgroundAgentTask] {
-        var scan: ArchiveTaskScan
-        if let previous = archiveTaskScans[path], previous.inode == inode, previous.scannedThrough <= size,
-           size - previous.scannedThrough <= windowLimit {
-            scan = previous
-            let appended = try readArchiveChunk(path: path, start: scan.scannedThrough, end: size)
-            if let end = appended.lastIndex(of: 10) {
-                let lines = String(decoding: appended[...end], as: UTF8.self).split(separator: "\n", omittingEmptySubsequences: false).dropLast().map(String.init)
-                BackgroundTaskTracker().consume(lines, into: &scan.state)
-                scan.scannedThrough += appended.distance(from: appended.startIndex, to: end) + 1
-            }
-        } else {
+    /// The tasks still running for the archive's newest page, from launches anywhere in the read window, or
+    /// nil while that window's first scan runs in the background; the page then counts its own chunk.
+    private func archiveRunningTasks(path: String, inode: String, size: Int) throws -> [BackgroundAgentTask]? {
+        guard var scan = archiveTaskScans[path], scan.inode == inode, scan.scannedThrough <= size,
+              size - scan.scannedThrough <= windowLimit else {
             // A new, replaced or truncated record, or one that grew past the window, is scanned afresh.
-            let (data, _, offset) = try window(path: path, size: size)
-            let end = data.lastIndex(of: 10)
-            scan = ArchiveTaskScan(inode: inode, scannedThrough: offset + (end.map { data.distance(from: data.startIndex, to: $0) + 1 } ?? 0),
-                                   state: scannedLaunches(data))
+            startArchiveScan(path: path, inode: inode, size: size)
+            return nil
         }
-        if archiveTaskScans[path] == nil, archiveTaskScans.count >= Self.capacity, let evicted = archiveTaskScans.keys.first {
-            archiveTaskScans[evicted] = nil
+        // Only the bytes appended since the last read; an unchanged record reads nothing.
+        let appended = try readArchiveChunk(path: path, start: scan.scannedThrough, end: size)
+        if let end = appended.lastIndex(of: 10) {
+            let lines = String(decoding: appended[...end], as: UTF8.self).split(separator: "\n", omittingEmptySubsequences: false).dropLast().map(String.init)
+            BackgroundTaskTracker().consume(lines, into: &scan.state)
+            scan.scannedThrough += appended.distance(from: appended.startIndex, to: end) + 1
+            archiveTaskScans[path] = scan
         }
-        archiveTaskScans[path] = scan
         let moment = now()
         var tasks = scan.state.launched.values.filter { $0.isRunning(at: moment) }.map(\.task)
         for task in resumedTasks(path: path, state: scan.state, at: moment) where !tasks.contains(where: { $0.id == task.id }) {
             tasks.append(task)
         }
         return tasks.sorted { $0.id < $1.id }
+    }
+    /// Scans the read window off the actor, at most a few records at a time; the next newest-page read uses it.
+    private func startArchiveScan(path: String, inode: String, size: Int) {
+        guard !archiveScansInFlight.contains(path), archiveScansInFlight.count < Self.archiveScanConcurrency else { return }
+        archiveScansInFlight.insert(path)
+        Task.detached(priority: .utility) { [self] in
+            let scan: ArchiveTaskScan?
+            if let (data, _, offset) = try? self.window(path: path, size: size) {
+                let end = data.lastIndex(of: 10)
+                scan = ArchiveTaskScan(inode: inode, scannedThrough: offset + (end.map { data.distance(from: data.startIndex, to: $0) + 1 } ?? 0),
+                                       state: self.scannedLaunches(data))
+            } else { scan = nil }
+            await self.finishArchiveScan(path: path, scan: scan)
+        }
+    }
+    private func finishArchiveScan(path: String, scan: ArchiveTaskScan?) {
+        archiveScansInFlight.remove(path)
+        guard let scan else { return }
+        if archiveTaskScans[path] == nil, archiveTaskScans.count >= Self.capacity, let evicted = archiveTaskScans.keys.first {
+            archiveTaskScans[evicted] = nil
+        }
+        archiveTaskScans[path] = scan
+    }
+    /// Test hook: waits until no background window scan is running.
+    func waitForArchiveScansForTesting() async {
+        while !archiveScansInFlight.isEmpty { try? await Task.sleep(for: .milliseconds(10)) }
     }
     /// This record's tasks still running now; none once the agent that owned them has ended.
     private func runningTasks(_ path: String, reports: Bool) -> [BackgroundAgentTask] {

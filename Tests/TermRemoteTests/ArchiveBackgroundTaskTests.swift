@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-import TermRemoteBridge
+@testable import TermRemoteBridge
 
 /// The archive's newest page parses only the record's last few hundred kilobytes. A shell started
 /// before that stretch, and still running, used to vanish from the phone.
@@ -33,8 +33,12 @@ import TermRemoteBridge
         try Data(text.utf8).write(to: file)
         let reader = TranscriptReader()
 
+        // The first read never waits for the window scan: it answers from its own chunk as before.
+        let first = try await reader.archive(path: file.path, agent: "claude", tail: 20, cursor: nil, limit: 20)
+        #expect(!first.snapshot.messages.contains { $0.id == "launch" })
+        await reader.waitForArchiveScansForTesting()
+        // Once the background scan is in, the next refresh carries the early launch.
         let newest = try await reader.archive(path: file.path, agent: "claude", tail: 20, cursor: nil, limit: 20)
-        #expect(!newest.snapshot.messages.contains { $0.id == "launch" })
         #expect(newest.snapshot.backgroundTasks?.map(\.id) == ["bg"])
 
         // The completion notice arrives later; only the appended bytes are read, and the task ends.
