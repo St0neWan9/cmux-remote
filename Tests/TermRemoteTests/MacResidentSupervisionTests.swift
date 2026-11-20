@@ -11,11 +11,24 @@ private actor ControllableOwner: CmuxControlling {
     var living: @Sendable () -> Bool = { true }
     /// The owner-protocol revision the fake resident reports through `bridge.status`.
     private var revision = OwnerRevision.current
+    /// The resident's sharing phase and failure code, as `bridge.status` reports them.
+    private var sharing = "running"
+    private var sharingError: String?
+    /// Owner methods other than status probes, in the order the launcher sent them.
+    private(set) var commands: [String] = []
     func open(_ living: @escaping @Sendable () -> Bool) { available = true; self.living = living }
     func setRevision(_ newRevision: Int) { revision = newRevision }
+    /// The listener failed to start, as it does while another process holds the port.
+    func failSharing() { sharing = "stopped"; sharingError = "sharing_start_failed" }
+    func turnSharingOff() { sharing = "stopped"; sharingError = nil }
     func request(_ method: String, params: [String: JSONValue]) async throws -> JSONValue {
         guard available, living() else { throw BridgeError("unavailable", "No resident is listening", status: 503) }
-        if method == "bridge.status" { return .object(["owner_revision": .number(Double(revision))]) }
+        if method == "bridge.status" {
+            return .object(["owner_revision": .number(Double(revision)), "state": .string(sharing),
+                            "error_code": sharingError.map(JSONValue.string) ?? .null])
+        }
+        commands.append(method)
+        if method == "bridge.start" { sharing = "running"; sharingError = nil }
         return .object(["pong": .bool(true)])
     }
 }
@@ -42,7 +55,8 @@ private final class FakeProcess: RunningProcess, @unchecked Sendable {
 }
 
 @Suite struct MacResidentSupervisionTests {
-    private func fixture(stopStale: (@Sendable () async throws -> Void)? = nil) throws -> (MacResidentLauncher, ControllableOwner, Children) {
+    private func fixture(stopStale: (@Sendable () async throws -> Void)? = nil,
+                         retireLegacy: @escaping @Sendable () async throws -> Bool = { false }) throws -> (MacResidentLauncher, ControllableOwner, Children) {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("resident-" + UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         // A completed, private setup is what tells the launcher that restarting is worth trying.
@@ -54,15 +68,9 @@ private final class FakeProcess: RunningProcess, @unchecked Sendable {
         try Data("#!/bin/sh\n".utf8).write(to: executable)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executable.path)
         let owner = ControllableOwner(); let children = Children()
-        let launcher: MacResidentLauncher
-        if let stopStale {
-            launcher = MacResidentLauncher(executable: executable, directory: directory, owner: owner,
+        let launcher = MacResidentLauncher(executable: executable, directory: directory, owner: owner,
                                            spawn: { _, _ in let child = FakeProcess(); children.add(child); return child },
-                                           stopStale: stopStale)
-        } else {
-            launcher = MacResidentLauncher(executable: executable, directory: directory, owner: owner,
-                                           spawn: { _, _ in let child = FakeProcess(); children.add(child); return child })
-        }
+                                           stopStale: stopStale ?? {}, retireLegacy: retireLegacy)
         return (launcher, owner, children)
     }
     @Test(.timeLimit(.minutes(1))) func aResidentThatExitsIsReplacedAndTheAppReattaches() async throws {
@@ -119,6 +127,45 @@ private final class FakeProcess: RunningProcess, @unchecked Sendable {
         #expect(children.count == 0)
         #expect(stops.value == 0)
     }
+    @Test(.timeLimit(.minutes(1))) func theOldAppsResidentIsRetiredBeforeTheBundledOneStarts() async throws {
+        let spawnedSoFar = SpawnedReference()
+        let retiredBeforeSpawn = Counter()
+        let (launcher, owner, spawned) = try fixture(retireLegacy: {
+            if spawnedSoFar.count == 0 { retiredBeforeSpawn.increment() }
+            return true
+        })
+        spawnedSoFar.children = spawned
+        let supervision = Task { await launcher.supervise() }
+        while spawned.count < 1 { try await Task.sleep(for: .milliseconds(5)) }
+        await owner.open { spawned.latest?.isRunning == true }
+        while !(await launcher.isWaitingForExitForTesting) { try await Task.sleep(for: .milliseconds(5)) }
+        #expect(retiredBeforeSpawn.value == 1)
+        // A freshly started resident restores its own sharing; the launcher sends it nothing.
+        #expect(await owner.commands.isEmpty)
+        supervision.cancel()
+    }
+    @Test func sharingThatLostThePortToTheOldResidentStartsOnceItIsRetired() async throws {
+        let (launcher, owner, children) = try fixture(retireLegacy: { true })
+        await owner.open { true }
+        await owner.failSharing()
+        try await launcher.ensureStarted()
+        #expect(children.count == 0)
+        #expect(await owner.commands == ["bridge.start"])
+    }
+    @Test func sharingIsLeftAloneWhenNoOldResidentWasRunning() async throws {
+        let (launcher, owner, _) = try fixture(retireLegacy: { false })
+        await owner.open { true }
+        await owner.failSharing()
+        try await launcher.ensureStarted()
+        #expect(await owner.commands.isEmpty)
+    }
+    @Test func sharingTheOwnerTurnedOffStaysOffAfterRetirement() async throws {
+        let (launcher, owner, _) = try fixture(retireLegacy: { true })
+        await owner.open { true }
+        await owner.turnSharingOff()
+        try await launcher.ensureStarted()
+        #expect(await owner.commands.isEmpty)
+    }
 }
 
 /// A counter the supervising task and the test both touch.
@@ -138,4 +185,12 @@ private final class Children: @unchecked Sendable {
     var first: FakeProcess? { lock.withLock { items.first } }
     var latest: FakeProcess? { lock.withLock { items.last } }
     func first(where predicate: (FakeProcess) -> Bool) -> FakeProcess? { lock.withLock { items.first(where: predicate) } }
+}
+
+/// Lets a closure built before the fixture read the children the fixture hands out.
+private final class SpawnedReference: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: Children?
+    var children: Children? { get { lock.withLock { stored } } set { lock.withLock { stored = newValue } } }
+    var count: Int { children?.count ?? 0 }
 }

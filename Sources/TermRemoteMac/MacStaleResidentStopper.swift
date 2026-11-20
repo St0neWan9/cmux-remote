@@ -9,29 +9,48 @@ import TermRemoteBridge
 /// lease to free before the replacement starts. Only the bundled resident's exact argument
 /// list matches, so the cmux app itself is never touched.
 struct MacStaleResidentStopper: Sendable {
-    private let executable: URL
+    /// The helper paths a resident of this app has shipped under: the current name and the CmuxRemote one.
+    static let bundledHelpers = ["/Contents/Helpers/term-remote", "/Contents/Helpers/cmux-remote"]
     private let directory: URL
+    private let helpers: [String]
     /// Bounded: SIGTERM, wait for the lease, then SIGKILL rather than wait forever.
     private let grace: Duration
 
-    init(executable: URL, directory: URL, grace: Duration = .seconds(5)) {
-        self.executable = executable; self.directory = directory; self.grace = grace
+    init(directory: URL, helpers: [String] = Self.bundledHelpers, grace: Duration = .seconds(5)) {
+        self.directory = directory; self.helpers = helpers; self.grace = grace
     }
 
-    func stop() async throws {
-        for pid in residentProcessIDs() { kill(pid, SIGTERM) }
+    /// The resident the CmuxRemote app left running for its own state directory.
+    ///
+    /// Quitting the app never stops its resident, so after the rename the old one keeps the
+    /// sharing port and the new resident cannot listen. Only the default Term Remote directory
+    /// has a predecessor; a custom `--state` path is never matched to anything else.
+    static func legacy(of directory: URL) -> MacStaleResidentStopper? {
+        guard directory.lastPathComponent == "term-remote" else { return nil }
+        let legacy = directory.deletingLastPathComponent().appendingPathComponent("cmux-remote", isDirectory: true)
+        guard FileManager.default.fileExists(atPath: legacy.path) else { return nil }
+        return MacStaleResidentStopper(directory: legacy, helpers: ["/Contents/Helpers/cmux-remote"])
+    }
+
+    /// Returns whether a matching resident was running and has been stopped.
+    @discardableResult func stop() async throws -> Bool {
+        let running = residentProcessIDs()
+        guard !running.isEmpty else { return false }
+        for pid in running { kill(pid, SIGTERM) }
         try await waitForLease()
         for pid in residentProcessIDs() { kill(pid, SIGKILL) }
         try await waitForLease()
+        return true
     }
 
-    /// Processes whose full command line is exactly this executable in resident mode for this state directory.
-    private func residentProcessIDs() -> [pid_t] {
-        // The renamed companion must also retire the helper installed by the
-        // previous app name. Only these two helper paths for this exact state
-        // directory match, never cmux itself.
+    /// Whether a `ps` command line is one of these helpers in resident mode for this exact state directory.
+    func matches(command: Substring) -> Bool {
         let suffix = " resident --state " + directory.path
-        let expected = ["/Contents/Helpers/term-remote", "/Contents/Helpers/cmux-remote"].map { $0 + suffix }
+        return helpers.contains { command.hasSuffix($0 + suffix) }
+    }
+
+    /// Processes whose full command line is exactly a bundled helper in resident mode for this state directory.
+    private func residentProcessIDs() -> [pid_t] {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/ps")
         process.arguments = ["-axww", "-o", "pid=,command="]
@@ -43,7 +62,7 @@ struct MacStaleResidentStopper: Sendable {
         guard process.terminationStatus == 0 else { return [] }
         return String(decoding: data, as: UTF8.self).split(separator: "\n").compactMap { line in
             let fields = line.split(maxSplits: 1, omittingEmptySubsequences: true) { $0 == " " }
-            guard fields.count == 2, expected.contains(where: { fields[1].hasSuffix($0) }), let pid = pid_t(fields[0]) else { return nil }
+            guard fields.count == 2, matches(command: fields[1]), let pid = pid_t(fields[0]) else { return nil }
             return pid
         }
     }

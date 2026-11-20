@@ -13,6 +13,9 @@ public actor MacResidentLauncher {
     private let spawn: @Sendable (URL, [String]) throws -> any RunningProcess
     /// Stops a running resident this launcher never spawned, so an upgraded bundled helper can replace it.
     private let stopStale: @Sendable () async throws -> Void
+    /// Stops the resident the CmuxRemote app left behind, which would otherwise keep the sharing port;
+    /// returns whether one was running.
+    private let retireLegacy: @Sendable () async throws -> Bool
     private var process: (any RunningProcess)?
     private var restartTimes: [Date] = []
     private var supervising = false
@@ -24,17 +27,25 @@ public actor MacResidentLauncher {
     public init(executable: URL, directory: URL, owner: any CmuxControlling) {
         self.init(executable: executable, directory: directory, owner: owner,
             spawn: { url, arguments in try SystemProcess(url: url, arguments: arguments) },
-            stopStale: { try await MacStaleResidentStopper(executable: executable, directory: directory).stop() })
+            stopStale: { try await MacStaleResidentStopper(directory: directory).stop() },
+            retireLegacy: { try await MacStaleResidentStopper.legacy(of: directory)?.stop() ?? false })
     }
     init(executable: URL, directory: URL, owner: any CmuxControlling,
          spawn: @escaping @Sendable (URL, [String]) throws -> any RunningProcess,
-         stopStale: @escaping @Sendable () async throws -> Void = {}) {
+         stopStale: @escaping @Sendable () async throws -> Void = {},
+         retireLegacy: @escaping @Sendable () async throws -> Bool = { false }) {
         self.executable = executable; self.directory = directory; self.owner = owner
-        self.spawn = spawn; self.stopStale = stopStale
+        self.spawn = spawn; self.stopStale = stopStale; self.retireLegacy = retireLegacy
     }
     public func ensureStarted() async throws {
+        // The previous app's resident outlives the app and keeps listening on the sharing port, so
+        // ours could run but never share. Best effort: a failure here does not block startup.
+        let retired = (try? await retireLegacy()) ?? false
         let availability = await ownerAvailability()
-        guard availability != .current else { return }
+        guard availability != .current else {
+            if retired { await resumeSharingAfterPortConflict() }
+            return
+        }
         if process?.isRunning == true {
             // A child this launcher started is still coming up; only a stale owner justifies replacing it.
             guard availability == .stale else { throw BridgeError("resident_starting", "The resident service is starting.") }
@@ -91,6 +102,14 @@ public actor MacResidentLauncher {
             // The new resident publishes a fresh owner socket, so its readers have to attach again.
             await afterRestart()
         }
+    }
+    /// A running resident whose sharing failed while the old resident held the port restores it now the port is free.
+    ///
+    /// Only a start that failed is retried; sharing the owner turned off stays off.
+    private func resumeSharingAfterPortConflict() async {
+        guard let status = try? await owner.request("bridge.status", params: [:]),
+              status["state"].string == "stopped", status["error_code"].string == "sharing_start_failed" else { return }
+        _ = try? await owner.request("bridge.start", params: [:])
     }
     /// Whether a restart is worth trying; a setup that was never completed needs the person, not another launch.
     private func shouldKeepTryingAfterFailure() async -> Bool {
