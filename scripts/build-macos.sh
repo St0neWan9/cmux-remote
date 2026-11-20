@@ -7,8 +7,8 @@ swift build --jobs 6 --product term-remote
 ln -sf term-remote .build/debug/cmux-remote
 # Remove only this task's generated app product so old PlugIns embedding cannot
 # survive a transition to ExtensionKit's Extensions directory.
-rm -rf "$PWD/.build/macos/Build/Products/Debug/CmuxRemoteMac.app" "$PWD/.build/macos/Build/Products/Debug/Cmux Remote.app" "$PWD/.build/macos/Build/Products/Debug/CmuxRemote.app" "$PWD/.build/macos/Build/Products/Debug/TermRemote.app"
-xcodebuild -project mac/CmuxRemoteMac.xcodeproj -scheme CmuxRemoteMac \
+rm -rf "$PWD/.build/macos/Build/Products/Debug/TermRemoteMac.app" "$PWD/.build/macos/Build/Products/Debug/Cmux Remote.app" "$PWD/.build/macos/Build/Products/Debug/TermRemote.app" "$PWD/.build/macos/Build/Products/Debug/TermRemote.app"
+xcodebuild -project mac/TermRemoteMac.xcodeproj -scheme TermRemoteMac \
   -configuration Debug -destination 'platform=macOS' -derivedDataPath .build/macos \
   CODE_SIGN_IDENTITY="${CMUX_REMOTE_MAC_SIGNING_IDENTITY:--}" CODE_SIGN_STYLE=Manual CODE_SIGNING_ALLOWED=YES ONLY_ACTIVE_ARCH=YES build
 app="$PWD/.build/macos/Build/Products/Debug/TermRemote.app"

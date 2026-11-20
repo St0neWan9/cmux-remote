@@ -1,6 +1,6 @@
 import SwiftUI
 import CmuxAgentChat
-import CmuxRemoteCore
+import TermRemoteCore
 
 /// Immutable rows distinguish the user's bubble from full-width agent prose.
 struct MessageRow: View {

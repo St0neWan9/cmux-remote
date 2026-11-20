@@ -1,5 +1,5 @@
 import Foundation
-import CmuxRemoteClient
+import TermRemoteClient
 
 /// Paces automatic redials of lost Macs: at once when a working link drops, then after growing pauses.
 ///

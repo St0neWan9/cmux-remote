@@ -1,6 +1,6 @@
 import SwiftUI
-import CmuxRemoteCore
-import CmuxRemoteClient
+import TermRemoteCore
+import TermRemoteClient
 
 /// A provider-neutral terminal without a proved Agent. It is a bounded text
 /// screen, not a terminal emulator, and every input is an explicit operation.

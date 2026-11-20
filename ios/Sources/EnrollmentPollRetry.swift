@@ -1,5 +1,5 @@
 import Foundation
-import CmuxRemoteCore
+import TermRemoteCore
 
 /// Whether a failed enrollment status poll is worth asking again until the request expires. The poll only reads,
 /// so a link that dropped mid-request is safe to repeat; the client reports every POST lost in flight as

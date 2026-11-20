@@ -31,7 +31,7 @@ if not device or not device['name'].startswith('cmux-remote-') or device['state'
     parser.error('Use an already booted, task-owned cmux-remote Simulator')
 root = Path(__file__).resolve().parents[1]
 derived = root / '.build/ios-navigation-tests'
-command = ['xcodebuild', '-project', 'ios/CmuxRemote.xcodeproj', '-scheme', 'CmuxRemote',
+command = ['xcodebuild', '-project', 'ios/TermRemote.xcodeproj', '-scheme', 'TermRemote',
            '-configuration', args.configuration, '-destination', f'platform=iOS Simulator,id={args.device},arch={args.arch}',
            '-derivedDataPath', str(derived), '-parallel-testing-enabled', 'NO', 'ONLY_ACTIVE_ARCH=YES',
            f'ARCHS={args.arch}', 'CODE_SIGNING_ALLOWED=NO']
@@ -40,12 +40,12 @@ run_file = max((derived / 'Build/Products').glob('*.xctestrun'), key=lambda p: p
 configuration = plistlib.loads(run_file.read_bytes())
 if args.fixture:
     fixture = args.fixture.resolve(strict=True)
-    configuration['CmuxRemoteUITests'].setdefault('EnvironmentVariables', {})['CMUX_REMOTE_TEST_PAIRING_PATH'] = str(fixture)
+    configuration['TermRemoteUITests'].setdefault('EnvironmentVariables', {})['CMUX_REMOTE_TEST_PAIRING_PATH'] = str(fixture)
 else:
     # UI tests need a deterministic backend; never substitute the user's live agent.
-    configuration['CmuxRemoteUITests']['SkipTestIdentifiers'] = ['MobileGestureUITests']
+    configuration['TermRemoteUITests']['SkipTestIdentifiers'] = ['MobileGestureUITests']
 if extra:
-    configuration['CmuxRemoteUITests'].setdefault('EnvironmentVariables', {}).update(extra)
+    configuration['TermRemoteUITests'].setdefault('EnvironmentVariables', {}).update(extra)
 run_file.write_bytes(plistlib.dumps(configuration))
 container_result = subprocess.run(['xcrun', 'simctl', 'get_app_container', args.device,
                                    'cmux-remote.mobile', 'data'], capture_output=True, text=True)

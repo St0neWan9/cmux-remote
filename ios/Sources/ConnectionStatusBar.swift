@@ -1,5 +1,5 @@
 import SwiftUI
-import CmuxRemoteClient
+import TermRemoteClient
 
 /// A link that is not up is shown at the top of the page until it is: dialing turns, a failure offers a retry.
 struct ConnectionStatusBar: View {

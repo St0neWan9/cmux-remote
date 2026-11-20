@@ -1,8 +1,8 @@
 import XCTest
-import CmuxRemoteCore
-import CmuxRemoteClient
+import TermRemoteCore
+import TermRemoteClient
 import CmuxAgentChat
-@testable import CmuxRemote
+@testable import TermRemote
 
 /// What a conversation's refresh does with the pages the Bridge hands it.
 ///

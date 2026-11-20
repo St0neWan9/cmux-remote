@@ -1,5 +1,5 @@
 import Foundation
-import CmuxRemoteCore
+import TermRemoteCore
 
 /// The id lookups a timeline needs, built once per change rather than once per body evaluation.
 ///

@@ -1,5 +1,5 @@
 import UIKit
-import CmuxRemoteCore
+import TermRemoteCore
 
 /// Column widths for a Markdown table that fits its message: columns wrap down to their longest
 /// unbreakable piece before the table is allowed to grow wider than the space it is given.

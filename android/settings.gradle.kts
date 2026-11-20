@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "CmuxRemote"
+rootProject.name = "TermRemote"
 include(":app")

@@ -1,7 +1,7 @@
 import Foundation
 import ImageIO
 import Observation
-import CmuxRemoteCore
+import TermRemoteCore
 
 /// Owns a single bounded image read, with the same navigation/background cancellation policy as text.
 @MainActor @Observable final class HistoricalImageModel {

@@ -1,5 +1,5 @@
 import Foundation
-import CmuxRemoteCore
+import TermRemoteCore
 
 /// A conversation together with the Mac that owns it; IDs only need to be unique within one Mac.
 struct HostedSession: Identifiable {

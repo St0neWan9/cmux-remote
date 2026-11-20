@@ -1,5 +1,5 @@
 import XCTest
-@testable import CmuxRemote
+@testable import TermRemote
 
 /// Finished and running turns both spell their duration the way the terminal does.
 @MainActor

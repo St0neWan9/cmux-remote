@@ -1,5 +1,5 @@
 import Foundation
-import CmuxRemoteCore
+import TermRemoteCore
 
 /// Selectable Markdown segments preserve the original code inside each fence.
 struct MarkdownBlock: Identifiable {

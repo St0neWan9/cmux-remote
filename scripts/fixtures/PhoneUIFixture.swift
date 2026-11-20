@@ -1,6 +1,6 @@
 import Foundation
-import CmuxRemoteCore
-import CmuxRemoteBridge
+import TermRemoteCore
+import TermRemoteBridge
 
 /// Deterministic UI-only backend. Decisions update this actor's fixture data, never cmux or an agent.
 private actor PhoneUIBackend: CmuxControlling {

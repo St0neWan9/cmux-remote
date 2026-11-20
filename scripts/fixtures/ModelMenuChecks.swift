@@ -1,6 +1,6 @@
 import Foundation
-import CmuxRemoteCore
-import CmuxRemoteClient
+import TermRemoteCore
+import TermRemoteClient
 
 /// The model menu belongs to the Mac and the agent: one conversation's read serves every other one.
 enum ModelMenuChecks {

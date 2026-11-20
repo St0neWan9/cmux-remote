@@ -1,5 +1,5 @@
 import Foundation
-import CmuxRemoteCore
+import TermRemoteCore
 
 /// The model choices each Mac offers per agent, shared by every conversation on this phone.
 ///

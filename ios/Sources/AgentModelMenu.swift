@@ -1,5 +1,5 @@
 import SwiftUI
-import CmuxRemoteCore
+import TermRemoteCore
 
 /// The agent and model under the conversation's title; tapped, it switches the model with the agent's own command.
 ///

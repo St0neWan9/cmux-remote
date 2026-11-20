@@ -1,6 +1,6 @@
 import SwiftUI
-import CmuxRemoteCore
-import CmuxRemoteClient
+import TermRemoteCore
+import TermRemoteClient
 
 /// Details stay accessible behind one quiet summary instead of filling the conversation with cards.
 struct ActivityGroupView: View {

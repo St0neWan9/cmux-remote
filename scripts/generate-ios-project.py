@@ -7,7 +7,7 @@ import re
 
 root = Path(__file__).resolve().parents[1]
 ios = root / 'ios'
-project = ios / 'CmuxRemote.xcodeproj'
+project = ios / 'TermRemote.xcodeproj'
 project.mkdir(exist_ok=True)
 release = json.loads((ios / 'Release.json').read_text())
 for field, pattern in {'bundle_id': r'[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+',
@@ -37,7 +37,7 @@ for locale in ('en', 'zh-Hans'):
     locale_refs.append(add('locale:' + locale, f'isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "{locale}"; path = "Resources/{locale}.lproj/Localizable.strings"; sourceTree = "<group>";'))
 variant = add('strings', f'isa = PBXVariantGroup; children = ({", ".join(locale_refs)}); name = Localizable.strings; sourceTree = "<group>";')
 strings_build = add('strings-build', f'isa = PBXBuildFile; fileRef = {variant};')
-product = add('product', 'isa = PBXFileReference; explicitFileType = wrapper.application; path = CmuxRemote.app; sourceTree = BUILT_PRODUCTS_DIR;')
+product = add('product', 'isa = PBXFileReference; explicitFileType = wrapper.application; path = TermRemote.app; sourceTree = BUILT_PRODUCTS_DIR;')
 info_locale_refs = []
 for locale in ('en', 'zh-Hans'):
     info_locale_refs.append(add('info-locale:' + locale, f'isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "{locale}"; path = "Resources/{locale}.lproj/InfoPlist.strings"; sourceTree = "<group>";'))
@@ -52,19 +52,19 @@ for path in sorted((ios / 'Tests').glob('*.swift')):
     ref = add(str(path.relative_to(ios)), f'isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Tests/{path.name}"; sourceTree = "<group>";')
     test_refs.append(ref)
     test_builds.append(add('test-build:' + str(path.relative_to(ios)), f'isa = PBXBuildFile; fileRef = {ref};'))
-test_product = add('test-product', 'isa = PBXFileReference; explicitFileType = wrapper.cfbundle; path = CmuxRemoteTests.xctest; sourceTree = BUILT_PRODUCTS_DIR;')
+test_product = add('test-product', 'isa = PBXFileReference; explicitFileType = wrapper.cfbundle; path = TermRemoteTests.xctest; sourceTree = BUILT_PRODUCTS_DIR;')
 ui_refs, ui_builds = [], []
 for path in sorted((ios / 'UITests').glob('*.swift')):
     ref = add(str(path.relative_to(ios)), f'isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "UITests/{path.name}"; sourceTree = "<group>";')
     ui_refs.append(ref)
     ui_builds.append(add('ui-build:' + str(path.relative_to(ios)), f'isa = PBXBuildFile; fileRef = {ref};'))
-ui_product = add('ui-product', 'isa = PBXFileReference; explicitFileType = wrapper.cfbundle; path = CmuxRemoteUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR;')
+ui_product = add('ui-product', 'isa = PBXFileReference; explicitFileType = wrapper.cfbundle; path = TermRemoteUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR;')
 products = add('products', f'isa = PBXGroup; children = ({product}, {test_product}, {ui_product}); name = Products; sourceTree = "<group>";')
 main = add('main', f'isa = PBXGroup; children = ({", ".join(source_refs + test_refs + ui_refs + [variant, info_variant, asset_ref, privacy_ref, products])}); sourceTree = "<group>";')
 package = add('package', 'isa = XCLocalSwiftPackageReference; relativePath = "..";')
 vendor_package = add('vendor-package', 'isa = XCLocalSwiftPackageReference; relativePath = "../Vendor/CmuxAgentChat";')
 deps, frameworks = [], []
-for name in ('CmuxRemoteCore', 'CmuxRemoteClient', 'CmuxAgentChat'):
+for name in ('TermRemoteCore', 'TermRemoteClient', 'CmuxAgentChat'):
     dep = add('dep:' + name, f'isa = XCSwiftPackageProductDependency; productName = {name};')
     deps.append(dep)
     frameworks.append(add('framework:' + name, f'isa = PBXBuildFile; productRef = {dep};'))
@@ -91,32 +91,32 @@ for config in ('Debug', 'Release'):
         INFOPLIST_KEY_UILaunchScreen_Generation = YES;
         SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; TARGETED_DEVICE_FAMILY = "1,2";
         {signing} DEVELOPMENT_TEAM = {release["team_id"]}; ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon; MARKETING_VERSION = {release["version"]}; CURRENT_PROJECT_VERSION = 1;
-        CODE_SIGN_ENTITLEMENTS = CmuxRemote.entitlements;
+        CODE_SIGN_ENTITLEMENTS = TermRemote.entitlements;
         SWIFT_STRICT_CONCURRENCY = complete;
     }};'''))
 project_list = add('project-list', f'isa = XCConfigurationList; buildConfigurations = ({", ".join(project_configs)}); defaultConfigurationName = Release; defaultConfigurationIsVisible = 0;')
 target_list = add('target-list', f'isa = XCConfigurationList; buildConfigurations = ({", ".join(target_configs)}); defaultConfigurationName = Release; defaultConfigurationIsVisible = 0;')
-target = add('target', f'isa = PBXNativeTarget; name = CmuxRemote; productName = CmuxRemote; productType = "com.apple.product-type.application"; productReference = {product}; buildConfigurationList = {target_list}; buildPhases = ({sources}, {frameworks_phase}, {resources}); buildRules = (); dependencies = (); packageProductDependencies = ({", ".join(deps)});')
+target = add('target', f'isa = PBXNativeTarget; name = TermRemote; productName = TermRemote; productType = "com.apple.product-type.application"; productReference = {product}; buildConfigurationList = {target_list}; buildPhases = ({sources}, {frameworks_phase}, {resources}); buildRules = (); dependencies = (); packageProductDependencies = ({", ".join(deps)});')
 test_configs = []
 for config in ('Debug', 'Release'):
-    test_configs.append(add('test-config:' + config, f'isa = XCBuildConfiguration; name = {config}; buildSettings = {{ PRODUCT_NAME = "$(TARGET_NAME)"; PRODUCT_BUNDLE_IDENTIFIER = {release["bundle_id"]}.tests; GENERATE_INFOPLIST_FILE = YES; TEST_HOST = "$(BUILT_PRODUCTS_DIR)/CmuxRemote.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/CmuxRemote"; BUNDLE_LOADER = "$(TEST_HOST)"; SWIFT_STRICT_CONCURRENCY = complete; CODE_SIGN_STYLE = Automatic; DEVELOPMENT_TEAM = {release["team_id"]}; TARGETED_DEVICE_FAMILY = "1,2"; }};'))
+    test_configs.append(add('test-config:' + config, f'isa = XCBuildConfiguration; name = {config}; buildSettings = {{ PRODUCT_NAME = "$(TARGET_NAME)"; PRODUCT_BUNDLE_IDENTIFIER = {release["bundle_id"]}.tests; GENERATE_INFOPLIST_FILE = YES; TEST_HOST = "$(BUILT_PRODUCTS_DIR)/TermRemote.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/TermRemote"; BUNDLE_LOADER = "$(TEST_HOST)"; SWIFT_STRICT_CONCURRENCY = complete; CODE_SIGN_STYLE = Automatic; DEVELOPMENT_TEAM = {release["team_id"]}; TARGETED_DEVICE_FAMILY = "1,2"; }};'))
 test_list = add('test-list', f'isa = XCConfigurationList; buildConfigurations = ({", ".join(test_configs)}); defaultConfigurationName = Debug; defaultConfigurationIsVisible = 0;')
 test_sources = add('test-sources', f'isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = ({", ".join(test_builds)}); runOnlyForDeploymentPostprocessing = 0;')
-test_proxy = add('test-proxy', f'isa = PBXContainerItemProxy; containerPortal = {key("project")}; proxyType = 1; remoteGlobalIDString = {target}; remoteInfo = CmuxRemote;')
+test_proxy = add('test-proxy', f'isa = PBXContainerItemProxy; containerPortal = {key("project")}; proxyType = 1; remoteGlobalIDString = {target}; remoteInfo = TermRemote;')
 test_dependency = add('test-dependency', f'isa = PBXTargetDependency; target = {target}; targetProxy = {test_proxy};')
-test_target = add('test-target', f'isa = PBXNativeTarget; name = CmuxRemoteTests; productName = CmuxRemoteTests; productType = "com.apple.product-type.bundle.unit-test"; productReference = {test_product}; buildConfigurationList = {test_list}; buildPhases = ({test_sources}); buildRules = (); dependencies = ({test_dependency});')
+test_target = add('test-target', f'isa = PBXNativeTarget; name = TermRemoteTests; productName = TermRemoteTests; productType = "com.apple.product-type.bundle.unit-test"; productReference = {test_product}; buildConfigurationList = {test_list}; buildPhases = ({test_sources}); buildRules = (); dependencies = ({test_dependency});')
 ui_configs = []
 for config in ('Debug', 'Release'):
-    ui_configs.append(add('ui-config:' + config, f'isa = XCBuildConfiguration; name = {config}; buildSettings = {{ PRODUCT_NAME = "$(TARGET_NAME)"; PRODUCT_BUNDLE_IDENTIFIER = {release["bundle_id"]}.uitests; GENERATE_INFOPLIST_FILE = YES; TEST_TARGET_NAME = CmuxRemote; CODE_SIGN_STYLE = Automatic; DEVELOPMENT_TEAM = {release["team_id"]}; TARGETED_DEVICE_FAMILY = "1,2"; }};'))
+    ui_configs.append(add('ui-config:' + config, f'isa = XCBuildConfiguration; name = {config}; buildSettings = {{ PRODUCT_NAME = "$(TARGET_NAME)"; PRODUCT_BUNDLE_IDENTIFIER = {release["bundle_id"]}.uitests; GENERATE_INFOPLIST_FILE = YES; TEST_TARGET_NAME = TermRemote; CODE_SIGN_STYLE = Automatic; DEVELOPMENT_TEAM = {release["team_id"]}; TARGETED_DEVICE_FAMILY = "1,2"; }};'))
 ui_list = add('ui-list', f'isa = XCConfigurationList; buildConfigurations = ({", ".join(ui_configs)}); defaultConfigurationName = Debug; defaultConfigurationIsVisible = 0;')
 ui_sources = add('ui-sources', f'isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = ({", ".join(ui_builds)}); runOnlyForDeploymentPostprocessing = 0;')
-ui_target = add('ui-target', f'isa = PBXNativeTarget; name = CmuxRemoteUITests; productName = CmuxRemoteUITests; productType = "com.apple.product-type.bundle.ui-testing"; productReference = {ui_product}; buildConfigurationList = {ui_list}; buildPhases = ({ui_sources}); buildRules = (); dependencies = ({test_dependency});')
+ui_target = add('ui-target', f'isa = PBXNativeTarget; name = TermRemoteUITests; productName = TermRemoteUITests; productType = "com.apple.product-type.bundle.ui-testing"; productReference = {ui_product}; buildConfigurationList = {ui_list}; buildPhases = ({ui_sources}); buildRules = (); dependencies = ({test_dependency});')
 project_id = add('project', f'isa = PBXProject; attributes = {{ LastUpgradeCheck = 2660; }}; buildConfigurationList = {project_list}; compatibilityVersion = "Xcode 14.0"; developmentRegion = en; knownRegions = (en, "zh-Hans", Base); mainGroup = {main}; productRefGroup = {products}; projectDirPath = ""; projectRoot = ""; packageReferences = ({package}, {vendor_package}); targets = ({target}, {test_target}, {ui_target});')
 body = '\n'.join(f'{ident} = {{ {value} }};' for ident, value in objects.items())
 (project / 'project.pbxproj').write_text(f'// !$*UTF8*$!\n{{ archiveVersion = 1; classes = {{}}; objectVersion = 56; objects = {{\n{body}\n}}; rootObject = {project_id}; }}\n')
 schemes = project / 'xcshareddata/xcschemes'
 schemes.mkdir(parents=True, exist_ok=True)
-(schemes / 'CmuxRemote.xcscheme').write_text(f'''<?xml version="1.0" encoding="UTF-8"?>
-<Scheme LastUpgradeVersion="2660" version="1.3"><BuildAction parallelizeBuildables="YES" buildImplicitDependencies="YES"><BuildActionEntries><BuildActionEntry buildForTesting="YES" buildForRunning="YES" buildForProfiling="YES" buildForArchiving="YES" buildForAnalyzing="YES"><BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="{target}" BuildableName="CmuxRemote.app" BlueprintName="CmuxRemote" ReferencedContainer="container:CmuxRemote.xcodeproj"/></BuildActionEntry></BuildActionEntries></BuildAction><TestAction buildConfiguration="Debug" selectedDebuggerIdentifier="Xcode.DebuggerFoundation.Debugger.LLDB" selectedLauncherIdentifier="Xcode.IDEFoundation.Launcher.LLDB"><Testables><TestableReference skipped="NO"><BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="{test_target}" BuildableName="CmuxRemoteTests.xctest" BlueprintName="CmuxRemoteTests" ReferencedContainer="container:CmuxRemote.xcodeproj"/></TestableReference><TestableReference skipped="NO"><BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="{ui_target}" BuildableName="CmuxRemoteUITests.xctest" BlueprintName="CmuxRemoteUITests" ReferencedContainer="container:CmuxRemote.xcodeproj"/></TestableReference></Testables></TestAction><LaunchAction buildConfiguration="Debug" selectedDebuggerIdentifier="Xcode.DebuggerFoundation.Debugger.LLDB" selectedLauncherIdentifier="Xcode.IDEFoundation.Launcher.LLDB"><BuildableProductRunnable runnableDebuggingMode="0"><BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="{target}" BuildableName="CmuxRemote.app" BlueprintName="CmuxRemote" ReferencedContainer="container:CmuxRemote.xcodeproj"/></BuildableProductRunnable></LaunchAction><ArchiveAction buildConfiguration="Release" revealArchiveInOrganizer="YES"/></Scheme>
+(schemes / 'TermRemote.xcscheme').write_text(f'''<?xml version="1.0" encoding="UTF-8"?>
+<Scheme LastUpgradeVersion="2660" version="1.3"><BuildAction parallelizeBuildables="YES" buildImplicitDependencies="YES"><BuildActionEntries><BuildActionEntry buildForTesting="YES" buildForRunning="YES" buildForProfiling="YES" buildForArchiving="YES" buildForAnalyzing="YES"><BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="{target}" BuildableName="TermRemote.app" BlueprintName="TermRemote" ReferencedContainer="container:TermRemote.xcodeproj"/></BuildActionEntry></BuildActionEntries></BuildAction><TestAction buildConfiguration="Debug" selectedDebuggerIdentifier="Xcode.DebuggerFoundation.Debugger.LLDB" selectedLauncherIdentifier="Xcode.IDEFoundation.Launcher.LLDB"><Testables><TestableReference skipped="NO"><BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="{test_target}" BuildableName="TermRemoteTests.xctest" BlueprintName="TermRemoteTests" ReferencedContainer="container:TermRemote.xcodeproj"/></TestableReference><TestableReference skipped="NO"><BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="{ui_target}" BuildableName="TermRemoteUITests.xctest" BlueprintName="TermRemoteUITests" ReferencedContainer="container:TermRemote.xcodeproj"/></TestableReference></Testables></TestAction><LaunchAction buildConfiguration="Debug" selectedDebuggerIdentifier="Xcode.DebuggerFoundation.Debugger.LLDB" selectedLauncherIdentifier="Xcode.IDEFoundation.Launcher.LLDB"><BuildableProductRunnable runnableDebuggingMode="0"><BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="{target}" BuildableName="TermRemote.app" BlueprintName="TermRemote" ReferencedContainer="container:TermRemote.xcodeproj"/></BuildableProductRunnable></LaunchAction><ArchiveAction buildConfiguration="Release" revealArchiveInOrganizer="YES"/></Scheme>
 ''')
 print(project)

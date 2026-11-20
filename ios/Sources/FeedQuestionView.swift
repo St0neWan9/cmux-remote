@@ -1,5 +1,5 @@
 import SwiftUI
-import CmuxRemoteCore
+import TermRemoteCore
 
 /// Collects one label-based answer per question, in the order supplied by cmux.
 struct FeedQuestionView: View {

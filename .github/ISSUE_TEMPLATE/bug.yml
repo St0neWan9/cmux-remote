@@ -22,7 +22,7 @@ body:
     id: version
     attributes:
       label: Version
-      description: Cmux Remote ▸ About, the TestFlight build, or `CmuxRemote` in the Mac menu bar.
+      description: Cmux Remote ▸ About, the TestFlight build, or `TermRemote` in the Mac menu bar.
       placeholder: "e.g. 0.1.5 (43)"
     validations:
       required: true

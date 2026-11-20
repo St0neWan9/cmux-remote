@@ -1,8 +1,8 @@
 import SwiftUI
 import PhotosUI
 import UniformTypeIdentifiers
-import CmuxRemoteCore
-import CmuxRemoteClient
+import TermRemoteCore
+import TermRemoteClient
 
 struct ConversationView: View {
     @State private var model: ConversationModel

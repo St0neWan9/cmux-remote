@@ -1,6 +1,6 @@
 import AppKit
 import SwiftUI
-import CmuxRemoteMac
+import TermRemoteMac
 
 /// A read-only, selectable monospaced log. New lines are followed only while the view is already scrolled to
 /// the end, and they wait while the user has text selected so a refresh never drops a selection.

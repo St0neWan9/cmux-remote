@@ -1,6 +1,6 @@
 import XCTest
-import CmuxRemoteCore
-@testable import CmuxRemote
+import TermRemoteCore
+@testable import TermRemote
 
 /// Reopening a task's page shows the stored copy before the read that confirms it.
 final class BackgroundTaskCacheTests: XCTestCase {

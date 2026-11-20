@@ -1,5 +1,5 @@
 import SwiftUI
-import CmuxRemoteCore
+import TermRemoteCore
 
 /// A pipe table as wide as its message: rows divided by hairlines, columns wrapping their text,
 /// and a sideways scroll only when the columns cannot wrap any narrower.

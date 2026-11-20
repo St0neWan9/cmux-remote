@@ -2,7 +2,7 @@
 import Foundation
 import AVFAudio
 import Speech
-import CmuxRemoteCore
+import TermRemoteCore
 
 /// Native on-device speech only; unavailable locale/models never fall back to server recognition.
 @MainActor final class SpeechInputService: SpeechInputServing {

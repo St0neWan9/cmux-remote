@@ -1,5 +1,5 @@
 import SwiftUI
-import CmuxRemoteCore
+import TermRemoteCore
 
 /// How long a finished turn took, spelled as the terminal spells it: `Worked for 3m 47s`.
 struct ResponseRunLabel: View {

@@ -1,5 +1,5 @@
 import SwiftUI
-import CmuxRemoteMac
+import TermRemoteMac
 
 /// Native preference rows for optional cloud reachability; secrets remain in private local files.
 struct RelaySettingsRows: View {

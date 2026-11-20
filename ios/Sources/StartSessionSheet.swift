@@ -1,5 +1,5 @@
 import SwiftUI
-import CmuxRemoteCore
+import TermRemoteCore
 
 /// New session: choose a workspace (unless one was chosen from its group), then a folder and an agent.
 struct StartSessionSheet: View {

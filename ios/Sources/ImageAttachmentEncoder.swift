@@ -1,7 +1,7 @@
 import Foundation
 import ImageIO
 import UniformTypeIdentifiers
-import CmuxRemoteCore
+import TermRemoteCore
 
 /// Downsample off the UI actor and strip source metadata before upload.
 struct ImageAttachmentEncoder: Sendable {

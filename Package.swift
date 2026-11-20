@@ -5,11 +5,11 @@ let package = Package(
     name: "term-remote",
     platforms: [.macOS(.v14), .iOS(.v17)],
     products: [
-        .executable(name: "term-remote", targets: ["CmuxRemoteCLI"]),
-        .library(name: "CmuxRemoteClient", targets: ["CmuxRemoteClient"]),
-        .library(name: "CmuxRemoteMac", targets: ["CmuxRemoteMac"]),
-        .library(name: "CmuxRemoteBridge", targets: ["CmuxRemoteBridge"]),
-        .library(name: "CmuxRemoteCore", targets: ["CmuxRemoteCore"])
+        .executable(name: "term-remote", targets: ["TermRemoteCLI"]),
+        .library(name: "TermRemoteClient", targets: ["TermRemoteClient"]),
+        .library(name: "TermRemoteMac", targets: ["TermRemoteMac"]),
+        .library(name: "TermRemoteBridge", targets: ["TermRemoteBridge"]),
+        .library(name: "TermRemoteCore", targets: ["TermRemoteCore"])
     ],
     dependencies: [
         .package(path: "Vendor/CmuxAgentChat"),
@@ -19,13 +19,13 @@ let package = Package(
         .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", exact: "1.11.2")
     ],
     targets: [
-        .target(name: "CmuxRemoteCore", dependencies: [.product(name: "CmuxAgentChat", package: "CmuxAgentChat")]),
+        .target(name: "TermRemoteCore", dependencies: [.product(name: "CmuxAgentChat", package: "CmuxAgentChat")]),
         .target(name: "CBridgeDiscovery"),
-        .target(name: "CmuxRemoteBridge", dependencies: ["CmuxRemoteCore", "CBridgeDiscovery", .product(name: "SwiftTerm", package: "SwiftTerm"), .product(name: "CmuxTerminalReplay", package: "CmuxTerminalReplay"), .product(name: "NIOCore", package: "swift-nio"), .product(name: "NIOPosix", package: "swift-nio"), .product(name: "NIOHTTP1", package: "swift-nio"), .product(name: "NIOWebSocket", package: "swift-nio"), .product(name: "NIOSSL", package: "swift-nio-ssl")]),
-        .target(name: "CmuxRemoteClient", dependencies: ["CmuxRemoteCore"]),
-        .target(name: "CmuxRemoteMac", dependencies: ["CmuxRemoteCore", "CmuxRemoteClient", "CmuxRemoteBridge"]),
-        .executableTarget(name: "CmuxRemoteCLI", dependencies: ["CmuxRemoteBridge", "CmuxRemoteMac", "CmuxRemoteClient"]),
-        .testTarget(name: "CmuxRemoteTests", dependencies: ["CmuxRemoteCore", "CmuxRemoteBridge", "CmuxRemoteClient", "CmuxRemoteMac", .product(name: "CmuxTerminalReplay", package: "CmuxTerminalReplay")])
+        .target(name: "TermRemoteBridge", dependencies: ["TermRemoteCore", "CBridgeDiscovery", .product(name: "SwiftTerm", package: "SwiftTerm"), .product(name: "CmuxTerminalReplay", package: "CmuxTerminalReplay"), .product(name: "NIOCore", package: "swift-nio"), .product(name: "NIOPosix", package: "swift-nio"), .product(name: "NIOHTTP1", package: "swift-nio"), .product(name: "NIOWebSocket", package: "swift-nio"), .product(name: "NIOSSL", package: "swift-nio-ssl")]),
+        .target(name: "TermRemoteClient", dependencies: ["TermRemoteCore"]),
+        .target(name: "TermRemoteMac", dependencies: ["TermRemoteCore", "TermRemoteClient", "TermRemoteBridge"]),
+        .executableTarget(name: "TermRemoteCLI", dependencies: ["TermRemoteBridge", "TermRemoteMac", "TermRemoteClient"]),
+        .testTarget(name: "TermRemoteTests", dependencies: ["TermRemoteCore", "TermRemoteBridge", "TermRemoteClient", "TermRemoteMac", .product(name: "CmuxTerminalReplay", package: "CmuxTerminalReplay")])
     ],
     swiftLanguageModes: [.v6]
 )

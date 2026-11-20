@@ -1,6 +1,6 @@
 import Foundation
 import Security
-import CmuxRemoteCore
+import TermRemoteCore
 
 /// Pairing credentials remain in device-only Keychain storage.
 struct PairingStore {

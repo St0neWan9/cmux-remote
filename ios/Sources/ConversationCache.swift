@@ -1,6 +1,6 @@
 import Foundation
 import Darwin
-import CmuxRemoteCore
+import TermRemoteCore
 
 /// The last read of a conversation, kept on the phone so opening a page shows its content at once.
 ///

@@ -1,5 +1,5 @@
 import SwiftUI
-import CmuxRemoteCore
+import TermRemoteCore
 
 /// The project folders the Mac found in the chosen workspace.
 struct StartRootsView: View {

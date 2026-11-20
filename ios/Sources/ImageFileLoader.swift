@@ -1,5 +1,5 @@
 import Foundation
-import CmuxRemoteCore
+import TermRemoteCore
 
 /// Reads only an explicitly user-selected security-scoped image file.
 struct ImageFileLoader: Sendable {

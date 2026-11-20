@@ -1,5 +1,5 @@
 import SwiftUI
-import CmuxRemoteCore
+import TermRemoteCore
 
 /// One folder inside a launch root: start here with the chosen agent, or open a subfolder.
 struct StartFolderView: View {

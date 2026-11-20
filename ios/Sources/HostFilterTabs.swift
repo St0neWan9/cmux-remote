@@ -1,7 +1,7 @@
 import SwiftUI
 import UniformTypeIdentifiers
-import CmuxRemoteCore
-import CmuxRemoteClient
+import TermRemoteCore
+import TermRemoteClient
 
 /// Which Mac's conversations the list shows, with each Mac's link state at a glance, and under each Mac's
 /// arrow the workspaces it shares. A Mac being dialed turns, one that cannot be reached shows a red dot, and a

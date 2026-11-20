@@ -1,5 +1,5 @@
 import SwiftUI
-import CmuxRemoteCore
+import TermRemoteCore
 
 /// A sent prompt drawn as the user's bubble until the transcript's own copy replaces it.
 struct OutgoingPromptRow: View {

@@ -1,5 +1,5 @@
 import Foundation
-import CmuxRemoteCore
+import TermRemoteCore
 
 /// Conversations grouped by their cmux workspace, in the Mac's workspace order; unbound ones come last.
 struct SessionWorkspaceGroup: Identifiable {

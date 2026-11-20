@@ -1,6 +1,6 @@
 import XCTest
 import SwiftUI
-@testable import CmuxRemote
+@testable import TermRemote
 
 /// Hosted UIKit/SwiftUI checks exercise the actual navigation and surface components.
 @MainActor

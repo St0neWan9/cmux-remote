@@ -1,5 +1,5 @@
 import Foundation
-import CmuxRemoteCore
+import TermRemoteCore
 
 struct MacCapabilityPresentation {
     func name(_ capability: ClientCapability) -> String {

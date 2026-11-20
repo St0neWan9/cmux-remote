@@ -1,7 +1,7 @@
 import SwiftUI
 import AppKit
-import CmuxRemoteCore
-import CmuxRemoteMac
+import TermRemoteCore
+import TermRemoteMac
 
 /// New-device pairing: an explicit workspace allow-list, then an expiring QR for exactly that scope.
 struct PairingSettingsView: View {

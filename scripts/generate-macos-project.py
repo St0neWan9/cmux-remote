@@ -7,7 +7,7 @@ import re
 
 root = Path(__file__).resolve().parents[1]
 mac = root / 'mac'
-project = mac / 'CmuxRemoteMac.xcodeproj'
+project = mac / 'TermRemoteMac.xcodeproj'
 project.mkdir(exist_ok=True)
 objects = {}
 def add(name, value):
@@ -21,7 +21,7 @@ for config in ('Debug', 'Release'):
     flags = 'SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG; SWIFT_OPTIMIZATION_LEVEL = "-Onone";' if config == 'Debug' else 'SWIFT_OPTIMIZATION_LEVEL = "-O";'
     project_configs.append(add('project-config:' + config, f'isa = XCBuildConfiguration; name = {config}; buildSettings = {{ SDKROOT = macosx; MACOSX_DEPLOYMENT_TARGET = 14.0; SWIFT_VERSION = 6.0; CLANG_ENABLE_MODULES = YES; {flags} }};'))
 
-for target_name, folder, suffix, extension in [('CmuxRemoteMac', 'Companion', '', False)]:
+for target_name, folder, suffix, extension in [('TermRemoteMac', 'Companion', '', False)]:
     source_builds, refs = [], []
     for path in sorted([*(mac / folder).glob('*.swift'), *(mac / 'Shared').glob('*.swift')]):
         relative = str(path.relative_to(mac))
@@ -38,7 +38,7 @@ for target_name, folder, suffix, extension in [('CmuxRemoteMac', 'Companion', ''
     product = add(target_name + ':product', f'isa = PBXFileReference; explicitFileType = {"wrapper.app-extension" if extension else "wrapper.application"}; path = "{product_name}"; sourceTree = BUILT_PRODUCTS_DIR;')
     product_refs.append(product); all_refs.extend(refs)
     deps, frameworks = [], []
-    for name in (['CmuxRemoteMac', 'CmuxRemoteClient', 'CmuxRemoteCore', 'CmuxExtensionKit'] if extension else ['CmuxRemoteMac', 'CmuxRemoteBridge', 'CmuxRemoteClient', 'CmuxRemoteCore']):
+    for name in (['TermRemoteMac', 'TermRemoteClient', 'TermRemoteCore', 'CmuxExtensionKit'] if extension else ['TermRemoteMac', 'TermRemoteBridge', 'TermRemoteClient', 'TermRemoteCore']):
         dep = add(target_name + ':dep:' + name, f'isa = XCSwiftPackageProductDependency; productName = {name};')
         deps.append(dep); frameworks.append(add(target_name + ':framework:' + name, f'isa = PBXBuildFile; productRef = {dep};'))
     sources = add(target_name + ':sources', f'isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = ({", ".join(source_builds)}); runOnlyForDeploymentPostprocessing = 0;')
@@ -48,7 +48,7 @@ for target_name, folder, suffix, extension in [('CmuxRemoteMac', 'Companion', ''
     dependencies = []
     configs = []
     for config in ('Debug', 'Release'):
-        additional = 'APPLICATION_EXTENSION_API_ONLY = YES; SKIP_INSTALL = YES; ENABLE_APP_SANDBOX = YES; CODE_SIGN_ENTITLEMENTS = Extension/RemoteSidebar.entitlements;' if extension else 'ENABLE_APP_SANDBOX = NO; PRODUCT_MODULE_NAME = CmuxRemoteCompanionApp;'
+        additional = 'APPLICATION_EXTENSION_API_ONLY = YES; SKIP_INSTALL = YES; ENABLE_APP_SANDBOX = YES; CODE_SIGN_ENTITLEMENTS = Extension/RemoteSidebar.entitlements;' if extension else 'ENABLE_APP_SANDBOX = NO; PRODUCT_MODULE_NAME = TermRemoteCompanionApp;'
         configs.append(add(target_name + ':' + config, f'isa = XCBuildConfiguration; name = {config}; buildSettings = {{ PRODUCT_NAME = "{product_stem}"; PRODUCT_BUNDLE_IDENTIFIER = "cmux-remote.desktop{suffix}"; GENERATE_INFOPLIST_FILE = YES; INFOPLIST_FILE = {folder}/Info.plist; INFOPLIST_KEY_CFBundleDisplayName = "Term Remote"; CODE_SIGN_STYLE = Manual; CODE_SIGN_IDENTITY = "-"; CREATE_INFOPLIST_SECTION_IN_BINARY = YES; SWIFT_STRICT_CONCURRENCY = complete; MARKETING_VERSION = 0.1.0; CURRENT_PROJECT_VERSION = 1; {additional} }};'))
     config_list = add(target_name + ':config-list', f'isa = XCConfigurationList; buildConfigurations = ({", ".join(configs)}); defaultConfigurationName = Release; defaultConfigurationIsVisible = 0;')
     targets.append(add(target_name + ':target', f'isa = PBXNativeTarget; name = {target_name}; productName = {target_name}; productType = "com.apple.product-type.{"app-extension" if extension else "application"}"; productReference = {product}; buildConfigurationList = {config_list}; buildPhases = ({", ".join(phases)}); buildRules = (); dependencies = ({", ".join(dependencies)}); packageProductDependencies = ({", ".join(deps)});'))
@@ -60,7 +60,7 @@ project_id = add('project', f'isa = PBXProject; attributes = {{ LastUpgradeCheck
 body = '\n'.join(f'{ident} = {{ {value} }};' for ident, value in objects.items())
 (project / 'project.pbxproj').write_text(f'// !$*UTF8*$!\n{{ archiveVersion = 1; classes = {{}}; objectVersion = 56; objects = {{\n{body}\n}}; rootObject = {project_id}; }}\n')
 schemes = project / 'xcshareddata/xcschemes'; schemes.mkdir(parents=True, exist_ok=True)
-(schemes / 'CmuxRemoteMac.xcscheme').write_text(f'''<?xml version="1.0" encoding="UTF-8"?>
-<Scheme LastUpgradeVersion="2660" version="1.3"><BuildAction parallelizeBuildables="YES" buildImplicitDependencies="YES"><BuildActionEntries><BuildActionEntry buildForTesting="YES" buildForRunning="YES" buildForProfiling="YES" buildForArchiving="YES" buildForAnalyzing="YES"><BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="{targets[0]}" BuildableName="TermRemote.app" BlueprintName="CmuxRemoteMac" ReferencedContainer="container:CmuxRemoteMac.xcodeproj"/></BuildActionEntry></BuildActionEntries></BuildAction><LaunchAction buildConfiguration="Debug" selectedDebuggerIdentifier="Xcode.DebuggerFoundation.Debugger.LLDB" selectedLauncherIdentifier="Xcode.IDEFoundation.Launcher.LLDB"><BuildableProductRunnable runnableDebuggingMode="0"><BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="{targets[0]}" BuildableName="TermRemote.app" BlueprintName="CmuxRemoteMac" ReferencedContainer="container:CmuxRemoteMac.xcodeproj"/></BuildableProductRunnable></LaunchAction><ArchiveAction buildConfiguration="Release" revealArchiveInOrganizer="YES"/></Scheme>
+(schemes / 'TermRemoteMac.xcscheme').write_text(f'''<?xml version="1.0" encoding="UTF-8"?>
+<Scheme LastUpgradeVersion="2660" version="1.3"><BuildAction parallelizeBuildables="YES" buildImplicitDependencies="YES"><BuildActionEntries><BuildActionEntry buildForTesting="YES" buildForRunning="YES" buildForProfiling="YES" buildForArchiving="YES" buildForAnalyzing="YES"><BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="{targets[0]}" BuildableName="TermRemote.app" BlueprintName="TermRemoteMac" ReferencedContainer="container:TermRemoteMac.xcodeproj"/></BuildActionEntry></BuildActionEntries></BuildAction><LaunchAction buildConfiguration="Debug" selectedDebuggerIdentifier="Xcode.DebuggerFoundation.Debugger.LLDB" selectedLauncherIdentifier="Xcode.IDEFoundation.Launcher.LLDB"><BuildableProductRunnable runnableDebuggingMode="0"><BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="{targets[0]}" BuildableName="TermRemote.app" BlueprintName="TermRemoteMac" ReferencedContainer="container:TermRemoteMac.xcodeproj"/></BuildableProductRunnable></LaunchAction><ArchiveAction buildConfiguration="Release" revealArchiveInOrganizer="YES"/></Scheme>
 ''')
 print(project)

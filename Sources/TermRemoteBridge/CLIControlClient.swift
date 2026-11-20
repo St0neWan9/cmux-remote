@@ -1,0 +1,102 @@
+import Foundation
+import TermRemoteCore
+
+/// Invokes the official CLI's local RPC path so cmux retains its own socket authority.
+public struct CLIControlClient: CmuxControlling {
+    private let executable: URL
+    private let socketPath: String
+    private let environment: [String: String]?
+    /// How quickly a failed read must have failed for it to be worth one retry. A slower failure is a real
+    /// stall, and repeating it would push the request past the link's no-progress window.
+    private let retryWindow: Duration
+    public init(executable: URL, socketPath: String, environment: [String: String]? = nil, retryWindow: Duration = .seconds(6)) {
+        self.executable = executable; self.socketPath = socketPath; self.environment = environment; self.retryWindow = retryWindow
+    }
+    public func request(_ method: String, params: [String: JSONValue]) async throws -> JSONValue {
+        // cmux scopes `workspace.list` to one window, the key one. The phone and the owner's approval page
+        // list one Mac, not one window, so every open window is merged. An explicit window keeps its own answer.
+        if method == "workspace.list", params["window_id"] == nil, let merged = await everyWindowWorkspaces(params) { return merged }
+        return try await rpc(method, params: params)
+    }
+    /// Merges `workspace.list` across every open window, in window order. A window whose read fails is left
+    /// out instead of failing the whole list; fewer than two windows keeps the direct answer.
+    private func everyWindowWorkspaces(_ params: [String: JSONValue]) async -> JSONValue? {
+        guard let windows = try? await rpc("window.list", params: [:])["windows"].array,
+              windows.count > 1, windows.count <= 16 else { return nil }
+        let ids = windows.compactMap { $0["id"].string }
+        guard ids.count == windows.count else { return nil }
+        let listings = await withTaskGroup(of: (Int, [JSONValue]?).self) { group in
+            for (index, id) in ids.enumerated() {
+                group.addTask { [self] in
+                    var scoped = params; scoped["window_id"] = .string(id)
+                    return (index, try? await rpc("workspace.list", params: scoped)["workspaces"].array)
+                }
+            }
+            var results: [(Int, [JSONValue]?)] = []
+            for await listing in group { results.append(listing) }
+            return results.sorted { $0.0 < $1.0 }
+        }
+        var rows: [JSONValue] = []; var seen = Set<String>()
+        for (_, listing) in listings {
+            for row in listing ?? [] {
+                guard let id = row["id"].string, seen.insert(id.lowercased()).inserted else { continue }
+                rows.append(row)
+            }
+        }
+        return rows.isEmpty ? nil : .object(["workspaces": .array(rows)])
+    }
+    private func rpc(_ method: String, params: [String: JSONValue]) async throws -> JSONValue {
+        // A cmux stall under system load makes the official CLI fail fast. One bounded retry absorbs
+        // that transient for reads; it only runs after a quick failure so the whole request, at worst
+        // six plus half a second plus twelve seconds, stays inside the link's twenty-second no-progress window.
+        let started = ContinuousClock.now
+        do { return try await attempt(method, params: params) }
+        catch let error as BridgeError where error.code == "socket_unavailable" && started.duration(to: .now) < retryWindow {
+            try await Task.sleep(for: .milliseconds(500))
+            return try await attempt(method, params: params)
+        }
+    }
+    private func attempt(_ method: String, params: [String: JSONValue]) async throws -> JSONValue {
+        let input = try JSONEncoder().encode(JSONValue.object(params))
+        guard input.count <= 1_048_576 else { throw BridgeError("too_large", "The request is too large.", status: 413) }
+        let executable = executable; let socketPath = socketPath; let environment = environment
+        return try await Task.detached {
+            // A private inherited stdin file avoids putting prompt contents in argv or pipe races.
+            let temporary = FileManager.default.temporaryDirectory.appendingPathComponent("cmux-remote-rpc-" + UUID().uuidString)
+            try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+            defer { try? FileManager.default.removeItem(at: temporary) }
+            let inputURL = temporary.appendingPathComponent("params.json")
+            try input.write(to: inputURL, options: .atomic)
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: inputURL.path)
+            let source = try FileHandle(forReadingFrom: inputURL); defer { try? source.close() }
+            let process = Process(); let output = Pipe(); let errors = Pipe()
+            process.executableURL = executable; process.arguments = ["--socket", socketPath, "--json", "rpc", method, "-"]
+            process.environment = environment
+            process.standardInput = source; process.standardOutput = output; process.standardError = errors
+            let completion = AsyncStream<Int32>.makeStream(bufferingPolicy: .bufferingNewest(1))
+            process.terminationHandler = { child in completion.continuation.yield(child.terminationStatus); completion.continuation.finish() }
+            try process.run()
+            let deadline = Task { try? await Task.sleep(for: .seconds(12)); if !Task.isCancelled && process.isRunning { process.terminate() } }
+            defer { deadline.cancel() }
+            let outFD = output.fileHandleForReading.fileDescriptor; let errFD = errors.fileHandleForReading.fileDescriptor
+            async let stdout = Task.detached { Self.drain(outFD, cap: 8_388_608) }.value
+            async let stderr = Task.detached { Self.drain(errFD, cap: 16_384) }.value
+            let status = await withTaskCancellationHandler {
+                var iterator = completion.stream.makeAsyncIterator(); return await iterator.next()
+            } onCancel: { if process.isRunning { process.terminate() } }
+            let data = await stdout; _ = await stderr
+            guard status == 0 else {
+                let mutation = ["mobile.chat.send", "mobile.chat.interrupt", "mobile.terminal.input", "mobile.terminal.rename", "workspace.create", "workspace.select", "workspace.group.create", "workspace.group.add", "workspace.reorder_many", "surface.create", "surface.split", "surface.action", "surface.move", "surface.split_off", "surface.reorder", "surface.close", "feed.permission.reply", "feed.question.reply", "feed.exit_plan.reply"].contains(method)
+                throw BridgeError(mutation ? "outcome_unknown" : "socket_unavailable", mutation ? "Inspect the task before repeating this operation." : "Open cmux and check the official CLI's socket access.", status: 503)
+            }
+            guard data.count <= 8_388_608, let value = try? JSONDecoder().decode(JSONValue.self, from: data) else { throw BridgeError("invalid_response", "The official CLI returned an invalid response.", status: 502) }
+            if value["ok"].bool == false { throw BridgeError(value["error"]["code"].string ?? "socket_denied", "cmux could not complete this operation.", status: 502) }
+            return value["ok"].bool == true ? value["result"] : value
+        }.value
+    }
+    private static func drain(_ fd: Int32, cap: Int) -> Data {
+        var data = Data(); var bytes = [UInt8](repeating: 0, count: 8192)
+        while true { let count = read(fd, &bytes, bytes.count); if count <= 0 { break }; if data.count <= cap { data.append(contentsOf: bytes.prefix(count)) } }
+        return data
+    }
+}

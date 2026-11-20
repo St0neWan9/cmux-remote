@@ -52,7 +52,7 @@ class ReleaseChecks(unittest.TestCase):
     def payload(self, signed=True, bundle=BUNDLE, extra=None):
         stream = io.BytesIO()
         with zipfile.ZipFile(stream, 'w') as z:
-            root = 'Payload/CmuxRemote.app/'
+            root = 'Payload/TermRemote.app/'
             z.writestr(root + 'Info.plist', plistlib.dumps({'CFBundleIdentifier': bundle, 'CFBundleShortVersionString': '0.1.0', 'CFBundleVersion': '23'}))
             if signed:
                 z.writestr(root + 'embedded.mobileprovision', b'fixture')
@@ -67,7 +67,7 @@ class ReleaseChecks(unittest.TestCase):
             with self.payload(**options) as z, self.assertRaises(ValueError):
                 PACKAGE.inspect_payload(z, BUNDLE, '0.1.0', '23')
         with self.payload() as z:
-            self.assertEqual(PACKAGE.inspect_payload(z, BUNDLE, '0.1.0', '23'), 'Payload/CmuxRemote.app/')
+            self.assertEqual(PACKAGE.inspect_payload(z, BUNDLE, '0.1.0', '23'), 'Payload/TermRemote.app/')
             with self.assertRaises(ValueError):
                 PACKAGE.inspect_payload(z, BUNDLE, '0.1.0', '24')
 
