@@ -231,7 +231,7 @@ actor LinkClientConnection {
         let crypto = IdentityCryptography(), publicKey = try crypto.publicKey(privateKey: key)
         if relay.admission.value.kind == "approved", relay.admission.value.clientPublicKey != publicKey { throw BridgeError("invalid_identity", "The relay admission belongs to another client.") }
         let join = try crypto.sign(RelayJoin(hostID: host.id, clientPublicKey: publicKey, permitDigest: crypto.digest(crypto.bytes(relay.admission, domain: "relay3-permit-envelope"))), domain: "relay3-join", privateKey: key)
-        let relayed = relayDial(try RelayOrigin(relay.origin).socketURL(hostID: host.id, role: "client"), ["X-Cmux-Relay-Permit": try JSONEncoder().encode(relay.admission).base64EncodedString(), "X-Cmux-Relay-Join": try JSONEncoder().encode(join).base64EncodedString()])
+        let relayed = relayDial(try RelayOrigin(relay.origin).socketURL(hostID: host.id, role: "client"), ["X-TermRemote-Relay-Permit": try JSONEncoder().encode(relay.admission).base64EncodedString(), "X-TermRemote-Relay-Join": try JSONEncoder().encode(join).base64EncodedString()])
         let started = ContinuousClock.now
         do {
             // A relay path that has not authenticated in ten seconds is not going to: waiting fifteen makes every

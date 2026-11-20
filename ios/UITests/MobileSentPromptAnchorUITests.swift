@@ -16,7 +16,7 @@ final class MobileSentPromptAnchorUITests: XCTestCase {
         }
         let refuses = URL(fileURLWithPath: pairingPath).deletingLastPathComponent().appendingPathComponent("refuse-send")
         try XCTSkipIf(FileManager.default.fileExists(atPath: refuses.path), "This run's fixture refuses every send.")
-        let app = XCUIApplication(bundleIdentifier: "cmux-remote.mobile")
+        let app = XCUIApplication(bundleIdentifier: "dev.trenta.termremote")
         app.launchEnvironment["CMUX_REMOTE_TEST_PAIRING_PATH"] = pairingPath
         app.launchArguments = ["-AppleLanguages", "(zh-Hans)"]
         app.launch()
@@ -65,7 +65,7 @@ final class MobileSentPromptAnchorUITests: XCTestCase {
         let directory = URL(fileURLWithPath: pairingPath).deletingLastPathComponent()
         func flag(_ name: String) -> Bool { FileManager.default.fileExists(atPath: directory.appendingPathComponent(name).path) }
         try XCTSkipUnless(flag("open-turn") && !flag("report-working") && !flag("refuse-send"), "This run's fixture does not record a turn late on an idle session.")
-        let app = XCUIApplication(bundleIdentifier: "cmux-remote.mobile")
+        let app = XCUIApplication(bundleIdentifier: "dev.trenta.termremote")
         app.launchEnvironment["CMUX_REMOTE_TEST_PAIRING_PATH"] = pairingPath
         app.launchArguments = ["-AppleLanguages", "(zh-Hans)"]
         app.launch()
@@ -111,7 +111,7 @@ final class MobileSentPromptAnchorUITests: XCTestCase {
         }
         let directory = URL(fileURLWithPath: pairingPath).deletingLastPathComponent()
         try XCTSkipUnless(FileManager.default.fileExists(atPath: directory.appendingPathComponent("refuse-send").path), "This run's fixture accepts sends.")
-        let app = XCUIApplication(bundleIdentifier: "cmux-remote.mobile")
+        let app = XCUIApplication(bundleIdentifier: "dev.trenta.termremote")
         app.launchEnvironment["CMUX_REMOTE_TEST_PAIRING_PATH"] = pairingPath
         app.launchArguments = ["-AppleLanguages", "(zh-Hans)"]
         app.launch()

@@ -68,7 +68,7 @@ private actor BoundFeedFixture: CmuxControlling {
         let router = BridgeRouter(service: service, authority: authority)
         func request(_ method: String, _ uri: String, body: Data = Data()) async throws -> (Int, Data) {
             let proof = RequestProof(epoch: authority.epoch, hostID: host.id, clientID: deviceID, method: method, uri: uri, bodySHA256: crypto.digest(body), nonce: UUID().uuidString, timestamp: 1000)
-            let header = "CmuxV2 " + (try JSONEncoder().encode(crypto.sign(proof, domain: "request", privateKey: deviceKey))).base64EncodedString()
+            let header = "TermRemoteV2 " + (try JSONEncoder().encode(crypto.sign(proof, domain: "request", privateKey: deviceKey))).base64EncodedString()
             return await router.respond(method: method, uri: uri, authorization: header, body: body)
         }
         let response = try await request("GET", "/v2/feed")

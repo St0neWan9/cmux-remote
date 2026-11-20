@@ -13,7 +13,7 @@ public struct IdentityCryptography: Sendable {
     }
     public func bytes<T: Encodable>(_ value: T, domain: String) throws -> Data {
         let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
-        var bytes = Data(("cmux-remote/2/" + domain + "\n").utf8); bytes.append(try encoder.encode(value)); return bytes
+        var bytes = Data(("term-remote/2/" + domain + "\n").utf8); bytes.append(try encoder.encode(value)); return bytes
     }
     public func sign<T: Codable & Sendable>(_ value: T, domain: String, privateKey: Data) throws -> SignedValue<T> {
         let key = try Curve25519.Signing.PrivateKey(rawRepresentation: privateKey)

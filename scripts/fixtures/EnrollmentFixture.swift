@@ -12,7 +12,7 @@ import TermRemoteBridge
 /// Usage:
 ///   enrollment-fixture <state-dir> <port> [--auto-approve <seconds>]
 ///
-/// It prints `enroll=<cmux-remote://enroll...>` once the window is open.
+/// It prints `enroll=<term-remote://enroll...>` once the window is open.
 private actor FixtureCmx: CmuxControlling {
     let workspace = "11111111-1111-1111-1111-111111111111"
     let surface = "22222222-2222-2222-2222-222222222222"

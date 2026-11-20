@@ -168,7 +168,7 @@ private actor JournalCmux: CmuxControlling {
         let firstRouter = BridgeRouter(service: try service(cmux, root), authority: authority)
         func call(_ router: BridgeRouter, _ auth: ConnectionAuthority, _ id: String, _ key: Data, _ method: String, _ uri: String, _ body: Data = Data()) async throws -> (Int, Data) {
             let proof = RequestProof(epoch: auth.epoch, hostID: host.id, clientID: id, method: method, uri: uri, bodySHA256: crypto.digest(body), nonce: UUID().uuidString, timestamp: 1000)
-            let header = "CmuxV2 " + (try JSONEncoder().encode(crypto.sign(proof, domain: "request", privateKey: key))).base64EncodedString()
+            let header = "TermRemoteV2 " + (try JSONEncoder().encode(crypto.sign(proof, domain: "request", privateKey: key))).base64EncodedString()
             return await router.respond(method: method, uri: uri, authorization: header, body: body)
         }
         let request = SendRequest(text: "Receipt fixture")

@@ -27,16 +27,16 @@ async function fixture() {
   }));
   const host = await signer(), phone = await signer(), origin = "https://relay.example";
   const path = `${origin}/v3/relay/${host.id}`;
-  const common = { Upgrade: "websocket", "Sec-WebSocket-Protocol": "cmux-remote.v3" };
+  const common = { Upgrade: "websocket", "Sec-WebSocket-Protocol": "term-remote.v3" };
   async function bridge(nonce = crypto.randomUUID()) {
     const record = await host.sign({ version: 3, hostID: host.id, hostPublicKey: host.publicKey, origin, nonce, timestamp: Math.floor(Date.now() / 1000) }, "relay3-registration");
-    return mf.dispatchFetch(path + "?role=bridge", { headers: { ...common, Authorization: "Bearer " + "a".repeat(64), "X-Cmux-Registration": base64(new TextEncoder().encode(JSON.stringify(record))) } });
+    return mf.dispatchFetch(path + "?role=bridge", { headers: { ...common, Authorization: "Bearer " + "a".repeat(64), "X-TermRemote-Registration": base64(new TextEncoder().encode(JSON.stringify(record))) } });
   }
   async function join(options: { nonce?: string; actor?: Awaited<ReturnType<typeof signer>>; pending?: boolean; expires?: number } = {}) {
     const actor = options.actor ?? phone;
     const permit = await host.sign({ version: 3, hostID: host.id, origin, permitID: crypto.randomUUID(), kind: options.pending ? "enrollment" : "approved", ...(options.pending ? { expiresAt: options.expires ?? Math.floor(Date.now() / 1000) + 300 } : { clientPublicKey: phone.publicKey }) }, "relay3-permit");
     const proof = await actor.sign({ version: 3, hostID: host.id, clientPublicKey: actor.publicKey, permitDigest: await digest(bytes(permit, "relay3-permit-envelope")), nonce: options.nonce ?? crypto.randomUUID(), timestamp: Math.floor(Date.now() / 1000) }, "relay3-join");
-    return mf.dispatchFetch(path + "?role=client", { headers: { ...common, "X-Cmux-Relay-Permit": base64(new TextEncoder().encode(JSON.stringify(permit))), "X-Cmux-Relay-Join": base64(new TextEncoder().encode(JSON.stringify(proof))) } });
+    return mf.dispatchFetch(path + "?role=client", { headers: { ...common, "X-TermRemote-Relay-Permit": base64(new TextEncoder().encode(JSON.stringify(permit))), "X-TermRemote-Relay-Join": base64(new TextEncoder().encode(JSON.stringify(proof))) } });
   }
   return { mf, host, phone, bridge, join };
 }

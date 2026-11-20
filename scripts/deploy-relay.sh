@@ -4,7 +4,7 @@
 # an owner-only file and only ever travels through stdin; it is never printed or passed in argv.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-key_file="${1:-$HOME/.local/state/cmux-remote/relay-registration-key}"
+key_file="${1:-$HOME/.local/state/term-remote/relay-registration-key}"
 case "$key_file" in /*) ;; *) echo "Use an absolute key file path." >&2; exit 2 ;; esac
 export WRANGLER_SEND_METRICS=false
 npm ci --prefix cloudflare --no-audit --no-fund >/dev/null

@@ -7,7 +7,7 @@ final class MobileListHeaderUITests: XCTestCase {
         guard let pairingPath = ProcessInfo.processInfo.environment["CMUX_REMOTE_TEST_PAIRING_PATH"], !pairingPath.isEmpty else {
             throw XCTSkip("Supply an isolated fixture pairing file to test the list without real sessions.")
         }
-        let app = XCUIApplication(bundleIdentifier: "cmux-remote.mobile")
+        let app = XCUIApplication(bundleIdentifier: "dev.trenta.termremote")
         app.launchEnvironment["CMUX_REMOTE_TEST_PAIRING_PATH"] = pairingPath
         app.launchArguments = ["-AppleLanguages", "(zh-Hans)"]
         app.launch()

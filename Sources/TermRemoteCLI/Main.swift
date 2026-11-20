@@ -14,7 +14,7 @@ struct Main {
         let args = Array(CommandLine.arguments.dropFirst()); let command = args.first ?? "help"
         let options = CLIOptions(args: Array(args.dropFirst()))
         let home = FileManager.default.homeDirectoryForCurrentUser
-        let state = BridgeState(directory: URL(fileURLWithPath: options.value("state") ?? home.appendingPathComponent(".local/state/cmux-remote").path))
+        let state = BridgeState(directory: URL(fileURLWithPath: options.value("state") ?? TermRemoteStateLocation.directory(home: home).path))
         let port = Int(options.value("port") ?? "7740") ?? 7740
         var runtimeEnvironment = ProcessInfo.processInfo.environment
         if command == "resident" {

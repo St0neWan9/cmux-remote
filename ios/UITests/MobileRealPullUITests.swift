@@ -13,7 +13,7 @@ final class MobileRealPullUITests: XCTestCase {
               let firstMessage = environment["CMUX_REMOTE_TEST_FIRST_MESSAGE"], !firstMessage.isEmpty else {
             throw XCTSkip("Supply a session id and that session's first message.")
         }
-        let app = XCUIApplication(bundleIdentifier: "cmux-remote.mobile")
+        let app = XCUIApplication(bundleIdentifier: "dev.trenta.termremote")
         // Without a pairing file the app uses the enrollment it already holds, so the test can run against the
         // installed Bridge on this Mac instead of an isolated one.
         if let pairingPath = environment["CMUX_REMOTE_TEST_PAIRING_PATH"], !pairingPath.isEmpty {
@@ -58,7 +58,7 @@ final class MobileRealPullUITests: XCTestCase {
         guard let sessionID = environment["CMUX_REMOTE_TEST_SESSION"], !sessionID.isEmpty else {
             throw XCTSkip("Supply a session id.")
         }
-        let app = XCUIApplication(bundleIdentifier: "cmux-remote.mobile")
+        let app = XCUIApplication(bundleIdentifier: "dev.trenta.termremote")
         // Without a pairing file the app uses the enrollment it already holds, so the test can run against the
         // installed Bridge on this Mac instead of an isolated one.
         if let pairingPath = environment["CMUX_REMOTE_TEST_PAIRING_PATH"], !pairingPath.isEmpty {

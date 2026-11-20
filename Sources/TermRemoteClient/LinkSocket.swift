@@ -10,7 +10,7 @@ final class LinkSocket: Sendable {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForRequest = timeout; configuration.httpShouldSetCookies = false
         session = URLSession(configuration: configuration, delegate: delegate ?? RelaySessionDelegate(), delegateQueue: nil)
-        var request = URLRequest(url: url); request.setValue("cmux-remote.v3", forHTTPHeaderField: "Sec-WebSocket-Protocol")
+        var request = URLRequest(url: url); request.setValue("term-remote.v3", forHTTPHeaderField: "Sec-WebSocket-Protocol")
         for (key, value) in headers { request.setValue(value, forHTTPHeaderField: key) }
         task = session.webSocketTask(with: request); task.maximumMessageSize = 2_100_000; task.resume()
     }

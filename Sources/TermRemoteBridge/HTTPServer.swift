@@ -24,12 +24,12 @@ public struct HTTPServer: Sendable {
                         let http = BridgeHTTPHandler(router: router)
                         let upgrader = NIOWebSocketServerUpgrader(maxFrameSize: 2_100_000, shouldUpgrade: { channel, request in
                             guard request.uri == "/v3/link", router.linkAuthority != nil,
-                                  request.headers.first(name: "Sec-WebSocket-Protocol")?.split(separator: ",").map({ $0.trimmingCharacters(in: .whitespaces) }).contains("cmux-remote.v3") == true else { return channel.eventLoop.makeSucceededFuture(nil) }
+                                  request.headers.first(name: "Sec-WebSocket-Protocol")?.split(separator: ",").map({ $0.trimmingCharacters(in: .whitespaces) }).contains("term-remote.v3") == true else { return channel.eventLoop.makeSucceededFuture(nil) }
                             let id = ObjectIdentifier(channel)
                             return channel.eventLoop.makeFutureWithTask {
                                 guard await admission.reserve(id) else { return nil }
                                 channel.closeFuture.whenComplete { _ in Task { await admission.release(id) } }
-                                return HTTPHeaders([("Sec-WebSocket-Protocol", "cmux-remote.v3")])
+                                return HTTPHeaders([("Sec-WebSocket-Protocol", "term-remote.v3")])
                             }
                         }, upgradePipelineHandler: { channel, _ in
                             guard let authority = router.linkAuthority else { return channel.eventLoop.makeFailedFuture(CancellationError()) }

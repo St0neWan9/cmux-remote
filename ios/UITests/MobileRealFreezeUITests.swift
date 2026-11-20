@@ -15,7 +15,7 @@ final class MobileRealFreezeUITests: XCTestCase {
         guard let sessionID = environment["CMUX_REMOTE_TEST_FREEZE_SESSION"], !sessionID.isEmpty else {
             throw XCTSkip("Supply the id of a content-heavy session.")
         }
-        let app = XCUIApplication(bundleIdentifier: "cmux-remote.mobile")
+        let app = XCUIApplication(bundleIdentifier: "dev.trenta.termremote")
         if let pairingPath = environment["CMUX_REMOTE_TEST_PAIRING_PATH"], !pairingPath.isEmpty {
             app.launchEnvironment["CMUX_REMOTE_TEST_PAIRING_PATH"] = pairingPath
         }

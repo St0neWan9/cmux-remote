@@ -85,7 +85,7 @@ import CmuxAgentChat
     @Test func aPastedAttachmentPathIsNotProse() {
         let screen = [
             "⏺ Reading the screenshot.",
-            "'/Users/example/.local/state/cmux-remote/tui-images/cfec33dd24fa7dfa410e594a94d100aa6ed4e6108e0ad7ad45382608ab8f8037/944ec0379593ceaae1413f657c8d95612e8215b9f36f548ee1d44c4316fc516b/0.jpeg'",
+            "'/Users/example/.local/state/term-remote/tui-images/cfec33dd24fa7dfa410e594a94d100aa6ed4e6108e0ad7ad45382608ab8f8037/944ec0379593ceaae1413f657c8d95612e8215b9f36f548ee1d44c4316fc516b/0.jpeg'",
             "✻ Blanching… (54s · ↓ 2.3k tokens)",
         ]
         let text = AgentChatProseScreenExtractor().extract(lines: screen, agentKind: .claude)

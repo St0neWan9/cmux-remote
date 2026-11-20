@@ -22,7 +22,7 @@ import TermRemoteBridge
                     guard hints.count <= 64 else { throw BridgeError("invalid_response", "Too many discovery hints.") }
                     let devices = try hints.map { hint in
                         try IdentityCryptography().validate(hint.host)
-                        guard ["_cmux-remote._tcp", "_cmux-remote._tcp."].contains(hint.serviceType), hint.serviceDomain == "local.",
+                        guard ["_term-remote._tcp", "_term-remote._tcp."].contains(hint.serviceType), hint.serviceDomain == "local.",
                               !hint.serviceName.isEmpty, hint.serviceName.utf8.count <= 255 else {
                             throw BridgeError("invalid_response", "Invalid discovery hint.")
                         }

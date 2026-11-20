@@ -50,7 +50,7 @@ private actor AuthorizationRaceCmux: CmuxControlling {
         let router = BridgeRouter(service: service, authority: authority)
         let body = try JSONEncoder().encode(SendRequest(text: "Prompt"))
         let proof = RequestProof(epoch: authority.epoch, hostID: host.id, clientID: clientID, method: "POST", uri: "/v2/sessions/session/send", bodySHA256: crypto.digest(body), nonce: UUID().uuidString, timestamp: 1000)
-        let header = "CmuxV2 " + (try JSONEncoder().encode(crypto.sign(proof, domain: "request", privateKey: key))).base64EncodedString()
+        let header = "TermRemoteV2 " + (try JSONEncoder().encode(crypto.sign(proof, domain: "request", privateKey: key))).base64EncodedString()
         let result = await router.respond(method: "POST", uri: proof.uri, authorization: header, body: body)
         return (result.0, await cmux.sends, try await authority.enrolledClients()[0].revoked)
     }

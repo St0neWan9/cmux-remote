@@ -31,7 +31,7 @@ export default {
     if (request.method !== "GET" || request.headers.get("Upgrade")?.toLowerCase() !== "websocket") return new Response("websocket_required", { status: 426 });
     const match = /^\/v3\/relay\/([0-9a-f]{64})$/.exec(url.pathname), role = url.searchParams.get("role");
     if (!match || !["bridge", "client"].includes(role ?? "") || [...url.searchParams].length !== 1 || url.searchParams.getAll("role").length !== 1) return new Response("invalid_route", { status: 400 });
-    if (!(request.headers.get("Sec-WebSocket-Protocol") ?? "").split(",").map(x => x.trim()).includes("cmux-remote.v3")) return new Response("unsupported_protocol", { status: 400 });
+    if (!(request.headers.get("Sec-WebSocket-Protocol") ?? "").split(",").map(x => x.trim()).includes("term-remote.v3")) return new Response("unsupported_protocol", { status: 400 });
     if (!await env.ADMISSION_LIMITER.limit({ key: request.headers.get("CF-Connecting-IP") ?? "unknown" }).then(x => x.success)) return new Response("rate_limited", { status: 429 });
     if (role === "bridge" && !await secretMatches(request.headers.get("Authorization"), env.BRIDGE_REGISTRATION_KEY)) return new Response("unauthorized", { status: 401 });
     return env.ROOMS.get(env.ROOMS.idFromName("wnam:" + match[1]), placement).fetch(request);
@@ -51,7 +51,7 @@ export class RelayRoom extends DurableObject<Env> {
       let metadata: Connection;
       if (role === "bridge") {
         if (!await secretMatches(request.headers.get("Authorization"), this.env.BRIDGE_REGISTRATION_KEY)) throw new RelayFailure("unauthorized");
-        const signed = header<Registration>(request, "X-Cmux-Registration"), proof = signed.value;
+        const signed = header<Registration>(request, "X-TermRemote-Registration"), proof = signed.value;
         if (proof.version !== 3 || proof.hostID !== hostID || proof.origin !== url.origin || !identity(hostID)) throw new RelayFailure("invalid_registration");
         fresh(proof.nonce, proof.timestamp, now);
         if (await digest(unbase64(proof.hostPublicKey, 32)) !== hostID) throw new RelayFailure("invalid_identity");
@@ -71,7 +71,7 @@ export class RelayRoom extends DurableObject<Env> {
         const owner = bridge.deserializeAttachment() as Connection;
         if (!owner.ready) throw new RelayFailure("bridge_starting", 503);
         const hostKey = await this.ctx.storage.get<string>("hostKey"); if (!hostKey) throw new RelayFailure("bridge_offline", 503);
-        const permit = header<Permit>(request, "X-Cmux-Relay-Permit"), signed = header<Join>(request, "X-Cmux-Relay-Join");
+        const permit = header<Permit>(request, "X-TermRemote-Relay-Permit"), signed = header<Join>(request, "X-TermRemote-Relay-Join");
         await verify(permit, "relay3-permit", hostKey);
         const value = permit.value, proof = signed.value;
         if (value.version !== 3 || value.hostID !== hostID || value.origin !== url.origin || typeof value.permitID !== "string" || value.permitID.length > 128 || !value.permitID) throw new RelayFailure("invalid_permit");
@@ -99,7 +99,7 @@ export class RelayRoom extends DurableObject<Env> {
         console.log(`relay client-connected host=${hostID.slice(0, 8)} pending=${metadata.pending}`);
         this.bridge()?.send(JSON.stringify({ kind: "open", channel_id: metadata.channel, client_id: metadata.clientID }));
       }
-      return new Response(null, { status: 101, webSocket: client, headers: { "Sec-WebSocket-Protocol": "cmux-remote.v3" } });
+      return new Response(null, { status: 101, webSocket: client, headers: { "Sec-WebSocket-Protocol": "term-remote.v3" } });
     } catch (error) {
       const failure = error instanceof RelayFailure ? error : new RelayFailure("invalid_request", 400);
       return new Response(failure.code, { status: failure.status });

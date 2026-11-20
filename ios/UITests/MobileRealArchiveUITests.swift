@@ -11,7 +11,7 @@ final class MobileRealArchiveUITests: XCTestCase {
         guard let pairingPath = environment["CMUX_REMOTE_TEST_PAIRING_PATH"], !pairingPath.isEmpty else {
             throw XCTSkip("Supply a pairing for a Bridge whose conversations include cleared ones.")
         }
-        let app = XCUIApplication(bundleIdentifier: "cmux-remote.mobile")
+        let app = XCUIApplication(bundleIdentifier: "dev.trenta.termremote")
         app.launchEnvironment["CMUX_REMOTE_TEST_PAIRING_PATH"] = pairingPath
         app.launchArguments = ["-AppleLanguages", "(zh-Hans)"]
         app.launch()

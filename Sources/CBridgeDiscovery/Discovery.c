@@ -4,7 +4,7 @@
 #include <arpa/inet.h>
 int32_t cmux_bonjour_publish(const char *name, uint16_t port, const unsigned char *txt, uint16_t length, void **handle) {
     DNSServiceRef ref = NULL;
-    DNSServiceErrorType error = DNSServiceRegister(&ref, 0, 0, name, "_cmux-remote._tcp", "local.", NULL, htons(port), length, txt, NULL, NULL);
+    DNSServiceErrorType error = DNSServiceRegister(&ref, 0, 0, name, "_term-remote._tcp", "local.", NULL, htons(port), length, txt, NULL, NULL);
     if (error != kDNSServiceErr_NoError) return error;
     // Dispatch delivery works in an async CLI without a Foundation run-loop thread.
     error = DNSServiceSetDispatchQueue(ref, dispatch_get_main_queue());

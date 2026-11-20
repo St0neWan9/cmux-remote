@@ -7,7 +7,7 @@ import TermRemoteCore
         let codec = PairingLinkCodec()
         #expect(try codec.decode(codec.encode(pairing)) == pairing)
     }
-    @Test(arguments: ["https://example.com", "cmux-remote://pair?v=2&payload=abc", "cmux-remote://pair?v=1&payload=abc"])
+    @Test(arguments: ["https://example.com", "term-remote://pair?v=2&payload=abc", "term-remote://pair?v=1&payload=abc"])
     func unrelatedOrMalformedCodesNeverStartPairing(_ text: String) {
         #expect(throws: BridgeError.self) { try PairingLinkCodec().decode(text) }
     }

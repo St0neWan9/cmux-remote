@@ -172,7 +172,7 @@ public actor ConnectionAuthority {
         try persist(updated); clients = updated; registryChanged()
     }
     public func authorize(header: String?, method: String, uri: String, body: Data) throws -> EnrolledClient {
-        guard let header, header.hasPrefix("CmuxV2 "), header.utf8.count <= 4096, let bytes = Data(base64Encoded: String(header.dropFirst(7))),
+        guard let header, header.hasPrefix("TermRemoteV2 "), header.utf8.count <= 4096, let bytes = Data(base64Encoded: String(header.dropFirst("TermRemoteV2 ".count))),
               let signed = try? JSONDecoder().decode(SignedValue<RequestProof>.self, from: bytes), let client = clients[signed.value.clientID], !client.revoked else { throw BridgeError("unauthorized", "This device is not authorized.", status: 401) }
         let proof = signed.value
         try crypto.verify(signed, domain: "request", publicKey: client.publicKey)

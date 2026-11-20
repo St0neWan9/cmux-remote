@@ -5,10 +5,10 @@ public struct EnrollmentLinkCodec: Sendable {
     public init() {}
     public func encode(_ bootstrap: SignedValue<EnrollmentBootstrap>) throws -> String {
         let payload = try JSONEncoder().encode(bootstrap).base64EncodedString().replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
-        return "cmux-remote://enroll?v=2&payload=" + payload
+        return "term-remote://enroll?v=2&payload=" + payload
     }
     public func decode(_ text: String, now: Int = Int(Date().timeIntervalSince1970)) throws -> SignedValue<EnrollmentBootstrap> {
-        guard text.utf8.count <= 8192, let url = URLComponents(string: text), url.scheme == "cmux-remote", url.host == "enroll", url.path.isEmpty,
+        guard text.utf8.count <= 8192, let url = URLComponents(string: text), url.scheme == "term-remote", url.host == "enroll", url.path.isEmpty,
               let items = url.queryItems, items.count == 2, items.first(where: { $0.name == "v" })?.value == "2",
               let payload = items.first(where: { $0.name == "payload" })?.value else { throw BridgeError("invalid_pairing", "Scan a version 2 enrollment QR code.") }
         let encoded = payload.replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")

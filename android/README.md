@@ -17,17 +17,17 @@ installed cmux.
   - `720dp+` → two panes, browser 320–400dp;
   - `>= 1100dp` with detail `>= 480dp` → optional supporting pane;
   - vertical hinge snaps the divider; horizontal half-open becomes tabletop.
-- **Pairing** — scan or paste the Mac's expiring `cmux-remote://enroll` code
+- **Pairing** — scan or paste the Mac's expiring `term-remote://enroll` code
   (or the signed enrollment JSON the Mac's "import" action copies); the app
   requests access and waits for the owner to approve that exact request.
   An explicitly chosen legacy `/v1` shared-token Mac can also be added from
-  Advanced settings or its `cmux-remote://pair?v=1` code; it carries shared
+  Advanced settings or its `term-remote://pair?v=1` code; it carries shared
   authority and requires `--legacy` on the Mac.
-- **Nearby Macs** — NSD browses `_cmux-remote._tcp` while a pairing page is
+- **Nearby Macs** — NSD browses `_term-remote._tcp` while a pairing page is
   open, verifies each advertised identity against the signed bootstrap, and
   asks before trusting a found Mac. An already-paired Mac is marked, not offered.
 - **Transport** — HTTPS only, pinned to the paired leaf certificate (DER
-  SHA-256), redirects refused, every request signed with `CmuxV2`.
+  SHA-256), redirects refused, every request signed with `TermRemoteV2`.
 - **Freshness** — an encrypted `/v3/link` subscription (BouncyCastle's RFC 9180
   HPKE, interoperable with CryptoKit) delivers change notifications; a bounded
   foreground poll (15 s in a conversation, 30 s on the list) is the fallback.
@@ -123,7 +123,7 @@ python3 scripts/build-enrollment-fixture.py
 
 # 3. Run the protocol tests with that code
 cd android
-CMUX_FIXTURE_ENROLL='cmux-remote://enroll?v=2&payload=…' \
+CMUX_FIXTURE_ENROLL='term-remote://enroll?v=2&payload=…' \
   ./gradlew testDebugUnitTest
 ```
 

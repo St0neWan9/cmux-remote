@@ -17,7 +17,7 @@ import UIKit
     func begin() {
         release()
         lasted = false
-        task = UIApplication.shared.beginBackgroundTask(withName: "cmux-remote.link") { [weak self] in
+        task = UIApplication.shared.beginBackgroundTask(withName: "term-remote.link") { [weak self] in
             MainActor.assumeIsolated { self?.release() }
         }
     }

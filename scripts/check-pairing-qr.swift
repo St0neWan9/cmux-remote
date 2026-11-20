@@ -30,5 +30,5 @@ let provider = CGDataProvider(data: Data(pixels) as CFData)!
 let image = CGImage(width: width * scale, height: height * scale, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: width * scale * 4, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.last.rawValue), provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent)!
 let request = VNDetectBarcodesRequest(); request.symbologies = [.qr]
 try VNImageRequestHandler(cgImage: image).perform([request])
-guard let result = request.results?.first?.payloadStringValue, result.hasPrefix("cmux-remote://enroll?v=2&payload=") else { fatalError("Rendered QR did not decode") }
+guard let result = request.results?.first?.payloadStringValue, result.hasPrefix("term-remote://enroll?v=2&payload=") else { fatalError("Rendered QR did not decode") }
 print("Version 2 enrollment QR decoded successfully; no permanent device credential is present.")

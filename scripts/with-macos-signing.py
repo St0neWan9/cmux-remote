@@ -67,7 +67,7 @@ def main():
     for name in ['CMUX_REMOTE_NOTARY_KEY_ID', 'CMUX_REMOTE_NOTARY_ISSUER']:
         if not env.get(name):
             raise ValueError(f'{name} is required')
-    with tempfile.TemporaryDirectory(prefix='cmux-remote-mac-signing-') as directory:
+    with tempfile.TemporaryDirectory(prefix='term-remote-mac-signing-') as directory:
         root = Path(directory)
         cert = material(env, 'CMUX_REMOTE_MAC_CERT_P12', root / 'developer-id.p12')
         key = material(env, 'CMUX_REMOTE_NOTARY_KEY', root / 'AuthKey.p8')

@@ -5,7 +5,7 @@ import TermRemoteCore
 public struct MacNavigationRequest: Sendable {
     public let hostID: String?
     public init(url: URL) throws {
-        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false), components.scheme == "cmux-remote-mac",
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false), components.scheme == "term-remote-mac",
               components.host == "devices", components.path.isEmpty, components.user == nil, components.fragment == nil else {
             throw BridgeError("invalid_input", "Unsupported Companion navigation URL.")
         }
@@ -16,7 +16,7 @@ public struct MacNavigationRequest: Sendable {
         hostID = id
     }
     public static func url(hostID: String? = nil) -> URL {
-        var value = URLComponents(); value.scheme = "cmux-remote-mac"; value.host = "devices"
+        var value = URLComponents(); value.scheme = "term-remote-mac"; value.host = "devices"
         if let hostID { value.queryItems = [URLQueryItem(name: "host", value: hostID)] }
         return value.url!
     }

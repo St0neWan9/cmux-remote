@@ -148,7 +148,7 @@ actor RemoteClientRuntime {
             let signedPath = path.hasPrefix("/v1/") ? "/v2/" + path.dropFirst(4) : path
             return AuthorizedRequest(transport: transport, path: signedPath, authorization: { uri, bytes in
                 let proof = RequestProof(epoch: announcement.value.epoch, hostID: connection.host.id, clientID: connection.grant.value.clientID, method: method, uri: uri, bodySHA256: crypto.digest(bytes), nonce: UUID().uuidString, timestamp: Int(Date().timeIntervalSince1970))
-                return "CmuxV2 " + (try JSONEncoder().encode(crypto.sign(proof, domain: "request", privateKey: connection.privateKey))).base64EncodedString()
+                return "TermRemoteV2 " + (try JSONEncoder().encode(crypto.sign(proof, domain: "request", privateKey: connection.privateKey))).base64EncodedString()
             })
         }
         let token = pairing.token

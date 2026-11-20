@@ -9,7 +9,7 @@ import TermRemoteCore
     public func start() -> AsyncStream<[DiscoveredBridge]> {
         stop()
         let stream = AsyncStream<[DiscoveredBridge]>.makeStream(bufferingPolicy: .bufferingNewest(1))
-        let browser = NWBrowser(for: .bonjourWithTXTRecord(type: "_cmux-remote._tcp", domain: "local."), using: .tcp)
+        let browser = NWBrowser(for: .bonjourWithTXTRecord(type: "_term-remote._tcp", domain: "local."), using: .tcp)
         browser.browseResultsChangedHandler = { results, _ in
             let discovered = results.compactMap { result -> DiscoveredBridge? in
                 guard case .bonjour(let txt) = result.metadata else { return nil }

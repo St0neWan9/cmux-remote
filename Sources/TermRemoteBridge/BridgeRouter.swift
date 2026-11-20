@@ -31,8 +31,8 @@ public struct BridgeRouter: Sendable {
             let signed = try JSONDecoder().decode(SignedValue<EnrollmentRequest>.self, from: frame.data ?? Data())
             guard signed.value.clientID == clientID else { throw BridgeError("unauthorized", "The enrollment belongs to another device.", status: 401) }
         } else {
-            guard let header = frame.authorization, header.hasPrefix("CmuxV2 "), header.utf8.count <= 4096,
-                  let data = Data(base64Encoded: String(header.dropFirst(7))),
+            guard let header = frame.authorization, header.hasPrefix("TermRemoteV2 "), header.utf8.count <= 4096,
+                  let data = Data(base64Encoded: String(header.dropFirst("TermRemoteV2 ".count))),
                   let proof = try? JSONDecoder().decode(SignedValue<RequestProof>.self, from: data), proof.value.clientID == clientID else { throw BridgeError("unauthorized", "The request belongs to another device.", status: 401) }
         }
     }
@@ -149,7 +149,7 @@ public struct BridgeRouter: Sendable {
             if method == "GET", path == ["v1", "status"] {
                 if let client, let authority {
                     let approved = try await authority.require(client.id, capability: .workspaceRead)
-                    data = try encode(JSONValue.object(["protocol": .string("cmux-remote/2"), "host_id": .string(authority.host.id), "capabilities": .array(approved.scope.capabilities.map { .string($0.rawValue) })]))
+                    data = try encode(JSONValue.object(["protocol": .string("term-remote/2"), "host_id": .string(authority.host.id), "capabilities": .array(approved.scope.capabilities.map { .string($0.rawValue) })]))
                 } else { data = try encode(await service.status()) }
             } else if method == "GET", path.count == 3, path[0...1] == ["v1", "operations"] {
                 guard let id = UUID(uuidString: path[2]) else { throw BridgeError("invalid_input", "An operation identity is required.") }

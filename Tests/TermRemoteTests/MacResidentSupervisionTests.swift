@@ -50,7 +50,7 @@ private final class FakeProcess: RunningProcess, @unchecked Sendable {
         let setupFile = directory.appendingPathComponent("cmux-setup.json")
         try setup.write(to: setupFile)
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: setupFile.path)
-        let executable = directory.appendingPathComponent("cmux-remote")
+        let executable = directory.appendingPathComponent("term-remote")
         try Data("#!/bin/sh\n".utf8).write(to: executable)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executable.path)
         let owner = ControllableOwner(); let children = Children()

@@ -13,13 +13,13 @@ final class MobileReturnKeepsLinkUITests: XCTestCase {
               let sessionID = environment["CMUX_REMOTE_REAL_RETURN_SESSION"], !sessionID.isEmpty else {
             throw XCTSkip("Run against a real Bridge.")
         }
-        let enrolling = XCUIApplication(bundleIdentifier: "cmux-remote.mobile")
+        let enrolling = XCUIApplication(bundleIdentifier: "dev.trenta.termremote")
         enrolling.launchEnvironment["CMUX_REMOTE_TEST_ENROLLMENT_PATH"] = bootstrap
         enrolling.launch()
         Thread.sleep(forTimeInterval: 12)
         enrolling.terminate()
 
-        let app = XCUIApplication(bundleIdentifier: "cmux-remote.mobile")
+        let app = XCUIApplication(bundleIdentifier: "dev.trenta.termremote")
         app.launchArguments = ["-AppleLanguages", "(zh-Hans)"]
         app.launch()
         let session = app.buttons.matching(NSPredicate(format: "identifier ENDSWITH %@", sessionID)).firstMatch

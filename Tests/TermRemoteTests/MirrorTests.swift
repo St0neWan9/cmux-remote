@@ -268,14 +268,14 @@ private actor MirrorTestLocal: CmuxControlling {
         let signed = try IdentityCryptography().sign(proof, domain: "request", privateKey: connection.privateKey)
         let service = SessionService(cmux: cmux, home: directory, transcriptRoots: [])
         let router = BridgeRouter(service: service, authority: authority, mirrors: RemoteMirrorService(cmux: cmux))
-        let response = await router.respond(method: "GET", uri: uri, authorization: "CmuxV2 " + (try JSONEncoder().encode(signed)).base64EncodedString(), body: Data())
+        let response = await router.respond(method: "GET", uri: uri, authorization: "TermRemoteV2 " + (try JSONEncoder().encode(signed)).base64EncodedString(), body: Data())
         #expect(response.0 == 403); #expect(await cmux.calls == 0)
     }
     @Test func navigationRejectsSecretAndCommandParameters() throws {
         let id = String(repeating: "a", count: 64)
         #expect(try MacNavigationRequest(url: MacNavigationRequest.url(hostID: id)).hostID == id)
-        #expect(throws: BridgeError.self) { try MacNavigationRequest(url: URL(string: "cmux-remote-mac://devices?host=\(id)&command=rm")!) }
-        #expect(throws: BridgeError.self) { try MacNavigationRequest(url: URL(string: "cmux-remote-mac://devices?token=secret")!) }
+        #expect(throws: BridgeError.self) { try MacNavigationRequest(url: URL(string: "term-remote-mac://devices?host=\(id)&command=rm")!) }
+        #expect(throws: BridgeError.self) { try MacNavigationRequest(url: URL(string: "term-remote-mac://devices?token=secret")!) }
     }
     @Test func terminalInputReceiptsSurviveRestartAndRequireFreshAuthority() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

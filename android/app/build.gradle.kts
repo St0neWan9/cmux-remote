@@ -10,7 +10,7 @@ val releaseKeyStore = System.getenv("CMUX_ANDROID_KEYSTORE")?.let { file(it) }
 val releaseKeyPassword = System.getenv("CMUX_ANDROID_KEYSTORE_PASSWORD")
 
 android {
-    namespace = "com.cmuxremote.mobile"
+    namespace = "dev.trenta.termremote"
     compileSdk = 35
 
     signingConfigs {
@@ -33,7 +33,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.cmuxremote.mobile"
+        applicationId = "dev.trenta.termremote"
         minSdk = 29
         targetSdk = 35
         versionCode = 33
