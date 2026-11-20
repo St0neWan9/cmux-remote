@@ -33,7 +33,7 @@ scripts/deploy-relay.sh            # optional argument: absolute key file path
 ```
 
 The script creates a random 64-hex registration key in an owner-only file
-(default `~/.local/state/cmux-remote/relay-registration-key`) unless one exists,
+(default `~/.local/state/term-remote/relay-registration-key`) unless one exists,
 deploys the Worker, stores the key as the `BRIDGE_REGISTRATION_KEY` secret through
 stdin, and prints the HTTPS origin, such as
 `https://cmux-remote-relay.YOUR-SUBDOMAIN.workers.dev`. The key is a project

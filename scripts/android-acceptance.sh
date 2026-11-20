@@ -21,8 +21,8 @@ for device in "$phone" "$fold"; do
     continue
   fi
   adb -s "$device" install -r "$apk" >/dev/null
-  adb -s "$device" shell am force-stop com.cmuxremote.mobile
-  adb -s "$device" shell am start -n com.cmuxremote.mobile/.MainActivity >/dev/null
+  adb -s "$device" shell am force-stop dev.trenta.termremote
+  adb -s "$device" shell am start -n dev.trenta.termremote/.MainActivity >/dev/null
   sleep 8
   adb -s "$device" exec-out screencap -p > "$out/$device-list.png"
   echo "captured $out/$device-list.png"

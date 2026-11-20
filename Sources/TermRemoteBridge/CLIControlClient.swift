@@ -62,7 +62,7 @@ public struct CLIControlClient: CmuxControlling {
         let executable = executable; let socketPath = socketPath; let environment = environment
         return try await Task.detached {
             // A private inherited stdin file avoids putting prompt contents in argv or pipe races.
-            let temporary = FileManager.default.temporaryDirectory.appendingPathComponent("cmux-remote-rpc-" + UUID().uuidString)
+            let temporary = FileManager.default.temporaryDirectory.appendingPathComponent("term-remote-rpc-" + UUID().uuidString)
             try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
             defer { try? FileManager.default.removeItem(at: temporary) }
             let inputURL = temporary.appendingPathComponent("params.json")

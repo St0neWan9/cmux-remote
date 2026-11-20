@@ -12,7 +12,7 @@ final class MobileRealBlankUITests: XCTestCase {
         guard let sessionID = environment["CMUX_REMOTE_TEST_BLANK_SESSION"], !sessionID.isEmpty else {
             throw XCTSkip("Supply the id of a running real session.")
         }
-        let app = XCUIApplication(bundleIdentifier: "cmux-remote.mobile")
+        let app = XCUIApplication(bundleIdentifier: "dev.trenta.termremote")
         if let pairingPath = environment["CMUX_REMOTE_TEST_PAIRING_PATH"], !pairingPath.isEmpty {
             app.launchEnvironment["CMUX_REMOTE_TEST_PAIRING_PATH"] = pairingPath
         }

@@ -12,7 +12,7 @@ public final class BonjourAdvertisement: @unchecked Sendable {
         var txt = Data()
         for field in fields { let bytes = Data(field.utf8); guard bytes.count <= 255 else { throw BridgeError("discovery_failed", "Service metadata is too large.") }; txt.append(UInt8(bytes.count)); txt.append(bytes) }
         var ref: UnsafeMutableRawPointer?
-        let error = txt.withUnsafeBytes { bytes in cmux_bonjour_publish("cmux-remote-" + String(host.id.prefix(12)), UInt16(port), bytes.bindMemory(to: UInt8.self).baseAddress, UInt16(txt.count), &ref) }
+        let error = txt.withUnsafeBytes { bytes in cmux_bonjour_publish("term-remote-" + String(host.id.prefix(12)), UInt16(port), bytes.bindMemory(to: UInt8.self).baseAddress, UInt16(txt.count), &ref) }
         guard error == 0, let ref else { throw BridgeError("discovery_failed", "LAN discovery could not be advertised. Manual and QR endpoints remain available.") }
         handle = ref
     }

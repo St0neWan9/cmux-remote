@@ -17,7 +17,7 @@ final class MobileModelListRefreshUITests: XCTestCase {
             try Data(body.utf8).write(to: URL(fileURLWithPath: settings))
         }
         try configure("Alpha 模型")
-        let app = XCUIApplication(bundleIdentifier: "cmux-remote.mobile")
+        let app = XCUIApplication(bundleIdentifier: "dev.trenta.termremote")
         app.launchEnvironment["CMUX_REMOTE_TEST_PAIRING_PATH"] = pairingPath
         app.launchArguments = ["-AppleLanguages", "(zh-Hans)"]
         app.launch()

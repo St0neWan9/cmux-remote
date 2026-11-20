@@ -4,8 +4,8 @@ import TermRemoteCore
 
 /// Pairing credentials remain in device-only Keychain storage.
 struct PairingStore {
-    private let service = "cmux-remote.pairing"
-    private let protected = SecureDeviceStore(service: "cmux-remote.authorized")
+    private let service = "term-remote.pairing"
+    private let protected = SecureDeviceStore(service: "term-remote.authorized", legacyService: "cmux-remote.authorized")
     func legacyEnabled() -> Bool { protected.load(account: "explicit-legacy") == Data([1]) }
     func enableLegacy() throws { try protected.save(Data([1]), account: "explicit-legacy") }
     func disableLegacy() { protected.remove(account: "explicit-legacy") }
@@ -47,7 +47,10 @@ struct PairingStore {
         guard let data = try? Data(contentsOf: simulatorFile), let value = try? JSONDecoder().decode(PairingConfiguration.self, from: data) else { return nil }
         return try? PairingConfiguration(host: value.host, port: value.port, token: value.token, certificateSHA256: value.certificateSHA256)
         #else
-        return read(service)
+        if let value = read(service) { return value }
+        guard let legacy = read("cmux-remote.pairing") else { return nil }
+        try? save(legacy)
+        return legacy
         #endif
     }
     /// The pairing stored under one service name, when it is present and still valid.

@@ -6,10 +6,10 @@ public struct PairingLinkCodec: Sendable {
     public func encode(_ pairing: PairingConfiguration) throws -> String {
         let data = try JSONEncoder().encode(pairing)
         let payload = data.base64EncodedString().replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
-        return "cmux-remote://pair?v=1&payload=" + payload
+        return "term-remote://pair?v=1&payload=" + payload
     }
     public func decode(_ text: String) throws -> PairingConfiguration {
-        guard text.utf8.count <= 4096, let url = URLComponents(string: text), url.scheme == "cmux-remote", url.host == "pair", url.path.isEmpty,
+        guard text.utf8.count <= 4096, let url = URLComponents(string: text), url.scheme == "term-remote", url.host == "pair", url.path.isEmpty,
               let items = url.queryItems, items.count == 2, items.first(where: { $0.name == "v" })?.value == "1",
               let payload = items.first(where: { $0.name == "payload" })?.value else { throw invalid() }
         let decoded = payload.replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")

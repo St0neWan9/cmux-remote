@@ -21,7 +21,7 @@ private actor CompanionTestOwner: CmuxControlling {
         if method == "mac.forget" { savedHostID = nil; return .object(["removed": .bool(true)]) }
         if method == "mac.discovery.list", let discoveryHost {
             return try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode([
-                MacDiscoveredHost(host: discoveryHost, serviceName: "Fixture", serviceType: "_cmux-remote._tcp.", serviceDomain: "local.")]))
+                MacDiscoveredHost(host: discoveryHost, serviceName: "Fixture", serviceType: "_term-remote._tcp.", serviceDomain: "local.")]))
         }
         if method == "mac.discovery.resolve" { return .object(["host": .string("127.0.0.1"), "port": .number(7740)]) }
         if method == "mac.enrollment.start" { return .object(["state": .string("connected")]) }
@@ -130,7 +130,7 @@ private actor CompanionTestOwner: CmuxControlling {
         let model = MacCompanionModel(owner: owner, discovery: CompanionTestDiscovery())
         let crypto = IdentityCryptography(); let key = try crypto.publicKey(privateKey: crypto.generatePrivateKey())
         let host = HostIdentity(id: try crypto.identityID(publicKey: key), publicKey: key, certificateSHA256: String(repeating: "b", count: 64), name: "Fixture")
-        let device = DiscoveredBridge(host: host, service: .service(name: "Fixture", type: "_cmux-remote._tcp", domain: "local.", interface: nil))
+        let device = DiscoveredBridge(host: host, service: .service(name: "Fixture", type: "_term-remote._tcp", domain: "local.", interface: nil))
         await model.select(device)
         #expect(model.trustCandidate?.host.id == host.id)
         #expect(await owner.calls.isEmpty)

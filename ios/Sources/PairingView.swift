@@ -55,7 +55,7 @@ struct PairingView: View {
                     QRScannerView { code in
                         scanning = false
                         do {
-                            if code.hasPrefix("cmux-remote://enroll") { Task { await model.enrollQR(code) } }
+                            if code.hasPrefix("term-remote://enroll") { Task { await model.enrollQR(code) } }
                             else { let pairing = try PairingLinkCodec().decode(code); Task { await model.pair(pairing) } }
                         } catch { model.error = String(localized: "pair.invalid") }
                     }.ignoresSafeArea()

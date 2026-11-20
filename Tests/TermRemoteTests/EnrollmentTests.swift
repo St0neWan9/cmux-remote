@@ -27,7 +27,7 @@ private struct EnrollmentFixture {
     }
     func header(key: Data, clientID: String, epoch: String, nonce: String = UUID().uuidString, method: String = "GET", uri: String = "/v2/sessions", body: Data = Data()) throws -> String {
         let crypto = IdentityCryptography(); let proof = RequestProof(epoch: epoch, hostID: host.id, clientID: clientID, method: method, uri: uri, bodySHA256: crypto.digest(body), nonce: nonce, timestamp: 1000)
-        return "CmuxV2 " + (try JSONEncoder().encode(crypto.sign(proof, domain: "request", privateKey: key))).base64EncodedString()
+        return "TermRemoteV2 " + (try JSONEncoder().encode(crypto.sign(proof, domain: "request", privateKey: key))).base64EncodedString()
     }
     func clean() { try? FileManager.default.removeItem(at: directory) }
 }

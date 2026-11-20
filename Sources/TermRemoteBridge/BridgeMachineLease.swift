@@ -8,7 +8,7 @@ public final class BridgeMachineLease: Sendable {
     public init(home: URL) throws {
         let directory = home.appendingPathComponent(".local/state")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-        let fd = Darwin.open(directory.appendingPathComponent("cmux-remote-bridge.lock").path, O_CREAT | O_RDWR | O_NOFOLLOW | O_CLOEXEC, 0o600)
+        let fd = Darwin.open(directory.appendingPathComponent("term-remote-bridge.lock").path, O_CREAT | O_RDWR | O_NOFOLLOW | O_CLOEXEC, 0o600)
         guard fd >= 0 else { throw BridgeError("state_unavailable", "The Bridge machine lock cannot be opened.") }
         guard flock(fd, LOCK_EX | LOCK_NB) == 0 else {
             Darwin.close(fd)

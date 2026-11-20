@@ -11,7 +11,7 @@ final class DemoRemoteControlUITests: XCTestCase {
         let commandURL = URL(fileURLWithPath: dir).appendingPathComponent("cmd.json")
         let outURL = URL(fileURLWithPath: dir).appendingPathComponent("out.json")
         continueAfterFailure = true
-        var app = XCUIApplication(bundleIdentifier: "cmux-remote.mobile")
+        var app = XCUIApplication(bundleIdentifier: "dev.trenta.termremote")
         var lastSeq = ((try? JSONSerialization.jsonObject(with: Data(contentsOf: commandURL))) as? [String: Any])?["seq"] as? Int ?? -1
         let deadline = Date().addingTimeInterval(3 * 60 * 60)
         func write(_ seq: Int, _ ok: Bool, _ detail: String) {
@@ -73,7 +73,7 @@ final class DemoRemoteControlUITests: XCTestCase {
             let timeout = command["timeout"] as? Double ?? 10
             switch op {
             case "launch":
-                app = XCUIApplication(bundleIdentifier: "cmux-remote.mobile")
+                app = XCUIApplication(bundleIdentifier: "dev.trenta.termremote")
                 for (key, value) in command["env"] as? [String: String] ?? [:] { app.launchEnvironment[key] = value }
                 app.launchArguments = ["-AppleLanguages", "(\(command["lang"] as? String ?? "zh-Hans"))",
                                        "-AppleLocale", command["locale"] as? String ?? "zh_CN"]

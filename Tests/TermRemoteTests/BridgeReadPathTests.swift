@@ -88,7 +88,7 @@ private struct ReadPathFixture {
     func authorization(_ uri: String) throws -> String {
         let crypto = IdentityCryptography()
         let proof = RequestProof(epoch: epoch, hostID: authority.host.id, clientID: clientID, method: "GET", uri: uri, bodySHA256: crypto.digest(Data()), nonce: UUID().uuidString, timestamp: Int(Date().timeIntervalSince1970))
-        return "CmuxV2 " + (try JSONEncoder().encode(crypto.sign(proof, domain: "request", privateKey: privateKey))).base64EncodedString()
+        return "TermRemoteV2 " + (try JSONEncoder().encode(crypto.sign(proof, domain: "request", privateKey: privateKey))).base64EncodedString()
     }
     /// One authorized `GET`, exactly as a phone sends it over HTTPS or a link request.
     func read(_ uri: String) async throws -> (Int, Data) {

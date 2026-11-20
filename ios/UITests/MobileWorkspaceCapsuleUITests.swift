@@ -11,7 +11,7 @@ final class MobileWorkspaceCapsuleUITests: XCTestCase {
         let flagFile = URL(fileURLWithPath: pairingPath).deletingLastPathComponent().appendingPathComponent("two-workspaces")
         guard FileManager.default.createFile(atPath: flagFile.path, contents: Data()) else { throw XCTSkip("The fixture state directory is not writable from the test.") }
         defer { try? FileManager.default.removeItem(at: flagFile) }
-        let app = XCUIApplication(bundleIdentifier: "cmux-remote.mobile")
+        let app = XCUIApplication(bundleIdentifier: "dev.trenta.termremote")
         app.launchEnvironment["CMUX_REMOTE_TEST_PAIRING_PATH"] = pairingPath
         app.launchArguments = ["-AppleLanguages", "(zh-Hans)"]
         app.launch()

@@ -22,7 +22,7 @@ private actor RoutedLaunchCmux: CmuxControlling {
     private func signed(_ method: String, _ uri: String, body: Data, device: Device, authority: ConnectionAuthority) async throws -> String {
         let crypto = IdentityCryptography()
         let proof = RequestProof(epoch: authority.epoch, hostID: authority.host.id, clientID: device.id, method: method, uri: uri, bodySHA256: crypto.digest(body), nonce: UUID().uuidString, timestamp: 1000)
-        return "CmuxV2 " + (try JSONEncoder().encode(crypto.sign(proof, domain: "request", privateKey: device.key))).base64EncodedString()
+        return "TermRemoteV2 " + (try JSONEncoder().encode(crypto.sign(proof, domain: "request", privateKey: device.key))).base64EncodedString()
     }
     private func enroll(_ requested: [ClientCapability], approved: [ClientCapability], authority: ConnectionAuthority, workspace: String) async throws -> Device {
         let crypto = IdentityCryptography(), key = crypto.generatePrivateKey()

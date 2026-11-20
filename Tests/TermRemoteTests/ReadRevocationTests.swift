@@ -40,7 +40,7 @@ private actor ReadRevocationCmux: CmuxControlling {
         let service = SessionService(cmux: cmux, home: dir, transcriptRoots: [])
         let router = BridgeRouter(service: service, authority: authority)
         let proof = RequestProof(epoch: authority.epoch, hostID: host.id, clientID: clientID, method: "GET", uri: "/v2/sessions/session/preview", bodySHA256: crypto.digest(Data()), nonce: UUID().uuidString, timestamp: 1000)
-        let header = "CmuxV2 " + (try JSONEncoder().encode(crypto.sign(proof, domain: "request", privateKey: key))).base64EncodedString()
+        let header = "TermRemoteV2 " + (try JSONEncoder().encode(crypto.sign(proof, domain: "request", privateKey: key))).base64EncodedString()
         let result = await router.respond(method: "GET", uri: proof.uri, authorization: header, body: Data())
         #expect(await cmux.didRevoke)
         #expect(try await authority.enrolledClients()[0].revoked)

@@ -182,7 +182,7 @@ public actor SessionService {
     public func status() async throws -> JSONValue {
         _ = try await cmux.request("system.ping", params: [:])
         let caps = try await cmux.request("system.capabilities", params: [:])
-        return .object(["protocol": .string("cmux-remote/1"), "cmux": caps, "history_source": .string("local_transcript"), "preview_fidelity": .string("screen_best_effort")])
+        return .object(["protocol": .string("term-remote/1"), "cmux": caps, "history_source": .string("local_transcript"), "preview_fidelity": .string("screen_best_effort")])
     }
     public func workspaces() async throws -> JSONValue { try await cmux.request("workspace.list", params: [:]) }
     public func feed() async throws -> JSONValue {

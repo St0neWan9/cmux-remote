@@ -4,7 +4,7 @@ import XCTest
 @MainActor
 final class MobileAboutUITests: XCTestCase {
     func testTheTitleMenuOpensTheAboutPage() throws {
-        let app = XCUIApplication(bundleIdentifier: "cmux-remote.mobile")
+        let app = XCUIApplication(bundleIdentifier: "dev.trenta.termremote")
         if let pairingPath = ProcessInfo.processInfo.environment["CMUX_REMOTE_TEST_PAIRING_PATH"], !pairingPath.isEmpty {
             app.launchEnvironment["CMUX_REMOTE_TEST_PAIRING_PATH"] = pairingPath
         }

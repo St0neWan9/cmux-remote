@@ -10,7 +10,7 @@ public actor NativeRemoteWorkspaceGroup: NativeRemoteWorkspaceGrouping {
     private var tail: Task<Void, any Error>?
     private var pending = 0
     /// Creates the native group owner with an injected local cmux transport.
-    public init(local: any CmuxControlling, identity: String = "cmux-remote.native.remote", name: String = "Remote") {
+    public init(local: any CmuxControlling, identity: String = "term-remote.native.remote", name: String = "Remote") {
         self.local = local; self.identity = identity; self.name = name
     }
     /// Serializes a bounded number of group mutations without changing focus.

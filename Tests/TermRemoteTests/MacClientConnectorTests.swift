@@ -25,7 +25,7 @@ private actor ConnectorOwnerFixture: CmuxControlling {
             return .array(saved ? [.object(["id": .string(host.id), "host": try json(host),
                 "endpoint": try json(BridgeEndpoint(host: "127.0.0.1", port: 7742))])] : [])
         case "mac.discovery.list":
-            return try json(advertised ? [MacDiscoveredHost(host: host, serviceName: "fixture", serviceType: "_cmux-remote._tcp", serviceDomain: "local.")] : [])
+            return try json(advertised ? [MacDiscoveredHost(host: host, serviceName: "fixture", serviceType: "_term-remote._tcp", serviceDomain: "local.")] : [])
         case "mac.discovery.resolve":
             resolutions += 1; return try json(BridgeEndpoint(host: "192.168.1.44", port: 7742))
         case "mac.enrollment.start":

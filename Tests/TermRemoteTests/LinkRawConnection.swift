@@ -22,7 +22,7 @@ struct LinkRawConnection {
     mutating func read(_ path: String, connection: AuthorizedConnection) async throws -> String {
         let id = UUID().uuidString, crypto = IdentityCryptography()
         let proof = RequestProof(epoch: epoch, hostID: connection.host.id, clientID: connection.grant.value.clientID, method: "GET", uri: path, bodySHA256: crypto.digest(Data()), nonce: UUID().uuidString, timestamp: Int(Date().timeIntervalSince1970))
-        let authorization = "CmuxV2 " + (try JSONEncoder().encode(crypto.sign(proof, domain: "request", privateKey: connection.privateKey))).base64EncodedString()
+        let authorization = "TermRemoteV2 " + (try JSONEncoder().encode(crypto.sign(proof, domain: "request", privateKey: connection.privateKey))).base64EncodedString()
         let bytes = try cipher.seal(LinkFrame(kind: "request", id: id, method: "GET", uri: path, authorization: authorization))
         try await socket.send(bytes); return id
     }

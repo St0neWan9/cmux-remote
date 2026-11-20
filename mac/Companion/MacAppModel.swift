@@ -24,7 +24,10 @@ import TermRemoteCore
     init(executable: URL, home: URL, preferences: UserDefaults) {
         self.executable = executable; self.preferences = preferences
         language = preferences.string(forKey: MacInterfaceLanguage.preferenceKey).flatMap(MacInterfaceLanguage.init(rawValue:)) ?? .english
-        let path = preferences.string(forKey: "bridgeStatePath") ?? home.appendingPathComponent(".local/state/cmux-remote").path
+        let defaultPath = TermRemoteStateLocation.directory(home: home).path
+        let legacyDefault = home.appendingPathComponent(".local/state/cmux-remote").path
+        let savedPath = preferences.string(forKey: "bridgeStatePath")
+        let path = savedPath == legacyDefault ? defaultPath : (savedPath ?? defaultPath)
         statePath = path
         let directory = URL(fileURLWithPath: path)
         let owner = UnixSocketClient(path: directory.appendingPathComponent("owner.sock").path)

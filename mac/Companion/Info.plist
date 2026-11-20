@@ -8,18 +8,18 @@
 	<array>
 		<dict>
 			<key>CFBundleURLName</key>
-			<string>cmux-remote.desktop</string>
+			<string>dev.trenta.termremote.desktop</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>cmux-remote-mac</string>
+				<string>term-remote-mac</string>
 			</array>
 		</dict>
 	</array>
 	<key>NSBonjourServices</key>
 	<array>
-		<string>_cmux-remote._tcp</string>
+		<string>_term-remote._tcp</string>
 	</array>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>Discover your cmux Bridges on the local network.</string>
+	<string>Discover your Term Remote Bridges on the local network.</string>
 </dict>
 </plist>

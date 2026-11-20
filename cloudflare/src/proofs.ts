@@ -21,7 +21,7 @@ export function canonical(value: unknown): string {
   return "{" + Object.keys(object).sort().map(key => JSON.stringify(key) + ":" + canonical(object[key])).join(",") + "}";
 }
 export function bytes(value: unknown, domain: string): Uint8Array {
-  return new TextEncoder().encode("cmux-remote/2/" + domain + "\n" + canonical(value));
+  return new TextEncoder().encode("term-remote/2/" + domain + "\n" + canonical(value));
 }
 export function base64(data: ArrayBuffer | Uint8Array): string {
   const input = data instanceof Uint8Array ? data : new Uint8Array(data);

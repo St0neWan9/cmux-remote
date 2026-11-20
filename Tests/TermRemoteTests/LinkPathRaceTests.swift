@@ -41,7 +41,7 @@ import TermRemoteCore
             #expect(!first.contains { $0.hasPrefix("dial fallback") })
             #expect(first.contains { $0.hasPrefix("dial relay ok ") && $0.hasSuffix("relayed=true") })
             #expect(first.contains("link connected relayed=true"))
-            #expect(!first.contains { $0.contains("X-Cmux") || $0.contains("CmuxV2") })
+            #expect(!first.contains { $0.contains("X-TermRemote") || $0.contains("TermRemoteV2") })
             // After a reconnect the dial races both paths again, and the relay wins again with one more dial.
             await link.reconnect()
             let _: [SessionDescriptor] = try await request(link, connection: fixture.connection, path: "/v2/sessions")
@@ -157,7 +157,7 @@ import TermRemoteCore
             let proof = RequestProof(epoch: announcement.value.epoch, hostID: connection.host.id,
                 clientID: connection.grant.value.clientID, method: "GET", uri: uri,
                 bodySHA256: crypto.digest(bytes), nonce: UUID().uuidString, timestamp: Int(Date().timeIntervalSince1970))
-            return "CmuxV2 " + (try JSONEncoder().encode(crypto.sign(proof, domain: "request", privateKey: connection.privateKey))).base64EncodedString()
+            return "TermRemoteV2 " + (try JSONEncoder().encode(crypto.sign(proof, domain: "request", privateKey: connection.privateKey))).base64EncodedString()
         }, as: T.self)
     }
 }

@@ -48,7 +48,7 @@ if extra:
     configuration['TermRemoteUITests'].setdefault('EnvironmentVariables', {}).update(extra)
 run_file.write_bytes(plistlib.dumps(configuration))
 container_result = subprocess.run(['xcrun', 'simctl', 'get_app_container', args.device,
-                                   'cmux-remote.mobile', 'data'], capture_output=True, text=True)
+                                   'dev.trenta.termremote', 'data'], capture_output=True, text=True)
 container = Path(container_result.stdout.strip()) if container_result.returncode == 0 else None
 names = ('ProtectedConnection', 'SimulatorPairing')
 with tempfile.TemporaryDirectory(prefix='ios-test-pairing-', dir=root / '.build') as temporary:
@@ -67,7 +67,7 @@ with tempfile.TemporaryDirectory(prefix='ios-test-pairing-', dir=root / '.build'
     finally:
         if args.fixture:
             current = subprocess.run(['xcrun', 'simctl', 'get_app_container', args.device,
-                                      'cmux-remote.mobile', 'data'], capture_output=True, text=True)
+                                      'dev.trenta.termremote', 'data'], capture_output=True, text=True)
             if current.returncode == 0:
                 support = Path(current.stdout.strip()) / 'Library/Application Support'
                 for name in names:

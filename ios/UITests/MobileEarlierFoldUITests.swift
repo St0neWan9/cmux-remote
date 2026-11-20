@@ -9,7 +9,7 @@ final class MobileEarlierFoldUITests: XCTestCase {
     func testOldConversationsFoldAndOpenInPlace() throws {
         let environment = ProcessInfo.processInfo.environment
         guard environment["CMUX_REMOTE_TEST_FOLD"] == "1" else { throw XCTSkip("Run against a Mac that keeps old conversations.") }
-        let app = XCUIApplication(bundleIdentifier: "cmux-remote.mobile")
+        let app = XCUIApplication(bundleIdentifier: "dev.trenta.termremote")
         if let pairingPath = environment["CMUX_REMOTE_TEST_PAIRING_PATH"], !pairingPath.isEmpty {
             app.launchEnvironment["CMUX_REMOTE_TEST_PAIRING_PATH"] = pairingPath
         }

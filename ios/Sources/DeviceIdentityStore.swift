@@ -3,7 +3,7 @@ import TermRemoteCore
 
 /// A stable private device identity survives disconnects; it is never included in a QR code.
 struct DeviceIdentityStore {
-    private let store = SecureDeviceStore(service: "cmux-remote.identity")
+    private let store = SecureDeviceStore(service: "term-remote.identity", legacyService: "cmux-remote.identity")
     func privateKey() throws -> Data {
         if let data = store.load(account: "private-key") { _ = try IdentityCryptography().publicKey(privateKey: data); return data }
         let key = IdentityCryptography().generatePrivateKey(); try store.save(key, account: "private-key"); return key

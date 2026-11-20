@@ -18,7 +18,7 @@ public struct BridgeState: Sendable {
         let token = bytes.map { String(format: "%02x", $0) }.joined()
         try Data(token.utf8).write(to: tokenFile, options: .atomic)
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: tokenFile.path)
-        try openssl(["req", "-x509", "-newkey", "rsa:2048", "-sha256", "-nodes", "-days", "365", "-subj", "/CN=cmux-remote", "-keyout", key, "-out", certificate])
+        try openssl(["req", "-x509", "-newkey", "rsa:2048", "-sha256", "-nodes", "-days", "365", "-subj", "/CN=term-remote", "-keyout", key, "-out", certificate])
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: key)
         try openssl(["x509", "-in", certificate, "-outform", "DER", "-out", directory.appendingPathComponent("server.der").path])
     }

@@ -7,7 +7,7 @@ struct NetworkPathMonitor: Sendable {
     func availability() -> AsyncStream<Bool> {
         let (stream, continuation) = AsyncStream<Bool>.makeStream(bufferingPolicy: .bufferingNewest(1))
         let monitor = NWPathMonitor()
-        let queue = DispatchQueue(label: "cmux-remote.network-path")
+        let queue = DispatchQueue(label: "term-remote.network-path")
         let last = LastPath()
         monitor.pathUpdateHandler = { path in
             let usable = path.status == .satisfied

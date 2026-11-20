@@ -16,7 +16,7 @@ import TermRemoteCore
             let crypto = IdentityCryptography(), path = "/v2/sessions/demo-session/history", id = UUID().uuidString
             let stale = RequestProof(epoch: UUID().uuidString, hostID: fixture.connection.host.id, clientID: fixture.connection.grant.value.clientID, method: "GET", uri: path,
                                      bodySHA256: crypto.digest(Data()), nonce: UUID().uuidString, timestamp: Int(Date().timeIntervalSince1970))
-            let authorization = "CmuxV2 " + (try JSONEncoder().encode(crypto.sign(stale, domain: "request", privateKey: fixture.connection.privateKey))).base64EncodedString()
+            let authorization = "TermRemoteV2 " + (try JSONEncoder().encode(crypto.sign(stale, domain: "request", privateKey: fixture.connection.privateKey))).base64EncodedString()
             try await connection.socket.send(connection.cipher.seal(LinkFrame(kind: "subscribe", id: id, method: "GET", uri: path, authorization: authorization)))
             let refusal = try await connection.next()
             #expect(refusal.id == id); #expect(refusal.kind == "event"); #expect(refusal.status == 401); #expect(refusal.final == true)

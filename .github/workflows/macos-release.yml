@@ -54,7 +54,7 @@ jobs:
         run: python3 scripts/with-macos-signing.py scripts/package-macos.sh --notarize
       - uses: actions/upload-artifact@v4
         with:
-          name: cmux-remote-macos-${{ env.CMUX_REMOTE_MAC_VERSION }}
+          name: term-remote-macos-${{ env.CMUX_REMOTE_MAC_VERSION }}
           path: .build/macos-release/dist/*
           if-no-files-found: error
           retention-days: 7

@@ -52,7 +52,7 @@ public actor CloudRelayService {
             do {
                 let registration = try await authority.relayRegistration(origin: origin.value)
                 let url = try origin.socketURL(hostID: authority.host.id, role: "bridge")
-                let socket = dial(url, ["Authorization": "Bearer " + secret, "X-Cmux-Registration": try JSONEncoder().encode(registration).base64EncodedString()])
+                let socket = dial(url, ["Authorization": "Bearer " + secret, "X-TermRemote-Registration": try JSONEncoder().encode(registration).base64EncodedString()])
                 self.socket = socket
                 let writer = LinkPacketWriter(send: { try await socket.send($0) }, terminate: { socket.close() }, packetLimit: 3_000_000)
                 self.writer = writer

@@ -4,7 +4,7 @@
 <dict>
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array>
-		<string>cmux-remote.sync</string>
+		<string>term-remote.sync</string>
 	</array>
 	<key>UIBackgroundModes</key>
 	<array>
@@ -14,7 +14,7 @@
 	<false/>
 	<key>NSBonjourServices</key>
 	<array>
-		<string>_cmux-remote._tcp</string>
+		<string>_term-remote._tcp</string>
 	</array>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>

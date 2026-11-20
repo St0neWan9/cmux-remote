@@ -122,7 +122,7 @@ project ships no relay service and no shared address.
 2. From the repository root, deploy and store a registration key:
 
    ```sh
-   scripts/deploy-relay.sh ~/.local/state/cmux-remote/relay-registration-key
+   scripts/deploy-relay.sh ~/.local/state/term-remote/relay-registration-key
    ```
 
    The script generates the key if it does not exist, deploys the Worker, stores
