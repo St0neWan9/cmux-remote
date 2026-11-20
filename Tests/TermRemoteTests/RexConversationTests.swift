@@ -96,7 +96,11 @@ import TermRemoteBridge
         let transcriptDirectory = home.appendingPathComponent(".claude/projects/\(encoded)")
         try FileManager.default.createDirectory(at: transcriptDirectory, withIntermediateDirectories: true)
         let line = #"{"type":"assistant","uuid":"fixture","timestamp":"2026-11-19T10:00:00.000Z","message":{"content":[{"type":"text","text":"Hello from Rex"}]}}"# + "\n"
-        try Data(line.utf8).write(to: transcriptDirectory.appendingPathComponent("\(agentSession).jsonl"))
+        // A command the Agent left running in the background, launched just now.
+        let launchedAt = Date().formatted(Date.ISO8601FormatStyle(includingFractionalSeconds: true))
+        let launch = #"{"type":"assistant","uuid":"launch","timestamp":"\#(launchedAt)","message":{"content":[{"type":"tool_use","id":"bg-serve","name":"Bash","input":{"command":"serve","description":"Serve the fixture","run_in_background":true}}]}}"# + "\n"
+            + #"{"type":"user","uuid":"launched","timestamp":"\#(launchedAt)","message":{"content":[{"type":"tool_result","tool_use_id":"bg-serve","content":"Command running in background with ID: bfixture1."}]}}"# + "\n"
+        try Data((line + launch).utf8).write(to: transcriptDirectory.appendingPathComponent("\(agentSession).jsonl"))
 
         // A Codex hook record proves the second Agent without a pid registry.
         let codexSplit = try await client.request("session.new_split", [
@@ -150,6 +154,8 @@ import TermRemoteBridge
             if case .prose(let prose) = message.kind { return prose.text.contains("Hello from Rex") }
             return false
         })
+        // A live Rex conversation reports its running background tasks like a cmux one.
+        #expect(history.backgroundTasks?.map(\.id) == ["bg-serve"])
         let preview = try await source.preview(agentSession)
         #expect(preview.available)
 
@@ -180,6 +186,11 @@ import TermRemoteBridge
             if case .prose(let prose) = message.kind { return prose.text.contains("Hello from Rex") }
             return false
         })
+        #expect(serviceHistory.backgroundTasks?.map(\.id) == ["bg-serve"])
+        // A task is opened through the same route as a cmux one: its record, not "unsupported".
+        await #expect { try await service.backgroundTask(id: agentSession, taskID: "bfixture1", offset: 0, limit: 1024) } throws: { error in
+            (error as? BridgeError)?.code != "unsupported"
+        }
         let sent = try await service.send(id: agentSession, request: SendRequest(text: "hello", operationID: UUID()))
         #expect(sent.accepted)
         let interrupted = try await service.interrupt(id: agentSession, request: InterruptRequest(hard: false, operationID: UUID()))
