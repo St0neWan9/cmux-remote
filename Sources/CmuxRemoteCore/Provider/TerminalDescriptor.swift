@@ -13,14 +13,16 @@ public struct TerminalDescriptor: Codable, Sendable, Identifiable, Equatable {
     public let state: String
     /// The provider's layout node this terminal belongs to, when it has one.
     public let layoutID: String?
+    /// The user-visible tab or window title, when the provider has one.
+    public let tabTitle: String?
     /// The foreground process id on the provider's host, when the provider can prove it.
     public let processID: Int?
 
     public init(id: String, providerID: String, spaceID: String, title: String, kind: String = "terminal",
                 processName: String? = nil, workingDirectory: String? = nil, state: String = "unknown",
-                layoutID: String? = nil, processID: Int? = nil) {
+                layoutID: String? = nil, tabTitle: String? = nil, processID: Int? = nil) {
         self.id = id; self.providerID = providerID; self.spaceID = spaceID; self.title = title; self.kind = kind
         self.processName = processName; self.workingDirectory = workingDirectory; self.state = state
-        self.layoutID = layoutID; self.processID = processID
+        self.layoutID = layoutID; self.tabTitle = tabTitle; self.processID = processID
     }
 }
