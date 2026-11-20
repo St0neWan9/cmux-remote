@@ -573,7 +573,7 @@ android/                         # 新 Gradle 工程，独立构建
 | JSON | `kotlinx.serialization` 解码 + 自写 `CanonicalJSON` 编码 | **签名/摘要必须用自写 canonical writer**，不能用默认 encoder |
 | 加密 | Google Tink（Ed25519、HPKE、AEAD）+ Android Keystore 包装 | Ed25519 私钥以 Tink keyset 存储，用 Keystore AES-GCM 包装；StrongBox 可用时优先。**必须确认 Tink 支持 RFC 9180 authenticated（sender auth）模式**；若只支持 base 模式，改用 BouncyCastle 或经审计的实现，绝不能退化为 base 模式——那会失去主机/客户端身份绑定。Tink 的 HPKE API/版本与 Android 支持范围**待核实** |
 | TLS / WS | OkHttp（`X509TrustManager` 自定义 pin、WebSocket 子协议） | **不能直接用 `CertificatePinner`**：协议 pin 是 DER 证书 SHA-256，不是 SPKI |
-| 发现 | `NsdManager`（`_cmux-remote._tcp`）+ 二维码 / 粘贴 v2 登记 JSON / relay 兜底 | mDNS 在部分机型/网络不可靠；必须保留 QR 与非 bearer 的手动入口 |
+| 发现 | `NsdManager`（`_term-remote._tcp`）+ 二维码 / 粘贴 v2 登记 JSON / relay 兜底 | mDNS 在部分机型/网络不可靠；必须保留 QR 与非 bearer 的手动入口 |
 | 扫码 | CameraX + ML Kit bundled barcode（或 ZXing 变体） | ML Kit 离线模型不依赖 Play Services，但仍有 Google 依赖；F-Droid 版本用 ZXing |
 | 持久化 | DataStore（连接/relay）、文件或 Room（操作账本、会话缓存） | 账本必须 fsync、容量有界、损坏时 fail closed；不备份 |
 | 后台 | WorkManager（best-effort）+ 前台生命周期 | 不承诺常驻 WebSocket；首版不做 FCM（会引入服务端，违反“无开发者服务器”） |
@@ -593,8 +593,8 @@ android/                         # 新 Gradle 工程，独立构建
 Android 必须实现与 Swift 完全一致的：
 
 - Ed25519 身份、公钥 Base64、identity ID = SHA-256(raw 32-byte public key) 十六进制。
-- 签名输入 = UTF-8 `cmux-remote/2/<domain>\n` + **sorted-key、不转义斜杠**的 JSON；Data 字段用标准 Base64。
-- 请求证明：`Authorization: "CmuxV2 " + Base64(JSON(SignedValue<RequestProof>))`；`uri` 是 percent-encoded path + 排序后的 query；`bodySHA256` 是原始 body 字节的 SHA-256；时间戳为 epoch 秒；nonce 每次新 UUID。
+- 签名输入 = UTF-8 `term-remote/2/<domain>\n` + **sorted-key、不转义斜杠**的 JSON；Data 字段用标准 Base64。
+- 请求证明：`Authorization: "TermRemoteV2 " + Base64(JSON(SignedValue<RequestProof>))`；`uri` 是 percent-encoded path + 排序后的 query；`bodySHA256` 是原始 body 字节的 SHA-256；时间戳为 epoch 秒；nonce 每次新 UUID。
 - v1 路径 → v2 线上路径的重写；失败时 `invalid_proof` 只允许丢 epoch 重试一次。
 - Link v3：proposal/acceptance 签名域、HPKE `P256_SHA256_AES_GCM_256`、transcript/info 字符串、`SealedLinkPacket` 首包带 encapsulated key、后续不允许重置上下文。
 - 固定证书：LAN 只信任保存的 leaf DER SHA-256 + 主机/端口；禁止重定向；relay 使用系统 PKI + HPKE。
@@ -643,13 +643,13 @@ Android 必须实现与 Swift 完全一致的：
 ### 6.5 发现与配对
 
 - 需要的权限：`INTERNET`、`ACCESS_NETWORK_STATE`；使用 `MulticastLock` 时加 `CHANGE_WIFI_MULTICAST_STATE`；如果直接读 Wi-Fi 状态再加 `ACCESS_WIFI_STATE`；扫码用 `CAMERA`；如果后续加本地通知再加 `POST_NOTIFICATIONS`。Android 13+ 的 `NEARBY_WIFI_DEVICES` 是否适用于所选 NSD 路径要按 targetSdk 核实。不要申请与功能无关的存储/位置权限。**Android 16+ 可能引入本地网络访问权限（`ACCESS_LOCAL_NETWORK`）**：需在目标 SDK 上核实并申请，否则 LAN 直连会失败、只剩 relay（**待核实**）。
-- `NsdManager` 浏览 `_cmux-remote._tcp`；Android 12+ 的 mDNS 行为、`WifiManager.MulticastLock`、企业 Wi-Fi / 访客网络隔离都需实测（**待核实**）。
+- `NsdManager` 浏览 `_term-remote._tcp`；Android 12+ 的 mDNS 行为、`WifiManager.MulticastLock`、企业 Wi-Fi / 访客网络隔离都需实测（**待核实**）。
 - 生命周期：注册 `ConnectivityManager.NetworkCallback`；Wi-Fi/蜂窝切换、网络丢失、访客网隔离后清空过期发现结果并重启 browse；退后台停止 browse，回前台重启；单个 resolve 用串行队列（并发会 `FAILURE_ALREADY_ACTIVE`），带超时和有限重试；结果去重、有界。
 - 可测试性：把发现抽象成 `DiscoverySource` 接口，由 `AppContainer` 注入；JVM/Compose 测试用 fake source，真机/AVD 用 NsdManager。参考 iOS 的 `CMUX_REMOTE_TEST_NEARBY_PATH` 注入方式，不要让 UI 测试依赖真实局域网。
 - 发现结果只作为可达性提示；首次信任仍需 QR 或显式确认主机身份（与 iOS 一致）。
 - relay 目录：`RelayDirectoryClient` 的同一合同；host-signed entry 逐个验证，不因为来自 relay 就信任。
 - 配对状态机与 iOS 对齐：扫码 → 登记请求 → 等待主人在 Mac 批准 → 保存 grant → 连接；拒绝/过期/撤销都显示稳定错误码的本地化文案。
-- 二维码解析优先支持 v2 `cmux-remote://enroll...`；legacy `PairingLinkCodec` 是共享 bearer，Android 首版不默认支持。若扫到 legacy，提示它需要 Bridge 显式开启、不可按设备撤销，并走单独确认（见 7.1a）；不要把它混进 v2 登记状态机。
+- 二维码解析优先支持 v2 `term-remote://enroll...`；legacy `PairingLinkCodec` 是共享 bearer，Android 首版不默认支持。若扫到 legacy，提示它需要 Bridge 显式开启、不可按设备撤销，并走单独确认（见 7.1a）；不要把它混进 v2 登记状态机。
 
 ### 6.6 后台与通知
 
@@ -753,11 +753,11 @@ Android 应保留平台习惯：ripple、predictive back、TalkBack、系统分�
 
 | 主题 | 现状（Swift 参考） | Kotlin 必须一致 |
 | --- | --- | --- |
-| 签名输入 | `IdentityCryptography.bytes`：`"cmux-remote/2/" + domain + "\n"` + `JSONEncoder(.sortedKeys, .withoutEscapingSlashes)` | 自写 canonical JSON；键排序、无斜杠转义、UTF-8、无多余空白；**非 ASCII（如中文主机名）按 UTF-8 原样输出，不转 `\uXXXX`**。注意：即使域名为 `link3-*`，前缀仍是 `cmux-remote/2/` |
+| 签名输入 | `IdentityCryptography.bytes`：`"term-remote/2/" + domain + "\n"` + `JSONEncoder(.sortedKeys, .withoutEscapingSlashes)` | 自写 canonical JSON；键排序、无斜杠转义、UTF-8、无多余空白；**非 ASCII（如中文主机名）按 UTF-8 原样输出，不转 `\uXXXX`**。注意：即使域名为 `link3-*`，前缀仍是 `term-remote/2/` |
 | `Data` 编码 | Foundation `JSONEncoder` 默认 Base64 字符串 | 标准 Base64（带 padding、无换行） |
 | 可选字段 | Swift `JSONEncoder` 省略 `nil` optional | Kotlin 必须**省略**而不是输出 `null`（`explicitNulls = false` 或自写 writer）；这是最常见的签名不一致来源 |
 | 身份 ID | SHA-256(raw 32-byte Ed25519 public key) → 小写 hex | 同左；公钥以 Base64 传输；host 身份还要校验 id 与公钥一致、`certificateSHA256` 为 64 位 hex、name 非空且 <=128 字节 |
-| 请求证明 | `RemoteClientRuntime.authorized`：`CmuxV2 ` + Base64(JSON(SignedValue<RequestProof>)) | 同左；`uri` 为 percent-encoded path + 排序 query；`bodySHA256` 是原始 body 字节的 SHA-256；GET 的 body 视为空字节（不是 `null` 的字符串）；`nonce` 每次新 UUID，时间戳为 epoch 秒且只接受 ±60s |
+| 请求证明 | `RemoteClientRuntime.authorized`：`TermRemoteV2 ` + Base64(JSON(SignedValue<RequestProof>)) | 同左；`uri` 为 percent-encoded path + 排序 query；`bodySHA256` 是原始 body 字节的 SHA-256；GET 的 body 视为空字节（不是 `null` 的字符串）；`nonce` 每次新 UUID，时间戳为 epoch 秒且只接受 ±60s |
 | URI 编码 | Swift `URLComponents.percentEncodedPath` + `percentEncodedQuery`；空格为 `%20`，query 按 key 排序 | 逐字节一致；用黄金向量覆盖空格、中文、`+`、`/`、`:`、`?`、`&`、`=`。不要用 `HttpUrl`/表单编码再拼一次 query，否则签名 URI 不同 |
 | 路径重写 | 客户端 `/v1/...` → 线上 `/v2/...` | 同左；不得自行改路由 |
 | 版本协商 | `/v2/identity` announcement `version == 2`；Link proposal/acceptance `version == 3`；WebSocket 子协议 `cmux-remote.v3` | 同左；未知版本 fail closed，不降级到 legacy/v1 |
@@ -774,7 +774,7 @@ Android 应保留平台习惯：ripple、predictive back、TalkBack、系统分�
 | 操作账本 | 共享 ledger：按设备 + operation UUID，16,384 个 key / 16 MiB；不自动驱逐；损坏/满/写失败 fail closed；POST 不自动重试 | 同左；Android 需 fsync 后再放行 dispatch，重启后不重放未完成意图 |
 | 操作回执 | `GET /v2/operations/:operation_id` 返回 `{operation_id, state: accepted|outcome_unknown, recorded_at}`；要求原设备当前 capability/workspace；不存在为 `operation_not_found`，**不存在不等于没执行** | 同左；Android 发送/停止/Feed 失败后只查回执，不自动重发；回执 UI 不得把“查不到”说成“没执行” |
 | 图片 | 上传：`send.attachments` 最多 4 张、每张 <=512 KiB、合计 <=640 KiB、仅 PNG/JPEG、每边 <=4096 px 且 <=8 MP，整体 body <=1 MiB；下载：`GET /v2/sessions/:id/image?reference_id&generation` 返回 JPEG <=512 KiB、最长边 1600 px、`no-store`/`nosniff`，`history.images` 绑定 generation | 同左；解码后重编码并去掉 EXIF/GPS；只按 reference ID 取图，不提交主机路径 |
-| relay | `X-Cmux-Relay-Permit` / `X-Cmux-Relay-Join`；`RelayJoin(hostID, clientPublicKey, permitDigest)` 签名域 `relay3-join`，`permitDigest = digest(bytes(admission, "relay3-permit-envelope"))`；`relay3-hint` 用于路由提示 | 同左；permit 不是授权；relay 只提供传输可达性 |
+| relay | `X-TermRemote-Relay-Permit` / `X-TermRemote-Relay-Join`；`RelayJoin(hostID, clientPublicKey, permitDigest)` 签名域 `relay3-join`，`permitDigest = digest(bytes(admission, "relay3-permit-envelope"))`；`relay3-hint` 用于路由提示 | 同左；permit 不是授权；relay 只提供传输可达性 |
 
 **Canonical JSON / URI 规范必须写死，不能只写“排序、无斜杠转义”**：
 
@@ -873,7 +873,7 @@ HPKE 本身有随机性，黄金向量不要试图固定密文；固定**握手 
 
 **A2 第一版已接入 Bridge（验证于隔离 fixture，未接真实 cmux）**
 
-- 传输：Android 走 **HTTPS + v2 请求证明**（`Authorization: CmuxV2`），LAN 直连，只信任配对时保存的 Bridge 自签 leaf 证书（DER SHA-256）。**不引入 HPKE**：`/v3/link` 的 HPKE 只用于 WebSocket 订阅，登记与资源请求在 HTTPS 上同样受签名保护。订阅（WebSocket）留到 A3。
+- 传输：Android 走 **HTTPS + v2 请求证明**（`Authorization: TermRemoteV2`），LAN 直连，只信任配对时保存的 Bridge 自签 leaf 证书（DER SHA-256）。**不引入 HPKE**：`/v3/link` 的 HPKE 只用于 WebSocket 订阅，登记与资源请求在 HTTPS 上同样受签名保护。订阅（WebSocket）留到 A3。
 - 密码学：BouncyCastle Ed25519；canonical JSON 与 Swift 逐字节一致（7 个向量测试），签名互相可验。
 - 登记：`GET /v2/enrollment/bootstrap` → `POST /v2/enrollment/request` → 轮询 `status` → 校验 host 签名 grant → 保存。`clientKind = "android"`。
 - 资源：`/v2/sessions`、`/v2/sessions/:id/history`、`/v2/sessions/:id/preview`、`send`、`interrupt`、`/v2/feed`、`/v2/feed/:request/reply`（含 `kind`）。
@@ -885,8 +885,8 @@ HPKE 本身有随机性，黄金向量不要试图固定密文；固定**握手 
 
 - 链路（**已启用**）：`/v3/link` WebSocket + RFC 9180 authenticated HPKE，改用 **BouncyCastle 的 HPKE**（`bcprov-jdk18on` 自带 RFC 9180，含 auth 模式），与 CryptoKit 逐字节互通——用 CryptoKit 直接解开了 Kotlin 生成的包作为证据。手写的 HKDF 版本已删除。
 - 修通过程中确认的三个协议细节，写进合同避免重犯：① `proposalDigest`/transcript 摘要算的是**整个签名信封** `{value, signature}`，不是内层 value；② Link 帧必须用 **WebSocket 二进制帧**发送，文本帧会被 Bridge 直接断开；③ `P256_SHA256_AES_GCM_256` 的 AEAD 0x0002 是 **AES-256-GCM（32 字节密钥）**。
-- 订阅必须带自己的 `CmuxV2` 请求证明；事件只表示“资源变了”，客户端随即重读。
-- 中转：relay origin + host 签名的 admission permit 已实现并校验；链路先拨 LAN，失败再拨 `wss://<origin>/v3/relay/<hostID>?role=client`（带 `X-Cmux-Relay-Permit` / `X-Cmux-Relay-Join`，join 用本设备密钥签名）。**中转下所有资源读取都走链路**（relay 只转发 `/v3/link`），响应按 64 KiB 分块并逐块 ACK。
+- 订阅必须带自己的 `TermRemoteV2` 请求证明；事件只表示“资源变了”，客户端随即重读。
+- 中转：relay origin + host 签名的 admission permit 已实现并校验；链路先拨 LAN，失败再拨 `wss://<origin>/v3/relay/<hostID>?role=client`（带 `X-TermRemote-Relay-Permit` / `X-TermRemote-Relay-Join`，join 用本设备密钥签名）。**中转下所有资源读取都走链路**（relay 只转发 `/v3/link`），响应按 64 KiB 分块并逐块 ACK。
 - 旧 Bridge 兼容：登记若返回 `invalid_enrollment`（旧版只认 `iphone` / `mac`），用 `iphone` 种类重试一次；新 Bridge 仍登记为 `android`。
 - 新鲜度：链路为主，前台轮询兜底（会话 15 秒、列表 30 秒），随页面取消。设备上实测：追加一条转录后 3 秒内出现在会话页。
 - 图片：选择/发送（重编码为 JPEG，单张 ≤512 KiB、每边 ≤4096px、≤8MP），历史图片按 `reference_id + generation` 读取并按 512 KiB 上限校验。

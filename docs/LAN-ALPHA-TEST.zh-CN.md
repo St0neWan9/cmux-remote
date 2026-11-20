@@ -76,7 +76,7 @@ mkdir -p "$HOME/Applications" "$HOME/.local/bin"
 if [ -e "$HOME/Applications/CmuxRemoteMac.app" ]; then
   alpha_installed_id=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' \
     "$HOME/Applications/CmuxRemoteMac.app/Contents/Info.plist")
-  if [ "$alpha_installed_id" != 'cmux-remote.desktop' ]; then
+  if [ "$alpha_installed_id" != 'dev.trenta.termremote.desktop' ]; then
     echo '目标位置不是本项目的 Companion，已停止安装' >&2
     exit 1
   fi
@@ -101,7 +101,7 @@ INSTALL
 在它的终端执行初始化（已有状态则保留），然后启动服务：
 
 ```sh
-if [ ! -f "$HOME/.local/state/cmux-remote/token" ]; then
+if [ ! -f "$HOME/.local/state/term-remote/token" ]; then
   "$HOME/.local/bin/cmux-remote-alpha" init
 fi
 "$HOME/.local/bin/cmux-remote-alpha" serve --port 7782
@@ -112,7 +112,7 @@ B 只监听本机。保留默认 Bonjour 发现，才能在 Companion 中发现 
 当前 `--no-discovery` 同时关闭广播和附近主机发现，本轮不要添加该选项。
 必须在 cmux 内启动，以符合 `cmuxOnly` 的进程来源检查。
 
-Companion 固定读取 B 的默认 `~/.local/state/cmux-remote/owner.sock`。
+Companion 固定读取 B 的默认 `~/.local/state/term-remote/owner.sock`。
 **本步骤不要添加另一条 `--state` 路径**，否则 Companion 找不到你的 Bridge。
 若报 `already_running`，已有 Bridge 占用默认状态：先确认已有服务版本与归属，
 不要启动第二份或删除状态。7782 若被别的程序占用，可换一个空闲端口，仍保留默认状态目录。

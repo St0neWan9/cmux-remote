@@ -73,7 +73,7 @@ On a Mac with no Bridge state yet, run `.build/debug/term-remote init` once befo
 The server defaults to loopback without this explicit LAN listen option. Bonjour
 discovery is enabled unless `--no-discovery` is selected. `--state` chooses a
 separate private state directory; the current containing app uses the default
-`~/.local/state/cmux-remote/owner.sock`. Its owner-only control socket is not a LAN
+`~/.local/state/term-remote/owner.sock`. Its owner-only control socket is not a LAN
 endpoint. Using the official cmux CLI does not bypass cmux's ancestry policy.
 
 When adding this Mac, open enrollment on the remote host, optionally confined to

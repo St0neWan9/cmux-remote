@@ -11,7 +11,7 @@ swift build
 .build/debug/term-remote serve --pair
 ```
 
-This initializes private state if needed, starts HTTPS and local administration, advertises `_cmux-remote._tcp` on the LAN and prints the enrollment QR. The window defaults to five minutes. The iPhone scans the code and requests approval. The Mac owner inspects the pending client and approves its exact request:
+This initializes private state if needed, starts HTTPS and local administration, advertises `_term-remote._tcp` on the LAN and prints the enrollment QR. The window defaults to five minutes. The iPhone scans the code and requests approval. The Mac owner inspects the pending client and approves its exact request:
 
 ```sh
 .build/debug/term-remote enrollment pending
@@ -20,7 +20,7 @@ This initializes private state if needed, starts HTTPS and local administration,
 
 Use a current UUID from the requested scope. Repeat `--workspace` to approve more than one. Omitting `--control` grants viewing, project reads and Feed reads. `--control` adds conversation control and Feed replies, plus starting conversations (`conversationStart`) when the device requested it; it does not implicitly add terminal mirroring or terminal input. The Mac approval page shows starting conversations as a separate checkbox, checked by default. Other clients can explicitly request separate capabilities, and the owner can use repeated `--capability` flags. An approval can narrow a request's scope and cannot expand it.
 
-The state directory defaults to `~/.local/state/cmux-remote`. When using a custom `--state`, use it consistently for every command. Further owner commands:
+The state directory defaults to `~/.local/state/term-remote`. When using a custom `--state`, use it consistently for every command. Further owner commands:
 
 ```sh
 term-remote enrollment open --workspace WORKSPACE_UUID
@@ -36,11 +36,11 @@ term-remote clients revoke CLIENT_ID
 
 Host and client identities use CryptoKit Ed25519 signing keys (`Curve25519.Signing`). Identity IDs are lowercase SHA-256 hashes of the raw 32-byte public key. Private host keys and the client registry are owner-protected outside the checkout; iPhone private keys and saved grants use device-only Keychain. Simulator verification uses owner-only sandbox files and does not establish physical Keychain behavior.
 
-Signature input is UTF-8 `cmux-remote/2/DOMAIN\n`, followed by sorted-key JSON with unescaped slashes. Dates use integer epoch seconds. Domains are `bootstrap`, `host`, `enrollment-request`, `enrollment-status`, `grant` and `request`. Enrollment binds host ID, window ID, client ID/public key, request ID, fresh nonce, client kind/name, requested workspace/capability scope and expiry. The owner approves that exact record. Denied, cancelled and expired requests issue no grants.
+Signature input is UTF-8 `term-remote/2/DOMAIN\n`, followed by sorted-key JSON with unescaped slashes. Dates use integer epoch seconds. Domains are `bootstrap`, `host`, `enrollment-request`, `enrollment-status`, `grant` and `request`. Enrollment binds host ID, window ID, client ID/public key, request ID, fresh nonce, client kind/name, requested workspace/capability scope and expiry. The owner approves that exact record. Denied, cancelled and expired requests issue no grants.
 
 Bonjour advertisements contain only public discovery metadata. A service name is not trust. First use requires a trusted QR or explicit comparison/confirmation of the advertised host identity. The client pins the exact TLS leaf before transmitting enrollment or signed resource requests and then verifies host signatures with the trusted public key.
 
-Every authenticated resource request has an `Authorization: CmuxV2 BASE64_SIGNED_PROOF` header. Its proof binds host ID, device ID, fresh Bridge epoch, exact method/raw URI/body SHA-256, nonce and timestamp. The server verifies the enrolled device key, rejects revoked clients, accepts timestamps only within 60 seconds, and rejects repeated nonces. The nonce cache is bounded; reaching capacity rejects requests rather than evicting still-valid replay protection. Each server run has a new signed epoch, preventing captured requests from replaying after a restart.
+Every authenticated resource request has an `Authorization: TermRemoteV2 BASE64_SIGNED_PROOF` header. Its proof binds host ID, device ID, fresh Bridge epoch, exact method/raw URI/body SHA-256, nonce and timestamp. The server verifies the enrolled device key, rejects revoked clients, accepts timestamps only within 60 seconds, and rejects repeated nonces. The nonce cache is bounded; reaching capacity rejects requests rather than evicting still-valid replay protection. Each server run has a new signed epoch, preventing captured requests from replaying after a restart.
 
 The saved grant is not a bearer token. Possessing it without the device's private key does not authorize requests. Scope and revocation are rechecked after backend awaits and at the final service binding used for reads/writes. Browsing never focuses the host desktop. No route forwards a client-selected cmux RPC method.
 
