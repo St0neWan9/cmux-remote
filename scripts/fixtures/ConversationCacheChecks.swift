@@ -1,6 +1,6 @@
 import Foundation
-import CmuxRemoteCore
-import CmuxRemoteClient
+import TermRemoteCore
+import TermRemoteClient
 import CmuxAgentChat
 
 /// A conversation read before is stored on the phone, so reopening one shows its content at once.

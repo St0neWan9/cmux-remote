@@ -1,6 +1,6 @@
 import SwiftUI
-import CmuxRemoteCore
-import CmuxRemoteClient
+import TermRemoteCore
+import TermRemoteClient
 
 /// Connection inspection exposes only public trust and the approved resource capabilities.
 struct ConnectionDetailView: View {

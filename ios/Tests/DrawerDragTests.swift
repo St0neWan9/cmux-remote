@@ -1,5 +1,5 @@
 import XCTest
-@testable import CmuxRemote
+@testable import TermRemote
 
 final class DrawerDragTests: XCTestCase {
     func testOpeningCommitsFromFingerPositionToOpenTarget() {

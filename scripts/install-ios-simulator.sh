@@ -9,5 +9,5 @@ device=next((d for items in devices.values() for d in items if d['udid']==os.env
 assert device and device['name'].startswith('cmux-remote-'), 'Use a task-owned cmux-remote Simulator'
 PY
 codesign --force --sign - --timestamp=none \
-  .build/ios/Build/Products/Debug-iphonesimulator/CmuxRemote.app
-xcrun simctl install "$device_id" .build/ios/Build/Products/Debug-iphonesimulator/CmuxRemote.app
+  .build/ios/Build/Products/Debug-iphonesimulator/TermRemote.app
+xcrun simctl install "$device_id" .build/ios/Build/Products/Debug-iphonesimulator/TermRemote.app

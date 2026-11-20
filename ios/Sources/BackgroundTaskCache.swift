@@ -1,5 +1,5 @@
 import Foundation
-import CmuxRemoteCore
+import TermRemoteCore
 
 /// The last read of one background task, kept on the phone so reopening its page shows content at once.
 ///

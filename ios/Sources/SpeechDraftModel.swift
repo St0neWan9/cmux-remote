@@ -1,6 +1,6 @@
 import Foundation
 import Observation
-import CmuxRemoteCore
+import TermRemoteCore
 
 /// Owns dictation and bounded deadlines; confirmed text is returned to the ordinary composer.
 @MainActor @Observable final class SpeechDraftModel {

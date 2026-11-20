@@ -1,6 +1,6 @@
 import SwiftUI
-import CmuxRemoteCore
-import CmuxRemoteClient
+import TermRemoteCore
+import TermRemoteClient
 import CmuxAgentChat
 
 /// One background task's own record: an asynchronous Agent's conversation, or a detached command's output.

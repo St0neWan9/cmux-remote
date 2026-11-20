@@ -1,7 +1,7 @@
 import Foundation
 import Observation
-import CmuxRemoteCore
-import CmuxRemoteClient
+import TermRemoteCore
+import TermRemoteClient
 
 /// Owns discovery, explicit first-use trust, enrollment progress and every approved Mac's authorization.
 @MainActor @Observable

@@ -1,5 +1,5 @@
 import Foundation
-import CmuxRemoteCore
+import TermRemoteCore
 
 struct ErrorPresentation {
     /// A lost or unreachable link, which the connection bar shows and retries instead of a red line on the page.

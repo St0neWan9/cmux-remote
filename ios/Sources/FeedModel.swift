@@ -1,7 +1,7 @@
 import Foundation
 import Observation
-import CmuxRemoteCore
-import CmuxRemoteClient
+import TermRemoteCore
+import TermRemoteClient
 
 /// Snapshot refresh and replies share one model, preserving mutation warnings across background reads.
 @MainActor @Observable

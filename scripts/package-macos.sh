@@ -34,7 +34,7 @@ echo "Packaging term remote $version ($build)"
 python3 scripts/generate-macos-project.py >/dev/null
 swift build -c release --arch arm64 --arch x86_64 --product term-remote
 helper_source="$(swift build -c release --arch arm64 --arch x86_64 --show-bin-path)/term-remote"
-xcodebuild -project mac/CmuxRemoteMac.xcodeproj -scheme CmuxRemoteMac -configuration Release \
+xcodebuild -project mac/TermRemoteMac.xcodeproj -scheme TermRemoteMac -configuration Release \
   -destination 'generic/platform=macOS' -derivedDataPath "$out/DerivedData" \
   ARCHS='arm64 x86_64' ONLY_ACTIVE_ARCH=NO CODE_SIGNING_ALLOWED=NO \
   "MARKETING_VERSION=$version" "CURRENT_PROJECT_VERSION=$build" build

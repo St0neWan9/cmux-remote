@@ -1,6 +1,6 @@
 import Foundation
 import Darwin
-import CmuxRemoteCore
+import TermRemoteCore
 
 /// Keeps an unresolved send in device-local protected storage before dispatch.
 actor PendingSendStore {

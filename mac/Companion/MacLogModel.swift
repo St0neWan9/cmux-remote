@@ -1,7 +1,7 @@
 import Foundation
 import Observation
-import CmuxRemoteMac
-import CmuxRemoteCore
+import TermRemoteMac
+import TermRemoteCore
 
 /// The Bridge log window's state: a bounded tail read off the main thread, re-read on a short cadence only
 /// while the window is on screen and not paused.

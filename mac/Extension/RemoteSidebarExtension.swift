@@ -1,6 +1,6 @@
 import SwiftUI
 import CmuxExtensionKit
-import CmuxRemoteClient
+import TermRemoteClient
 
 /// Public cmux sidebar extension; uses no internal host SPI or native mirror provider.
 @main @MainActor final class RemoteSidebarExtension: CmuxSidebarExtension {

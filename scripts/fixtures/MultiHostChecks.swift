@@ -1,6 +1,6 @@
 import Foundation
-import CmuxRemoteCore
-import CmuxRemoteClient
+import TermRemoteCore
+import TermRemoteClient
 
 /// Several approved Macs on one phone: combined lists, per-Mac failures, removal and relay directories.
 enum MultiHostChecks {

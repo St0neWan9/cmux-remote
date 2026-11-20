@@ -1,6 +1,6 @@
 import SwiftUI
-import CmuxRemoteCore
-import CmuxRemoteClient
+import TermRemoteCore
+import TermRemoteClient
 
 /// A white native preview with explicit copy/share actions; no host URL is opened.
 struct HistoricalImageView: View {

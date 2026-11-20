@@ -1,6 +1,6 @@
 import SwiftUI
-import CmuxRemoteMac
-import CmuxRemoteCore
+import TermRemoteMac
+import TermRemoteCore
 
 /// Exact-request approval and per-device revocation; actions apply only to the selected row.
 struct DevicesSettingsView: View {

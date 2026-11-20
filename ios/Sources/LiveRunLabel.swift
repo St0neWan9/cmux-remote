@@ -1,5 +1,5 @@
 import SwiftUI
-import CmuxRemoteCore
+import TermRemoteCore
 
 /// The running turn's elapsed time, in both places the terminal's own line appears: beside the
 /// spinner above the input box, and at the top of the reply in progress, where a divider closes it.

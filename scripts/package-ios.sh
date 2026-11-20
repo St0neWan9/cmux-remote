@@ -25,8 +25,8 @@ if [[ "$unsigned" == 1 ]]; then
   version=$(ruby -r ./ios/fastlane/release_config.rb -e 'print ReleaseConfig.new.version')
   bundle_id=$(ruby -r ./ios/fastlane/release_config.rb -e 'print ReleaseConfig.new.bundle_id')
   if ! xcrun --sdk iphoneos metal --version >/dev/null 2>&1; then xcodebuild -downloadComponent MetalToolchain; fi
-  xcodebuild -project ios/CmuxRemote.xcodeproj -scheme CmuxRemote -configuration Release \
-    -sdk iphoneos -destination 'generic/platform=iOS' -archivePath "$output/CmuxRemote.xcarchive" \
+  xcodebuild -project ios/TermRemote.xcodeproj -scheme TermRemote -configuration Release \
+    -sdk iphoneos -destination 'generic/platform=iOS' -archivePath "$output/TermRemote.xcarchive" \
     -derivedDataPath "$output/DerivedData" CODE_SIGNING_ALLOWED=NO \
     "PRODUCT_BUNDLE_IDENTIFIER=$bundle_id" "MARKETING_VERSION=$version" "CURRENT_PROJECT_VERSION=$CMUX_REMOTE_IOS_BUILD_NUMBER" archive
   exit 0

@@ -1,5 +1,5 @@
 import SwiftUI
-import CmuxRemoteCore
+import TermRemoteCore
 
 /// The list's title opens the page's options: order, pending items, refresh and management.
 struct SessionTitleMenu: View {

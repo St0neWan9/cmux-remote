@@ -1,6 +1,6 @@
 import SwiftUI
-import CmuxRemoteMac
-import CmuxRemoteClient
+import TermRemoteMac
+import TermRemoteClient
 
 /// Host choice and workspace mirroring; terminal work remains in the native cmux workspace.
 struct CompanionView: View {

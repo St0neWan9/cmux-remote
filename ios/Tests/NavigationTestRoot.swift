@@ -1,5 +1,5 @@
 import SwiftUI
-@testable import CmuxRemote
+@testable import TermRemote
 
 struct NavigationTestRoot: View {
     @Bindable var route: NavigationTestRoute

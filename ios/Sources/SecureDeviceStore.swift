@@ -1,6 +1,6 @@
 import Foundation
 import Security
-import CmuxRemoteCore
+import TermRemoteCore
 
 /// Platform storage: physical-device-only Keychain; isolated Simulator sandbox for development.
 struct SecureDeviceStore {

@@ -1,6 +1,6 @@
 import Foundation
 import SQLite3
-import CmuxRemoteCore
+import TermRemoteCore
 import CmuxAgentChat
 
 /// Values the store binds to a statement. Kept narrow on purpose: the store only ever binds text, integers and

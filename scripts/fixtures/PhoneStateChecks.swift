@@ -1,6 +1,6 @@
 import Foundation
-import CmuxRemoteCore
-import CmuxRemoteClient
+import TermRemoteCore
+import TermRemoteClient
 import CmuxAgentChat
 
 /// A conversation that moved on while the phone was away, read over a link that refuses the first reads as busy

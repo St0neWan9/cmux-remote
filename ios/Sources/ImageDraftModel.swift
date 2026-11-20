@@ -1,6 +1,6 @@
 import Foundation
 import Observation
-import CmuxRemoteCore
+import TermRemoteCore
 
 /// Selected images remain local until an explicit send confirms their operation.
 @MainActor @Observable

@@ -1,6 +1,6 @@
 import Foundation
 import SQLite3
-import CmuxRemoteCore
+import TermRemoteCore
 import CmuxAgentChat
 
 /// A conversation kept on the phone, so reading back through it never asks the Mac again.

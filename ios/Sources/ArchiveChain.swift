@@ -1,5 +1,5 @@
 import Foundation
-import CmuxRemoteCore
+import TermRemoteCore
 
 /// Reads a conversation from the Bridge's archive route, newest page first and then downward.
 ///

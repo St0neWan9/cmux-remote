@@ -2,7 +2,7 @@ import AppKit
 
 /// The system preference toolbar owns category icons, labels and selection rendering.
 @MainActor final class RemoteSettingsToolbar: NSObject, NSToolbarDelegate {
-    let toolbar = NSToolbar(identifier: "CmuxRemoteSettings")
+    let toolbar = NSToolbar(identifier: "TermRemoteSettings")
     private let model: MacAppModel
     /// Section identifier, label key and symbol, in toolbar order.
     private let sections: [(id: String, label: String, symbol: String)] = [

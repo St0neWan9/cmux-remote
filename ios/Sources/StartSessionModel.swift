@@ -1,7 +1,7 @@
 import Foundation
 import Observation
-import CmuxRemoteCore
-import CmuxRemoteClient
+import TermRemoteCore
+import TermRemoteClient
 
 /// One "new session" flow on one Mac: folders inside an approved workspace, then a fixed agent.
 @MainActor @Observable

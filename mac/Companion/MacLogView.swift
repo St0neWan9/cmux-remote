@@ -1,6 +1,6 @@
 import AppKit
 import SwiftUI
-import CmuxRemoteMac
+import TermRemoteMac
 
 /// The Bridge log window: level and keyword filters over the newest lines, which sit at the bottom.
 struct MacLogView: View {

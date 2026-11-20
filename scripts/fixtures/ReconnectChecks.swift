@@ -1,5 +1,5 @@
 import Foundation
-import CmuxRemoteClient
+import TermRemoteClient
 
 /// The automatic redial pacing: a dropped working link is dialed at once, then retries back off.
 enum ReconnectChecks {

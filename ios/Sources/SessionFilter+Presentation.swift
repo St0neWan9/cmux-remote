@@ -1,5 +1,5 @@
 import Foundation
-import CmuxRemoteCore
+import TermRemoteCore
 
 extension SessionFilter {
     var localizedTitle: String {

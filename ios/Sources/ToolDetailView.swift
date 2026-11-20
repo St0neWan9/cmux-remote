@@ -1,6 +1,6 @@
 import SwiftUI
-import CmuxRemoteClient
-import CmuxRemoteCore
+import TermRemoteClient
+import TermRemoteCore
 
 struct ToolDetailView: View {
     @State private var model: ToolDetailModel

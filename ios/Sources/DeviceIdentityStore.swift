@@ -1,5 +1,5 @@
 import Foundation
-import CmuxRemoteCore
+import TermRemoteCore
 
 /// A stable private device identity survives disconnects; it is never included in a QR code.
 struct DeviceIdentityStore {

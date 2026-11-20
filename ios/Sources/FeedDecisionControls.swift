@@ -1,5 +1,5 @@
 import SwiftUI
-import CmuxRemoteCore
+import TermRemoteCore
 
 /// Each decision is an explicit user action; extended permission/plan modes explain their effect first.
 struct FeedDecisionControls: View {

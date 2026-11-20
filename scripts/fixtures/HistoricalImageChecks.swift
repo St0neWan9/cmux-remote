@@ -1,5 +1,5 @@
 import Foundation
-import CmuxRemoteCore
+import TermRemoteCore
 
 private actor HeldHistoryImage {
     nonisolated let started = AsyncStream<Void>.makeStream()

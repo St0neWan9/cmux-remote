@@ -1,6 +1,6 @@
 import XCTest
 import SwiftUI
-@testable import CmuxRemote
+@testable import TermRemote
 
 @MainActor
 final class DrawerRenderingTests: XCTestCase {

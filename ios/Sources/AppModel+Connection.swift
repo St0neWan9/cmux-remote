@@ -1,5 +1,5 @@
 import Foundation
-import CmuxRemoteClient
+import TermRemoteClient
 
 /// Keeps every approved Mac's link up and makes its state visible.
 extension AppModel {

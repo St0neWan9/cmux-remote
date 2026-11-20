@@ -1,6 +1,6 @@
 import Foundation
-import CmuxRemoteCore
-import CmuxRemoteClient
+import TermRemoteCore
+import TermRemoteClient
 
 /// A workspace this device may start sessions in, with the Mac that owns it.
 struct StartTarget: Identifiable {

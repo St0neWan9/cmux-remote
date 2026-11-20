@@ -1,5 +1,5 @@
 import Foundation
-import CmuxRemoteCore
+import TermRemoteCore
 
 /// One Mac's workspace groups, in Mac order; group IDs are unique only within their Mac.
 struct SessionHostSection: Identifiable {

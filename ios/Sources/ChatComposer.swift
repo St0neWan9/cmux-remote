@@ -1,5 +1,5 @@
 import SwiftUI
-import CmuxRemoteCore
+import TermRemoteCore
 
 /// The input bar exposes supported project/decision actions and a single send-or-stop control.
 /// Focused or holding images, it expands: images, then the text, then a row of actions.

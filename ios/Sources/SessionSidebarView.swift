@@ -1,5 +1,5 @@
 import SwiftUI
-import CmuxRemoteCore
+import TermRemoteCore
 
 /// A white project drawer receives immutable discovery snapshots, never a live store under its lazy rows.
 struct SessionSidebarView: View {

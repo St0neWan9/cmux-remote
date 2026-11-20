@@ -1,5 +1,5 @@
 import Foundation
-import CmuxRemoteCore
+import TermRemoteCore
 
 /// Portable model tests and unsupported platforms never create a fake active recorder.
 @MainActor final class UnavailableSpeechInput: SpeechInputServing {

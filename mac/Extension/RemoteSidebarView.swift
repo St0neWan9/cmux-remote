@@ -1,5 +1,5 @@
 import SwiftUI
-import CmuxRemoteMac
+import TermRemoteMac
 
 /// Public metadata plus system navigation to the containing app; no secret-bearing URLs.
 struct RemoteSidebarView: View {

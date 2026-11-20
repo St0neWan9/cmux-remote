@@ -1,7 +1,7 @@
 import Foundation
 import Darwin
-import CmuxRemoteCore
-import CmuxRemoteBridge
+import TermRemoteCore
+import TermRemoteBridge
 
 /// Isolated Bridge for testing the Android enrollment and read/write paths.
 ///

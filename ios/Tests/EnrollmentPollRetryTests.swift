@@ -1,6 +1,6 @@
 import XCTest
-import CmuxRemoteCore
-@testable import CmuxRemote
+import TermRemoteCore
+@testable import TermRemote
 
 /// A relay reconnect while the phone waits for the owner's approval must not end the wait.
 final class EnrollmentPollRetryTests: XCTestCase {

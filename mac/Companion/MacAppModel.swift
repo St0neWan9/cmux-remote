@@ -1,8 +1,8 @@
 import Foundation
 import Observation
-import CmuxRemoteMac
-import CmuxRemoteBridge
-import CmuxRemoteCore
+import TermRemoteMac
+import TermRemoteBridge
+import TermRemoteCore
 
 /// One application lifetime owns observation; closing Settings never stops its service.
 @MainActor @Observable final class MacAppModel {
@@ -46,7 +46,7 @@ import CmuxRemoteCore
             try await launcher.ensureStarted(); serviceError = nil; sharing.start(); remote.start(); await sharing.refresh(); await remote.refresh()
             observeResident()
         }
-        catch { serviceError = (error as? CmuxRemoteCore.BridgeError)?.code ?? "connection_failed" }
+        catch { serviceError = (error as? TermRemoteCore.BridgeError)?.code ?? "connection_failed" }
     }
     /// A resident that exits on its own is replaced, and the app reattaches to the new one.
     ///

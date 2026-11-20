@@ -1,6 +1,6 @@
 import AppKit
 import SwiftUI
-import CmuxRemoteMac
+import TermRemoteMac
 
 /// Owns one settings window; menu status labels do not own application lifetime.
 @MainActor final class RemoteAppDelegate: NSObject, NSApplicationDelegate {
@@ -93,7 +93,7 @@ import CmuxRemoteMac
             window.title = String(localized: "mac.logs.windowTitle", bundle: .interface); window.isReleasedWhenClosed = false
             window.contentMinSize = NSSize(width: design.logMinimumWidth, height: design.logMinimumHeight)
             window.contentView = NSHostingView(rootView: MacLogView(model: model.logs, language: model.language))
-            window.setFrameAutosaveName("CmuxRemoteBridgeLog")
+            window.setFrameAutosaveName("TermRemoteBridgeLog")
             if window.frame.origin == .zero { window.center() }
             // Closing, miniaturizing or covering the window stops the periodic read; showing it again resumes.
             logOcclusion = NotificationCenter.default.addObserver(forName: NSWindow.didChangeOcclusionStateNotification, object: window, queue: .main) { [weak self, weak window] _ in
@@ -107,7 +107,7 @@ import CmuxRemoteMac
     /// A task-owned debug fixture obtains a stable capture handle before exercising the real UI.
     private var acceptanceOpenSettings: Bool {
         #if DEBUG
-        Bundle.main.object(forInfoDictionaryKey: "CmuxRemoteAcceptanceOpenSettings") as? Bool == true
+        Bundle.main.object(forInfoDictionaryKey: "TermRemoteAcceptanceOpenSettings") as? Bool == true
         #else
         false
         #endif

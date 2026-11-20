@@ -115,7 +115,7 @@ installed cmux and starts no Agent.
 
 ```sh
 # 1. Build the fixture (from the repository root)
-swift build --product CmuxRemoteBridge
+swift build --product TermRemoteBridge
 python3 scripts/build-enrollment-fixture.py
 
 # 2. Run it; it prints one enroll= line

@@ -1,5 +1,5 @@
 import SwiftUI
-import CmuxRemoteCore
+import TermRemoteCore
 
 /// Transcript actions operate on committed text, and never start a new provider request.
 struct ResponseFooter: View {

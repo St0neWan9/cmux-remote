@@ -1,6 +1,6 @@
 import SwiftUI
 import AppKit
-import CmuxRemoteMac
+import TermRemoteMac
 
 /// Sharing switch and endpoint facts; the switch reflects the service's reported state, not the click.
 struct SharingSettingsView: View {

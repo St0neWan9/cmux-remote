@@ -1,6 +1,6 @@
 import Foundation
-import CmuxRemoteCore
-import CmuxRemoteClient
+import TermRemoteCore
+import TermRemoteClient
 import CmuxAgentChat
 
 /// Refreshing a conversation over the relay: reads go out together, and a refresh soon after a full read

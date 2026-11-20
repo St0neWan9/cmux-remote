@@ -1,7 +1,7 @@
 import Foundation
 import Observation
-import CmuxRemoteCore
-import CmuxRemoteClient
+import TermRemoteCore
+import TermRemoteClient
 
 @MainActor @Observable
 final class ProjectModel {

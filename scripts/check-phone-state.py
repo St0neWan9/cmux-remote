@@ -19,7 +19,7 @@ args.append(str(root / 'scripts/fixtures/EdgeBackChecks.swift'))
 args.append(str(root / 'scripts/fixtures/MultiHostChecks.swift'))
 args.append(str(root / 'scripts/fixtures/ReconnectChecks.swift'))
 args.append(str(root / 'scripts/fixtures/ModelMenuChecks.swift'))
-for module in ['CmuxRemoteCore', 'CmuxRemoteClient', 'CmuxAgentChat']:
+for module in ['TermRemoteCore', 'TermRemoteClient', 'CmuxAgentChat']:
     mapping_file = build / (module + '.build/output-file-map.json')
     if mapping_file.is_file():
         mapping = json.loads(mapping_file.read_text())

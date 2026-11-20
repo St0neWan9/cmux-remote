@@ -1,5 +1,5 @@
 import SwiftUI
-import CmuxRemoteCore
+import TermRemoteCore
 
 /// Immutable image snapshots keep typing and polling from re-decoding thumbnails.
 struct ImageDraftStrip: View, Equatable {

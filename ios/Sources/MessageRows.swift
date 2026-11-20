@@ -1,5 +1,5 @@
 import SwiftUI
-import CmuxRemoteCore
+import TermRemoteCore
 import CmuxAgentChat
 
 /// A conversation's rows with the timeline's own rhythm: consecutive tool operations touch, and anything else

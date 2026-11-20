@@ -1,6 +1,6 @@
 import SwiftUI
-import CmuxRemoteCore
-import CmuxRemoteClient
+import TermRemoteCore
+import TermRemoteClient
 
 struct FeedView: View {
     let client: RemoteClient

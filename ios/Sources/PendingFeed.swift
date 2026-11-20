@@ -1,5 +1,5 @@
 import Foundation
-import CmuxRemoteCore
+import TermRemoteCore
 
 /// What one Mac is waiting on the reader for, as the conversation list's reminder shows it.
 struct PendingFeed: Equatable, Sendable {

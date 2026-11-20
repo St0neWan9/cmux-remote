@@ -1,8 +1,8 @@
 import Foundation
 import Observation
 import CmuxExtensionKit
-import CmuxRemoteClient
-import CmuxRemoteMac
+import TermRemoteClient
+import TermRemoteMac
 
 /// Sidebar-only state; credentials, process creation and mirroring remain in the Companion.
 @MainActor @Observable final class RemoteSidebarModel {

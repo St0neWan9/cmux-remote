@@ -1,7 +1,7 @@
 import XCTest
 import UIKit
-import CmuxRemoteCore
-@testable import CmuxRemote
+import TermRemoteCore
+@testable import TermRemote
 
 final class MarkdownTableMetricsTests: XCTestCase {
     private let body = UIFont.systemFont(ofSize: 15), header = UIFont.systemFont(ofSize: 15, weight: .semibold)

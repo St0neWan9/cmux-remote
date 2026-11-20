@@ -1,6 +1,6 @@
 import Foundation
-import CmuxRemoteCore
-import CmuxRemoteClient
+import TermRemoteCore
+import TermRemoteClient
 
 /// One approved Mac and its own client; every request to that Mac uses this client and grant.
 struct HostLink: Identifiable {
