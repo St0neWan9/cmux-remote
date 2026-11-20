@@ -144,14 +144,16 @@ public actor RexConversationSource {
                                         generation: "terminal:" + (entry.descriptor.surfaceID ?? id), clipped: false)
         }
         return try await reader.history(path: entry.transcript, agent: "claude", beforeSeq: beforeSeq, limit: limit,
-                                        allowsUncreatedTranscript: false, reportsBackgroundTasks: false)
+                                        allowsUncreatedTranscript: false,
+                                        // A live Agent still owns its detached tasks; an ended one cannot report them.
+                                        reportsBackgroundTasks: entry.descriptor.writable)
     }
 
     public func archive(_ id: String, tail: Int?, cursor: String?, limit: Int) async throws -> ConversationArchivePage {
         let entry = try await entry(id)
         guard entry.descriptor.kind != "terminal" else { throw BridgeError("unsupported", "A Rex terminal has no conversation archive.", status: 422) }
         return try await reader.archive(path: entry.transcript, agent: "claude", tail: tail, cursor: cursor, limit: limit,
-                                        reportsBackgroundTasks: false)
+                                        reportsBackgroundTasks: entry.descriptor.writable)
     }
 
     public func toolText(_ id: String, messageID: String, generation: String, field: String,

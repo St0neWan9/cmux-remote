@@ -54,7 +54,6 @@ public actor SessionService {
     public func backgroundTask(id: String, taskID: String, offset: Int, limit: Int, beforeSeq: Int? = nil, discovered: Bool = false, access: SessionAccess? = nil) async throws -> BackgroundTaskContent {
         guard BackgroundTaskLocator.isValid(taskID), offset >= 0 else { throw BridgeError("invalid_input", "Choose a task and a valid text offset.", status: 422) }
         let record = try await authorizedRecord(id, capability: .conversationRead, discovered: discovered, access: access)
-        if record.source == "rex" { throw BridgeError("unsupported", "Rex background tasks are not exposed by the Bridge yet.", status: 422) }
         guard let path = record.transcript else { throw BridgeError("task_unavailable", "No readable conversation record is available.", status: 404) }
         let listed = try await reader.history(path: path, agent: record.descriptor.agent, beforeSeq: nil, limit: 1,
                                               allowsUncreatedTranscript: record.descriptor.writable, reportsBackgroundTasks: record.descriptor.writable)
