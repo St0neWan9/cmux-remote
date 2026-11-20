@@ -44,9 +44,11 @@ public struct ClaudeProcessRegistry: Sendable {
             guard actual == expected else { return nil }
         }
         let transcript = transcriptPath(cwd: record.cwd, sessionID: record.sessionId)
+        // A long conversation is still a valid binding: history reads bounded windows, not the whole file.
+        // The cap only rejects an implausible registry entry, not a real transcript.
         guard let values = try? URL(fileURLWithPath: transcript).resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey]),
               values.isRegularFile == true, values.isSymbolicLink != true,
-              let size = values.fileSize, size >= 0, size <= 33_554_432 else { return nil }
+              let size = values.fileSize, size >= 0, size <= 1_073_741_824 else { return nil }
         let allowed = roots.contains { root in
             let resolved = root.resolvingSymlinksInPath().standardizedFileURL.path
             return transcript.hasPrefix(resolved + "/")

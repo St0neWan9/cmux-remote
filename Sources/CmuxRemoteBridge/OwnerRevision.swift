@@ -7,5 +7,5 @@ import Foundation
 /// the launcher replaces it instead of adopting it. Bump this whenever the owner protocol
 /// gains behavior a bundled companion requires.
 public enum OwnerRevision {
-    public static let current = 9
+    public static let current = 10
 }
