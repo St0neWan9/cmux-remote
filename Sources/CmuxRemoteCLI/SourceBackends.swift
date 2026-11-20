@@ -17,9 +17,15 @@ struct SourceBackends {
             if (try? await candidate.request("system.ping", params: [:])) != nil { local = candidate; path = socket }
         }
         desktop = local; desktopSocket = path
-        controller = CmuxBackendRouter(desktop: local, discovery: TuiSocketDiscovery(explicit: options.values("tui-socket"))) { socket in
+        let router = CmuxBackendRouter(desktop: local, discovery: TuiSocketDiscovery(explicit: options.values("tui-socket"))) { socket in
             TuiControlAdapter(client: TuiResourceSocketClient(path: socket), transcripts: transcripts, attachments: directory.map { TuiAttachmentStore(directory: $0) }, decisions: mutations, archive: directory.map { TuiBindingRepository(directory: $0) })
         }
-        _ = try await controller.request("system.ping", params: [:])
+        // A Rex-only Mac has no cmux backend at all. The Bridge still serves provider
+        // sources; only cmux-native routes become unavailable.
+        if (try? await router.request("system.ping", params: [:])) != nil {
+            controller = router
+        } else {
+            controller = NoCmuxBackend()
+        }
     }
 }

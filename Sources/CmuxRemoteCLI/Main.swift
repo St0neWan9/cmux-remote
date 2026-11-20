@@ -146,7 +146,7 @@ struct Main {
             if !options.contains("no-rex") {
                 let configured = options.values("rex-endpoint")
                 if configured.isEmpty {
-                    let socket = home.appendingPathComponent("Library/Application Support/rex/server.sock").path
+                    let socket = RexSocketLocation.path(home: home)
                     if FileManager.default.fileExists(atPath: socket) {
                         let provider = RexProvider(endpoint: .unix(path: socket), label: "Rex", mutations: mutations)
                         try await registry.register(provider)
@@ -218,7 +218,12 @@ struct Main {
         case "doctor":
             let roots = TuiTranscriptLocator(claudeRoot: home.appendingPathComponent(".claude"), codexRoot: home.appendingPathComponent(".codex"))
             let sources = try await SourceBackends(options: options, environment: runtimeEnvironment, home: home, transcripts: roots, directory: nil, mutations: MutationLedger())
-            _ = try await sources.controller.request("system.ping", params: [:]); print("Local cmux backends are reachable.")
+            let ping = try await sources.controller.request("system.ping", params: [:])
+            if ping["active_backends"].int == 0 {
+                print("No local cmux backend; provider sources only.")
+            } else {
+                print("Local cmux backends are reachable.")
+            }
         default:
             print("term-remote setup|resident|init|serve|pairing|enrollment|clients|providers|view|hooks|agent-hook|discover|connect|mirror|doctor [--tui-socket PATH] [--relay HTTPS_ORIGIN|off] [--relay-key-file PATH] [--rex-endpoint URL] [--rex-label LABEL] [--no-rex] [--secondary-instance] [--pair] [--legacy] [--no-discovery] [--state PATH] [--socket PATH] [--cli PATH] [--direct-socket] [--listen HOST] [--host HOST] [--port PORT] [--format json] [--demo]")
         }

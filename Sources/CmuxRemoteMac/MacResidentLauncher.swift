@@ -47,8 +47,8 @@ public actor MacResidentLauncher {
         }
         if FileManager.default.fileExists(atPath: directory.appendingPathComponent("cmux-setup.json").path) {
             _ = try MacSetupRepository(directory: directory).environment()
-        } else if try TuiSocketDiscovery().sockets().isEmpty {
-            throw BridgeError("setup_required", "Connect this app to cmux first.")
+        } else if try TuiSocketDiscovery().sockets().isEmpty && !RexSocketLocation.isAvailable() {
+            throw BridgeError("setup_required", "Connect this app to cmux or start Rex first.")
         }
         guard FileManager.default.isExecutableFile(atPath: executable.path) else { throw BridgeError("resident_missing", "Reinstall Term Remote to restore its bundled service.") }
         // An adopted or freshly stopped resident that predates the bundled owner revision cannot
@@ -95,7 +95,8 @@ public actor MacResidentLauncher {
     /// Whether a restart is worth trying; a setup that was never completed needs the person, not another launch.
     private func shouldKeepTryingAfterFailure() async -> Bool {
         if FileManager.default.fileExists(atPath: directory.appendingPathComponent("cmux-setup.json").path) { return true }
-        return (try? TuiSocketDiscovery().sockets().isEmpty) == false
+        if (try? TuiSocketDiscovery().sockets().isEmpty) == false { return true }
+        return RexSocketLocation.isAvailable()
     }
     /// Refuses a restart loop: too many exits inside the window mean the resident is not going to stay up.
     private func waitForRestartSlot() async -> Bool {
