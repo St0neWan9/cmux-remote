@@ -183,6 +183,25 @@ public actor RexProvider: TerminalProvider {
         throw BridgeError("terminal_not_found", "Unknown Rex terminal.", status: 404)
     }
 
+    /// The visible screen with its styles, or nil when Rex cannot return it in one bounded reply.
+    ///
+    /// Claude shows a suggested next prompt as faint text in an empty input box. Plain text loses
+    /// the faintness, so the suggestion reads as a draft; the `vt` format keeps it.
+    func styledScreen(terminalID: String) async throws -> TuiTerminalState? {
+        let ref = try await reference(terminalID)
+        let result = try await client.request("com.superlogical.terminal.format", [
+            "session_id": .string(ref.session), "block_id": .string(ref.block),
+            "args": .object(["format": .string("vt"), "max_bytes": .number(983_040)])
+        ])
+        // A partial reply would leave the screen half drawn; the caller falls back to plain text.
+        guard result["id"].int == nil, let content = result["content"].string else { return nil }
+        let size = try await client.request("com.superlogical.terminal.size", [
+            "session_id": .string(ref.session), "block_id": .string(ref.block), "args": .object([:])
+        ])
+        guard let columns = size["columns"].int, let rows = size["rows"].int else { return nil }
+        return try TuiTerminalState(columns: columns, rows: rows, vt: Data(content.utf8))
+    }
+
     public func snapshot(terminalID: String) async throws -> TerminalSnapshot {
         let ref = try await reference(terminalID)
         do {

@@ -11,6 +11,13 @@ struct TuiTerminalState: Sendable {
         guard let columns = payload["cols"].int, (1...500).contains(columns), let count = payload["rows"].int, (1...200).contains(count),
               let encoded = payload["state_base64"].string, encoded.utf8.count <= 1_398_104,
               let data = Data(base64Encoded: encoded), data.count <= 1_048_576 else { throw BridgeError("invalid_response", "The daemon terminal state is invalid.", status: 502) }
+        try self.init(columns: columns, rows: count, vt: data)
+    }
+    /// Decodes escape sequences that redraw a screen of this size, as cmux-tui's replay and Rex's `vt` format do.
+    init(columns: Int, rows count: Int, vt data: Data) throws {
+        guard (1...500).contains(columns), (1...200).contains(count), data.count <= 1_048_576 else {
+            throw BridgeError("invalid_response", "The terminal state is invalid.", status: 502)
+        }
         // Canonical grid replays need no graphics payloads; keep decode-only parsing bounded.
         let raw = String(decoding: data, as: UTF8.self)
         guard !raw.contains("\u{1b}P"), !raw.contains("\u{1b}_"), !raw.contains("\u{90}"), !raw.contains("\u{9f}") else { throw BridgeError("unsupported", "This terminal replay contains unsupported graphics/control payloads.", status: 422) }

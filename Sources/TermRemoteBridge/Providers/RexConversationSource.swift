@@ -195,12 +195,22 @@ public actor RexConversationSource {
         }
         let terminal = try await requireLive(id)
         let providerName = entries[id]?.descriptor.agent ?? "claude"
-        let snapshot = try await provider.snapshot(terminalID: terminal)
-        guard TuiPromptSafety().isEmpty(snapshot.text, provider: providerName) else {
+        guard try await promptIsEmpty(terminal, agent: providerName) else {
             throw BridgeError("input_busy", "The Rex agent has a draft or an open question. Resolve it first.", status: 409)
         }
         try await authorize()
         try await provider.write(terminalID: terminal, data: text + "\r")
+    }
+
+    /// Whether the agent's input box holds nothing typed.
+    ///
+    /// The styled screen tells Claude's faint suggested prompt apart from a real draft; plain text
+    /// cannot, so it is only the fallback and treats any text after the prompt as a draft.
+    private func promptIsEmpty(_ terminal: String, agent: String) async throws -> Bool {
+        if let state = try? await provider.styledScreen(terminalID: terminal) {
+            return TuiPromptSafety().isEmpty(state, provider: agent)
+        }
+        return TuiPromptSafety().isEmpty(try await provider.snapshot(terminalID: terminal).text, provider: agent)
     }
 
     public func interrupt(_ id: String, hard: Bool,
@@ -239,8 +249,7 @@ public actor RexConversationSource {
         }
         let name = try AgentModelName.validated(model)
         let terminal = try await requireLive(id)
-        let before = try await provider.snapshot(terminalID: terminal)
-        guard TuiPromptSafety().isEmpty(before.text, provider: "claude") else {
+        guard try await promptIsEmpty(terminal, agent: "claude") else {
             throw BridgeError("agent_busy", "The Rex agent is not waiting at its prompt.", status: 409)
         }
         try await authorize()

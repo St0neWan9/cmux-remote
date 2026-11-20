@@ -23,7 +23,8 @@ import TermRemoteBridge
                 if process.isRunning { process.terminate() }
                 for _ in 0..<30 where process.isRunning { Darwin.usleep(100_000) }
                 if process.isRunning { Darwin.kill(process.processIdentifier, SIGKILL) }
-                process.waitUntilExit()
+                // Bounded: Foundation can miss the exit of a killed server and wait forever.
+                for _ in 0..<50 where process.isRunning { Darwin.usleep(100_000) }
                 try? FileManager.default.removeItem(at: state)
             }
             let endpoint = RexEndpoint.tcp(host: "127.0.0.1", port: port, tls: false)

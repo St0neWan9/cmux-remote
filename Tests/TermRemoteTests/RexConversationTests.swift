@@ -14,7 +14,8 @@ import TermRemoteBridge
         try FileManager.default.createDirectory(at: home.appendingPathComponent(".claude/sessions"), withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
         let fakeClaude = root.appendingPathComponent("claude")
-        try Data("#!/bin/sh\nprintf '❯\\302\\240\\n'\nexec -a claude /bin/sleep 300\n".utf8).write(to: fakeClaude)
+        // An idle Claude shows its suggested next prompt as faint text in the empty input box.
+        try Data("#!/bin/sh\nprintf '❯\\302\\240\\033[2mtry this next\\033[0m\\n'\nexec -a claude /bin/sleep 300\n".utf8).write(to: fakeClaude)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fakeClaude.path)
         let fakeCodex = root.appendingPathComponent("codex")
         try Data("#!/bin/sh\nprintf '› \\n'\nexec -a codex /bin/sleep 300\n".utf8).write(to: fakeCodex)
@@ -33,7 +34,8 @@ import TermRemoteBridge
             if process.isRunning { process.terminate() }
             for _ in 0..<30 where process.isRunning { Darwin.usleep(100_000) }
             if process.isRunning { Darwin.kill(process.processIdentifier, SIGKILL) }
-            process.waitUntilExit()
+            // Bounded: Foundation can miss the exit of a killed server and wait forever.
+            for _ in 0..<50 where process.isRunning { Darwin.usleep(100_000) }
         }
         let endpoint = RexEndpoint.tcp(host: "127.0.0.1", port: port, tls: false)
         let client = RexControlClient(endpoint: endpoint)
