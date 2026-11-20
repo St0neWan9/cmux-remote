@@ -4,7 +4,8 @@ cd "$(dirname "$0")/.."
 source_app="$PWD/.build/macos/Build/Products/Debug/TermRemote.app"
 destination="${CMUX_REMOTE_MAC_DESTINATION:-$HOME/Applications/TermRemote.app}"
 # Earlier installs used other bundle names; retire only those exact bundles of this app.
-legacy_apps=("$HOME/Applications/TermRemoteMac.app" "$HOME/Applications/Cmux Remote.app" "$HOME/Applications/TermRemote.app")
+# The destination is never on this list: retiring it would remove the copy just installed.
+legacy_apps=("$HOME/Applications/TermRemoteMac.app" "$HOME/Applications/Cmux Remote.app" "$HOME/Applications/CmuxRemoteMac.app")
 expected="dev.trenta.termremote.desktop"
 test -d "$source_app" || { echo "Run scripts/build-macos.sh first." >&2; exit 1; }
 test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$source_app/Contents/Info.plist")" = "$expected"
