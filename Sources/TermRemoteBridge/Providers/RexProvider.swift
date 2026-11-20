@@ -303,7 +303,7 @@ public actor RexProvider: TerminalProvider {
                                                  agentSessionID: binding.sessionID, transcript: binding.transcript,
                                                  cwd: binding.cwd,
                                                  title: name.isEmpty ? binding.sessionID : name,
-                                                 state: binding.status == "idle" ? "idle" : "working"))
+                                                 state: binding.conversationState))
                 if result.count >= 128 { return result }
             }
         }

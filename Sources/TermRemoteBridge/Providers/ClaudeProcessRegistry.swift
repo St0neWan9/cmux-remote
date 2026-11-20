@@ -11,6 +11,18 @@ public struct ClaudeProcessRegistry: Sendable {
         public let cwd: String
         public let status: String
         public let transcript: String
+
+        /// The phone's conversation state for this registry status.
+        ///
+        /// Claude writes `shell` when its turn has finished but a background shell it started is
+        /// still running; it is waiting for the person, so it is idle, not working. Only `busy`
+        /// and statuses this Bridge does not know yet are reported as working.
+        public var conversationState: String {
+            switch status {
+            case "idle", "shell": return "idle"
+            default: return "working"
+            }
+        }
     }
 
     private struct Record: Decodable {
