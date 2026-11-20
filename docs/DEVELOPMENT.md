@@ -42,7 +42,7 @@ Immediate Bridge restart after an active HTTPS connection originally failed with
 
 The independent Mac containing app and public sidebar extension compile with the
 Swift 6 toolchain on Apple Silicon. Deep/strict code-signature checks pass and
-`pluginkit` registers one `cmux-remote.desktop.sidebar` extension under
+`pluginkit` registers one `dev.trenta.termremote.desktop.sidebar` extension under
 the official production extension point. Official cmux was not modified,
 restarted, or re-signed; its selected sidebar was not changed.
 
@@ -296,7 +296,7 @@ acceptance steps.
 ## Signing moved to the maintainer's individual team — 2026-10-26
 
 The iPhone app now ships under the maintainer's individual team `7G42499LWB` with
-bundle ID `cmux-remote.mobile` and its own App Store Connect record (**Term Remote
+bundle ID `dev.trenta.termremote` and its own App Store Connect record (**Term Remote
 for Mobile**). The account it shipped under before that — its record, team and
 Apple Distribution identity — is retired: no workflow, script or local check uses
 it. The current account's API key lives at

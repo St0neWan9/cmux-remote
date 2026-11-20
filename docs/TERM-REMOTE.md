@@ -440,7 +440,7 @@ Rename map, staged so nothing installed breaks:
 | CLI binary | `term-remote` | Stage 0 (now) |
 | Swift targets `CmuxRemote*` | `TermRemote*`, with typealias/import shims | Stage 1 |
 | Bundle IDs, App Group, Keychain services | new `term remote` IDs with a one-time read-old/write-new migration | Major release, owner-approved |
-| State directory `~/.local/state/cmux-remote` | `~/.local/state/term-remote`, importing the old directory | Major release, with rollback |
+| State directory `~/.local/state/term-remote` | `~/.local/state/term-remote`, importing the old directory | Major release, with rollback |
 | Bonjour service type / relay identity | new identity, advertising the old one during transition | Later, after both ends can upgrade |
 | Website and release tags | term remote branding | Later |
 

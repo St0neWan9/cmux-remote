@@ -368,7 +368,7 @@ relay origin 仅接受合法 HTTPS origin，拒绝 URL 用户信息、查询、�
 - **手机多台 Mac**：已认证的 Mac 按主机身份分别保存，旧的单台记录自动迁移。对话按 Mac 分组合并显示，一台
   Mac 读取失败只影响它自己；侧边面板列出全部 Mac，可添加或单独移除。添加设备页同时列出局域网和中转发现的 Mac。
 - **每台 Mac 只运行一个 Bridge**：`serve`/`resident` 启动时获取本用户范围的机器锁
-  `~/.local/state/cmux-remote-bridge.lock`，第二个实例以 `bridge_already_running` 拒绝启动。
+  `~/.local/state/term-remote-bridge.lock`，第二个实例以 `bridge_already_running` 拒绝启动。
 - **链路请求名额**：客户端收到最后一块即释放名额；Bridge 原先要等投递任务再次运行才释放，负载高时会把客户端
   合法的第 8 个请求判为非法并关闭整条链路（CI 上稳定复现为 "Socket is not connected"）。现在 Bridge 在收到最后
   一块确认的同一步释放名额，CI 连续两次通过。入站缓冲也改为按字节上限（64 帧、8 MiB），不再积压 8 帧就断开。

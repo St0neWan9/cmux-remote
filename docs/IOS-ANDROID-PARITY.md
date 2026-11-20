@@ -59,8 +59,8 @@
 | 图片草稿缩略图 | 解码后的缩略图 + 逐张移除（与 iOS 的草稿条对齐） |
 | 图片准备与 iOS 对齐 | 最长边 1600px、质量 85→25、≤512 KiB，去元数据 |
 | 历史图片分享 / 重试 | 一次性缓存文件 + FileProvider 分享；失败可重试 |
-| 附近 Mac 发现 | Android NSD 浏览 `_cmux-remote._tcp`，校验 TXT 身份；附近列表、身份确认、已批准项禁用；从附近直接登记（签名 bootstrap + 主机身份核对） |
-| 粘贴原始登记 JSON | 除 `cmux-remote://enroll` 外也接受 Mac“导入登记”复制出的签名 JSON |
+| 附近 Mac 发现 | Android NSD 浏览 `_term-remote._tcp`，校验 TXT 身份；附近列表、身份确认、已批准项禁用；从附近直接登记（签名 bootstrap + 主机身份核对） |
+| 粘贴原始登记 JSON | 除 `term-remote://enroll` 外也接受 Mac“导入登记”复制出的签名 JSON |
 | 添加 Mac 不打断当前连接 | 配对状态独立于 `ShellState`，以覆盖层显示，可返回；不会再替换已连接的会话列表 |
 | Feed 全部事件切换真实可用 | 列表刷新保留全部事件，页内自己过滤 pending |
 | 状态过滤与 iOS 一致 | 全部 / 运行中 / 只读（删除 iOS 没有的“待处理”占位） |
