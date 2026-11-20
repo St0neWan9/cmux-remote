@@ -18,10 +18,14 @@ Swift project needs neither CocoaPods nor an extension profile.
 | Marketing version | `0.1.0` |
 | Phone display name | `Term Remote` |
 | App Store Connect name | `Term Remote for Mobile` |
-| App Store Connect app ID | `6827037964` |
-| App Store profile name | `Term Remote mobile App Store` (new profile required) |
+| App Store Connect app ID | `6837200309` |
+| App Store profile name | `Term Remote mobile App Store` |
 
-> The bundle ID moved to `dev.trenta.termremote`. App Store Connect cannot move an existing app record, so create a new app record and provisioning profile, then replace `app_store_app_id` and `profile_name` here and in CI.
+> The bundle ID moved from `cmux-remote.mobile` to `dev.trenta.termremote` on 2026-11-20.
+> App Store Connect cannot move an app record, so the new ID has its own record
+> (`6837200309`, SKU `termremote-ios`); the old record `6827037964` keeps the
+> builds made under the old ID. Fastlane creates the App Store profile on the first
+> signed run.
 
 These identify *this* app: a Bundle ID, team and app record are public — every signed
 build and every App Store page shows them — so keeping them here costs nothing and
