@@ -84,6 +84,9 @@ public actor RexProvider: TerminalProvider {
     public func terminals(spaceID: String) async throws -> [TerminalDescriptor] {
         let session = try await nativeSession(for: spaceID)
         do {
+            // Block methods such as `process` need this connection attached to the session, not only
+            // attached to the whole server. Attaching is idempotent and also covers a reconnect.
+            _ = try? await client.request("session.attach", ["session_id": .string(session)])
             let view = try await client.request("session.view", ["session_id": .string(session)])
             let windows = view["windows"].array ?? []
             guard windows.count <= 64 else { throw BridgeError("rex_invalid", "Rex returned too many windows.", status: 502) }
@@ -105,7 +108,7 @@ public actor RexProvider: TerminalProvider {
                         refs[id] = TerminalRef(space: spaceID, session: session, block: native)
                         descriptors.append(TerminalDescriptor(id: id, providerID: identity.id, spaceID: spaceID,
                                                               title: title, kind: "terminal", state: "unknown",
-                                                              layoutID: layoutID))
+                                                              layoutID: layoutID, tabTitle: window["label"].string))
                         if pendingProcesses.count < 16 { pendingProcesses.append((id, native)) }
                     }
                 }
@@ -126,7 +129,7 @@ public actor RexProvider: TerminalProvider {
                     descriptors[index] = TerminalDescriptor(id: old.id, providerID: old.providerID, spaceID: old.spaceID,
                                                             title: old.title, kind: old.kind, processName: processName,
                                                             workingDirectory: cwd, state: state, layoutID: old.layoutID,
-                                                            processID: pid)
+                                                            tabTitle: old.tabTitle, processID: pid)
                 }
             }
             for key in terminalRefs.keys where terminalRefs[key]?.space == spaceID { terminalRefs.removeValue(forKey: key) }
@@ -272,12 +275,15 @@ public actor RexProvider: TerminalProvider {
             for terminal in items {
                 guard terminal.processName == "claude", let pid = terminal.processID,
                       let binding = registry.binding(pid: pid, cwd: terminal.workingDirectory, roots: roots) else { continue }
-                let title = await title(for: terminal.id)
-                    ?? URL(fileURLWithPath: binding.cwd).lastPathComponent
+                let tab = terminal.tabTitle?.trimmingCharacters(in: .whitespacesAndNewlines)
+                var resolved: String? = (tab?.isEmpty == false ? tab : nil)
+                if resolved == nil { resolved = await self.title(for: terminal.id) }
+                if resolved == nil { resolved = URL(fileURLWithPath: binding.cwd).lastPathComponent }
+                let name = resolved ?? binding.sessionID
                 result.append(ConversationTarget(space: space, terminal: terminal,
                                                  agentSessionID: binding.sessionID, transcript: binding.transcript,
                                                  cwd: binding.cwd,
-                                                 title: title.isEmpty ? binding.sessionID : title,
+                                                 title: name.isEmpty ? binding.sessionID : name,
                                                  state: binding.status == "idle" ? "idle" : "working"))
                 if result.count >= 128 { return result }
             }

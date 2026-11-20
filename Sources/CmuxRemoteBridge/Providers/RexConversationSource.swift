@@ -62,8 +62,11 @@ public actor RexConversationSource {
                 guard FileManager.default.fileExists(atPath: record.transcript),
                       let terminal = await provider.terminal(forBlock: record.rexBlock),
                       terminal.state != "exited", terminal.processName == record.agent else { continue }
-                let title = await provider.terminalTitle(terminalID: terminal.id)
-                    ?? URL(fileURLWithPath: record.cwd).lastPathComponent
+                let tab = terminal.tabTitle?.trimmingCharacters(in: .whitespacesAndNewlines)
+                var resolved: String? = (tab?.isEmpty == false ? tab : nil)
+                if resolved == nil { resolved = await provider.terminalTitle(terminalID: terminal.id) }
+                if resolved == nil { resolved = URL(fileURLWithPath: record.cwd).lastPathComponent }
+                let name = resolved ?? record.sessionID
                 let state: String
                 switch record.event {
                 case "SessionEnd": state = "ended"
@@ -71,7 +74,7 @@ public actor RexConversationSource {
                 default: state = "working"
                 }
                 let descriptor = SessionDescriptor(id: record.sessionID, agent: record.agent,
-                                                   title: title.isEmpty ? record.sessionID : title,
+                                                   title: name.isEmpty ? record.sessionID : name,
                                                    cwd: record.cwd, workspaceID: terminal.spaceID,
                                                    surfaceID: terminal.id, state: state,
                                                    updatedAt: record.recordedAt, resumable: false,
