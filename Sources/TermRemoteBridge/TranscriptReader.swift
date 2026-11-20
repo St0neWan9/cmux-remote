@@ -47,6 +47,15 @@ public actor TranscriptReader {
     /// messages; keyed by path, because one reader serves every conversation and an unchanged record is
     /// answered from this cache.
     private var launches: [String: [BackgroundTaskTracker.Launch]] = [:]
+    /// Detached calls behind the archive's newest page. That page parses only the record's last few hundred
+    /// kilobytes, but a shell started hours earlier can still be running, so launches are tracked over the
+    /// same window `history` reads and then only across the bytes appended since.
+    private struct ArchiveTaskScan {
+        let inode: String
+        var scannedThrough: Int
+        var state: BackgroundTaskTracker.State
+    }
+    private var archiveTaskScans: [String: ArchiveTaskScan] = [:]
     private static let capacity = 32
     /// How long a retried background agent's own record counts as proof that it is running again.
     private static let resumeWindow: TimeInterval = 900
@@ -284,6 +293,36 @@ public actor TranscriptReader {
         BackgroundTaskTracker().consume(lines, into: &state)
         return state
     }
+    /// The tasks still running for the archive's newest page, from launches anywhere in the read window.
+    private func archiveRunningTasks(path: String, inode: String, size: Int) throws -> [BackgroundAgentTask] {
+        var scan: ArchiveTaskScan
+        if let previous = archiveTaskScans[path], previous.inode == inode, previous.scannedThrough <= size,
+           size - previous.scannedThrough <= windowLimit {
+            scan = previous
+            let appended = try readArchiveChunk(path: path, start: scan.scannedThrough, end: size)
+            if let end = appended.lastIndex(of: 10) {
+                let lines = String(decoding: appended[...end], as: UTF8.self).split(separator: "\n", omittingEmptySubsequences: false).dropLast().map(String.init)
+                BackgroundTaskTracker().consume(lines, into: &scan.state)
+                scan.scannedThrough += appended.distance(from: appended.startIndex, to: end) + 1
+            }
+        } else {
+            // A new, replaced or truncated record, or one that grew past the window, is scanned afresh.
+            let (data, _, offset) = try window(path: path, size: size)
+            let end = data.lastIndex(of: 10)
+            scan = ArchiveTaskScan(inode: inode, scannedThrough: offset + (end.map { data.distance(from: data.startIndex, to: $0) + 1 } ?? 0),
+                                   state: scannedLaunches(data))
+        }
+        if archiveTaskScans[path] == nil, archiveTaskScans.count >= Self.capacity, let evicted = archiveTaskScans.keys.first {
+            archiveTaskScans[evicted] = nil
+        }
+        archiveTaskScans[path] = scan
+        let moment = now()
+        var tasks = scan.state.launched.values.filter { $0.isRunning(at: moment) }.map(\.task)
+        for task in resumedTasks(path: path, state: scan.state, at: moment) where !tasks.contains(where: { $0.id == task.id }) {
+            tasks.append(task)
+        }
+        return tasks.sorted { $0.id < $1.id }
+    }
     /// This record's tasks still running now; none once the agent that owned them has ended.
     private func runningTasks(_ path: String, reports: Bool) -> [BackgroundAgentTask] {
         guard reports else { return [] }
@@ -448,13 +487,17 @@ public actor TranscriptReader {
         // A chunk can hold nothing a page can use -- records the parser ignores, or a stretch of one very long
         // line. Returning an empty page would end the reader's paging for good, so the window keeps moving back
         // until it finds messages or reaches the start of the record.
+        // The newest page's running tasks come from the whole read window, not from its own small chunk.
+        let newestTasks = cursor == nil && reportsBackgroundTasks
+            ? try archiveRunningTasks(path: path, inode: metadata.inode, size: metadata.size) : nil
         var windowEnd = end
         for attempt in 0..<8 {
             let start = max(0, windowEnd - window)
             let chunk = try readArchiveChunk(path: path, start: start, end: windowEnd)
             try Task.checkCancellation()
             let page = try archivePage(chunk: chunk, chunkStart: start, count: count, generation: generation,
-                                       agent: agent, newest: cursor == nil && attempt == 0, reportsBackgroundTasks: reportsBackgroundTasks)
+                                       agent: agent, newest: cursor == nil && attempt == 0, reportsBackgroundTasks: reportsBackgroundTasks,
+                                       runningTasks: newestTasks)
             if !page.snapshot.messages.isEmpty || start == 0 { return page }
             windowEnd = start
         }
@@ -512,7 +555,8 @@ public actor TranscriptReader {
     /// Parses the chunk with the same readers ordinary history uses, then rewrites every sequence
     /// number from the chunk's line index to that line's file byte offset.
     private func archivePage(chunk: Data, chunkStart: Int, count: Int, generation: String, agent: String,
-                             newest: Bool, reportsBackgroundTasks: Bool) throws -> ConversationArchivePage {
+                             newest: Bool, reportsBackgroundTasks: Bool,
+                             runningTasks known: [BackgroundAgentTask]? = nil) throws -> ConversationArchivePage {
         guard let chunk = archiveChunkLines(chunk, chunkStart: chunkStart) else {
             // No complete record in this chunk. Continue from its first complete-line boundary, or
             // from the chunk start when the whole chunk was one cut record.
@@ -546,9 +590,8 @@ public actor TranscriptReader {
         let messages = localMessages.map { remapped($0, offsets: chunk.lineOffsets) }.sorted { $0.seq < $1.seq }
         var tracker = BackgroundTaskTracker.State()
         BackgroundTaskTracker().consume(raw, into: &tracker)
-        let tasks = reportsBackgroundTasks
-            ? tracker.launched.values.filter { $0.isRunning(at: now()) }.map(\.task).sorted { $0.id < $1.id }
-            : []
+        let tasks = !reportsBackgroundTasks ? [] : known
+            ?? tracker.launched.values.filter { $0.isRunning(at: now()) }.map(\.task).sorted { $0.id < $1.id }
         return archivePage(messages: messages, images: imageIndex.records, presentation: presentation,
                            chunkStart: chunkStart, firstLineOffset: chunk.firstLineOffset, count: count,
                            generation: generation, backgroundTasks: tasks, agentModel: agentModel, newest: newest)
