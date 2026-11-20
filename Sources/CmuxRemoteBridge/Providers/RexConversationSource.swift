@@ -62,8 +62,8 @@ public actor RexConversationSource {
                 guard FileManager.default.fileExists(atPath: record.transcript),
                       let terminal = await provider.terminal(forBlock: record.rexBlock),
                       terminal.state != "exited", terminal.processName == record.agent else { continue }
-                let tab = terminal.tabTitle?.trimmingCharacters(in: .whitespacesAndNewlines)
-                var resolved: String? = (tab?.isEmpty == false ? tab : nil)
+                let pane = terminal.title.trimmingCharacters(in: .whitespacesAndNewlines)
+                var resolved: String? = (pane.isEmpty || ["shell", "terminal"].contains(pane.lowercased())) ? nil : pane
                 if resolved == nil { resolved = await provider.terminalTitle(terminalID: terminal.id) }
                 if resolved == nil { resolved = URL(fileURLWithPath: record.cwd).lastPathComponent }
                 let name = resolved ?? record.sessionID
