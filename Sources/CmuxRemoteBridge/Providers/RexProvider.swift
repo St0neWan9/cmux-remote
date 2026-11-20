@@ -108,7 +108,7 @@ public actor RexProvider: TerminalProvider {
                         refs[id] = TerminalRef(space: spaceID, session: session, block: native)
                         descriptors.append(TerminalDescriptor(id: id, providerID: identity.id, spaceID: spaceID,
                                                               title: title, kind: "terminal", state: "unknown",
-                                                              layoutID: layoutID, tabTitle: window["label"].string))
+                                                              layoutID: layoutID))
                         if pendingProcesses.count < 16 { pendingProcesses.append((id, native)) }
                     }
                 }
@@ -129,7 +129,7 @@ public actor RexProvider: TerminalProvider {
                     descriptors[index] = TerminalDescriptor(id: old.id, providerID: old.providerID, spaceID: old.spaceID,
                                                             title: old.title, kind: old.kind, processName: processName,
                                                             workingDirectory: cwd, state: state, layoutID: old.layoutID,
-                                                            tabTitle: old.tabTitle, processID: pid)
+                                                            processID: pid)
                 }
             }
             for key in terminalRefs.keys where terminalRefs[key]?.space == spaceID { terminalRefs.removeValue(forKey: key) }
@@ -275,8 +275,8 @@ public actor RexProvider: TerminalProvider {
             for terminal in items {
                 guard terminal.processName == "claude", let pid = terminal.processID,
                       let binding = registry.binding(pid: pid, cwd: terminal.workingDirectory, roots: roots) else { continue }
-                let tab = terminal.tabTitle?.trimmingCharacters(in: .whitespacesAndNewlines)
-                var resolved: String? = (tab?.isEmpty == false ? tab : nil)
+                let tab = terminal.title.trimmingCharacters(in: .whitespacesAndNewlines)
+                var resolved: String? = (tab.isEmpty || ["shell", "terminal"].contains(tab.lowercased())) ? nil : tab
                 if resolved == nil { resolved = await self.title(for: terminal.id) }
                 if resolved == nil { resolved = URL(fileURLWithPath: binding.cwd).lastPathComponent }
                 let name = resolved ?? binding.sessionID
