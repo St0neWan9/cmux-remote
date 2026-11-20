@@ -77,7 +77,7 @@ struct OwnerControlRouter: Sendable {
                 let available = try await availableWorkspaces()
                 let existingIDs = Set(available.compactMap { $0["id"].string?.lowercased() })
                 let chosen = params["workspaces"].array?.compactMap(\.string).map { $0.lowercased() } ?? Array(existingIDs)
-                guard Set(chosen).isSubset(of: existingIDs) else { throw BridgeError("invalid_scope", "Choose current cmux workspaces.") }
+                guard Set(chosen).isSubset(of: existingIDs) else { throw BridgeError("invalid_scope", "Choose current spaces.") }
                 value = try json(await authority.open(endpoint: BridgeEndpoint(host: host, port: port), workspaces: chosen, seconds: params["seconds"].int ?? 300))
             case "enrollment.close": await authority.closeEnrollment(); value = .object(["closed": .bool(true)])
             case "enrollment.pending": value = try json(await authority.pendingRequests())

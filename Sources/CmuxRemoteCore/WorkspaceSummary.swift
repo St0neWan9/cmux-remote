@@ -4,7 +4,7 @@ import Foundation
 public struct WorkspaceSummary: Sendable, Equatable, Identifiable {
     public let id: String
     public let title: String
-    /// Set for a provider space such as a Rex session; nil for a cmux workspace.
+    /// Set for a provider space such as a Rex session; nil for a native workspace.
     public let providerID: String?
     public init(id: String, title: String, providerID: String? = nil) { self.id = id; self.title = title; self.providerID = providerID }
     public init?(json: JSONValue) {
