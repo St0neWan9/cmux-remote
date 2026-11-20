@@ -7,7 +7,7 @@ import androidx.compose.ui.test.performClick
 import com.cmuxremote.mobile.data.FeedOption
 import com.cmuxremote.mobile.data.FeedQuestion
 import com.cmuxremote.mobile.data.FeedItem
-import com.cmuxremote.mobile.ui.theme.CmuxTheme
+import com.cmuxremote.mobile.ui.theme.TermRemoteTheme
 import org.junit.Rule
 import org.junit.Test
 
@@ -34,7 +34,7 @@ class FeedSemanticsTest {
     @Test
     fun pendingQuestionShowsItsSubmitAction() {
         compose.setContent {
-            CmuxTheme { FeedScreen(items = listOf(question("req1", "pending")), onBack = null, onAnswer = { _, _ -> }, onDecide = { _, _, _ -> }) }
+            TermRemoteTheme { FeedScreen(items = listOf(question("req1", "pending")), onBack = null, onAnswer = { _, _ -> }, onDecide = { _, _, _ -> }) }
         }
         compose.onNodeWithTag("feed.question.req1.submit").assertIsDisplayed()
     }
@@ -42,7 +42,7 @@ class FeedSemanticsTest {
     @Test
     fun resolvedQuestionIsARecordWithoutActions() {
         compose.setContent {
-            CmuxTheme { FeedScreen(items = listOf(question("req2", "resolved")), onBack = null, onAnswer = { _, _ -> }, onDecide = { _, _, _ -> }) }
+            TermRemoteTheme { FeedScreen(items = listOf(question("req2", "resolved")), onBack = null, onAnswer = { _, _ -> }, onDecide = { _, _, _ -> }) }
         }
         compose.onNodeWithTag("feed.history.toggle").performClick()
         compose.onNodeWithTag("feed.question.req2.submit").assertDoesNotExist()

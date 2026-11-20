@@ -17,7 +17,7 @@ import com.cmuxremote.mobile.model.SessionItem
 import com.cmuxremote.mobile.model.SessionTrailing
 import com.cmuxremote.mobile.ui.components.SessionRow
 import com.cmuxremote.mobile.ui.components.WorkingIndicator
-import com.cmuxremote.mobile.ui.theme.CmuxTheme
+import com.cmuxremote.mobile.ui.theme.TermRemoteTheme
 import org.junit.Rule
 import org.junit.Test
 
@@ -28,14 +28,14 @@ class ComponentSemanticsTest {
 
     @Test
     fun theWorkingIndicatorIsLabeled() {
-        compose.setContent { CmuxTheme { WorkingIndicator() } }
+        compose.setContent { TermRemoteTheme { WorkingIndicator() } }
         compose.onNodeWithTag("chat.working").assertIsDisplayed()
     }
 
     @Test
     fun theResponseFooterOffersEveryAction() {
         compose.setContent {
-            CmuxTheme {
+            TermRemoteTheme {
                 ResponseFooter(
                     completedAt = null,
                     onCopy = {},
@@ -54,7 +54,7 @@ class ComponentSemanticsTest {
     @Test
     fun theDrawerCarriesTheTreeAndItsMacs() {
         compose.setContent {
-            CmuxTheme {
+            TermRemoteTheme {
                 DrawerContent(
                     model = SessionListModel(
                         sessions = listOf(
@@ -84,7 +84,7 @@ class ComponentSemanticsTest {
 
     @Test
     fun thePushTransitionShowsItsPage() {
-        compose.setContent { CmuxTheme { PushIn { androidx.compose.material3.Text("pushed page") } } }
+        compose.setContent { TermRemoteTheme { PushIn { androidx.compose.material3.Text("pushed page") } } }
         compose.waitForIdle()
         compose.onNodeWithText("pushed page").assertIsDisplayed()
     }
@@ -92,7 +92,7 @@ class ComponentSemanticsTest {
     @Test
     fun aMarkdownTableRendersItsCells() {
         compose.setContent {
-            CmuxTheme {
+            TermRemoteTheme {
                 com.cmuxremote.mobile.ui.markdown.MarkdownText("| Name | Value |\n| --- | --- |\n| Alpha | 7 |")
             }
         }
@@ -103,7 +103,7 @@ class ComponentSemanticsTest {
     @Test
     fun backgroundTasksCollapseToASummaryUntilOpened() {
         compose.setContent {
-            CmuxTheme {
+            TermRemoteTheme {
                 BackgroundTasksRow(
                     tasks = listOf(BackgroundTask(id = "t1", tool = "Shell", status = "running", running = true)),
                     onOpen = {},
@@ -120,7 +120,7 @@ class ComponentSemanticsTest {
     @Test
     fun aSelectedPillAnnouncesItsState() {
         compose.setContent {
-            CmuxTheme {
+            TermRemoteTheme {
                 com.cmuxremote.mobile.ui.components.Pill(
                     text = "All",
                     modifier = androidx.compose.ui.Modifier.testTag("pill.all"),
@@ -138,7 +138,7 @@ class ComponentSemanticsTest {
     @Test
     fun theComposerTakesFocusOnTap() {
         compose.setContent {
-            CmuxTheme {
+            TermRemoteTheme {
                 ComposerArea(
                     draft = "",
                     onDraftChange = {},
@@ -163,7 +163,7 @@ class ComponentSemanticsTest {
             CompositionLocalProvider(
                 LocalDensity provides Density(density = density.density, fontScale = 2f),
             ) {
-                CmuxTheme {
+                TermRemoteTheme {
                     SessionRow(
                         session = SessionItem(
                             id = "big",

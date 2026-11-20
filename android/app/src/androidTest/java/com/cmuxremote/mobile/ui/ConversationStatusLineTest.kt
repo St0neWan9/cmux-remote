@@ -8,7 +8,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import com.cmuxremote.mobile.ConversationUi
 import com.cmuxremote.mobile.R
 import com.cmuxremote.mobile.data.SessionDescriptor
-import com.cmuxremote.mobile.ui.theme.CmuxTheme
+import com.cmuxremote.mobile.ui.theme.TermRemoteTheme
 import org.junit.Rule
 import org.junit.Test
 
@@ -24,7 +24,7 @@ class ConversationStatusLineTest {
     )
     private fun show(state: ConversationUi, connecting: Boolean = false, offline: Boolean = false) {
         compose.setContent {
-            CmuxTheme {
+            TermRemoteTheme {
                 ConversationScreen(state = state, onBack = null, onDraft = {}, onSend = {}, onStop = {}, connecting = connecting, offline = offline)
             }
         }

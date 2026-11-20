@@ -17,7 +17,7 @@ import com.cmuxremote.mobile.R
 /**
  * Keeps the process alive while the app is away, so the encrypted links to the
  * Macs stay subscribed and live updates keep arriving. The service owns no
- * connection itself: the page's [com.cmuxremote.mobile.CmuxViewModel] does, and
+ * connection itself: the page's [com.cmuxremote.mobile.TermRemoteViewModel] does, and
  * this only stops Android from reclaiming the process between reads.
  */
 class PersistentConnectionService : Service() {

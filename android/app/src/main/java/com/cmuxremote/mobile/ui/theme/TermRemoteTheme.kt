@@ -10,7 +10,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 
-private val CmuxColors = lightColorScheme(
+private val TermRemoteColors = lightColorScheme(
     primary = MobileDesign.Accent,
     onPrimary = Color.White,
     background = MobileDesign.Canvas,
@@ -22,7 +22,7 @@ private val CmuxColors = lightColorScheme(
     outline = MobileDesign.Line,
 )
 
-private val CmuxTypography = Typography(
+private val TermRemoteTypography = Typography(
     titleLarge = TextStyle(
         fontFamily = FontFamily.SansSerif,
         fontWeight = FontWeight.SemiBold,
@@ -57,10 +57,10 @@ private val CmuxTypography = Typography(
 )
 
 @Composable
-fun CmuxTheme(content: @Composable () -> Unit) {
+fun TermRemoteTheme(content: @Composable () -> Unit) {
     MaterialTheme(
-        colorScheme = CmuxColors,
-        typography = CmuxTypography,
+        colorScheme = TermRemoteColors,
+        typography = TermRemoteTypography,
         content = content,
     )
 }

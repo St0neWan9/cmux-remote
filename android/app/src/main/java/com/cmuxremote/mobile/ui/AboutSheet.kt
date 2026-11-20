@@ -43,7 +43,7 @@ fun AboutSheet(onDismiss: () -> Unit) {
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("Cmux Remote", color = MobileDesign.Ink, style = MaterialTheme.typography.titleLarge)
+                Text("Term Remote", color = MobileDesign.Ink, style = MaterialTheme.typography.titleLarge)
                 Text(
                     stringResource(R.string.about_version, "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})"),
                     color = MobileDesign.Muted,

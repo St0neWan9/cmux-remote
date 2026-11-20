@@ -250,7 +250,7 @@ data class TaskUi(
     val loadingEarlier: Boolean = false,
 )
 
-class CmuxViewModel(application: Application) : AndroidViewModel(application) {
+class TermRemoteViewModel(application: Application) : AndroidViewModel(application) {
     private val store = ConnectionStore(application)
     /** Every page of every conversation read so far, on this phone only. */
     private val conversations = ConversationStore(application)
