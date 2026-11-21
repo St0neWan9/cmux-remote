@@ -824,7 +824,10 @@ class TermRemoteViewModel(application: Application) : AndroidViewModel(applicati
         poll?.cancel(); poll = null
         approvalPoll?.cancel(); approvalPoll = null
         pollLoop?.cancel(); pollLoop = null
-        liveRefresh?.cancel()
+        listRefresh?.cancel()
+        openRefreshJob?.cancel()
+        openRefreshJob = null
+        openRefreshPending = false
         backfill?.cancel()
         lives.values.forEach { it.stop() }
         lives.clear()
@@ -880,11 +883,17 @@ class TermRemoteViewModel(application: Application) : AndroidViewModel(applicati
     /** The approval poll; paused in the background and resumed on return. */
     private var approvalPoll: Job? = null
     /** One encrypted link per Mac; a single link left every other Mac on slow polling. */
-    private val lives = mutableMapOf<String, LiveUpdates>()
+    private val lives = java.util.concurrent.ConcurrentHashMap<String, LiveUpdates>()
     private var networkCallback: android.net.ConnectivityManager.NetworkCallback? = null
     /** Debug-only: dial the relay even when the LAN answers, to test that path. */
     var forceRelay: Boolean = false
-    private var liveRefresh: Job? = null
+    private var listRefresh: Job? = null
+    private var openRefreshJob: Job? = null
+    @Volatile private var openRefreshPending = false
+    @Volatile private var openRefreshPendingSessions = false
+    @Volatile private var openRefreshPendingFeed = false
+    private val lastDescriptorsReadAt = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    private val lastFeedReadAt = java.util.concurrent.ConcurrentHashMap<String, Long>()
     private var pollLoop: Job? = null
     /** Fills the stored copy backwards while its page is open. */
     private var backfill: Job? = null
@@ -907,17 +916,30 @@ class TermRemoteViewModel(application: Application) : AndroidViewModel(applicati
     /** A Mac whose three failed reads are being confirmed with its own signed probe. */
     private val offlineChecks = mutableSetOf<String>()
 
+    /** The default network last observed, so initial callback registration does not race startup. */
+    @Volatile private var activeNetwork: android.net.Network? = null
+
     init {
         // A network that comes back needs a redial; the encrypted links do not
         // recover on their own when Wi-Fi returns or the phone switches to cellular.
         runCatching {
             val manager = application.getSystemService(android.content.Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+            activeNetwork = manager.activeNetwork
             val callback = object : android.net.ConnectivityManager.NetworkCallback() {
                 override fun onAvailable(network: android.net.Network) {
+                    val previous = activeNetwork
+                    activeNetwork = network
+                    // Android immediately notifies the already-active network on registration;
+                    // ignore that first callback so startup's connect() does not get torn down.
+                    if (previous == network) return
                     // A background wake owns its own reads; a path change must not start links.
                     // A link the service is holding is redialled at once, as in the foreground.
                     if (hosts.isEmpty() || (backgroundedAt != null && !keepAliveActive)) return
                     viewModelScope.launch { redialAll() }
+                }
+
+                override fun onLost(network: android.net.Network) {
+                    if (activeNetwork == network) activeNetwork = null
                 }
             }
             manager.registerDefaultNetworkCallback(callback)
@@ -962,7 +984,10 @@ class TermRemoteViewModel(application: Application) : AndroidViewModel(applicati
         if (!keepAlive) {
             pollLoop?.cancel()
             pollLoop = null
-            liveRefresh?.cancel()
+            listRefresh?.cancel()
+            openRefreshJob?.cancel()
+            openRefreshJob = null
+            openRefreshPending = false
             // The approval request stays; only its polling pauses until onForeground.
             approvalPoll?.cancel()
             approvalPoll = null
@@ -983,12 +1008,48 @@ class TermRemoteViewModel(application: Application) : AndroidViewModel(applicati
         (_shell.value as? ShellState.Connected)?.let { current ->
             _shell.value = current.copy(hostConnecting = only.associate { it.id to true })
         }
-        // Each host keeps its own link and repository; a redial replaces only that link.
-        only.forEach { host ->
-            runCatching { refreshRelayHint(host.repository) }
-            startLive(host)
+        // Each host keeps its own link and repository; a redial replaces only that link
+        // and re-establishes the relay transport when LAN is unreachable.
+        kotlinx.coroutines.coroutineScope {
+            only.map { host ->
+                async(Dispatchers.IO) {
+                    if (host.repository.relayLink?.isOpen != true) {
+                        host.repository.clearRelayLink()
+                    }
+                    runCatching { refreshRelayHint(host.repository) }
+                    if (host.connection.isLegacy) return@async
+                    val relay = host.connection.endpoint.relay
+                    if (relay != null && forceRelay) {
+                        val relayed = dialRelay(host.connection, host.repository)
+                        if (relayed != null) {
+                            host.repository.useRelayLink(relayed.link, relayed.epoch)
+                            startLive(host, existing = relayed.link)
+                            return@async
+                        }
+                    } else if (relay != null) {
+                        val lanDeferred = async { lanReachable(host.repository, host.connection) }
+                        val relayDeferred = async { dialRelay(host.connection, host.repository) }
+                        val lanWon = lanDeferred.await()
+                        val relayResult = relayDeferred.await()
+                        if (lanWon) {
+                            runCatching { relayResult?.link?.close() }
+                            if (host.repository.overRelay) host.repository.clearRelayLink()
+                            startLive(host)
+                            return@async
+                        } else if (relayResult != null) {
+                            host.repository.useRelayLink(relayResult.link, relayResult.epoch)
+                            startLive(host, existing = relayResult.link)
+                            return@async
+                        }
+                    }
+                    startLive(host)
+                }
+            }.forEach { it.await() }
         }
-        _reachable.value = hosts.any { host -> runCatching { host.repository.epoch() }.isSuccess }
+        _reachable.value = hosts.any { host ->
+            host.repository.relayLink?.isOpen == true ||
+                runCatching { kotlinx.coroutines.withTimeout(6_000) { host.repository.probe() } }.isSuccess
+        }
         _probed.value = true
         _connecting.value = false
         (_shell.value as? ShellState.Connected)?.let { current ->
@@ -1541,13 +1602,14 @@ class TermRemoteViewModel(application: Application) : AndroidViewModel(applicati
     /** Dials the host's relay and returns the authenticated link, or null. */
     private suspend fun dialRelay(connection: AuthorizedConnection, repository: BridgeRepository): Relayed? {
         val relay = connection.endpoint.relay ?: return null
-        val link = dev.trenta.termremote.bridge.LinkClient(
+        lateinit var link: dev.trenta.termremote.bridge.LinkClient
+        link = dev.trenta.termremote.bridge.LinkClient(
             host = connection.host,
             endpoint = connection.endpoint,
             privateKey = connection.privateKey,
             clientID = connection.clientID,
             agreementKey = dev.trenta.termremote.protocol.HpkeSession.generateKeyPair(),
-            onEvent = { event -> onLiveChange(connection.host.id, event.id) },
+            onEvent = { event -> onLiveChange(connection.host.id, link.subscriptionPaths[event.id] ?: "") },
         )
         return try {
             android.util.Log.i("cmux-relay", "dial relay ${relay.origin}")
@@ -1555,19 +1617,9 @@ class TermRemoteViewModel(application: Application) : AndroidViewModel(applicati
             android.util.Log.i("cmux-relay", "relay connected open=${link.isOpen} relayed=${link.dialedViaRelay}")
             // The epoch must be read *over this link*: the LAN is the unreachable path,
             // so a normal signed HTTPS read would time out and leave the link unused.
-            val body = link.request("GET", "/v2/identity", null, null)
-            val signed = dev.trenta.termremote.protocol.decodeSignedJson(String(body, Charsets.UTF_8))
-            dev.trenta.termremote.protocol.Signer.verify(signed, "host", connection.host.publicKey)
-            val announcement = dev.trenta.termremote.protocol.HostAnnouncement.from(
-                signed.value as? kotlinx.serialization.json.JsonObject
-                    ?: throw ProtocolException("invalid_response", "The identity is not an object."),
-            )
-            if (announcement.host.id != connection.host.id || announcement.epoch.isBlank()) {
-                throw ProtocolException("host_changed", "The relay link answered for another host.")
-            }
-            link.epoch = announcement.epoch
-            android.util.Log.i("cmux-relay", "relay epoch read ${announcement.epoch}")
-            Relayed(link, announcement.epoch)
+            val epoch = link.fetchEpoch()
+            android.util.Log.i("cmux-relay", "relay epoch read $epoch")
+            Relayed(link, epoch)
         } catch (error: Exception) {
             android.util.Log.w("cmux-relay", "relay dial failed: ${error.javaClass.name} ${(error as? ProtocolException)?.code ?: error.message}")
             dev.trenta.termremote.data.Diagnostics.log(
@@ -1595,49 +1647,121 @@ class TermRemoteViewModel(application: Application) : AndroidViewModel(applicati
             { path -> onLiveChange(host.id, path) },
             { host.repository.epoch() },
             existing = existing,
+            onLinkConnected = { link, epoch ->
+                if (link.dialedViaRelay) {
+                    host.repository.useRelayLink(link, epoch)
+                } else if (host.repository.overRelay) {
+                    host.repository.clearRelayLink()
+                }
+                viewModelScope.launch {
+                    hostFailures.remove(host.id)
+                    quietHosts.remove(host.id)
+                    conversationFailures.remove(host.id)
+                    _hostReachable.value = _hostReachable.value + (host.id to true)
+                    if (openHostID == host.id) {
+                        _reachable.value = true
+                        reloadOpen()
+                    }
+                }
+            },
+            onLinkClosed = { link ->
+                if (host.repository.relayLink === link) {
+                    host.repository.clearRelayLink()
+                }
+            },
         )
         lives[host.id] = updates
+        updates.watch(watchedPathsFor(host.id))
         updates.start()
-        updates.watch(listPaths())
     }
 
     /** Resources watched while the list is on screen. */
     private fun listPaths(): List<String> = listOf("/v2/sessions", "/v2/feed")
 
-    private fun onLiveChange(hostID: String, path: String) {
-        // Coalesce bursts: a running turn fires several notifications per second.
-        liveRefresh?.cancel()
-        liveRefresh = viewModelScope.launch {
-            kotlinx.coroutines.delay(250)
-            if (path.startsWith("/v2/sessions/") && path.endsWith("/history")) {
-                // Only the open conversation's own Mac changes what its page shows.
-                if (openHostID == hostID) reloadOpen()
-            } else {
-                val sessionsPath = path.startsWith("/v2/sessions")
-                val now = System.currentTimeMillis()
-                if (sessionsPath) {
-                    if (now - lastListRefreshAt < 8_000) return@launch
-                    lastListRefreshAt = now
-                }
-                refresh()
-                if (openHostID == hostID) reloadOpen()
+    private fun watchedPathsFor(hostID: String): List<String> = buildList {
+        addAll(listPaths())
+        val openSession = _conversation.value?.session?.id
+        if (openSession != null && openHostID == hostID) {
+            add("/v2/sessions/$openSession/history")
+            add("/v2/sessions/$openSession/preview")
+        }
+    }
+
+    /**
+     * Single-flight live refresh for the open conversation, matching iOS:
+     * starts immediately on the first change and never cancels an in-flight read;
+     * notifications arriving mid-read coalesce into one immediate follow-up pass.
+     */
+    private fun requestOpenRefresh(refreshSessions: Boolean = false, refreshFeed: Boolean = false) {
+        if (_conversation.value == null) return
+        if (refreshSessions) openRefreshPendingSessions = true
+        if (refreshFeed) openRefreshPendingFeed = true
+        if (openRefreshJob?.isActive == true) {
+            openRefreshPending = true
+            return
+        }
+        openRefreshPending = false
+        val readSessions = openRefreshPendingSessions
+        val readFeed = openRefreshPendingFeed
+        openRefreshPendingSessions = false
+        openRefreshPendingFeed = false
+        openRefreshJob = viewModelScope.launch {
+            reloadOpen(refreshSessions = readSessions, refreshFeed = readFeed)
+            while (openRefreshPending && isActive && _conversation.value != null) {
+                openRefreshPending = false
+                val nextSessions = openRefreshPendingSessions
+                val nextFeed = openRefreshPendingFeed
+                openRefreshPendingSessions = false
+                openRefreshPendingFeed = false
+                delay(60)
+                reloadOpen(refreshSessions = nextSessions, refreshFeed = nextFeed)
             }
+        }
+    }
+
+    private fun onLiveChange(hostID: String, path: String) {
+        if (path.startsWith("/v2/sessions/") && (path.endsWith("/history") || path.endsWith("/preview"))) {
+            // Only the open conversation's own Mac changes what its page shows.
+            if (openHostID == hostID) requestOpenRefresh()
+            return
+        }
+        val sessionsPath = path.startsWith("/v2/sessions")
+        val feedPath = path.startsWith("/v2/feed")
+        if (openHostID == hostID) {
+            requestOpenRefresh(
+                refreshSessions = sessionsPath || path.isEmpty(),
+                refreshFeed = feedPath || path.isEmpty(),
+            )
+        }
+        listRefresh?.cancel()
+        listRefresh = viewModelScope.launch {
+            delay(150)
+            val now = System.currentTimeMillis()
+            if (sessionsPath) {
+                if (now - lastListRefreshAt < 8_000) return@launch
+                lastListRefreshAt = now
+            }
+            refresh()
         }
     }
 
     private fun watchOpenSession(sessionID: String?) {
         pollLoop?.cancel()
-        val paths = buildList {
-            addAll(listPaths())
-            if (sessionID != null) add("/v2/sessions/$sessionID/history")
+        val base = listPaths()
+        lives.forEach { (hostID, updates) ->
+            val paths = if (sessionID != null && (openHostID == null || openHostID == hostID)) {
+                base + listOf("/v2/sessions/$sessionID/history", "/v2/sessions/$sessionID/preview")
+            } else {
+                base
+            }
+            updates.watch(paths)
         }
-        lives.values.forEach { it.watch(paths) }
         // A slow poll covers a Bridge whose link stayed closed; it is cancelled with the page.
         pollLoop = viewModelScope.launch {
             while (isActive) {
                 // A floor under a Bridge whose link stays closed; the link notifies sooner.
                 delay(if (sessionID == null) 30_000 else 15_000)
-                if (sessionID != null) reloadOpen() else refresh()
+                if (sessionID != null) requestOpenRefresh(refreshSessions = true, refreshFeed = true) else refresh()
             }
         }
     }
@@ -1708,6 +1832,7 @@ class TermRemoteViewModel(application: Application) : AndroidViewModel(applicati
                                 val relayed = dialRelay(host.connection, host.repository)
                                 if (relayed != null) {
                                     host.repository.useRelayLink(relayed.link, relayed.epoch)
+                                    startLive(host, existing = relayed.link)
                                     runCatching { host.repository.sessions() }
                                 } else {
                                     direct
@@ -1903,23 +2028,33 @@ class TermRemoteViewModel(application: Application) : AndroidViewModel(applicati
             // A stored copy can be on screen already; a slow first read says it is updating.
             catchingUp(session.id) {
                 try {
-                    val snapshot = current.history(session.id)
-                    val preview = runCatching { current.preview(session.id) }.getOrNull()
-                    val feed = runCatching { current.feed() }.getOrDefault(emptyList()).map {
-                        it.copy(hostID = host?.id.orEmpty(), hostName = host?.name.orEmpty())
+                    val (snapshot, preview, feed) = kotlinx.coroutines.coroutineScope {
+                        val historyDeferred = async(Dispatchers.IO) { current.history(session.id) }
+                        val previewDeferred = async(Dispatchers.IO) { runCatching { current.preview(session.id) }.getOrNull() }
+                        val feedDeferred = async(Dispatchers.IO) {
+                            runCatching { current.feed() }.getOrDefault(emptyList()).map {
+                                it.copy(hostID = host?.id.orEmpty(), hostName = host?.name.orEmpty())
+                            }
+                        }
+                        Triple(historyDeferred.await(), previewDeferred.await(), feedDeferred.await())
                     }
+                    val committed = snapshot.messages.lastOrNull { it.role == "agent" && it.kind == "prose" }?.text
+                    val livePreview = preview?.text?.takeIf { it != committed }
                     _conversation.update { ui ->
                         if (ui?.session?.id != session.id) ui
                         else applySnapshot(ui, snapshot, ui.session, feed).copy(
-                            preview = preview?.text,
+                            preview = livePreview,
                             compacting = preview?.compacting ?: false,
                             loading = false,
                         )
                     }
                     conversationFailures.remove(openHostID)
                     _reachable.value = true
-                    lastStoredAt[scope + ":" + session.id] = System.currentTimeMillis()
-                    withContext(Dispatchers.IO) {
+                    val readAt = System.currentTimeMillis()
+                    lastConversationReadAt[scope + ":" + session.id] = readAt
+                    if (host != null) lastFeedReadAt[host.id] = readAt
+                    lastStoredAt[scope + ":" + session.id] = readAt
+                    viewModelScope.launch(Dispatchers.IO) {
                         runCatching {
                             conversations.save(snapshot, scope, session.id, complete = !snapshot.hasMore)
                         }
@@ -2018,14 +2153,33 @@ class TermRemoteViewModel(application: Application) : AndroidViewModel(applicati
             return
         }
         viewModelScope.launch {
-            val reached = runCatching {
+            var reached = runCatching {
                 kotlinx.coroutines.withTimeout(8_000) { host.repository.probe() }
             }.isSuccess
+            if (!reached && host.connection.endpoint.relay != null && !host.connection.isLegacy) {
+                if (host.repository.overRelay) host.repository.clearRelayLink()
+                reached = runCatching {
+                    kotlinx.coroutines.withTimeout(6_000) { host.repository.probe() }
+                }.isSuccess
+                if (!reached) {
+                    val relayed = dialRelay(host.connection, host.repository)
+                    if (relayed != null) {
+                        host.repository.useRelayLink(relayed.link, relayed.epoch)
+                        startLive(host, existing = relayed.link)
+                        reached = runCatching {
+                            kotlinx.coroutines.withTimeout(8_000) { host.repository.probe() }
+                        }.isSuccess
+                    }
+                }
+            }
             offlineChecks.remove(hostID)
             if (reached) {
                 conversationFailures.remove(hostID)
                 _hostReachable.value = _hostReachable.value + (hostID to true)
-                if (openHostID == hostID) _reachable.value = true
+                if (openHostID == hostID) {
+                    _reachable.value = true
+                    reloadOpen()
+                }
             } else {
                 _hostReachable.value = _hostReachable.value + (hostID to false)
                 if (openHostID == hostID) _reachable.value = false
@@ -2108,6 +2262,9 @@ class TermRemoteViewModel(application: Application) : AndroidViewModel(applicati
 
     fun close() {
         backfill?.cancel()
+        openRefreshJob?.cancel()
+        openRefreshJob = null
+        openRefreshPending = false
         _conversation.value = null
         terminalPoll?.cancel(); terminalPoll = null; _terminal.value = null
         _selectedKey.value = null
@@ -3134,7 +3291,7 @@ class TermRemoteViewModel(application: Application) : AndroidViewModel(applicati
 
     /** A pull when there is no earlier page to ask for: read the newest page again. */
     fun refreshOpen() {
-        viewModelScope.launch { reloadOpen() }
+        viewModelScope.launch { reloadOpen(refreshSessions = true, refreshFeed = true) }
     }
 
     fun send() {
@@ -3419,6 +3576,8 @@ class TermRemoteViewModel(application: Application) : AndroidViewModel(applicati
         /** iOS fills 64 pages; anything longer is resumed on the next open. */
         const val BACKFILL_PAGES = 64
         const val STORE_COALESCE_MS = 2_000L
+        /** Matches iOS descriptorsInterval: avoid scanning every Mac session on every transcript delta. */
+        const val DESCRIPTORS_INTERVAL_MS = 10_000L
         const val OLDER_PAUSE_MS = 800L
         /** How long a catch-up read may take before the page says it is updating. */
         const val UPDATING_REVEAL_MS = 500L
@@ -3430,7 +3589,7 @@ class TermRemoteViewModel(application: Application) : AndroidViewModel(applicati
     /** Reads the open page again after it was away, saying it is updating while that read is slow. */
     private suspend fun catchUpOpen() {
         val id = _conversation.value?.session?.id ?: return
-        catchingUp(id) { reloadOpen() }
+        catchingUp(id) { reloadOpen(refreshSessions = true, refreshFeed = true) }
     }
 
     /** Catch-up reads in flight per conversation; the page says it is updating until the last one answers. */
@@ -3460,7 +3619,7 @@ class TermRemoteViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
-    private suspend fun reloadOpen() {
+    private suspend fun reloadOpen(refreshSessions: Boolean = false, refreshFeed: Boolean = false) {
         // Reads belong to the Mac the conversation was opened on, not whichever
         // Mac happened to be selected last.
         val host = hosts.firstOrNull { it.id == openHostID }
@@ -3472,40 +3631,94 @@ class TermRemoteViewModel(application: Application) : AndroidViewModel(applicati
             val readKey = storeScope(current.connection) + ":" + value.session.id
             val readAt = System.currentTimeMillis()
             val recent = readAt - (lastConversationReadAt[readKey] ?: 0L) < 60_000
-            val snapshot = current.history(value.session.id, limit = if (recent) 30 else 100)
-            lastConversationReadAt[readKey] = readAt
-            val sessions = current.sessions()
-            val feed = runCatching { current.feed() }.getOrDefault(emptyList())
-                .map { it.copy(hostID = host.id, hostName = host.name) }
-            val refreshed = sessions.firstOrNull { it.id == value.session.id } ?: value.session
-            _conversation.update { ui ->
-                if (ui?.session?.id != value.session.id) ui else applySnapshot(ui, snapshot, refreshed, feed)
-            }
-            // Every newest-page read becomes the stored copy, so reopening never re-reads it.
-            // A running turn fires several notifications per second; two seconds of
-            // coalescing keeps SQLite out of the render path without going stale.
-            val scope = storeScope(current.connection)
-            val key = scope + ":" + value.session.id
-            val now = System.currentTimeMillis()
-            if (now - (lastStoredAt[key] ?: 0L) >= STORE_COALESCE_MS) {
-                lastStoredAt[key] = now
-                withContext(Dispatchers.IO) {
-                    runCatching {
-                        conversations.save(
-                            snapshot,
-                            scope,
-                            value.session.id,
-                            complete = !snapshot.hasMore,
+            val shouldReadSessions = refreshSessions ||
+                readAt - (lastDescriptorsReadAt[host.id] ?: 0L) >= DESCRIPTORS_INTERVAL_MS
+            val shouldReadFeed = refreshFeed ||
+                value.feed.any { it.status == "pending" } ||
+                readAt - (lastFeedReadAt[host.id] ?: 0L) >= DESCRIPTORS_INTERVAL_MS
+            if (shouldReadSessions) lastDescriptorsReadAt[host.id] = readAt
+            if (shouldReadFeed) lastFeedReadAt[host.id] = readAt
+
+            // Launch transcript, live preview, and optional list/feed reads in parallel, as iOS does.
+            // History + preview update the UI immediately without blocking on the full session list.
+            kotlinx.coroutines.coroutineScope {
+                val historyDeferred = async(Dispatchers.IO) {
+                    current.history(value.session.id, limit = if (recent) 30 else 100)
+                }
+                val previewDeferred = async(Dispatchers.IO) {
+                    runCatching { current.preview(value.session.id) }.getOrNull()
+                }
+                val sessionsDeferred = if (shouldReadSessions) {
+                    async(Dispatchers.IO) { runCatching { current.sessions() }.getOrNull() }
+                } else {
+                    null
+                }
+                val feedDeferred = if (shouldReadFeed) {
+                    async(Dispatchers.IO) {
+                        runCatching { current.feed() }.getOrNull()
+                            ?.map { it.copy(hostID = host.id, hostName = host.name) }
+                    }
+                } else {
+                    null
+                }
+
+                val snapshot = historyDeferred.await()
+                val preview = previewDeferred.await()
+                lastConversationReadAt[readKey] = System.currentTimeMillis()
+
+                _conversation.update { ui ->
+                    if (ui?.session?.id != value.session.id) ui else {
+                        val merged = applySnapshot(ui, snapshot, ui.session, ui.feed)
+                        val committed = merged.messages.lastOrNull { it.role == "agent" && it.kind == "prose" }?.text
+                        val livePreview = preview?.text?.takeIf { it != committed }
+                        merged.copy(
+                            preview = livePreview,
+                            compacting = if (merged.session.working) (preview?.compacting ?: merged.compacting) else false,
                         )
                     }
                 }
-            }
-            val shell = _shell.value as? ShellState.Connected
-            val host = hosts.firstOrNull { it.repository === current }
-            if (shell != null && host != null) {
-                val hosted = sessions.map { HostedSession(host.id, host.name, it) }
-                val others = shell.sessions.filterNot { it.hostID == host.id }
-                _shell.value = shell.copy(sessions = others + hosted)
+
+                // Every newest-page read becomes the stored copy off the render path.
+                val scope = storeScope(current.connection)
+                val now = System.currentTimeMillis()
+                if (now - (lastStoredAt[readKey] ?: 0L) >= STORE_COALESCE_MS) {
+                    lastStoredAt[readKey] = now
+                    viewModelScope.launch(Dispatchers.IO) {
+                        runCatching {
+                            conversations.save(
+                                snapshot,
+                                scope,
+                                value.session.id,
+                                complete = !snapshot.hasMore,
+                            )
+                        }
+                    }
+                }
+
+                val sessions = sessionsDeferred?.await()
+                val feed = feedDeferred?.await()
+                if (sessions != null || feed != null) {
+                    val refreshed = sessions?.firstOrNull { it.id == value.session.id }
+                    _conversation.update { ui ->
+                        if (ui?.session?.id != value.session.id) ui else {
+                            val nextSession = refreshed ?: ui.session
+                            ui.copy(
+                                session = nextSession,
+                                feed = feed ?: ui.feed,
+                                compacting = if (nextSession.working) ui.compacting else false,
+                                stopRequested = ui.stopRequested && nextSession.working,
+                            )
+                        }
+                    }
+                    if (sessions != null) {
+                        val shell = _shell.value as? ShellState.Connected
+                        if (shell != null) {
+                            val hosted = sessions.map { HostedSession(host.id, host.name, it) }
+                            val others = shell.sessions.filterNot { it.hostID == host.id }
+                            _shell.value = shell.copy(sessions = others + hosted)
+                        }
+                    }
+                }
             }
         }
             .onSuccess {

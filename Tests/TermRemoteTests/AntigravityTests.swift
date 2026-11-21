@@ -356,4 +356,55 @@ import CmuxAgentChat
         #expect(ended.isEmpty)
         #expect(await registry.stamp(sessionID: sessionID) == "0")
     }
+
+    @Test func backgroundTasksTrackAntigravityLaunchLogAndCompletion() async throws {
+        let root = try temporary(); defer { try? FileManager.default.removeItem(at: root) }
+        let sysGen = root.appendingPathComponent(".system_generated", isDirectory: true)
+        let logs = sysGen.appendingPathComponent("logs", isDirectory: true)
+        let tasks = sysGen.appendingPathComponent("tasks", isDirectory: true)
+        try FileManager.default.createDirectory(at: logs, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: tasks, withIntermediateDirectories: true)
+
+        let sessionID = "49f96599-cb55-4395-9b1e-24c790123008"
+        let transcript = logs.appendingPathComponent("transcript_full.jsonl")
+        let logFile = tasks.appendingPathComponent("task-809.log")
+        try Data("Running verification suite...\n".utf8).write(to: logFile)
+
+        let launchChunk = [
+            #"{"step_index":808,"source":"MODEL","type":"PLANNER_RESPONSE","status":"DONE","created_at":"2026-11-21T04:42:46Z","tool_calls":[{"name":"run_command","args":{"CommandLine":"scripts/verify.sh","toolSummary":"Verify repo"}}]}"#,
+            #"{"step_index":809,"source":"MODEL","type":"GENERIC","status":"RUNNING","created_at":"2026-11-21T04:42:47Z","content":"Created At: 2026-11-21T11:42:47+07:00\nTool is running as a background task with task id: \#(sessionID)/task-809\nTask Description: scripts/verify.sh && scripts/build-ios.sh\nTask logs are available at: file://\#(logFile.path)\n"}"#
+        ].joined(separator: "\n") + "\n"
+        try Data(launchChunk.utf8).write(to: transcript)
+
+        let reader = TranscriptReader()
+        let whileRunning = try await reader.history(path: transcript.path, agent: "antigravity", beforeSeq: nil, limit: 100, reportsBackgroundTasks: true)
+        let task = try #require(whileRunning.backgroundTasks?.first)
+        #expect(task.id == "task-809")
+        #expect(task.tool == "Bash")
+        #expect(task.summary == "scripts/verify.sh && scripts/build-ios.sh")
+
+        // BackgroundTaskLocator resolves the sibling tasks/task-809.log and launch command.
+        let locator = BackgroundTaskLocator()
+        let located = try #require(locator.locate(transcript: transcript.path, taskID: "task-809"))
+        #expect(located.kind == .output)
+        #expect(located.path == logFile.resolvingSymlinksInPath().standardizedFileURL.path)
+        #expect(locator.launchCommand(transcript: transcript.path, toolUseID: "task-809") == "scripts/verify.sh && scripts/build-ios.sh")
+
+        // Symlinked log files outside tasks/ are rejected.
+        let outside = root.appendingPathComponent("secret.log")
+        try Data("nope".utf8).write(to: outside)
+        let symlinkLog = tasks.appendingPathComponent("task-999.log")
+        try FileManager.default.createSymbolicLink(at: symlinkLog, withDestinationURL: outside)
+        #expect(locator.locate(transcript: transcript.path, taskID: "task-999") == nil)
+
+        // Append completion SYSTEM_MESSAGE -> task disappears from running backgroundTasks.
+        let finishLine = #"{"step_index":811,"source":"SYSTEM","type":"SYSTEM_MESSAGE","status":"DONE","created_at":"2026-11-21T04:44:00Z","content":"<SYSTEM_MESSAGE>\n[Message] timestamp=2026-11-21T04:44:00Z sender=\#(sessionID)/task-809 priority=MESSAGE_PRIORITY_HIGH content=Task id \"\#(sessionID)/task-809\" finished with result:\nCommand exited with code 0.\n</SYSTEM_MESSAGE>"}"# + "\n"
+        let handle = try FileHandle(forWritingTo: transcript)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data(finishLine.utf8))
+        try handle.close()
+
+        let afterFinish = try await reader.history(path: transcript.path, agent: "antigravity", beforeSeq: nil, limit: 100, reportsBackgroundTasks: true)
+        #expect(afterFinish.backgroundTasks?.isEmpty == true)
+    }
 }

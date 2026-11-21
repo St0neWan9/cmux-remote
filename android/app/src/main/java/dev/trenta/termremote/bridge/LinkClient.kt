@@ -52,6 +52,7 @@ class LinkClient(
     private val onEvent: (LinkEvent) -> Unit,
 ) {
     private val failures = Channel<Exception>(Channel.CONFLATED)
+    private val sendLock = Any()
     private var socket: WebSocket? = null
     private var sending: HpkeSession? = null
     private var receiving: HpkeSession? = null
@@ -116,7 +117,7 @@ class LinkClient(
     }
 
     private suspend fun dial(request: Request, client: OkHttpClient, relayed: Boolean) = suspendCancellableCoroutine<Unit> { continuation ->
-        var settled = false
+        val settled = java.util.concurrent.atomic.AtomicBoolean(false)
         val webSocket = client.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 webSocket.send(Json.text(signedProposal.toJson()).encodeToByteArray().toByteString())
@@ -129,12 +130,12 @@ class LinkClient(
                     webSocket.close(1009, "too large")
                     return
                 }
-                if (!settled) {
-                    settled = true
+                if (settled.compareAndSet(false, true)) {
                     try {
                         accept(raw)
                         continuation.resume(Unit)
                     } catch (error: Exception) {
+                        closed = true
                         continuation.resumeWithException(error)
                         webSocket.cancel()
                     }
@@ -163,8 +164,20 @@ class LinkClient(
                     response?.code ?: 502,
                 )
                 closed = true
-                if (!settled) {
-                    settled = true
+                failPending(error)
+                if (settled.compareAndSet(false, true)) {
+                    continuation.resumeWithException(error)
+                } else {
+                    failures.trySend(error)
+                }
+            }
+
+            override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+                val error = ProtocolException("link_failed", "The link closed ($code).", 502)
+                closed = true
+                failPending(error)
+                webSocket.close(code, null)
+                if (settled.compareAndSet(false, true)) {
                     continuation.resumeWithException(error)
                 } else {
                     failures.trySend(error)
@@ -172,15 +185,22 @@ class LinkClient(
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                val error = ProtocolException("link_failed", "The link closed ($code).", 502)
                 closed = true
-                if (!settled) {
-                    settled = true
+                failPending(error)
+                if (settled.compareAndSet(false, true)) {
                     continuation.resumeWithException(ProtocolException("link_failed", "The link closed before it was authenticated.", 502))
+                } else {
+                    failures.trySend(error)
                 }
             }
         })
         socket = webSocket
-        continuation.invokeOnCancellation { webSocket.cancel(); closed = true }
+        continuation.invokeOnCancellation {
+            closed = true
+            failPending(ProtocolException("link_failed", "The link dial was cancelled.", 502))
+            webSocket.cancel()
+        }
     }
 
     private class Pending(
@@ -192,17 +212,42 @@ class LinkClient(
     private val chunks = java.util.concurrent.ConcurrentHashMap<String, java.io.ByteArrayOutputStream>()
 
     /**
+     * Reads and verifies the host's signed runtime epoch over this link itself.
+     * Used on relay connections where direct LAN HTTPS is unreachable.
+     */
+    suspend fun fetchEpoch(): String {
+        val body = request("GET", "/v2/identity", null, null)
+        val signed = decodeSignedJson(String(body, Charsets.UTF_8))
+        Signer.verify(signed, "host", host.publicKey)
+        val announcement = dev.trenta.termremote.protocol.HostAnnouncement.from(
+            signed.value as? JsonObject
+                ?: throw ProtocolException("invalid_response", "The identity is not an object.", 502),
+        )
+        if (announcement.version != 2 ||
+            announcement.host.id != host.id ||
+            announcement.host.publicKey != host.publicKey ||
+            announcement.host.certificateSHA256 != host.certificateSHA256 ||
+            announcement.epoch.isBlank()
+        ) {
+            throw ProtocolException("host_changed", "The link answered for another host.", 401)
+        }
+        epoch = announcement.epoch
+        return announcement.epoch
+    }
+
+    /**
      * One resource request over the link, for a Bridge reachable only through a
      * relay. Chunks are acknowledged in order, exactly as the Mac expects.
      */
     suspend fun request(method: String, uri: String, authorization: String?, body: ByteArray? = null): ByteArray {
         val id = UUID.randomUUID().toString()
+        val deferred = kotlinx.coroutines.CompletableDeferred<ByteArray>()
+        pending[id] = Pending(method, deferred)
         if (sending == null || closed) {
+            pending.remove(id)
             android.util.Log.w("cmux-relay", "request before link ready $method $uri")
             throw ProtocolException("link_failed", "The link is not ready.", 502)
         }
-        val deferred = kotlinx.coroutines.CompletableDeferred<ByteArray>()
-        pending[id] = Pending(method, deferred)
         android.util.Log.i("cmux-relay", "request $method $uri id=$id")
         try {
             val frame = buildJsonObject {
@@ -217,6 +262,7 @@ class LinkClient(
             return kotlinx.coroutines.withTimeout(30_000) { deferred.await() }
         } finally {
             pending.remove(id)
+            chunks.remove(id)
         }
     }
 
@@ -266,24 +312,40 @@ class LinkClient(
 
     fun close() {
         closed = true
+        failPending(ProtocolException("link_failed", "The link was closed.", 502))
         socket?.close(1000, null)
         failures.close()
     }
 
+    private fun failPending(error: ProtocolException) {
+        val entries = pending.values.toList()
+        pending.clear()
+        chunks.clear()
+        entries.forEach { it.done.completeExceptionally(error) }
+    }
+
     private fun fail(error: ProtocolException) {
         closed = true
+        failPending(error)
         failures.trySend(error)
     }
 
     private fun send(value: JsonObject) {
-        val session = sending ?: return
-        if (closed) return
-        val sealed = session.seal(Json.bytes(value))
-        val packet = buildJsonObject {
-            sealed.encapsulatedKey?.let { put("encapsulatedKey", JsonPrimitive(Base64.getEncoder().encodeToString(it))) }
-            put("ciphertext", JsonPrimitive(Base64.getEncoder().encodeToString(sealed.ciphertext)))
+        // HPKE AEAD sequence numbers are strictly monotonic: seal and WebSocket enqueue
+        // must happen under one lock so reader-thread ACKs and coroutine requests never
+        // reorder encrypted packets on the wire.
+        val failure = synchronized(sendLock) {
+            val session = sending ?: return
+            if (closed) return
+            val sealed = session.seal(Json.bytes(value))
+            val packet = buildJsonObject {
+                sealed.encapsulatedKey?.let { put("encapsulatedKey", JsonPrimitive(Base64.getEncoder().encodeToString(it))) }
+                put("ciphertext", JsonPrimitive(Base64.getEncoder().encodeToString(sealed.ciphertext)))
+            }
+            val queued = socket?.send(Json.text(packet).encodeToByteArray().toByteString()) ?: false
+            if (!queued) ProtocolException("link_failed", "The link is no longer open.", 502) else null
         }
-        socket?.send(Json.text(packet).encodeToByteArray().toByteString())
+        if (failure != null) fail(failure)
     }
 
     private fun deliver(bytes: ByteArray) {
@@ -396,7 +458,10 @@ class LinkClient(
 
     private fun systemClient(): OkHttpClient = OkHttpClient.Builder()
         .followRedirects(false)
-        .pingInterval(25, TimeUnit.SECONDS)
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(0, TimeUnit.SECONDS)
+        .writeTimeout(15, TimeUnit.SECONDS)
+        .pingInterval(15, TimeUnit.SECONDS)
         .build()
 
     /** A relayed dial: system PKI, with the permit and join headers that admit this device. */
@@ -423,7 +488,10 @@ class LinkClient(
                 }.getOrDefault(false)
             }
             .followRedirects(false)
-            .pingInterval(25, TimeUnit.SECONDS)
+            .connectTimeout(5, TimeUnit.SECONDS)
+            .readTimeout(0, TimeUnit.SECONDS)
+            .writeTimeout(15, TimeUnit.SECONDS)
+            .pingInterval(15, TimeUnit.SECONDS)
             .build()
     }
 }

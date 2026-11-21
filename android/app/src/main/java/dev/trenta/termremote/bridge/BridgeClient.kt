@@ -177,7 +177,7 @@ class BridgeClient(
         authorization: String?,
     ): SignedJson {
         val uri = uri(path, query)
-        val response = exchange(method, uri, authorization, body)
+        val response = link?.request(method, uri, authorization, body) ?: exchange(method, uri, authorization, body)
         return decodeSignedJson(String(response, Charsets.UTF_8))
     }
 

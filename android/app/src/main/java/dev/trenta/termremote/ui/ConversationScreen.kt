@@ -6,6 +6,7 @@ import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
@@ -71,7 +72,9 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.focusRequester
@@ -247,128 +250,139 @@ fun ConversationScreen(
                 keyboard?.hide()
             },
         )
-        if (state.backgroundTasks.isNotEmpty() && onOpenTask != null) {
-            BackgroundTasksRow(
-                tasks = state.backgroundTasks.map {
-                    BackgroundTask(id = it.id, tool = it.tool, status = it.summary, running = it.running)
-                },
-                onOpen = { chip ->
-                    state.backgroundTasks.firstOrNull { it.id == chip.id }?.let(onOpenTask)
-                },
-                modifier = Modifier.padding(horizontal = 14.dp),
-            )
-        }
-        if (state.displayedQueuedPrompts.isNotEmpty()) {
-            QueuedPromptsRow(
-                prompts = state.displayedQueuedPrompts,
-                modifier = Modifier.padding(horizontal = 14.dp),
-            )
-        }
-        if (state.session.resumable && !state.session.writable && onResume != null) {
-            ResumeBanner(onResume = onResume, busy = busy)
-        }
-        if (imagePreparing > 0) {
-            Text(
-                stringResource(R.string.chat_preparing_image),
-                color = MobileDesign.Muted,
-                style = MaterialTheme.typography.labelMedium,
-                modifier = Modifier.padding(horizontal = 14.dp),
-            )
-        }
-        if (imageError != null) {
-            Text(
-                imageError,
-                color = MaterialTheme.colorScheme.error,
-                style = MaterialTheme.typography.labelMedium,
-                modifier = Modifier.padding(horizontal = 14.dp),
-            )
-        }
-        if (pendingSend && !busy) {
-            PendingSendBanner(
-                onCheck = onCheckPending,
-                onAcknowledge = onAcknowledgePending,
-                modifier = Modifier.padding(horizontal = 14.dp),
-            )
-        }
-        if (speechDraft != null || speechListening) {
-            SpeechDraftStrip(
-                text = speechDraft.orEmpty(),
-                listening = speechListening,
-                onFinish = onFinishVoice,
-                onUse = onUseSpeech,
-                onCancel = onCancelSpeech,
-            )
-        }
-        // The running turn sits against the composer, as on the iPhone's bottom
-        // inset, not at the end of the transcript.
-        // It runs from the tap that sent the prompt, not from the Mac's later report (see TurnClock).
-        if (state.activeResponse) {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                WorkingIndicator(size = 12.dp)
-                val since = state.runningSince
-                if (since != null) {
-                    LiveRunLabel(since = since, compacting = state.compacting, showsMark = false)
-                } else {
-                    Text(stringResource(R.string.common_working), color = MobileDesign.Muted, style = MaterialTheme.typography.labelMedium)
-                }
-                Spacer(Modifier.weight(1f))
-                Icon(Icons.Rounded.AutoAwesome, contentDescription = null, tint = MobileDesign.Muted, modifier = Modifier.size(13.dp))
-                Text(
-                    text = state.session.agent.replaceFirstChar { it.uppercase() },
-                    color = MobileDesign.Muted,
-                    style = MaterialTheme.typography.labelMedium,
+        // Bottom inset matches iOS (`padding(horizontal = 14)` + `spacing = 12`):
+        // status bars (background tasks, queued prompts, running/updating line) each add
+        // `12.dp` horizontal padding (26.dp total), while the resting composer adds `18.dp`
+        // (32.dp total) and expands to `0.dp` (14.dp total) when focused.
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(MobileDesign.Canvas.copy(alpha = 0.95f))
+                .padding(horizontal = 14.dp)
+                .padding(top = 12.dp, bottom = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            if (speechDraft != null || speechListening) {
+                SpeechDraftStrip(
+                    text = speechDraft.orEmpty(),
+                    listening = speechListening,
+                    onFinish = onFinishVoice,
+                    onUse = onUseSpeech,
+                    onCancel = onCancelSpeech,
                 )
             }
-        } else if (state.updating || connecting) {
-            // Without a running turn, the same line says the page is catching up: back from another app, or its
-            // link dialing. A running turn keeps its time there instead.
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 4.dp).testTag("connection.updating"),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                WorkingIndicator(size = 12.dp)
-                Text(stringResource(R.string.chat_updating), color = MobileDesign.Muted, style = MaterialTheme.typography.labelMedium)
+            if (imagePreparing > 0) {
+                Text(
+                    stringResource(R.string.chat_preparing_image),
+                    color = MobileDesign.Muted,
+                    style = MaterialTheme.typography.labelMedium,
+                    modifier = Modifier.padding(horizontal = 12.dp),
+                )
             }
-        }
-        ComposerArea(
-            draft = state.draft,
-            onDraftChange = onDraft,
-            onSend = onSend,
-            onStop = onStop,
-            working = state.activeResponse,
-            canSend = canControl && state.session.writable,
-            sending = state.sending,
-            // The timeline carries the error row; a second copy under the composer
-            // made every failure appear twice.
-            error = null,
-            hasImages = pendingImages.isNotEmpty(),
-            // Drafts sit inside the rounded field, as they do on the iPhone.
-            draftImages = if (pendingImages.isEmpty()) {
-                null
-            } else {
-                {
-                    DraftImageStrip(
-                        images = pendingImages,
-                        onRemove = onRemoveImage,
-                        onPreview = { previewImage = it },
+            if (imageError != null) {
+                Text(
+                    imageError,
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.labelMedium,
+                    modifier = Modifier.padding(horizontal = 12.dp),
+                )
+            }
+            if (pendingSend && !busy) {
+                PendingSendBanner(
+                    onCheck = onCheckPending,
+                    onAcknowledge = onAcknowledgePending,
+                    modifier = Modifier.padding(horizontal = 12.dp),
+                )
+            }
+            if (state.backgroundTasks.isNotEmpty() && onOpenTask != null) {
+                BackgroundTasksRow(
+                    tasks = state.backgroundTasks.map {
+                        BackgroundTask(id = it.id, tool = it.tool, status = it.summary, running = it.running)
+                    },
+                    onOpen = { chip ->
+                        state.backgroundTasks.firstOrNull { it.id == chip.id }?.let(onOpenTask)
+                    },
+                )
+            }
+            if (state.displayedQueuedPrompts.isNotEmpty()) {
+                QueuedPromptsRow(
+                    prompts = state.displayedQueuedPrompts,
+                )
+            }
+            if (state.session.resumable && !state.session.writable && onResume != null) {
+                ResumeBanner(onResume = onResume, busy = busy)
+            }
+            // The running turn sits against the composer, aligned left and right with
+            // background tasks and queued prompts (14 + 12 = 26.dp), as on the iPhone.
+            // It runs from the tap that sent the prompt, not from the Mac's later report (see TurnClock).
+            if (state.activeResponse) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(7.dp),
+                ) {
+                    WorkingIndicator(size = 12.dp)
+                    val since = state.runningSince
+                    if (since != null) {
+                        LiveRunLabel(since = since, compacting = state.compacting, showsMark = false)
+                    } else {
+                        Text(stringResource(R.string.common_working), color = MobileDesign.Muted, style = MaterialTheme.typography.labelMedium)
+                    }
+                    Spacer(Modifier.weight(1f))
+                    Icon(Icons.Rounded.AutoAwesome, contentDescription = null, tint = MobileDesign.Muted, modifier = Modifier.size(13.dp))
+                    Text(
+                        text = state.session.agent.replaceFirstChar { it.uppercase() },
+                        color = MobileDesign.Muted,
+                        style = MaterialTheme.typography.labelMedium,
                     )
                 }
-            },
-            sendBlocked = pendingSend || imagePreparing > 0 || busy,
-            onPickImages = onPickImages,
-            onPickImageFile = onPickImageFile,
-            onOpenProject = onOpenProject,
-            onOpenFeed = onOpenFeed,
-            stopRequested = state.stopRequested,
-            dictating = dictating,
-            onToggleVoice = onToggleVoice,
-            voiceError = voiceError,
-        )
+            } else if (state.updating || connecting) {
+                // Without a running turn, the same line says the page is catching up: back from another app, or its
+                // link dialing. A running turn keeps its time there instead.
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp).testTag("connection.updating"),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(7.dp),
+                ) {
+                    WorkingIndicator(size = 12.dp)
+                    Text(stringResource(R.string.chat_updating), color = MobileDesign.Muted, style = MaterialTheme.typography.labelMedium)
+                }
+            }
+            ComposerArea(
+                draft = state.draft,
+                onDraftChange = onDraft,
+                onSend = onSend,
+                onStop = onStop,
+                working = state.activeResponse,
+                canSend = canControl && state.session.writable,
+                sending = state.sending,
+                // The timeline carries the error row; a second copy under the composer
+                // made every failure appear twice.
+                error = null,
+                hasImages = pendingImages.isNotEmpty(),
+                // Drafts sit inside the rounded field, as they do on the iPhone.
+                draftImages = if (pendingImages.isEmpty()) {
+                    null
+                } else {
+                    {
+                        DraftImageStrip(
+                            images = pendingImages,
+                            onRemove = onRemoveImage,
+                            onPreview = { previewImage = it },
+                        )
+                    }
+                },
+                sendBlocked = pendingSend || imagePreparing > 0 || busy,
+                onPickImages = onPickImages,
+                onPickImageFile = onPickImageFile,
+                onOpenProject = onOpenProject,
+                onOpenFeed = onOpenFeed,
+                stopRequested = state.stopRequested,
+                dictating = dictating,
+                onToggleVoice = onToggleVoice,
+                voiceError = voiceError,
+            )
+        }
     }
     // A prepared image can be inspected before it is sent.
     previewImage?.let { bitmap ->
@@ -582,19 +596,30 @@ fun ConversationTimeline(
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     // Following keeps the newest output pinned until the reader drags upward.
-    var autoFollow by remember { mutableStateOf(true) }
+    var autoFollow by remember(state.session.id) { mutableStateOf(true) }
     val atLatest by remember { derivedStateOf {
         val layout = listState.layoutInfo
+        if (layout.totalItemsCount == 0 || !listState.canScrollForward) return@derivedStateOf true
         val last = layout.visibleItemsInfo.lastOrNull() ?: return@derivedStateOf true
-        last.index >= layout.totalItemsCount - 1 && last.offset + last.size <= layout.viewportEndOffset + 8
+        last.index >= layout.totalItemsCount - 1 && last.offset + last.size <= layout.viewportEndOffset + 24
     } }
-    val previousCount = remember { intArrayOf(0) }
-    val previousText = remember { intArrayOf(0) }
-    val previousGeneration = remember { arrayOfNulls<String>(1) }
+    suspend fun scrollToBottom() {
+        val lastItem = listState.layoutInfo.totalItemsCount - 1
+        if (lastItem < 0) return
+        listState.scrollToItem(lastItem)
+        repeat(4) {
+            if (!listState.canScrollForward) return
+            val consumed = listState.scrollBy(10_000f)
+            if (consumed <= 0.5f) return
+        }
+    }
+    val previousCount = remember(state.session.id) { intArrayOf(0) }
+    val previousText = remember(state.session.id) { intArrayOf(0) }
+    val previousGeneration = remember(state.session.id) { arrayOfNulls<String>(1) }
     // The last message's text grows while the agent streams; the size alone never
     // changes then, so it must be part of what re-triggers the follow scroll.
     val streaming = (state.messages.lastOrNull()?.text?.length ?: 0) + (state.preview?.length ?: 0)
-    LaunchedEffect(state.messages.size, streaming, state.generation) {
+    LaunchedEffect(state.session.id, state.messages.size, streaming, state.generation) {
         val firstLayout = previousCount[0] == 0
         val grew = state.messages.size > previousCount[0]
         val textGrew = streaming > previousText[0]
@@ -610,19 +635,37 @@ fun ConversationTimeline(
             // the end until it stops moving, as the iPhone's six-frame retry does.
             repeat(6) {
                 androidx.compose.runtime.withFrameNanos { }
-                val lastItem = listState.layoutInfo.totalItemsCount - 1
-                if (lastItem >= 0) listState.scrollToItem(lastItem)
+                scrollToBottom()
             }
         }
         previousCount[0] = state.messages.size
         previousText[0] = streaming
         previousGeneration[0] = state.generation
     }
+    // Keep the end pinned when bottom chrome (queued prompts, background tasks, IME)
+    // shrinks the viewport or when Markdown/image rows finish measuring after open.
+    val hasMessages by rememberUpdatedState(state.messages.isNotEmpty())
+    LaunchedEffect(state.session.id) {
+        snapshotFlow {
+            Triple(
+                autoFollow && hasMessages && !listState.isScrollInProgress,
+                listState.canScrollForward,
+                listState.layoutInfo.viewportSize.height,
+            )
+        }.collect { (shouldPin, canForward, _) ->
+            if (shouldPin && canForward) {
+                androidx.compose.runtime.withFrameNanos { }
+                if (autoFollow && !listState.isScrollInProgress && listState.canScrollForward) {
+                    scrollToBottom()
+                }
+            }
+        }
+    }
     // Prepending an earlier page must keep the row the reader was looking at in
     // place; scrolling by the raw item count jumps to a different message.
-    var previousFirst by remember { mutableStateOf<String?>(null) }
+    var previousFirst by remember(state.session.id) { mutableStateOf<String?>(null) }
     val currentFirst = state.messages.firstOrNull()?.id
-    LaunchedEffect(currentFirst) {
+    LaunchedEffect(state.session.id, currentFirst) {
         val anchor = previousFirst
         if (anchor != null && anchor != currentFirst) {
             val index = timelineEntries(state.messages).indexOfFirst { it.key == anchor }
@@ -644,7 +687,7 @@ fun ConversationTimeline(
         previousFirst = currentFirst
     }
     // A drag toward older text stops following; returning to the end resumes it.
-    val followConnection = remember {
+    val followConnection = remember(state.session.id) {
         object : androidx.compose.ui.input.nestedscroll.NestedScrollConnection {
             override fun onPostScroll(
                 consumed: androidx.compose.ui.geometry.Offset,
@@ -672,6 +715,7 @@ fun ConversationTimeline(
             androidx.compose.runtime.withFrameNanos { }
             val last = listState.layoutInfo.totalItemsCount - 1
             if (last >= 0) listState.animateScrollToItem(last)
+            scrollToBottom()
         }
     }
     // Earlier messages are fetched when the reader is within 240pt of the top,
@@ -694,6 +738,7 @@ fun ConversationTimeline(
     // Expanding a card changes the height above the reader's position. Capture the
     // first visible row and restore it after the new layout lands.
     val holdPlace: () -> Unit = {
+        autoFollow = false
         val index = listState.firstVisibleItemIndex
         val offset = listState.firstVisibleItemScrollOffset
         scope.launch {
@@ -1032,6 +1077,7 @@ fun ConversationTimeline(
                     scope.launch {
                         val last = listState.layoutInfo.totalItemsCount - 1
                         if (last >= 0) listState.animateScrollToItem(last)
+                        scrollToBottom()
                         autoFollow = true
                     }
                 }
@@ -1477,11 +1523,18 @@ fun ComposerArea(
     val expandedMaxLines = ComposerSizing.maxLines(visibleDp, density.fontScale)
     val twoPart = expanded && !compactHeight && !ComposerSizing.compact(visibleDp)
     val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+    // At rest the bar is inset 18.dp inside the 14.dp bottom container (32.dp total,
+    // matching iOS ChatComposer); focused it expands to the full container width (14.dp).
+    val restingInset by androidx.compose.animation.core.animateDpAsState(
+        targetValue = if (twoPart) 0.dp else 18.dp,
+        animationSpec = androidx.compose.animation.core.tween(180),
+        label = "composerInset",
+    )
     Column(
         modifier = modifier
             .fillMaxWidth()
             .testTag("voice.draft")
-            .padding(horizontal = if (twoPart) 12.dp else 18.dp, vertical = 10.dp),
+            .padding(horizontal = restingInset),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         if (!canSend) {

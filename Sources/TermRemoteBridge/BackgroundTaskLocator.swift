@@ -45,7 +45,23 @@ public struct BackgroundTaskLocator: Sendable {
             return Location(kind: .output, path: journal, format: .workflowJournal)
         }
         if let output = outputFile(transcript: transcript, taskID: taskID) { return Location(kind: .output, path: output) }
+        if let agyLog = antigravityTaskLog(transcript: transcript, taskID: taskID) { return Location(kind: .output, path: agyLog) }
         return nil
+    }
+
+    /// Antigravity stores each background task's log at `.../.system_generated/tasks/<taskID>.log`
+    /// beside `.../.system_generated/logs/transcript_full.jsonl`.
+    private func antigravityTaskLog(transcript: String, taskID: String) -> String? {
+        let logsDir = URL(fileURLWithPath: transcript).deletingLastPathComponent()
+        guard logsDir.lastPathComponent == "logs" else { return nil }
+        let tasksDir = logsDir.deletingLastPathComponent().appendingPathComponent("tasks", isDirectory: true)
+        let candidate = tasksDir.appendingPathComponent(taskID + ".log")
+        guard let values = try? candidate.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey]),
+              values.isRegularFile == true, values.isSymbolicLink != true else { return nil }
+        let root = tasksDir.resolvingSymlinksInPath().standardizedFileURL.path + "/"
+        let resolved = candidate.resolvingSymlinksInPath().standardizedFileURL.path
+        guard resolved.hasPrefix(root) else { return nil }
+        return resolved
     }
 
     /// The sidecar next to the session's own record names the tool call, and its transcript sits beside it.
@@ -124,19 +140,34 @@ public struct BackgroundTaskLocator: Sendable {
         while let chunk = try? handle.read(upToCount: 1_048_576), !chunk.isEmpty {
             pending.append(chunk)
             while let end = pending.lastIndex(of: 10) {
-                let line = pending[pending.startIndex...end]
+                let block = pending[pending.startIndex...end]
                 pending.removeSubrange(pending.startIndex...end)
-                guard let text = String(data: line, encoding: .utf8), text.contains(toolUseID), text.contains("\"tool_use\"") else { continue }
-                guard let data = text.data(using: .utf8),
-                      let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                      let content = (root["message"] as? [String: Any])?["content"] as? [[String: Any]] else { continue }
-                for block in content where block["type"] as? String == "tool_use" && block["id"] as? String == toolUseID {
-                    guard let input = block["input"] as? [String: Any] else { continue }
-                    let command = (input["command"] as? String) ?? (input["script"] as? String) ?? (input["file_path"] as? String)
-                    guard let command else { continue }
-                    let bounded = String(command.prefix(16_384))
-                    runtimeIDs.set(key, bounded)
-                    return bounded
+                for rawLine in block.split(separator: 10) {
+                    guard let text = String(data: Data(rawLine), encoding: .utf8), text.contains(toolUseID) else { continue }
+                    if text.contains("Tool is running as a background task"),
+                       let data = text.data(using: .utf8),
+                       let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                       let content = root["content"] as? String,
+                       let range = content.range(of: "Task Description: ") {
+                        let desc = content[range.upperBound...].prefix { $0 != "\n" }.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if !desc.isEmpty {
+                            let bounded = String(desc.prefix(16_384))
+                            runtimeIDs.set(key, bounded)
+                            return bounded
+                        }
+                    }
+                    guard text.contains("\"tool_use\"") else { continue }
+                    guard let data = text.data(using: .utf8),
+                          let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                          let content = (root["message"] as? [String: Any])?["content"] as? [[String: Any]] else { continue }
+                    for item in content where item["type"] as? String == "tool_use" && item["id"] as? String == toolUseID {
+                        guard let input = item["input"] as? [String: Any] else { continue }
+                        let command = (input["command"] as? String) ?? (input["script"] as? String) ?? (input["file_path"] as? String)
+                        guard let command else { continue }
+                        let bounded = String(command.prefix(16_384))
+                        runtimeIDs.set(key, bounded)
+                        return bounded
+                    }
                 }
             }
         }

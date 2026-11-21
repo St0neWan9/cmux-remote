@@ -74,7 +74,12 @@ struct BackgroundTaskTracker {
             guard let data = line.data(using: .utf8), let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
             // A request blob replays rows that were already folded in, including a launch whose completion came
             // later in the record; reading it again would revive a finished task. Only records count.
-            guard Self.isRecord(value["type"] as? String) else { continue }
+            let recordType = value["type"] as? String
+            guard Self.isRecord(recordType) else { continue }
+            if recordType == "GENERIC" || recordType == "SYSTEM_MESSAGE" || recordType == "PLANNER_RESPONSE" {
+                Self.consumeAntigravity(value, recordType: recordType!, into: &state)
+                continue
+            }
             let stamp = Self.timestamp(value["timestamp"] as? String)
             for call in Self.toolCalls(in: value) {
                 guard let id = call["id"] as? String else { continue }
@@ -132,7 +137,69 @@ struct BackgroundTaskTracker {
     /// The record kinds a task signal can come from; request payload copies replay earlier rows.
     private static func isRecord(_ type: String?) -> Bool {
         guard let type else { return false }
-        return ["user", "assistant", "queue-operation", "attachment"].contains(type)
+        return ["user", "assistant", "queue-operation", "attachment", "GENERIC", "SYSTEM_MESSAGE", "PLANNER_RESPONSE"].contains(type)
+    }
+
+    /// Antigravity background tasks: `GENERIC` (status=RUNNING) launches a task with `task id: <session>/<task-N>`,
+    /// `SYSTEM_MESSAGE` notifies completion (`sender=<session>/<task-N>` or `Task id "..." finished`), and
+    /// `PLANNER_RESPONSE` with `manage_task` (`Action: kill`) terminates it.
+    private static func consumeAntigravity(_ value: [String: Any], recordType: String, into state: inout State) {
+        switch recordType {
+        case "GENERIC":
+            guard (value["status"] as? String)?.uppercased() == "RUNNING",
+                  let content = value["content"] as? String,
+                  let fullID = Self.matches(#"Tool is running as a background task with task id:\s*([A-Za-z0-9_./-]+)"#, in: content).first,
+                  let shortID = Self.antigravityShortTaskID(fullID) else { return }
+            let summary = Self.matches(#"Task Description:\s*([^\n]+)"#, in: content).first
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .flatMap { $0.isEmpty ? nil : $0 } ?? shortID
+            let tool = summary.lowercased().hasPrefix("timer") || summary.lowercased().hasPrefix("cron") ? "Timer" : "Bash"
+            let launch = Launch(task: BackgroundAgentTask(id: shortID, tool: tool, summary: Self.shorten(summary)), deadline: nil)
+            state.failed[shortID] = nil
+            state.launched[shortID] = launch
+            state.toolUseByTaskID[fullID] = shortID
+            state.taskIDByToolUse[shortID] = fullID
+
+        case "SYSTEM_MESSAGE":
+            guard let content = value["content"] as? String else { return }
+            var finishedIDs = Self.matches(#"Task id "([^"]+)" (?:finished|failed|was killed|cancelled|canceled|stopped)"#, in: content)
+            if finishedIDs.isEmpty, content.contains("finished with result:") {
+                finishedIDs = Self.matches(#"sender=([A-Za-z0-9_./-]+)"#, in: content)
+            }
+            for rawID in finishedIDs {
+                let key = state.launched[rawID] != nil ? rawID
+                    : (state.toolUseByTaskID[rawID] ?? Self.antigravityShortTaskID(rawID))
+                guard let key else { continue }
+                state.launched[key] = nil
+                state.failed[key] = nil
+                state.taskIDByToolUse[key] = nil
+                state.toolUseByTaskID[rawID] = nil
+            }
+
+        case "PLANNER_RESPONSE":
+            guard let calls = value["tool_calls"] as? [[String: Any]] else { return }
+            for call in calls where call["name"] as? String == "manage_task" {
+                let args = call["args"] as? [String: Any] ?? [:]
+                guard (args["Action"] as? String)?.lowercased() == "kill",
+                      let rawID = args["TaskId"] as? String else { continue }
+                let key = state.launched[rawID] != nil ? rawID
+                    : (state.toolUseByTaskID[rawID] ?? Self.antigravityShortTaskID(rawID))
+                if let key {
+                    state.launched[key] = nil
+                    state.failed[key] = nil
+                    state.taskIDByToolUse[key] = nil
+                    state.toolUseByTaskID[rawID] = nil
+                }
+            }
+
+        default:
+            break
+        }
+    }
+
+    private static func antigravityShortTaskID(_ raw: String) -> String? {
+        let candidate = raw.split(separator: "/").last.map(String.init) ?? raw
+        return BackgroundTaskLocator.isValid(candidate) ? candidate : nil
     }
     /// When a Monitor stops on its own: launch time plus its declared timeout, never past the ceiling.
     private static func monitorDeadline(_ input: [String: Any], launchedAt: Date?) -> Date? {
@@ -164,6 +231,8 @@ struct BackgroundTaskTracker {
         // A Workflow's launch result says "Workflow launched in background. Task ID: …"; the row names no tool, so
         // the signal has to be read from the sentence itself.
         if line.contains("launched in background") || line.contains("Task ID:") { return true }
+        // Antigravity background tasks launch on GENERIC (status=RUNNING), finish via SYSTEM_MESSAGE, or stop via manage_task.
+        if line.contains("Tool is running as a background task") || line.contains("Task id \\\"") || line.contains("finished with result:") || line.contains("\"manage_task\"") { return true }
         return alwaysDetached.contains { line.contains("\"" + $0 + "\"") }
     }
     /// Every `tool_use` block on one transcript record.

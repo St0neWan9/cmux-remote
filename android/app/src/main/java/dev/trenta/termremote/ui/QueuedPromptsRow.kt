@@ -51,7 +51,7 @@ fun QueuedPromptsRow(
         modifier = modifier
             .fillMaxWidth()
             .animateContentSize(animationSpec = androidx.compose.animation.core.tween(180, easing = androidx.compose.animation.core.FastOutSlowInEasing))
-            .padding(horizontal = 12.dp, vertical = 2.dp),
+            .padding(horizontal = 12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Row(
