@@ -112,6 +112,7 @@ struct ConversationView: View {
                 }
                 // Tasks the agent detached outlive the turn that started them, so this shows whenever any run.
                 if !model.backgroundTasks.isEmpty { BackgroundTasksBar(tasks: model.backgroundTasks, sessionID: model.session.id, client: model.client) }
+                if !model.displayedQueuedPrompts.isEmpty { QueuedPromptsBar(prompts: model.displayedQueuedPrompts) }
                 if model.stopRequested {
                     Label(String(localized: "chat.stop_requested"), systemImage: "checkmark.circle").font(.footnote).foregroundStyle(.secondary)
                 } else if model.hasActiveResponse {

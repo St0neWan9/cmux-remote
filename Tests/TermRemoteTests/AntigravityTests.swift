@@ -59,7 +59,7 @@ import CmuxAgentChat
         let chunk2 = [
             #"{"step_index":3,"source":"MODEL","type":"GENERIC","status":"DONE","created_at":"2026-11-20T18:41:42Z","content":"Created At: 2026-11-21T01:41:41+07:00\nCompleted At: 2026-11-21T01:41:42+07:00\n# Project"}"#,
             #"{"step_index":6,"source":"SYSTEM","type":"SYSTEM_MESSAGE","status":"DONE","created_at":"2026-11-20T18:41:43Z","content":"The following is a <SYSTEM_MESSAGE> not actually sent by the user."}"#,
-            #"{"step_index":7,"source":"MODEL","type":"PLANNER_RESPONSE","status":"DONE","created_at":"2026-11-20T18:41:45Z","model":"gemini-4-neon-high","content":"All done."}"#
+            #"{"step_index":7,"source":"MODEL","type":"PLANNER_RESPONSE","status":"DONE","created_at":"2026-11-20T18:41:45Z","model":"gemini-4-neon-high","thinking":"Internal summary that must not leak after or beside a final reply.","content":"All done."}"#
         ].joined(separator: "\n") + "\n"
         let handle = try FileHandle(forWritingTo: file)
         try handle.seekToEnd()
@@ -79,9 +79,15 @@ import CmuxAgentChat
             Issue.record("Expected completed Read toolUse")
         }
 
-        // SYSTEM_MESSAGE was not emitted; final prose was emitted.
+        // SYSTEM_MESSAGE and final-reply thinking summaries were not emitted; tool-step thinking and final prose were.
         #expect(!second.messages.contains {
             if case .prose(let prose) = $0.kind { return prose.text.contains("<SYSTEM_MESSAGE>") } else { return false }
+        })
+        #expect(!second.messages.contains {
+            if case .thought(let thought) = $0.kind { return thought.text.contains("Internal summary") } else { return false }
+        })
+        #expect(second.messages.contains {
+            if case .thought(let thought) = $0.kind { return thought.text == "Inspecting the repository layout." } else { return false }
         })
         let finalProse = try #require(second.messages.last)
         if case .prose(let prose) = finalProse.kind {
@@ -253,5 +259,101 @@ import CmuxAgentChat
         let cmd = AgentCommandLine()
         #expect(cmd.line(.antigravity, prompt: nil) == "agy --dangerously-skip-permissions")
         #expect(cmd.line(.antigravity, prompt: "-start with dash") == "agy --dangerously-skip-permissions --prompt-interactive='-start with dash'")
+    }
+
+    @Test func queuedScreenExtractorReadsQueuedPromptsAndSkipsScrollback() {
+        let lines = [
+            "● Ran (git status)",
+            "Working on the fix now.",
+            "⣯  Running command...",
+            "> First queued message",
+            "> Second queued message",
+            "  Press ↑ to edit queued messages",
+            "────────────────────────────────────────",
+            "> ",
+            "────────────────────────────────────────",
+            "esc to cancel    auto · Gemini 4 Neon · high"
+        ]
+        let extracted = AntigravityQueuedScreenExtractor().extract(lines: lines)
+        #expect(extracted.hasQueueHint)
+        #expect(extracted.prompts == ["First queued message", "Second queued message"])
+
+        // Prose extractor stops at the Braille spinner and never leaks queued prompts.
+        #expect(AntigravityProseScreenExtractor().extract(lines: lines) == "Working on the fix now.")
+
+        // No hint near the composer -> empty queue even if scrollback mentions queued messages.
+        let idleLines = [
+            "  Press ↑ to edit queued messages",
+        ] + Array(repeating: "scrollback line", count: 30) + [
+            "────────────────────────────────────────",
+            "> ",
+            "────────────────────────────────────────",
+        ]
+        let idle = AntigravityQueuedScreenExtractor().extract(lines: idleLines)
+        #expect(!idle.hasQueueHint)
+        #expect(idle.prompts.isEmpty)
+    }
+
+    @Test func queuedPromptRegistrySyncsAcrossDevicesAndClearsWhenCommitted() async {
+        let baseDate = Date(timeIntervalSince1970: 1_700_000_000)
+        let registry = QueuedPromptRegistry(now: { baseDate })
+        let sessionID = "49f96599-cb55-4395-9b1e-24c790123008"
+        let firstUser = ChatMessage(id: "agy-step-1", seq: 1, role: .user, timestamp: baseDate, kind: .prose(ChatProse(text: "First")))
+
+        #expect(await registry.stamp(sessionID: sessionID) == "0")
+
+        // Device A sends while working -> Bridge tracks it and bumps the subscription stamp.
+        await registry.recordSend(
+            sessionID: sessionID,
+            id: "op-1",
+            text: "Also check Android build",
+            afterSeq: 1,
+            generation: "gen-1",
+            knownUserIDs: ["agy-step-1"]
+        )
+        let stampAfterSend = await registry.stamp(sessionID: sessionID)
+        #expect(stampAfterSend != "0")
+
+        // Screen also reports a Mac-typed queued message plus a truncated copy of op-1.
+        await registry.observeScreen(
+            sessionID: sessionID,
+            extraction: .init(hasQueueHint: true, prompts: ["Also check Android…", "Typed on Mac"])
+        )
+        let synced = await registry.reconcile(
+            sessionID: sessionID,
+            messages: [firstUser],
+            generation: "gen-1",
+            writable: true,
+            working: true
+        )
+        // Bridge preserves full text for op-1 (deduping the truncated screen copy) and appends the Mac-typed item.
+        #expect(synced.map(\.text) == ["Also check Android build", "Typed on Mac"])
+
+        // OutgoingPromptMatcher clears Device A's local outgoing bubble once op-1 is in queuedPrompts.
+        let outgoing = [OutgoingPrompt(request: SendRequest(text: "Also check Android build"), after: [firstUser], generation: "gen-1")]
+        #expect(OutgoingPromptMatcher().pending(outgoing, messages: [firstUser], generation: "gen-1", queuedPrompts: synced).isEmpty)
+
+        // Once Antigravity dequeues op-1 into transcript_full.jsonl, reconcile removes op-1 from the queue.
+        let dequeuedUser = ChatMessage(id: "agy-step-5", seq: 5, role: .user, timestamp: baseDate, kind: .prose(ChatProse(text: "Also check Android build")))
+        await registry.observeScreen(sessionID: sessionID, extraction: .init(hasQueueHint: true, prompts: ["Typed on Mac"]))
+        let afterDequeue = await registry.reconcile(
+            sessionID: sessionID,
+            messages: [firstUser, dequeuedUser],
+            generation: "gen-1",
+            writable: true,
+            working: true
+        )
+        #expect(afterDequeue.map(\.text) == ["Typed on Mac"])
+
+        // Ending the session clears the queue cleanly.
+        let ended = await registry.reconcile(
+            sessionID: sessionID,
+            messages: [firstUser, dequeuedUser],
+            generation: "gen-1",
+            writable: false,
+            working: false
+        )
+        #expect(ended.isEmpty)
+        #expect(await registry.stamp(sessionID: sessionID) == "0")
     }
 }

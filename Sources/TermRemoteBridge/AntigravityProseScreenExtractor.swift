@@ -83,6 +83,7 @@ public struct AntigravityProseScreenExtractor: Sendable {
         if trimmed.hasPrefix("└ Tip:") || trimmed.hasPrefix("Tip:") { return true }
         let lower = trimmed.lowercased()
         if lower.contains("esc to cancel") { return true }
+        if AntigravityQueuedScreenExtractor.isQueuedEditHint(trimmed) { return true }
         if trimmed == ">" { return true }
         return false
     }

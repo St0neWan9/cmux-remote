@@ -59,4 +59,16 @@ class ConversationMergeTest {
         assertEquals(existing, ConversationMerge.messages(existing, emptyList()))
         assertEquals(existing.map { it.id }, ConversationMerge.images(existing.map { ImageReference(it.id, it.id, "g", "") }, emptyList(), "g").map { it.id })
     }
+
+    @Test
+    fun sameSequenceMessagesKeepIncomingOrder() {
+        val merged = ConversationMerge.messages(
+            existing = listOf(message("step#prose", 10, "Final reply")),
+            incoming = listOf(
+                message("step#thought", 10, "Internal reasoning"),
+                message("step#prose", 10, "Final reply"),
+            ),
+        )
+        assertEquals(listOf("step#thought", "step#prose"), merged.map { it.id })
+    }
 }

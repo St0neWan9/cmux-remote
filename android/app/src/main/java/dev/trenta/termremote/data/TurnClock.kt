@@ -24,11 +24,24 @@ object TurnClock {
         return if (outgoingPending) !outgoingUnsettled else !turnCompleted
     }
 
-    fun active(stopRequested: Boolean, sentTurnRunning: Boolean, working: Boolean, turnCompleted: Boolean): Boolean =
-        !stopRequested && (sentTurnRunning || (working && !turnCompleted))
+    fun active(
+        stopRequested: Boolean,
+        sentTurnRunning: Boolean,
+        working: Boolean,
+        turnCompleted: Boolean,
+        hasQueuedPrompts: Boolean = false,
+        trustWorkingWhenCompleted: Boolean = false,
+    ): Boolean =
+        !stopRequested && (sentTurnRunning || hasQueuedPrompts || (working && (!turnCompleted || trustWorkingWhenCompleted)))
 
-    fun since(active: Boolean, sentTurnRunning: Boolean, sentAt: Instant?, turnStartedAt: Instant?): Instant? =
-        if (!active) null else if (sentTurnRunning) sentAt else turnStartedAt
+    fun since(
+        active: Boolean,
+        sentTurnRunning: Boolean,
+        sentAt: Instant?,
+        turnStartedAt: Instant?,
+        turnCompleted: Boolean = false,
+    ): Instant? =
+        if (!active) null else if (sentTurnRunning) sentAt else if (turnCompleted) null else turnStartedAt
 
     /**
      * Whether a read leaves the phone's own turn standing. Once the transcript recorded the prompt its own turn

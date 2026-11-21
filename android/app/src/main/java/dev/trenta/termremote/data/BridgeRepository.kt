@@ -98,6 +98,9 @@ data class ConversationSnapshot(
     val backgroundTasks: List<BackgroundTaskInfo> = emptyList(),
     /** Only a newest-page read reports tasks; an earlier page must not clear them. */
     val backgroundTasksPresent: Boolean = false,
+    /** Prompts waiting in the agent's queue while a turn runs; only the newest page carries them. */
+    val queuedPrompts: List<QueuedPromptInfo> = emptyList(),
+    val queuedPromptsPresent: Boolean = false,
     val responses: List<ResponseTiming> = emptyList(),
     /** Total recorded running time and the turns that contributed it. */
     val recordedRunSeconds: Double? = null,
@@ -120,6 +123,9 @@ data class ToolDetailPage(
 
 /** One task the agent detached; its own record is read on demand. */
 data class BackgroundTaskInfo(val id: String, val tool: String, val summary: String, val running: Boolean)
+
+/** One prompt waiting in the agent's input queue, synced from the Bridge across all devices. */
+data class QueuedPromptInfo(val id: String, val text: String, val queuedAt: java.time.Instant? = null)
 
 /** One page of a detached task's record; a null next offset means the record ended. */
 data class TaskPage(
@@ -359,6 +365,17 @@ class BridgeRepository(val connection: AuthorizedConnection, private val client:
                     tool = task.string("tool") ?: "",
                     summary = task.string("summary") ?: "",
                     running = true,
+                )
+            } ?: emptyList(),
+            queuedPromptsPresent = object_.array("queuedPrompts") != null,
+            queuedPrompts = object_.array("queuedPrompts")?.mapNotNull { row ->
+                val item = row.asObject() ?: return@mapNotNull null
+                val id = item.string("id") ?: return@mapNotNull null
+                val text = item.string("text") ?: return@mapNotNull null
+                QueuedPromptInfo(
+                    id = id,
+                    text = text,
+                    queuedAt = item.string("queuedAt")?.let(::instantOrNull),
                 )
             } ?: emptyList(),
         )

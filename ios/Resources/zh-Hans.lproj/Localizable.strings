@@ -101,6 +101,8 @@
 "chat.response_time" = "回复时间";
 "chat.compacting" = "正在压缩上下文 %@";
 "chat.background.count" = "%ld 个后台任务正在运行";
+"chat.queued.one" = "1 条消息排队中";
+"chat.queued.count" = "%ld 条消息排队中";
 "chat.background.running" = "运行中";
 "chat.background.waiting" = "等待输出…";
 "chat.background.empty" = "这个任务还没有输出。";

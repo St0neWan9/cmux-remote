@@ -136,6 +136,10 @@ data class ConversationUi(
     val generation: String = "",
     val images: List<dev.trenta.termremote.data.ImageReference> = emptyList(),
     val backgroundTasks: List<dev.trenta.termremote.data.BackgroundTaskInfo> = emptyList(),
+    /** Prompts waiting in the agent's queue, synced from the Bridge across all devices. */
+    val queuedPrompts: List<dev.trenta.termremote.data.QueuedPromptInfo> = emptyList(),
+    /** Optimistic prompts sent while a turn is already running, until the Bridge echoes them. */
+    val pendingQueuedPrompts: List<dev.trenta.termremote.data.QueuedPromptInfo> = emptyList(),
     /** Timing anchors per prompt, so a finished reply shows its own duration. */
     val responses: List<dev.trenta.termremote.data.ResponseTiming> = emptyList(),
     /** Total recorded running time and the turns that contributed it. */
@@ -164,14 +168,38 @@ data class ConversationUi(
      */
     val updating: Boolean = false,
 ) {
+    /** Synced host queue plus any in-flight optimistic queued sends from this device, deduplicated in order. */
+    val displayedQueuedPrompts: List<dev.trenta.termremote.data.QueuedPromptInfo>
+        get() {
+            if (pendingQueuedPrompts.isEmpty()) return queuedPrompts
+            val seenIDs = queuedPrompts.mapTo(HashSet()) { it.id }
+            val seenTexts = queuedPrompts.mapTo(HashSet()) { dev.trenta.termremote.data.OutgoingPromptMatcher.normalized(it.text) }
+            val combined = ArrayList<dev.trenta.termremote.data.QueuedPromptInfo>(queuedPrompts.size + pendingQueuedPrompts.size)
+            combined.addAll(queuedPrompts)
+            for (item in pendingQueuedPrompts) {
+                if (item.id in seenIDs) continue
+                val norm = dev.trenta.termremote.data.OutgoingPromptMatcher.normalized(item.text)
+                if (norm.isNotEmpty() && norm in seenTexts) continue
+                combined.add(item)
+            }
+            return combined
+        }
+
     private val sentTurnRunning: Boolean
         get() = dev.trenta.termremote.data.TurnClock.sentTurnRunning(sentTurnAt, outgoing != null, outgoingUnconfirmed, turnCompleted)
     /** Whether a turn is running, from the tap that started it rather than from the Mac's late report. */
     val activeResponse: Boolean
-        get() = dev.trenta.termremote.data.TurnClock.active(stopRequested, sentTurnRunning, session.working, turnCompleted)
+        get() = dev.trenta.termremote.data.TurnClock.active(
+            stopRequested = stopRequested,
+            sentTurnRunning = sentTurnRunning,
+            working = session.working,
+            turnCompleted = turnCompleted,
+            hasQueuedPrompts = displayedQueuedPrompts.isNotEmpty(),
+            trustWorkingWhenCompleted = session.agent == "antigravity",
+        )
     /** Where the running time counts from; null when nothing runs or the start is unknown. */
     val runningSince: java.time.Instant?
-        get() = dev.trenta.termremote.data.TurnClock.since(activeResponse, sentTurnRunning, sentTurnAt, turnStartedAt)
+        get() = dev.trenta.termremote.data.TurnClock.since(activeResponse, sentTurnRunning, sentTurnAt, turnStartedAt, turnCompleted)
 }
 
 /** A provider-neutral terminal without a proved Agent; the screen is plain text. */
@@ -2023,6 +2051,19 @@ class TermRemoteViewModel(application: Application) : AndroidViewModel(applicati
         } else {
             snapshot.images
         }
+        val queuedPrompts = if (snapshot.queuedPromptsPresent) snapshot.queuedPrompts else ui.queuedPrompts
+        val echoedIDs = queuedPrompts.mapTo(HashSet()) { it.id }
+        val echoedTexts = queuedPrompts.mapTo(HashSet()) { dev.trenta.termremote.data.OutgoingPromptMatcher.normalized(it.text) }
+        val recentUsers = messages.filter { it.kind == "prose" && it.role == "user" }.takeLast(8)
+            .map { dev.trenta.termremote.data.OutgoingPromptMatcher.normalized(it.text) }
+        val pendingQueued = if (snapshot.queuedPromptsPresent) {
+            ui.pendingQueuedPrompts.filterNot { item ->
+                val norm = dev.trenta.termremote.data.OutgoingPromptMatcher.normalized(item.text)
+                item.id in echoedIDs || (norm.isNotEmpty() && (norm in echoedTexts || recentUsers.any { it.contains(norm) }))
+            }
+        } else {
+            ui.pendingQueuedPrompts
+        }
         val outgoing = ui.outgoing?.takeIf { text ->
             !dev.trenta.termremote.data.OutgoingPromptMatcher.recorded(
                 text = text,
@@ -2031,6 +2072,7 @@ class TermRemoteViewModel(application: Application) : AndroidViewModel(applicati
                 knownUserIDs = ui.outgoingKnownUserIDs,
                 historyGeneration = snapshot.generation,
                 messages = messages,
+                queuedPrompts = queuedPrompts,
             )
         }
         val keepsSentTurn = dev.trenta.termremote.data.TurnClock.keepsSentTurn(
@@ -2046,6 +2088,8 @@ class TermRemoteViewModel(application: Application) : AndroidViewModel(applicati
             feed = feed,
             images = images,
             backgroundTasks = if (snapshot.backgroundTasksPresent) snapshot.backgroundTasks else ui.backgroundTasks,
+            queuedPrompts = queuedPrompts,
+            pendingQueuedPrompts = pendingQueued,
             responses = responses,
             recordedRunSeconds = snapshot.recordedRunSeconds,
             recordedTurnCount = snapshot.recordedTurnCount,
@@ -3006,7 +3050,13 @@ class TermRemoteViewModel(application: Application) : AndroidViewModel(applicati
     fun acknowledgePendingSend() {
         val current = repository ?: return
         val value = _conversation.value ?: return
+        val pendingID = _pendingOperation.value
         forgetPending(storeScope(current.connection), value.session.id)
+        if (pendingID != null) {
+            _conversation.update { ui ->
+                ui?.copy(pendingQueuedPrompts = ui.pendingQueuedPrompts.filterNot { it.id == pendingID })
+            }
+        }
     }
 
     /** Sends the draft once; a failed send keeps the text so it can be inspected, never auto-retried. */
@@ -3095,23 +3145,39 @@ class TermRemoteViewModel(application: Application) : AndroidViewModel(applicati
         // A send whose outcome is unknown must be inspected before another one.
         if (text.isEmpty() || value.sending || _pendingOperation.value != null) return
         val scope = storeScope(current.connection)
+        val operation = java.util.UUID.randomUUID().toString()
+        val sendsIntoQueue = value.activeResponse
         viewModelScope.launch {
             _conversation.update { ui ->
-                ui?.copy(
-                    sending = true,
-                    error = null,
-                    outgoing = text,
-                    outgoingUnconfirmed = false,
-                    outgoingImages = 0,
-                    stopRequested = false,
-                    // The turn runs from the tap, before the Mac lists the session working (see TurnClock).
-                    sentTurnAt = java.time.Instant.now(),
-                    outgoingAfterSeq = ui.messages.lastOrNull()?.seq,
-                    outgoingGeneration = ui.generation,
-                    outgoingKnownUserIDs = ui.messages.filter { it.role == "user" }.map { it.id }.toSet(),
-                )
+                if (ui == null) null
+                else if (sendsIntoQueue) {
+                    // While a turn is already running, show the prompt in the queue bar above the composer
+                    // instead of appending a stuck timeline bubble or clobbering the active turn's timer.
+                    ui.copy(
+                        sending = true,
+                        error = null,
+                        pendingQueuedPrompts = ui.pendingQueuedPrompts + dev.trenta.termremote.data.QueuedPromptInfo(
+                            id = operation,
+                            text = text,
+                            queuedAt = java.time.Instant.now(),
+                        ),
+                    )
+                } else {
+                    ui.copy(
+                        sending = true,
+                        error = null,
+                        outgoing = text,
+                        outgoingUnconfirmed = false,
+                        outgoingImages = 0,
+                        stopRequested = false,
+                        // The turn runs from the tap, before the Mac lists the session working (see TurnClock).
+                        sentTurnAt = java.time.Instant.now(),
+                        outgoingAfterSeq = ui.messages.lastOrNull()?.seq,
+                        outgoingGeneration = ui.generation,
+                        outgoingKnownUserIDs = ui.messages.filter { it.role == "user" }.map { it.id }.toSet(),
+                    )
+                }
             }
-            val operation = java.util.UUID.randomUUID().toString()
             rememberPending(scope, value.session.id, operation)
             try {
                 current.send(value.session.id, text, operation)
@@ -3124,13 +3190,29 @@ class TermRemoteViewModel(application: Application) : AndroidViewModel(applicati
                 // still holds the prompt for a retry. An unknown outcome keeps the bubble, marked unconfirmed.
                 val refused = !unknownOutcome(error)
                 _conversation.update {
-                    it?.copy(
-                        sending = false, outgoing = if (refused) null else it.outgoing, outgoingUnconfirmed = !refused,
-                        sentTurnAt = if (refused) null else it.sentTurnAt, error = error.userMessage(),
-                    )
+                    if (it == null) null
+                    else if (sendsIntoQueue) {
+                        it.copy(
+                            sending = false,
+                            pendingQueuedPrompts = if (refused) it.pendingQueuedPrompts.filterNot { item -> item.id == operation } else it.pendingQueuedPrompts,
+                            error = error.userMessage(),
+                        )
+                    } else {
+                        it.copy(
+                            sending = false, outgoing = if (refused) null else it.outgoing, outgoingUnconfirmed = !refused,
+                            sentTurnAt = if (refused) null else it.sentTurnAt, error = error.userMessage(),
+                        )
+                    }
                 }
             } catch (error: Exception) {
-                _conversation.update { it?.copy(sending = false, outgoingUnconfirmed = true, error = error.userMessage() ?: "The prompt was not confirmed.") }
+                _conversation.update {
+                    if (it == null) null
+                    else if (sendsIntoQueue) {
+                        it.copy(sending = false, error = error.userMessage() ?: "The prompt was not confirmed.")
+                    } else {
+                        it.copy(sending = false, outgoingUnconfirmed = true, error = error.userMessage() ?: "The prompt was not confirmed.")
+                    }
+                }
             }
         }
     }
@@ -3151,7 +3233,7 @@ class TermRemoteViewModel(application: Application) : AndroidViewModel(applicati
             try {
                 current.interrupt(value.session.id, hard = hard)
                 if (!hard) _conversation.update { it?.copy(stopRequested = true, sentTurnAt = null) }
-                else _conversation.update { it?.copy(sentTurnAt = null) }
+                else _conversation.update { it?.copy(sentTurnAt = null, queuedPrompts = emptyList(), pendingQueuedPrompts = emptyList()) }
                 dev.trenta.termremote.data.Diagnostics.log(
                     dev.trenta.termremote.data.Diagnostics.Level.Info,
                     "conversation",

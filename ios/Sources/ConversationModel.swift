@@ -37,10 +37,15 @@ final class ConversationModel {
         if let prompt = outgoing.first(where: { $0.id == sentTurn.id }) { return prompt.delivery != .unconfirmed }
         return !currentTurnCompleted
     }
-    var hasActiveResponse: Bool { !stopRequested && (sentTurnRunning || (working && !currentTurnCompleted)) }
+    var hasActiveResponse: Bool {
+        guard !stopRequested else { return false }
+        if sentTurnRunning || !displayedQueuedPrompts.isEmpty { return true }
+        return working && (!currentTurnCompleted || session.agent == "antigravity")
+    }
     var runningSince: Date? {
         guard hasActiveResponse else { return nil }
-        return sentTurnRunning ? sentTurn?.at : currentTurnStartedAt
+        if sentTurnRunning { return sentTurn?.at }
+        return currentTurnCompleted ? nil : currentTurnStartedAt
     }
     func responseText(_ response: ConversationResponse) -> String {
         messages.filter { $0.seq == response.lastSeq && $0.role == .agent }
@@ -55,6 +60,27 @@ final class ConversationModel {
     var compacting = false
     /// Tasks the agent detached and has not finished. They outlive the turn that started them.
     private(set) var backgroundTasks: [BackgroundAgentTask] = []
+    /// Prompts waiting in the agent's queue, synced from the Bridge across all devices.
+    private(set) var queuedPrompts: [QueuedPrompt] = []
+    /// Optimistic prompts queued from this phone while a turn is already running, until the Bridge echoes them.
+    private var pendingQueued: [QueuedPrompt] = []
+    /// Synced host queue plus any in-flight optimistic queued sends from this device, deduplicated in order.
+    var displayedQueuedPrompts: [QueuedPrompt] {
+        guard !pendingQueued.isEmpty else { return queuedPrompts }
+        var combined = queuedPrompts
+        let seenIDs = Set(queuedPrompts.map(\.id))
+        let seenTexts = Set(queuedPrompts.map { Self.normalizedQueueText($0.text) })
+        for item in pendingQueued {
+            if seenIDs.contains(item.id) { continue }
+            let norm = Self.normalizedQueueText(item.text)
+            if !norm.isEmpty && seenTexts.contains(norm) { continue }
+            combined.append(item)
+        }
+        return combined
+    }
+    private static func normalizedQueueText(_ text: String) -> String {
+        text.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+    }
     /// Questions the agent is blocked on and the phone may answer, keyed by the prompt the card shows.
     ///
     /// The transcript holds the question the agent asked; the Feed holds the request that may be answered.
@@ -483,14 +509,23 @@ final class ConversationModel {
             let hole = continues ? await missingMessages(below: history, held: messages, using: historyCursor, read: readHole, limit: tailLimit) : []
             guard refreshReads.isCurrent(request) else { return }
             if continues, !messages.isEmpty {
+                let incoming = hole + history.messages
                 var next = messages
                 var positions = [String: Int](minimumCapacity: next.count)
                 for (index, message) in next.enumerated() { positions[message.id] = index }
-                for message in hole + history.messages {
+                var incomingOrder = [String: Int](minimumCapacity: incoming.count)
+                for (offset, message) in incoming.enumerated() {
+                    incomingOrder[message.id] = offset
                     if let index = positions[message.id] { next[index] = message }
                     else { positions[message.id] = next.count; next.append(message) }
                 }
-                messages = next.sorted { $0.seq < $1.seq }
+                let fallbackBase = incoming.count
+                messages = next.enumerated().sorted { lhs, rhs in
+                    if lhs.element.seq != rhs.element.seq { return lhs.element.seq < rhs.element.seq }
+                    let leftRank = incomingOrder[lhs.element.id] ?? (fallbackBase + lhs.offset)
+                    let rightRank = incomingOrder[rhs.element.id] ?? (fallbackBase + rhs.offset)
+                    return leftRank < rightRank
+                }.map(\.element)
             } else if !messages.isEmpty, history.messages.isEmpty, generation != history.generation {
                 // A transcript caught mid-rewrite (a compaction replacing the file) reads as a generation with no
                 // messages yet. Replacing a page the reader has with that empty answer blanked the conversation —
@@ -517,6 +552,20 @@ final class ConversationModel {
             }
             // Only a newest-page read carries them, so an earlier page must not clear the set.
             if history.backgroundTasks != nil { backgroundTasks = history.backgroundTasks ?? [] }
+            if let incomingQueued = history.queuedPrompts {
+                queuedPrompts = incomingQueued
+                let echoedIDs = Set(incomingQueued.map(\.id))
+                let echoedTexts = Set(incomingQueued.map { Self.normalizedQueueText($0.text) })
+                let committedUsers = messages.compactMap { message -> String? in
+                    guard message.role == .user, case .prose(let value) = message.kind else { return nil }
+                    return Self.normalizedQueueText(value.text)
+                }
+                pendingQueued.removeAll { item in
+                    let norm = Self.normalizedQueueText(item.text)
+                    return echoedIDs.contains(item.id)
+                        || (!norm.isEmpty && (echoedTexts.contains(norm) || committedUsers.suffix(8).contains(where: { $0.contains(norm) })))
+                }
+            }
             // Both full and tail reads are the newest page, which is the one that reports the model.
             agentModel = history.agentModel
             if let switched = switchedModel, switched.over != agentModel { switchedModel = nil }
@@ -536,7 +585,7 @@ final class ConversationModel {
                     guard refreshReads.isCurrent(request) else { return }
                 }
             }
-            outgoing = OutgoingPromptMatcher().pending(outgoing, messages: messages, generation: generation)
+            outgoing = OutgoingPromptMatcher().pending(outgoing, messages: messages, generation: generation, queuedPrompts: displayedQueuedPrompts)
             // Once the transcript recorded the prompt, its own turn takes over: a closed turn ends the phone's.
             if let sent = sentTurn, !outgoing.contains(where: { $0.id == sent.id }), currentTurnCompleted { sentTurn = nil }
             let committed = messages.reversed().compactMap { message -> String? in
@@ -703,10 +752,17 @@ final class ConversationModel {
             try await restorePendingSend()
             guard pendingSend == nil else { return }
             let request = SendRequest(text: draft, attachments: imageDraft.images)
+            let sendsIntoQueue = hasActiveResponse && request.attachments.isEmpty
             pendingSend = request; sent = request
-            // The prompt moves into the conversation at once; the composer is free while the agent catches up.
-            outgoing.append(OutgoingPrompt(request: request, after: messages, generation: generation))
-            sentTurn = (request.operationID, Date())
+            if sendsIntoQueue {
+                // While a turn is already running, show the prompt in the queue bar above the composer
+                // rather than appending a stuck timeline bubble or resetting the active turn's timer.
+                pendingQueued.append(QueuedPrompt(id: request.operationID.uuidString, text: request.text.trimmingCharacters(in: .whitespacesAndNewlines), queuedAt: Date()))
+            } else {
+                // The prompt moves into the conversation at once; the composer is free while the agent catches up.
+                outgoing.append(OutgoingPrompt(request: request, after: messages, generation: generation))
+                sentTurn = (request.operationID, Date())
+            }
             draft = ""; imageDraft.removeSubmitted(Set(request.attachments.map(\.id))); jumpToLatest += 1
             try await saveRecovery(request)
             let receipt = try await sendRequest(request)
@@ -719,7 +775,11 @@ final class ConversationModel {
             let neverSent = !(error is BridgeError) && ErrorPresentation().isConnectivity(error)
             if neverSent || (error as? BridgeError).map({ safeRejections.contains($0.code) }) == true {
                 // Nothing reached the agent: the prompt leaves the conversation, and no turn started.
-                if let sent { outgoing.removeAll { $0.id == sent.operationID }; if sentTurn?.id == sent.operationID { sentTurn = nil } }
+                if let sent {
+                    outgoing.removeAll { $0.id == sent.operationID }
+                    pendingQueued.removeAll { $0.id == sent.operationID.uuidString }
+                    if sentTurn?.id == sent.operationID { sentTurn = nil }
+                }
                 do { try await saveRecovery(nil); pendingSend = nil; mutationWarning = nil }
                 catch { mutationWarning = ErrorPresentation().message(error) }
             }
@@ -748,7 +808,7 @@ final class ConversationModel {
     func acknowledgePendingSend() async {
         guard !busy else { return }; busy = true; defer { busy = false }
         let released = pendingSend?.operationID
-        do { try await saveRecovery(nil); outgoing.removeAll { $0.id == released }; if sentTurn?.id == released { sentTurn = nil }; pendingSend = nil; recoveryReady = true; recoveryFailed = false; recoveryTask = nil; mutationWarning = nil; error = nil }
+        do { try await saveRecovery(nil); outgoing.removeAll { $0.id == released }; if let released { pendingQueued.removeAll { $0.id == released.uuidString } }; if sentTurn?.id == released { sentTurn = nil }; pendingSend = nil; recoveryReady = true; recoveryFailed = false; recoveryTask = nil; mutationWarning = nil; error = nil }
         catch { logFailure("acknowledgePendingSend", error, shown: true); mutationWarning = ErrorPresentation().message(error); self.error = mutationWarning }
     }
     private func restorePendingSend() async throws {
@@ -780,7 +840,7 @@ final class ConversationModel {
     }
     func interrupt(hard: Bool = false) async {
         guard !busy else { return }; busy = true; defer { busy = false }
-        do { _ = try await client.post("/v1/sessions/\(session.id)/interrupt", body: InterruptRequest(hard: hard), as: MutationReceipt.self); markInterrupted(); descriptorsReadAt = nil; await refresh() }
+        do { _ = try await client.post("/v1/sessions/\(session.id)/interrupt", body: InterruptRequest(hard: hard), as: MutationReceipt.self); if hard { pendingQueued.removeAll(); queuedPrompts.removeAll() }; markInterrupted(); descriptorsReadAt = nil; await refresh() }
         catch { logFailure("interrupt", error, shown: true); self.error = ErrorPresentation().message(error) }
     }
     /// One line per failure the page handles: an error when it raises the red line, a warning when the connection bar owns it.

@@ -133,7 +133,15 @@ public struct AntigravityTranscriptParser: Sendable {
         pending: inout [String: [ChatMessage]],
         pendingOrder: inout [String]
     ) {
-        if let thinking = (root["thinking"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
+        let trimmedContent = (root["content"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let calls = root["tool_calls"] as? [[String: Any]] ?? []
+
+        // Antigravity attaches an internal English thought summary (`thinking`) to every PLANNER_RESPONSE,
+        // often populated asynchronously after a final reply's `content` is already written. Both mobile
+        // clients render standalone thoughts (with no adjacent tool operations) as full-width body prose,
+        // so only emit `thinking` on tool-calling steps where it belongs inside the collapsible activity group.
+        if trimmedContent.isEmpty, !calls.isEmpty,
+           let thinking = (root["thinking"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
            !thinking.isEmpty {
             emit(ChatMessage(
                 id: "\(stepID)#thought",
@@ -144,18 +152,17 @@ public struct AntigravityTranscriptParser: Sendable {
             ))
         }
 
-        if let content = (root["content"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !content.isEmpty {
+        if !trimmedContent.isEmpty {
             emit(ChatMessage(
                 id: "\(stepID)#prose",
                 seq: seq,
                 role: .agent,
                 timestamp: timestamp,
-                kind: .prose(ChatProse(text: truncateBody(content)))
+                kind: .prose(ChatProse(text: truncateBody(trimmedContent)))
             ))
         }
 
-        guard let calls = root["tool_calls"] as? [[String: Any]], !calls.isEmpty else { return }
+        guard !calls.isEmpty else { return }
         for (callIndex, call) in calls.enumerated() {
             let name = call["name"] as? String ?? "tool"
             let args = call["args"] as? [String: Any] ?? [:]

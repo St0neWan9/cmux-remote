@@ -258,6 +258,12 @@ fun ConversationScreen(
                 modifier = Modifier.padding(horizontal = 14.dp),
             )
         }
+        if (state.displayedQueuedPrompts.isNotEmpty()) {
+            QueuedPromptsRow(
+                prompts = state.displayedQueuedPrompts,
+                modifier = Modifier.padding(horizontal = 14.dp),
+            )
+        }
         if (state.session.resumable && !state.session.writable && onResume != null) {
             ResumeBanner(onResume = onResume, busy = busy)
         }

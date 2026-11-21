@@ -34,14 +34,17 @@ public actor SessionService {
     private let taskLocator: BackgroundTaskLocator
     private let modelSwitch = CodexModelSwitch()
     private let claudeConfirmation = ClaudeModelConfirmation()
+    private let queuedPrompts: QueuedPromptRegistry
     private var rex: RexConversationSource?
 
     public init(cmux: any CmuxControlling, home: URL, transcriptRoots: [URL], mutations: MutationLedger? = nil, journal: MutationJournal? = nil, aliases: SessionAliasStore? = nil,
-                taskLocator: BackgroundTaskLocator = BackgroundTaskLocator(), reader: TranscriptReader = TranscriptReader()) {
+                taskLocator: BackgroundTaskLocator = BackgroundTaskLocator(), reader: TranscriptReader = TranscriptReader(),
+                queuedPrompts: QueuedPromptRegistry = QueuedPromptRegistry()) {
         self.cmux = cmux; self.transcriptRoots = transcriptRoots.map { $0.resolvingSymlinksInPath().standardizedFileURL }
         self.files = ProjectFilePolicy(home: home); self.modelCatalog = ModelChoiceCatalog(home: home); self.mutations = mutations ?? MutationLedger(); self.journal = journal; self.aliases = aliases
         self.taskLocator = taskLocator
         self.reader = reader
+        self.queuedPrompts = queuedPrompts
     }
 
     /// Attaches the proved Rex conversation source after the provider registry is
@@ -413,7 +416,8 @@ public actor SessionService {
               // Suspension may let a discovery or hook event move the binding; that is a change too.
               records[id]?.descriptor == descriptor else { return nil }
         // The binding decides the history's background tasks and its scope, so it is part of the identity.
-        return ("\(transcript):\(workspace):\(descriptor.surfaceID ?? ""):\(descriptor.writable)", workspace)
+        let queueStamp = await queuedPrompts.stamp(sessionID: id)
+        return ("\(transcript):\(workspace):\(descriptor.surfaceID ?? ""):\(descriptor.writable):q=\(queueStamp)", workspace)
     }
 
     /// - Parameter discovered: The caller resolved this id against a fresh discovery for the same request.
@@ -422,8 +426,9 @@ public actor SessionService {
         if record.source == "rex" {
             guard let rex else { throw BridgeError("history_unavailable", "No readable conversation record is available.", status: 404) }
             let result = try await rex.history(id, beforeSeq: beforeSeq, limit: limit)
+            let enriched = beforeSeq == nil ? await attachQueuedPrompts(id: id, record: record, snapshot: result) : result
             try await recheck(record, capability: .conversationRead, access: access)
-            return result
+            return enriched
         }
         guard let path = record.transcript else { throw BridgeError("history_unavailable", "No readable conversation record is available.", status: 404) }
         let reader = reader; let agent = record.descriptor.agent
@@ -432,8 +437,9 @@ public actor SessionService {
         let result = try await reader.history(path: path, agent: agent, beforeSeq: beforeSeq, limit: limit,
                                              allowsUncreatedTranscript: record.descriptor.writable,
                                              reportsBackgroundTasks: record.descriptor.writable)
+        let enriched = beforeSeq == nil ? await attachQueuedPrompts(id: id, record: record, snapshot: result) : result
         try await recheck(record, capability: .conversationRead, access: access)
-        return result
+        return enriched
     }
 
     /// A byte-offset-paged window of the transcript, from the newest record or from an opaque archive cursor.
@@ -442,14 +448,16 @@ public actor SessionService {
         if record.source == "rex" {
             guard let rex else { throw BridgeError("history_unavailable", "No readable conversation record is available.", status: 404) }
             let result = try await rex.archive(id, tail: tail, cursor: cursor, limit: limit)
+            let snapshot = cursor == nil ? await attachQueuedPrompts(id: id, record: record, snapshot: result.snapshot) : result.snapshot
             try await recheck(record, capability: .conversationRead, access: access)
-            return result
+            return ConversationArchivePage(snapshot: snapshot, nextCursor: result.nextCursor, complete: result.complete)
         }
         guard let path = record.transcript else { throw BridgeError("history_unavailable", "No readable conversation record is available.", status: 404) }
         let result = try await reader.archive(path: path, agent: record.descriptor.agent, tail: tail, cursor: cursor, limit: limit,
                                               reportsBackgroundTasks: record.descriptor.writable)
+        let snapshot = cursor == nil ? await attachQueuedPrompts(id: id, record: record, snapshot: result.snapshot) : result.snapshot
         try await recheck(record, capability: .conversationRead, access: access)
-        return result
+        return ConversationArchivePage(snapshot: snapshot, nextCursor: result.nextCursor, complete: result.complete)
     }
 
     /// Returns a bounded, revision-bound page from an authorized session's tool record.
@@ -513,13 +521,21 @@ public actor SessionService {
         let record = try await authorizedRecord(id, capability: .conversationRead, discovered: discovered, access: access)
         if record.source == "rex" {
             guard let rex else { return PreviewSnapshot(text: nil, available: false) }
-            let result = try await rex.preview(id)
+            let (result, antigravityRows) = try await rex.previewWithScreen(id)
+            if let antigravityRows {
+                let extraction = AntigravityQueuedScreenExtractor().extract(lines: antigravityRows)
+                await queuedPrompts.observeScreen(sessionID: id, extraction: extraction)
+            }
             try await recheck(record, capability: .conversationRead, access: access)
             return result
         }
         guard record.descriptor.writable, let surface = record.descriptor.surfaceID else { return PreviewSnapshot(text: nil, available: false) }
         let snapshot = try await cmux.request("surface.read_text", params: ["surface_id": .string(surface)])
         let lines = (snapshot["text"].string ?? "").components(separatedBy: .newlines)
+        if record.descriptor.agent == "antigravity" {
+            let extraction = AntigravityQueuedScreenExtractor().extract(lines: lines)
+            await queuedPrompts.observeScreen(sessionID: id, extraction: extraction)
+        }
         let text = record.descriptor.agent == "antigravity"
             ? AntigravityProseScreenExtractor().extract(lines: lines)
             : AgentChatProseScreenExtractor().extract(lines: lines, agentKind: ChatAgentKind(source: record.descriptor.agent))
@@ -549,24 +565,84 @@ public actor SessionService {
             try await access?.require(.conversationControl, workspace: workspace)
             if let receipt = try await begin(request.operationID, signature: signature, workspace: workspace,
                                              capability: .conversationControl, legacySignature: legacySignature, access: access) { return receipt }
+            let queueContext = await sendQueueContext(id: id, record: record)
             do {
                 try await rex.sendText(id, text: request.text) {
                     try await access?.require(.conversationControl, workspace: workspace)
                 }
-                return try await complete(request.operationID, access: access)
+                let receipt = try await complete(request.operationID, access: access)
+                if queueContext.shouldQueue {
+                    await queuedPrompts.recordSend(
+                        sessionID: id, id: request.operationID.uuidString, text: request.text,
+                        afterSeq: queueContext.afterSeq, generation: queueContext.generation,
+                        knownUserIDs: queueContext.knownUserIDs
+                    )
+                }
+                return receipt
             } catch { throw mutationError(error) }
         }
         // The daemon backend clears its own Agent input for a phone send; the desktop backend still requires an empty prompt.
         let session = try await verifiedBinding(id, requiresEmptyPrompt: !id.hasPrefix("tui:"), access: access)
         if let receipt = try await begin(request.operationID, signature: signature, workspace: session.workspaceID, capability: .conversationControl, legacySignature: legacySignature, access: access) { return receipt }
         try await validateMutationBinding(session, access: access)
+        let queueContext = records[id].map { record in record }
+        let cmuxQueueContext = queueContext != nil ? await sendQueueContext(id: id, record: queueContext!) : nil
         do {
             var params: [String: JSONValue] = ["session_id": .string(await liveSessionID(session.id)), "text": .string(request.text), "operation_id": .string(request.operationID.uuidString), "backend_operation_key": .string(IdentityCryptography().digest(Data(((access?.clientID ?? "owner") + ":" + request.operationID.uuidString).utf8))), "workspace_id": .string(session.workspaceID!), "surface_id": .string(session.surfaceID!)]
             if !attachments.isEmpty { params["attachments"] = .array(attachments) }
             let result = try await cmux.request("mobile.chat.send", params: params)
             guard result["submitted"].bool != false else { throw BridgeError("outcome_unknown", "cmux did not confirm prompt submission; inspect its draft before retrying.", status: 409) }
-            return try await complete(request.operationID, access: access)
+            let receipt = try await complete(request.operationID, access: access)
+            if let cmuxQueueContext, cmuxQueueContext.shouldQueue {
+                await queuedPrompts.recordSend(
+                    sessionID: id, id: request.operationID.uuidString, text: request.text,
+                    afterSeq: cmuxQueueContext.afterSeq, generation: cmuxQueueContext.generation,
+                    knownUserIDs: cmuxQueueContext.knownUserIDs
+                )
+            }
+            return receipt
         } catch { journal?.uncertain(id: request.operationID); throw mutationError(error) }
+    }
+
+    private func sendQueueContext(id: String, record: Record) async -> (shouldQueue: Bool, afterSeq: Int?, generation: String?, knownUserIDs: Set<String>) {
+        var shouldQueue = record.descriptor.state.hasPrefix("working")
+        if !shouldQueue { shouldQueue = await queuedPrompts.hasEntries(sessionID: id) }
+        guard let path = record.transcript,
+              let snapshot = try? await reader.history(
+                  path: path, agent: record.descriptor.agent, beforeSeq: nil, limit: 100,
+                  allowsUncreatedTranscript: record.descriptor.writable && record.descriptor.agent == "antigravity",
+                  reportsBackgroundTasks: false
+              ) else {
+            return (shouldQueue, nil, nil, [])
+        }
+        if snapshot.currentTurnCompleted == false, snapshot.messages.contains(where: { $0.role == .user }) {
+            shouldQueue = true
+        }
+        let knownUsers = Set(snapshot.messages.filter { $0.role == .user }.map(\.id))
+        return (shouldQueue, snapshot.messages.last?.seq, snapshot.generation, knownUsers)
+    }
+
+    private func attachQueuedPrompts(id: String, record: Record, snapshot: ConversationSnapshot) async -> ConversationSnapshot {
+        let working = record.descriptor.state.hasPrefix("working") || snapshot.currentTurnCompleted == false
+        let hasQueued = await queuedPrompts.hasEntries(sessionID: id)
+        if record.descriptor.agent == "antigravity", record.descriptor.writable, (working || hasQueued) {
+            if record.source == "rex", let rex, let rows = try? await rex.screenRows(id) {
+                await queuedPrompts.observeScreen(sessionID: id, extraction: AntigravityQueuedScreenExtractor().extract(lines: rows))
+            } else if record.source != "rex", let surface = record.descriptor.surfaceID,
+                      let screen = try? await cmux.request("surface.read_text", params: ["surface_id": .string(surface)]),
+                      let text = screen["text"].string {
+                let rows = text.components(separatedBy: .newlines)
+                await queuedPrompts.observeScreen(sessionID: id, extraction: AntigravityQueuedScreenExtractor().extract(lines: rows))
+            }
+        }
+        let items = await queuedPrompts.reconcile(
+            sessionID: id,
+            messages: snapshot.messages,
+            generation: snapshot.generation,
+            writable: record.descriptor.writable,
+            working: working
+        )
+        return snapshot.withQueuedPrompts(items)
     }
 
     /// The models this conversation's agent offers on this Mac.
@@ -821,6 +897,7 @@ public actor SessionService {
                 try await rex.interrupt(id, hard: request.hard) {
                     try await access?.require(.conversationControl, workspace: workspace)
                 }
+                if request.hard { await queuedPrompts.clear(sessionID: id) }
                 return try await complete(request.operationID, access: access)
             } catch { throw mutationError(error) }
         }
@@ -830,6 +907,7 @@ public actor SessionService {
         do {
             let result = try await cmux.request("mobile.chat.interrupt", params: ["session_id": .string(await liveSessionID(session.id)), "hard": .bool(request.hard), "operation_id": .string(request.operationID.uuidString), "backend_operation_key": .string(IdentityCryptography().digest(Data(((access?.clientID ?? "owner") + ":" + request.operationID.uuidString).utf8))), "workspace_id": .string(session.workspaceID!), "surface_id": .string(session.surfaceID!)])
             guard result["interrupted"].bool != false else { throw BridgeError("outcome_unknown", "cmux did not confirm interruption.", status: 409) }
+            if request.hard { await queuedPrompts.clear(sessionID: id) }
             return try await complete(request.operationID, access: access)
         } catch { journal?.uncertain(id: request.operationID); throw mutationError(error) }
     }

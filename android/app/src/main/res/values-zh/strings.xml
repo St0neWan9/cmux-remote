@@ -446,6 +446,8 @@
     <string name="chat_no_reference">没有记录图片引用。</string>
     <string name="chat_background_tasks_count">%1$d 个后台任务</string>
     <string name="chat_background_tasks_open">打开后台任务</string>
+    <string name="chat_queued_one">1 条消息排队中</string>
+    <string name="chat_queued_count">%1$d 条消息排队中</string>
     <string name="common_zoom_in">放大</string>
     <string name="common_zoom_out">缩小</string>
     <string name="sessions_all_hosts">全部</string>

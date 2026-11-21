@@ -446,6 +446,8 @@
     <string name="chat_no_reference">No image reference recorded.</string>
     <string name="chat_background_tasks_count">%1$d background tasks</string>
     <string name="chat_background_tasks_open">Open background tasks</string>
+    <string name="chat_queued_one">1 queued message</string>
+    <string name="chat_queued_count">%1$d queued messages</string>
     <string name="common_zoom_in">Zoom in</string>
     <string name="common_zoom_out">Zoom out</string>
     <string name="sessions_all_hosts">All</string>

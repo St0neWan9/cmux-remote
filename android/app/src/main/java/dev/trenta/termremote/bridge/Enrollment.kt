@@ -274,6 +274,8 @@ class PendingEnrollment(
 }
 
 object Enrollment {
+    const val DEFAULT_CLIENT_NAME = "Term Remote Android"
+
     /**
      * Starts a pending enrollment for one scanned code.
      *
@@ -283,7 +285,7 @@ object Enrollment {
     fun begin(
         code: String,
         privateKey: ByteArray,
-        clientName: String = "cmux Android",
+        clientName: String = DEFAULT_CLIENT_NAME,
         clientKind: String = "android",
         capabilities: List<ClientCapability> = AndroidCapabilities,
         now: Long = System.currentTimeMillis() / 1000,
@@ -300,7 +302,7 @@ object Enrollment {
     fun fromBootstrap(
         bootstrap: EnrollmentBootstrap,
         privateKey: ByteArray,
-        clientName: String = "cmux Android",
+        clientName: String = DEFAULT_CLIENT_NAME,
         clientKind: String = "android",
         capabilities: List<ClientCapability> = AndroidCapabilities,
         now: Long = System.currentTimeMillis() / 1000,
@@ -323,7 +325,7 @@ object Enrollment {
         endpoint: dev.trenta.termremote.protocol.BridgeEndpoint,
         trustedHost: HostIdentity,
         privateKey: ByteArray,
-        clientName: String = "cmux Android",
+        clientName: String = DEFAULT_CLIENT_NAME,
         clientKind: String = "android",
         capabilities: List<ClientCapability> = AndroidCapabilities,
         now: Long = System.currentTimeMillis() / 1000,

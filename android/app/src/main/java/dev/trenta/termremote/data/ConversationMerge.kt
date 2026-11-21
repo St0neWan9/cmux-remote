@@ -14,8 +14,18 @@ object ConversationMerge {
         if (existing.isEmpty()) return incoming.sortedBy { it.seq }
         val byId = LinkedHashMap<String, ChatMessage>(existing.size + incoming.size)
         existing.forEach { byId[it.id] = it }
-        incoming.forEach { byId[it.id] = it }
-        return byId.values.sortedBy { it.seq }
+        val incomingOrder = HashMap<String, Int>(incoming.size)
+        incoming.forEachIndexed { index, message ->
+            incomingOrder[message.id] = index
+            byId[message.id] = message
+        }
+        val fallbackBase = incoming.size
+        return byId.values.withIndex()
+            .sortedWith(
+                compareBy<IndexedValue<ChatMessage>> { it.value.seq }
+                    .thenBy { incomingOrder[it.value.id] ?: (fallbackBase + it.index) },
+            )
+            .map { it.value }
     }
 
     /** A newer turn replaces the anchor with the same first message; earlier pages keep theirs. */

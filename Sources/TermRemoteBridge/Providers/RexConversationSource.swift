@@ -184,19 +184,36 @@ public actor RexConversationSource {
     }
 
     public func preview(_ id: String) async throws -> PreviewSnapshot {
+        try await previewWithScreen(id).snapshot
+    }
+
+    /// Reads the live preview alongside Antigravity's raw screen rows so the Bridge can observe
+    /// queued prompts without a second terminal round trip.
+    public func previewWithScreen(_ id: String) async throws -> (snapshot: PreviewSnapshot, antigravityRows: [String]?) {
         let entry = try await entry(id)
         guard entry.descriptor.state != "ended", let terminal = entry.descriptor.surfaceID else {
-            return PreviewSnapshot(text: nil, available: false)
+            return (PreviewSnapshot(text: nil, available: false), nil)
         }
         let snapshot = try await provider.snapshot(terminalID: terminal)
         let rows = snapshot.text.components(separatedBy: .newlines)
         if entry.descriptor.kind == "terminal" {
-            return PreviewSnapshot(text: snapshot.text, available: true)
+            return (PreviewSnapshot(text: snapshot.text, available: true), nil)
         }
-        let text = entry.descriptor.agent == "antigravity"
+        let isAntigravity = entry.descriptor.agent == "antigravity"
+        let text = isAntigravity
             ? AntigravityProseScreenExtractor().extract(lines: rows)
             : AgentChatProseScreenExtractor().extract(lines: rows, agentKind: ChatAgentKind(source: entry.descriptor.agent))
-        return PreviewSnapshot(text: text, available: true, compacting: TuiCompactionScreen.isCompacting(rows: rows))
+        return (PreviewSnapshot(text: text, available: true, compacting: TuiCompactionScreen.isCompacting(rows: rows)),
+                isAntigravity ? rows : nil)
+    }
+
+    /// Reads the current terminal screen lines for a live Rex conversation, or nil when ended.
+    public func screenRows(_ id: String) async throws -> [String]? {
+        let entry = try await entry(id)
+        guard entry.descriptor.state != "ended", entry.descriptor.kind != "terminal",
+              let terminal = entry.descriptor.surfaceID else { return nil }
+        let snapshot = try await provider.snapshot(terminalID: terminal)
+        return snapshot.text.components(separatedBy: .newlines)
     }
 
     public func sendText(_ id: String, text: String,

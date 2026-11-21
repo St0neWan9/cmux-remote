@@ -21,7 +21,16 @@ object OutgoingPromptMatcher {
         knownUserIDs: Set<String>,
         historyGeneration: String,
         messages: List<ChatMessage>,
+        queuedPrompts: List<QueuedPromptInfo> = emptyList(),
     ): Boolean {
+        val wanted = normalized(text)
+        if (wanted.isNotEmpty() && queuedPrompts.any { item ->
+                val queued = normalized(item.text)
+                queued.isNotEmpty() && (queued == wanted || queued.startsWith(wanted) || wanted.startsWith(queued))
+            }
+        ) {
+            return true
+        }
         val users = messages.filter { it.kind == "prose" && it.role == "user" }
         fun recordedAfter(message: ChatMessage): Boolean {
             // A message that already existed at send time is not the prompt.
@@ -29,7 +38,6 @@ object OutgoingPromptMatcher {
             if (generation != historyGeneration || afterSeq == null) return true
             return message.seq > afterSeq
         }
-        val wanted = normalized(text)
         if (wanted.isNotEmpty() && users.any { recordedAfter(it) && normalized(it.text).contains(wanted) }) {
             return true
         }
