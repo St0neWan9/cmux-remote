@@ -58,7 +58,6 @@ struct SessionListView: View {
         // A search or a status filter is the reader looking for something: every match shows, nothing folds.
         let folds = query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && filter == .all
         let loading = model.loading
-        let error = model.error
         let multiple = shownLinks.count > 1
         let canRead = links.contains { $0.client.allows(.conversationRead) }
         // The drawer stays as the user left it; a pushed page opens over it rather than closing it.
@@ -102,7 +101,6 @@ struct SessionListView: View {
                         VStack(alignment: .leading, spacing: MobileDesign.sectionGap) {
                             if multiple {
                                 Label(section.hostName, systemImage: "laptopcomputer").font(.title3.weight(.semibold)).accessibilityAddTraits(.isHeader)
-                                if let hostError = model.hostErrors[section.hostID] { Text(hostError).font(.footnote).foregroundStyle(.red) }
                             } else if grouped { Text(String(localized: "sessions.workspaces_title")).font(.headline) }
                             ForEach(section.groups) { group in
                                 let key = section.hostID + "/" + group.id
@@ -146,9 +144,6 @@ struct SessionListView: View {
                         Text(String(localized: !canRead ? "sessions.no_read_grant" : (model.hostedSessions.isEmpty ? "sessions.empty" : (archiveEmpty ? "sessions.archive_empty" : "sessions.no_matches"))))
                             .foregroundStyle(.secondary).padding(.vertical, 12)
                     }
-                    // The Mac's tab already says it is unreachable, and a Mac retried in the background is not shown
-                    // as failing; the red line is for other failures.
-                    if let error, !multiple, model.connectionState != .disconnected, model.quietHosts.isEmpty { Text(error).font(.footnote).foregroundStyle(.red) }
                 }.frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, MobileDesign.pageInset).padding(.top, 20).padding(.bottom, 24)
             }
