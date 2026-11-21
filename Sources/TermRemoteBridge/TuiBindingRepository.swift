@@ -18,7 +18,7 @@ public struct TuiBindingRepository: Sendable {
         guard fstat(fd, &info) == 0, info.st_uid == getuid(), info.st_mode & S_IFMT == S_IFREG, info.st_mode & 0o077 == 0, info.st_size <= 1_048_576 else { throw invalid() }
         let archive = try JSONDecoder().decode(Archive.self, from: handle.readToEnd() ?? Data())
         guard archive.identity == identity, archive.rows.count <= 200,
-              archive.rows.allSatisfy({ $0.id.hasPrefix("tui:") && UUID(uuidString: $0.providerSession) != nil && ["claude", "codex"].contains($0.provider) && $0.title.utf8.count <= 8192 && ($0.cwd?.utf8.count ?? 0) <= 8192 }) else { throw invalid() }
+              archive.rows.allSatisfy({ $0.id.hasPrefix("tui:") && UUID(uuidString: $0.providerSession) != nil && ["claude", "codex", "antigravity"].contains($0.provider) && $0.title.utf8.count <= 8192 && ($0.cwd?.utf8.count ?? 0) <= 8192 }) else { throw invalid() }
         // A conversation is now identified by its Agent session rather than its terminal, so an archive written by an
         // older Bridge is re-keyed on load; rows that collapse onto one Agent keep the newest and take its identity.
         let migrated = migrate(archive.rows, identity: identity)

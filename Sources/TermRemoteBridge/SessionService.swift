@@ -272,14 +272,14 @@ public actor SessionService {
         var discovered: [String: Record] = [:]
         for item in vault["sessions"].array ?? [] {
             guard let id = item["session_id"].string, cmuxIDs.contains(id), let agent = item["agent"].string,
-                  ["claude", "codex"].contains(agent) else { continue }
+                  ["claude", "codex", "antigravity"].contains(agent) else { continue }
             let path = allowedTranscript(item["file"].string)
             let named = item["title"].string?.trimmingCharacters(in: .whitespacesAndNewlines)
             let descriptor = SessionDescriptor(id: id, agent: agent, title: named.flatMap { $0.isEmpty ? nil : $0 } ?? id, cwd: item["cwd"].string, state: item["status"].string ?? "unknown")
             discovered[id] = Record(descriptor: descriptor, transcript: path)
         }
         for item in dump?["sessions"].array ?? [] {
-            guard let id = item["session_id"].string, cmuxIDs.contains(id), let agent = item["agent"].string, ["claude", "codex"].contains(agent) else { continue }
+            guard let id = item["session_id"].string, cmuxIDs.contains(id), let agent = item["agent"].string, ["claude", "codex", "antigravity"].contains(agent) else { continue }
             var record = discovered[id] ?? Record(descriptor: SessionDescriptor(id: id, agent: agent, title: id, cwd: item["cwd"].string), transcript: allowedTranscript(item["transcript_path"].string))
             record.descriptor.workspaceID = item["workspace_id"].string
             record.descriptor.surfaceID = item["surface_id"].string
@@ -354,7 +354,20 @@ public actor SessionService {
               let path = record.transcript,
               let attributes = try? FileManager.default.attributesOfItem(atPath: path),
               let size = (attributes[.size] as? NSNumber)?.intValue, size > 0 else { return false }
-        return TranscriptWorkingDirectory().read(path: path, size: size) != nil
+        return recordedCwd(for: record.descriptor, transcript: path, size: size) != nil
+    }
+    private func recordedCwd(for descriptor: SessionDescriptor, transcript path: String, size: Int) -> String? {
+        if descriptor.agent == "antigravity" {
+            for root in transcriptRoots {
+                if path.hasPrefix(root.path + "/"),
+                   let cwd = AntigravityProcessRegistry(root: root).metadata(sessionID: descriptor.id)?.workspacePaths.first,
+                   cwd.hasPrefix("/") {
+                    return cwd
+                }
+            }
+            return nil
+        }
+        return TranscriptWorkingDirectory().read(path: path, size: size)
     }
     public func acceptEvent(_ frame: JSONValue) {
         if let boot = frame["boot_id"].string, eventBoot != nil && eventBoot != boot { liveBindings.removeAll(); records.removeAll() }
@@ -507,7 +520,9 @@ public actor SessionService {
         guard record.descriptor.writable, let surface = record.descriptor.surfaceID else { return PreviewSnapshot(text: nil, available: false) }
         let snapshot = try await cmux.request("surface.read_text", params: ["surface_id": .string(surface)])
         let lines = (snapshot["text"].string ?? "").components(separatedBy: .newlines)
-        let text = AgentChatProseScreenExtractor().extract(lines: lines, agentKind: ChatAgentKind(source: record.descriptor.agent))
+        let text = record.descriptor.agent == "antigravity"
+            ? AntigravityProseScreenExtractor().extract(lines: lines)
+            : AgentChatProseScreenExtractor().extract(lines: lines, agentKind: ChatAgentKind(source: record.descriptor.agent))
         // Compaction is printed on the agent's own working line, so it is read from the same rows.
         let compacting = TuiCompactionScreen.isCompacting(rows: lines)
         try await recheck(record, capability: .conversationRead, access: access)
@@ -735,7 +750,7 @@ public actor SessionService {
         guard let path = records[value.id]?.transcript,
               let attributes = try? FileManager.default.attributesOfItem(atPath: path),
               let size = (attributes[.size] as? NSNumber)?.intValue, size > 0,
-              let recorded = TranscriptWorkingDirectory().read(path: path, size: size),
+              let recorded = recordedCwd(for: value, transcript: path, size: size),
               let directory = try? files.projectRoot(recorded),
               let agent = LaunchAgent(rawValue: value.agent) else { throw BridgeError("read_only", "This conversation's directory is no longer available.", status: 409) }
         var isDirectory: ObjCBool = false

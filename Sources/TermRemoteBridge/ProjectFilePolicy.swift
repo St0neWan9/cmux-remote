@@ -7,7 +7,7 @@ public struct ProjectFilePolicy: Sendable {
     public init(home: URL) { self.home = home.resolvingSymlinksInPath().standardizedFileURL }
     public func projectRoot(_ root: String) throws -> URL {
         let base = URL(fileURLWithPath: root).resolvingSymlinksInPath().standardizedFileURL
-        let sensitive = [".ssh", ".aws", ".gnupg", ".codex", ".claude", ".config", "Library"]
+        let sensitive = [".ssh", ".aws", ".gnupg", ".codex", ".claude", ".gemini", ".config", "Library"]
         guard base.path != "/", base.path != home.path, !home.path.hasPrefix(base.path + "/"),
               !sensitive.contains(where: { base.path == home.appendingPathComponent($0).path || base.path.hasPrefix(home.appendingPathComponent($0).path + "/") }) else { throw denied() }
         return base

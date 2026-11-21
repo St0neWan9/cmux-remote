@@ -203,7 +203,7 @@ data class StartUi(
     val foldersTruncated: Boolean = false,
     val foldersLoading: Boolean = false,
     val foldersError: String? = null,
-    val agents: List<String> = listOf("claude", "codex"),
+    val agents: List<String> = listOf("claude", "codex", "antigravity"),
     val agent: String = "claude",
     val prompt: String = "",
     val busy: Boolean = false,

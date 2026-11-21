@@ -521,9 +521,12 @@ public actor TuiControlAdapter: CmuxControlling {
     private func showsAgentPrompt(_ current: TuiSessionSnapshot, binding: TuiSessionSnapshot.Binding) async -> Bool? {
         // The rendered grid, not the raw screen text, which still carries the escape sequences that place the prompt.
         guard let state = try? await terminalState(current, binding: binding) else { return nil }
-        let prefix = binding.provider == "claude" ? "❯\u{00a0}" : "› "
         // A menu the Agent drew over its prompt leaves no prompt line, yet the Agent is still waiting there.
         if AgentMenuScreen(rows: state.rows).isShown { return true }
+        if binding.provider == "antigravity" {
+            return TuiPromptSafety.hasAntigravityPrompt(in: state.rows)
+        }
+        let prefix = binding.provider == "claude" ? "❯\u{00a0}" : "› "
         return state.rows.contains { line in
             var body = Substring(line.drop(while: { $0 == " " }))
             if body.hasPrefix("│") { body = body.dropFirst().drop(while: { $0 == " " }) }

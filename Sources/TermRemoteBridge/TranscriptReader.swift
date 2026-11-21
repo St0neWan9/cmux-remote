@@ -24,6 +24,8 @@ public actor TranscriptReader {
         let trackerState: BackgroundTaskTracker.State
         /// The newest records, so a tool call and its result pair across a chunk edge.
         let tailLines: [String]
+        /// Carry-over parser state so tool calls and results pair across incremental reads.
+        let parseState: ChatTranscriptParseState
     }
     private var observations: [String: Observation] = [:]
     /// Last-read order per path; an eviction takes the lowest, which is the least recently read.
@@ -209,7 +211,7 @@ public actor TranscriptReader {
         let generation = reset ? UUID() : previous!.generation
         guard let end = data.lastIndex(of: 10) else {
             store(Observation(inode: inode, size: size.intValue, modified: modified, generation: generation, windowStart: resolvedStart, images: [], messages: [], presentation: .init(), agentModel: nil,
-                              parsedThrough: dataOffset + data.count, lastSeq: -1, responseState: .init(), trackerState: scanned, tailLines: []), for: path)
+                              parsedThrough: dataOffset + data.count, lastSeq: -1, responseState: .init(), trackerState: scanned, tailLines: [], parseState: ChatTranscriptParseState()), for: path)
             return page([], images: [], presentation: .init(), beforeSeq: beforeSeq, limit: limit, generation: generation, clipped: resolvedStart > 0,
                         backgroundTasks: runningTasks(path, reports: reportsBackgroundTasks))
         }
@@ -219,7 +221,7 @@ public actor TranscriptReader {
         let agentModel = TranscriptModelReader().read(lines: raw, agent: agent)
         let compaction = agent == "claude" ? ClaudeCompactionSummary().replace(raw) : .init(lines: raw, markers: [])
         let lines = agent == "claude" ? ClaudeTaskNoticeRewriter().normalize(ClaudeQueuedPromptNormalizer().normalize(compaction.lines)) : raw
-        let result = agent == "claude" ? ClaudeTranscriptParser().parse(lines: lines, startingSeq: 0) : CodexTranscriptParser().parse(lines: lines, startingSeq: 0)
+        let result = Self.parse(lines: lines, agent: agent, startingSeq: 0)
         // A record may repeat an id as it develops; one index by id beats a scan per update.
         var positions: [String: Int] = [:]
         for (index, message) in result.messages.enumerated() where positions[message.id] == nil { positions[message.id] = index }
@@ -233,7 +235,7 @@ public actor TranscriptReader {
         TranscriptResponseReader().consume(lines: lines, startingSeq: 0, messages: messages, agent: agent, into: &responseState)
         let presentation = TranscriptResponseReader().snapshot(responseState)
         store(Observation(inode: inode, size: size.intValue, modified: modified, generation: generation, windowStart: resolvedStart, images: imageIndex.records, messages: messages, presentation: presentation, agentModel: agentModel,
-                          parsedThrough: dataOffset + end + 1, lastSeq: lines.count - 1, responseState: responseState, trackerState: scanned, tailLines: Array(lines.suffix(64))), for: path)
+                          parsedThrough: dataOffset + end + 1, lastSeq: lines.count - 1, responseState: responseState, trackerState: scanned, tailLines: Array(lines.suffix(64)), parseState: result.state), for: path)
         return page(messages, images: imageIndex.records, presentation: presentation, beforeSeq: beforeSeq, limit: limit, generation: generation, clipped: resolvedStart > 0,
                     backgroundTasks: runningTasks(path, reports: reportsBackgroundTasks), agentModel: agentModel)
     }
@@ -258,7 +260,7 @@ public actor TranscriptReader {
         let agentModel = TranscriptModelReader().read(lines: raw, agent: agent) ?? previous.agentModel
         let compaction = agent == "claude" ? ClaudeCompactionSummary().replace(raw, startingSeq: startingSeq) : .init(lines: raw, markers: [])
         let lines = agent == "claude" ? ClaudeTaskNoticeRewriter().normalize(ClaudeQueuedPromptNormalizer().normalize(compaction.lines)) : raw
-        let result = agent == "claude" ? ClaudeTranscriptParser().parse(lines: lines, startingSeq: startingSeq) : CodexTranscriptParser().parse(lines: lines, startingSeq: startingSeq)
+        let result = Self.parse(lines: lines, agent: agent, startingSeq: startingSeq, state: previous.parseState)
         var positions: [String: Int] = [:]
         for (index, message) in previous.messages.enumerated() where positions[message.id] == nil { positions[message.id] = index }
         var messages = previous.messages
@@ -287,7 +289,7 @@ public actor TranscriptReader {
         let observation = Observation(inode: previous.inode, size: size, modified: modified, generation: previous.generation, windowStart: previous.windowStart,
                                       images: Array(images.suffix(512)), messages: messages, presentation: presentation, agentModel: agentModel,
                                       parsedThrough: previous.parsedThrough + complete.count, lastSeq: startingSeq + lines.count - 1,
-                                      responseState: responseState, trackerState: tracker, tailLines: Array(lines.suffix(64)))
+                                      responseState: responseState, trackerState: tracker, tailLines: Array(lines.suffix(64)), parseState: result.state)
         store(observation, for: key)
         return observation
     }
@@ -404,9 +406,8 @@ public actor TranscriptReader {
         let raw = String(decoding: data[...end], as: UTF8.self).split(separator: "\n", omittingEmptySubsequences: false).dropLast().map(String.init)
         let lines = agent == "claude" ? ClaudeTaskNoticeRewriter().normalize(ClaudeQueuedPromptNormalizer().normalize(ClaudeCompactionSummary().replace(raw).lines)) : raw
         try Task.checkCancellation()
-        let result = agent == "claude"
-            ? ClaudeTranscriptParser(maxBodyCharacters: 33_554_432, maxInputDetailCharacters: 33_554_432).parse(lines: lines, startingSeq: 0)
-            : CodexTranscriptParser(maxBodyCharacters: 33_554_432, maxInputDetailCharacters: 33_554_432).parse(lines: lines, startingSeq: 0)
+        let result = Self.parse(lines: lines, agent: agent, startingSeq: 0,
+                                maxBodyCharacters: 33_554_432, maxInputDetailCharacters: 33_554_432)
         guard let message = (result.updatedMessages + result.messages).first(where: { $0.id == messageID }) else { throw BridgeError("detail_not_found", "This tool record is unavailable.", status: 404) }
         let text: String
         switch (message.kind, field) {
@@ -598,9 +599,7 @@ public actor TranscriptReader {
         let compaction = agent == "claude" ? ClaudeCompactionSummary().replace(raw) : ClaudeCompactionSummary.Result(lines: raw, markers: [])
         let lines = agent == "claude" ? ClaudeTaskNoticeRewriter().normalize(ClaudeQueuedPromptNormalizer().normalize(compaction.lines)) : raw
         let agentModel = TranscriptModelReader().read(lines: raw, agent: agent)
-        let result = agent == "claude"
-            ? ClaudeTranscriptParser().parse(lines: lines, startingSeq: 0)
-            : CodexTranscriptParser().parse(lines: lines, startingSeq: 0)
+        let result = Self.parse(lines: lines, agent: agent, startingSeq: 0)
         // A record may repeat an id as it develops; one index by id beats a scan per update.
         var positions: [String: Int] = [:]
         var localMessages = result.messages
@@ -713,6 +712,27 @@ public actor TranscriptReader {
     /// The only archive failure left: a configured chunk that is larger than the supported bound.
     private func archiveTooLarge() -> BridgeError {
         BridgeError("history_too_large", "The archive chunk exceeds the supported size.", status: 413)
+    }
+
+    private static func parse(
+        lines: [String],
+        agent: String,
+        startingSeq: Int,
+        state: ChatTranscriptParseState = ChatTranscriptParseState(),
+        maxBodyCharacters: Int = 16_384,
+        maxInputDetailCharacters: Int = 2_048
+    ) -> ChatTranscriptParseResult {
+        switch agent {
+        case "claude":
+            return ClaudeTranscriptParser(maxBodyCharacters: maxBodyCharacters, maxInputDetailCharacters: maxInputDetailCharacters)
+                .parse(lines: lines, startingSeq: startingSeq, state: state)
+        case "antigravity":
+            return AntigravityTranscriptParser(maxBodyCharacters: maxBodyCharacters, maxInputDetailCharacters: maxInputDetailCharacters)
+                .parse(lines: lines, startingSeq: startingSeq, state: state)
+        default:
+            return CodexTranscriptParser(maxBodyCharacters: maxBodyCharacters, maxInputDetailCharacters: maxInputDetailCharacters)
+                .parse(lines: lines, startingSeq: startingSeq, state: state)
+        }
     }
 
     private func page(_ messages: [ChatMessage], images: [TranscriptImageRecord], presentation: TranscriptResponseReader.Result, beforeSeq: Int?, limit: Int, generation: UUID, clipped: Bool, backgroundTasks: [BackgroundAgentTask], agentModel: AgentModelState? = nil) -> ConversationSnapshot {

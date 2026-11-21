@@ -17,6 +17,10 @@ struct AgentCommandLine: Sendable {
 
     func line(_ agent: LaunchAgent, prompt: String?) -> String {
         guard let prompt else { return agent.command }
+        if agent == .antigravity {
+            // Antigravity takes an interactive initial prompt via `--prompt-interactive=<prompt>`.
+            return agent.command + " --prompt-interactive=" + quoted(prompt)
+        }
         return agent.command + " " + quoted(argument(prompt))
     }
 

@@ -8,13 +8,22 @@ public actor RexProvider: TerminalProvider {
     public struct ConversationTarget: Sendable, Equatable {
         public let space: SpaceDescriptor
         public let terminal: TerminalDescriptor
+        public let agent: String
         public let agentSessionID: String
         public let transcript: String
+        public let transcriptExists: Bool
         /// The directory the Agent recorded in its own registry, not a moved
         /// terminal cwd or a symlink spelling.
         public let cwd: String
         public let title: String
         public let state: String
+        public init(space: SpaceDescriptor, terminal: TerminalDescriptor, agent: String = "claude",
+                    agentSessionID: String, transcript: String, transcriptExists: Bool = true,
+                    cwd: String, title: String, state: String) {
+            self.space = space; self.terminal = terminal; self.agent = agent
+            self.agentSessionID = agentSessionID; self.transcript = transcript
+            self.transcriptExists = transcriptExists; self.cwd = cwd; self.title = title; self.state = state
+        }
     }
 
     private struct TerminalRef: Sendable {
@@ -281,29 +290,47 @@ public actor RexProvider: TerminalProvider {
         }
     }
 
-    /// Claude conversations whose block foreground is the Agent process and
-    /// whose own registry proves the session id and transcript. A Codex block
-    /// stays a terminal until a supported binding exists.
-    public func conversationTargets(registry: ClaudeProcessRegistry, roots: [URL]) async throws -> [ConversationTarget] {
-        // A pid on another machine has nothing to do with this Mac's Claude
-        // registry. Remote Agent binding needs a remote transcript source.
+    /// Conversations whose block foreground is a verified Agent process (Claude or
+    /// Antigravity) proved by the Agent's own local registry or presence lock. A Codex
+    /// block stays a terminal until a hook binding exists.
+    public func conversationTargets(registry: ClaudeProcessRegistry,
+                                    antigravity: AntigravityProcessRegistry? = nil,
+                                    roots: [URL]) async throws -> [ConversationTarget] {
+        // A pid on another machine has nothing to do with this Mac's local
+        // registries. Remote Agent binding needs a remote transcript source.
         guard isLocalHost else { return [] }
         var result: [ConversationTarget] = []
         for space in try await spaces() {
             guard let items = try? await terminals(spaceID: space.id) else { continue }
             for terminal in items {
-                guard terminal.processName == "claude", let pid = terminal.processID,
-                      let binding = registry.binding(pid: pid, cwd: terminal.workingDirectory, roots: roots) else { continue }
-                let tab = terminal.title.trimmingCharacters(in: .whitespacesAndNewlines)
-                var resolved: String? = (tab.isEmpty || ["shell", "terminal"].contains(tab.lowercased())) ? nil : tab
-                if resolved == nil { resolved = await self.title(for: terminal.id) }
-                if resolved == nil { resolved = URL(fileURLWithPath: binding.cwd).lastPathComponent }
-                let name = resolved ?? binding.sessionID
-                result.append(ConversationTarget(space: space, terminal: terminal,
-                                                 agentSessionID: binding.sessionID, transcript: binding.transcript,
-                                                 cwd: binding.cwd,
-                                                 title: name.isEmpty ? binding.sessionID : name,
-                                                 state: binding.conversationState))
+                guard let pid = terminal.processID else { continue }
+                if terminal.processName == "claude",
+                   let binding = registry.binding(pid: pid, cwd: terminal.workingDirectory, roots: roots) {
+                    let tab = terminal.title.trimmingCharacters(in: .whitespacesAndNewlines)
+                    var resolved: String? = (tab.isEmpty || ["shell", "terminal"].contains(tab.lowercased())) ? nil : tab
+                    if resolved == nil { resolved = await self.title(for: terminal.id) }
+                    if resolved == nil { resolved = URL(fileURLWithPath: binding.cwd).lastPathComponent }
+                    let name = resolved ?? binding.sessionID
+                    result.append(ConversationTarget(space: space, terminal: terminal, agent: "claude",
+                                                     agentSessionID: binding.sessionID, transcript: binding.transcript,
+                                                     transcriptExists: true, cwd: binding.cwd,
+                                                     title: name.isEmpty ? binding.sessionID : name,
+                                                     state: binding.conversationState))
+                } else if let antigravity,
+                          let processName = terminal.processName, ["agy", "antigravity"].contains(processName),
+                          let binding = antigravity.binding(pid: pid, cwd: terminal.workingDirectory, roots: roots) {
+                    let tab = terminal.title.trimmingCharacters(in: .whitespacesAndNewlines)
+                    var resolved: String? = (tab.isEmpty || ["shell", "terminal", "agy"].contains(tab.lowercased())) ? nil : tab
+                    if resolved == nil { resolved = binding.title }
+                    if resolved == nil { resolved = await self.title(for: terminal.id) }
+                    if resolved == nil { resolved = URL(fileURLWithPath: binding.cwd).lastPathComponent }
+                    let name = resolved ?? binding.sessionID
+                    result.append(ConversationTarget(space: space, terminal: terminal, agent: "antigravity",
+                                                     agentSessionID: binding.sessionID, transcript: binding.transcript,
+                                                     transcriptExists: binding.transcriptExists, cwd: binding.cwd,
+                                                     title: name.isEmpty ? binding.sessionID : name,
+                                                     state: binding.conversationState))
+                }
                 if result.count >= 128 { return result }
             }
         }

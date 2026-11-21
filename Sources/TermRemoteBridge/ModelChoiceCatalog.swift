@@ -20,6 +20,10 @@ struct ModelChoiceCatalog: Sendable {
         if agent == "codex" {
             return ModelChoiceList(choices: codexChoices(), acceptsCustom: true, persistsDefault: false)
         }
+        if agent == "antigravity" {
+            // Antigravity's `/model` command opens an interactive picker; stay honest until a verified picker adapter exists.
+            return ModelChoiceList(choices: [], acceptsCustom: false, persistsDefault: false)
+        }
         return ModelChoiceList(choices: unique(Self.claudeAliases + claudeConfigured()), acceptsCustom: true, persistsDefault: true)
     }
     private func claudeConfigured() -> [ModelChoice] {

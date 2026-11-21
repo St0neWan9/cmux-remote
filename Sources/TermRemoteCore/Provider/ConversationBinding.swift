@@ -9,7 +9,7 @@ public struct ConversationBinding: Codable, Sendable, Equatable {
     public let spaceID: String
     public let terminalID: String
     public let agent: String
-    /// "cmux_registry", "daemon_hook", "agent_hook" or "claude_registry".
+    /// "cmux_registry", "daemon_hook", "agent_hook", "claude_registry" or "antigravity_presence".
     public let proof: String
     public let observedAt: Date
 

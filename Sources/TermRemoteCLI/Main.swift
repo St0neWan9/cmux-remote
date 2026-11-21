@@ -76,8 +76,11 @@ struct Main {
             let cmux: any CmuxControlling
             let localDesktop: (any CmuxControlling)?
             let desktopSocket: String?
-            let roots = [URL(fileURLWithPath: runtimeEnvironment["CLAUDE_CONFIG_DIR"] ?? home.appendingPathComponent(".claude").path), URL(fileURLWithPath: runtimeEnvironment["CODEX_HOME"] ?? home.appendingPathComponent(".codex").path)]
-            let transcripts = TuiTranscriptLocator(claudeRoot: roots[0], codexRoot: roots[1])
+            let antigravityRoot = URL(fileURLWithPath: runtimeEnvironment["ANTIGRAVITY_APP_DATA_DIR"] ?? home.appendingPathComponent(".gemini/antigravity-cli").path)
+            let roots = [URL(fileURLWithPath: runtimeEnvironment["CLAUDE_CONFIG_DIR"] ?? home.appendingPathComponent(".claude").path),
+                         URL(fileURLWithPath: runtimeEnvironment["CODEX_HOME"] ?? home.appendingPathComponent(".codex").path),
+                         antigravityRoot]
+            let transcripts = TuiTranscriptLocator(claudeRoot: roots[0], codexRoot: roots[1], antigravityRoot: roots[2])
             let transcriptRoots: [URL]
             if options.contains("demo") {
                 let directory = state.directory.appendingPathComponent("demo", isDirectory: true)
@@ -166,7 +169,8 @@ struct Main {
             if let rexForConversations {
                 await service.attachRex(RexConversationSource(
                     provider: rexForConversations, home: home, transcriptRoots: transcriptRoots, reader: reader,
-                    hookSpool: RexHookSpool(directory: state.directory.appendingPathComponent("rex-hooks", isDirectory: true))))
+                    hookSpool: RexHookSpool(directory: state.directory.appendingPathComponent("rex-hooks", isDirectory: true)),
+                    antigravityRoot: antigravityRoot))
             }
             let providers = ProviderDirectory(registry: registry)
             let router = BridgeRouter(service: service, authority: authority, legacyToken: options.contains("legacy") ? try state.token() : nil,
@@ -216,7 +220,7 @@ struct Main {
             // Resident owner/discovery/mirror services stay alive while LAN sharing is off.
             try await owner.value
         case "doctor":
-            let roots = TuiTranscriptLocator(claudeRoot: home.appendingPathComponent(".claude"), codexRoot: home.appendingPathComponent(".codex"))
+            let roots = TuiTranscriptLocator(claudeRoot: home.appendingPathComponent(".claude"), codexRoot: home.appendingPathComponent(".codex"), antigravityRoot: home.appendingPathComponent(".gemini/antigravity-cli"))
             let sources = try await SourceBackends(options: options, environment: runtimeEnvironment, home: home, transcripts: roots, directory: nil, mutations: MutationLedger())
             let ping = try await sources.controller.request("system.ping", params: [:])
             if ping["active_backends"].int == 0 {

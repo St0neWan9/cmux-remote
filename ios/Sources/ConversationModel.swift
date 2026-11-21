@@ -81,7 +81,10 @@ final class ConversationModel {
     private(set) var modelChoices: ModelChoiceList?
     /// A switch Claude Code asked to confirm and the Bridge declined for the reader; the page asks, then switches again.
     var modelAwaitingConfirmation: (name: String, label: String)?
-    var canSwitchModel: Bool { canSend && modelChoices != nil && ["claude", "codex"].contains(session.agent) }
+    var canSwitchModel: Bool {
+        canSend && modelChoices.map { !$0.choices.isEmpty || $0.acceptsCustom } == true
+            && ["claude", "codex", "antigravity"].contains(session.agent)
+    }
     var error: String?
     var draft = ""
     let imageDraft = ImageDraftModel()
@@ -637,7 +640,7 @@ final class ConversationModel {
     /// this one reads afresh. It is read every time the page opens or the app returns: the owner edits the agent's
     /// configuration on the Mac while the app keeps running, and a list read once per launch went stale for days.
     func loadModelChoices() async {
-        guard canSend, !modelsLoading, ["claude", "codex"].contains(session.agent) else { return }
+        guard canSend, !modelsLoading, ["claude", "codex", "antigravity"].contains(session.agent) else { return }
         modelsLoading = true; defer { modelsLoading = false }
         let scope = client.operationRecoveryScope, agent = session.agent
         // An unchanged list is never assigned again: the menu may be open, and any change rebuilds it.

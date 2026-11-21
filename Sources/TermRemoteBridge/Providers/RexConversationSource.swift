@@ -2,8 +2,8 @@ import Foundation
 import TermRemoteCore
 import CmuxAgentChat
 
-/// Conversations proved by a Rex block's foreground Claude process. A terminal
-/// with no such proof stays a terminal; this source never guesses.
+/// Conversations proved by a Rex block's foreground Agent process or hook record.
+/// A terminal with no such proof stays a terminal; this source never guesses.
 public actor RexConversationSource {
     public struct Entry: Sendable {
         public var descriptor: SessionDescriptor
@@ -12,6 +12,7 @@ public actor RexConversationSource {
 
     private let provider: RexProvider
     private let registry: ClaudeProcessRegistry
+    private let antigravity: AntigravityProcessRegistry
     private let reader: TranscriptReader
     private let roots: [URL]
     private let hookSpool: RexHookSpool?
@@ -25,9 +26,11 @@ public actor RexConversationSource {
     private let maximumEntries = 200
 
     public init(provider: RexProvider, home: URL, transcriptRoots: [URL], reader: TranscriptReader,
-                hookSpool: RexHookSpool? = nil, showsUnboundTerminals: Bool = false) {
+                hookSpool: RexHookSpool? = nil, showsUnboundTerminals: Bool = false,
+                antigravityRoot: URL? = nil, antigravityRegistry: AntigravityProcessRegistry? = nil) {
         self.provider = provider
         self.registry = ClaudeProcessRegistry(home: home)
+        self.antigravity = antigravityRegistry ?? AntigravityProcessRegistry(home: home, root: antigravityRoot)
         self.reader = reader
         self.roots = transcriptRoots.map { $0.resolvingSymlinksInPath().standardizedFileURL }
         self.hookSpool = hookSpool
@@ -36,12 +39,12 @@ public actor RexConversationSource {
     }
 
     public func conversations() async throws -> [Entry] {
-        let targets = try await provider.conversationTargets(registry: registry, roots: roots)
+        let targets = try await provider.conversationTargets(registry: registry, antigravity: antigravity, roots: roots)
         var fresh = Set<String>()
         var result: [Entry] = []
         for target in targets {
             let updated = (try? FileManager.default.attributesOfItem(atPath: target.transcript))?[.modificationDate] as? Date
-            let descriptor = SessionDescriptor(id: target.agentSessionID, agent: "claude", title: target.title,
+            let descriptor = SessionDescriptor(id: target.agentSessionID, agent: target.agent, title: target.title,
                                                cwd: target.cwd, workspaceID: target.space.id,
                                                surfaceID: target.terminal.id, state: target.state,
                                                updatedAt: updated, resumable: false, kind: "agent", source: "rex")
@@ -54,25 +57,24 @@ public actor RexConversationSource {
         }
         let localHost = await provider.localHost
         if let hookSpool, localHost {
-            // Hooks are the source for Codex and a second proof for Claude. A
-            // record is accepted only while its block's foreground is that
-            // Agent, so a stale file cannot revive a shell.
+            // Hooks are the source for Codex and a second proof for Claude and Antigravity. A
+            // record is accepted only while its block's foreground is that Agent, so a stale
+            // file cannot revive a shell.
             for record in hookSpool.records().sorted(by: { $0.recordedAt > $1.recordedAt }) {
                 guard !fresh.contains(record.sessionID), transcriptAllowed(record.transcript) else { continue }
-                guard FileManager.default.fileExists(atPath: record.transcript),
+                let hasTranscript = FileManager.default.fileExists(atPath: record.transcript)
+                guard (hasTranscript || record.agent == "antigravity"),
                       let terminal = await provider.terminal(forBlock: record.rexBlock),
-                      terminal.state != "exited", terminal.processName == record.agent else { continue }
+                      terminal.state != "exited", Self.matchesProcess(terminal.processName, agent: record.agent) else { continue }
                 let pane = terminal.title.trimmingCharacters(in: .whitespacesAndNewlines)
                 var resolved: String? = (pane.isEmpty || ["shell", "terminal"].contains(pane.lowercased())) ? nil : pane
+                if resolved == nil, record.agent == "antigravity" {
+                    resolved = antigravity.metadata(sessionID: record.sessionID)?.title
+                }
                 if resolved == nil { resolved = await provider.terminalTitle(terminalID: terminal.id) }
                 if resolved == nil { resolved = URL(fileURLWithPath: record.cwd).lastPathComponent }
                 let name = resolved ?? record.sessionID
-                let state: String
-                switch record.event {
-                case "SessionEnd": state = "ended"
-                case "Stop": state = "idle"
-                default: state = "working"
-                }
+                let state = Self.hookState(event: record.event, agent: record.agent)
                 let descriptor = SessionDescriptor(id: record.sessionID, agent: record.agent,
                                                    title: name.isEmpty ? record.sessionID : name,
                                                    cwd: record.cwd, workspaceID: terminal.spaceID,
@@ -108,8 +110,7 @@ public actor RexConversationSource {
     public func rows() async throws -> [Entry] {
         var result = try await conversations()
         guard showsUnboundTerminals else { return result }
-        let targets = try await provider.conversationTargets(registry: registry, roots: roots)
-        var bound = Set(targets.map(\.terminal.id))
+        var bound = Set(result.compactMap { $0.descriptor.state != "ended" ? $0.descriptor.surfaceID : nil })
         let spaces = try await provider.spaces()
         for space in spaces {
             guard let terminals = try? await provider.terminals(spaceID: space.id) else { continue }
@@ -143,8 +144,8 @@ public actor RexConversationSource {
             return ConversationSnapshot(messages: [], hasMore: false,
                                         generation: "terminal:" + (entry.descriptor.surfaceID ?? id), clipped: false)
         }
-        return try await reader.history(path: entry.transcript, agent: "claude", beforeSeq: beforeSeq, limit: limit,
-                                        allowsUncreatedTranscript: false,
+        return try await reader.history(path: entry.transcript, agent: entry.descriptor.agent, beforeSeq: beforeSeq, limit: limit,
+                                        allowsUncreatedTranscript: entry.descriptor.writable && entry.descriptor.agent == "antigravity",
                                         // A live Agent still owns its detached tasks; an ended one cannot report them.
                                         reportsBackgroundTasks: entry.descriptor.writable)
     }
@@ -152,7 +153,14 @@ public actor RexConversationSource {
     public func archive(_ id: String, tail: Int?, cursor: String?, limit: Int) async throws -> ConversationArchivePage {
         let entry = try await entry(id)
         guard entry.descriptor.kind != "terminal" else { throw BridgeError("unsupported", "A Rex terminal has no conversation archive.", status: 422) }
-        return try await reader.archive(path: entry.transcript, agent: "claude", tail: tail, cursor: cursor, limit: limit,
+        if entry.descriptor.writable && entry.descriptor.agent == "antigravity",
+           !FileManager.default.fileExists(atPath: entry.transcript) {
+            let generation = "pending:" + IdentityCryptography().digest(Data(entry.transcript.utf8))
+            return ConversationArchivePage(
+                snapshot: ConversationSnapshot(messages: [], hasMore: false, generation: generation, clipped: false),
+                nextCursor: nil, complete: true)
+        }
+        return try await reader.archive(path: entry.transcript, agent: entry.descriptor.agent, tail: tail, cursor: cursor, limit: limit,
                                         reportsBackgroundTasks: entry.descriptor.writable)
     }
 
@@ -160,14 +168,14 @@ public actor RexConversationSource {
                          offset: Int, contentID: String?, limit: Int) async throws -> ToolTextPage {
         let entry = try await entry(id)
         guard entry.descriptor.kind != "terminal" else { throw BridgeError("unsupported", "A Rex terminal has no tool record.", status: 422) }
-        return try await reader.toolText(path: entry.transcript, agent: "claude", messageID: messageID,
+        return try await reader.toolText(path: entry.transcript, agent: entry.descriptor.agent, messageID: messageID,
                                          generation: generation, field: field, offset: offset, contentID: contentID, limit: limit)
     }
 
     public func image(_ id: String, referenceID: String, generation: String) async throws -> Data {
         let entry = try await entry(id)
         guard entry.descriptor.kind != "terminal" else { throw BridgeError("unsupported", "A Rex terminal has no recorded image.", status: 422) }
-        let image = try await reader.image(path: entry.transcript, agent: "claude",
+        let image = try await reader.image(path: entry.transcript, agent: entry.descriptor.agent,
                                            referenceID: referenceID, generation: generation)
         switch image.source {
         case .recorded(let data): return try HistoricalImageProjection().preview(data)
@@ -185,7 +193,9 @@ public actor RexConversationSource {
         if entry.descriptor.kind == "terminal" {
             return PreviewSnapshot(text: snapshot.text, available: true)
         }
-        let text = AgentChatProseScreenExtractor().extract(lines: rows, agentKind: ChatAgentKind(source: entry.descriptor.agent))
+        let text = entry.descriptor.agent == "antigravity"
+            ? AntigravityProseScreenExtractor().extract(lines: rows)
+            : AgentChatProseScreenExtractor().extract(lines: rows, agentKind: ChatAgentKind(source: entry.descriptor.agent))
         return PreviewSnapshot(text: text, available: true, compacting: TuiCompactionScreen.isCompacting(rows: rows))
     }
 
@@ -247,7 +257,7 @@ public actor RexConversationSource {
             throw BridgeError("unsupported", "A Rex terminal has no model switch.", status: 422)
         }
         guard described.agent == "claude" else {
-            throw BridgeError("unsupported", "Rex drives Claude model switching; Codex uses its picker.", status: 422)
+            throw BridgeError("unsupported", "Rex drives Claude model switching; this agent uses an interactive picker.", status: 422)
         }
         let name = try AgentModelName.validated(model)
         let terminal = try await requireLive(id)
@@ -277,9 +287,15 @@ public actor RexConversationSource {
         guard let space = entry.descriptor.workspaceID, let cwd = entry.descriptor.cwd else {
             throw BridgeError("read_only", "This conversation cannot be reopened.", status: 409)
         }
-        let command = entry.descriptor.agent == "codex"
-            ? ["codex", "resume", entry.descriptor.id]
-            : ["claude", "--resume", entry.descriptor.id]
+        let command: [String]
+        switch entry.descriptor.agent {
+        case "codex":
+            command = ["codex", "resume", entry.descriptor.id]
+        case "antigravity":
+            command = ["agy", "--dangerously-skip-permissions", "--conversation=" + entry.descriptor.id]
+        default:
+            command = ["claude", "--resume", entry.descriptor.id]
+        }
         try await authorize()
         return try await provider.start(spaceID: space, command: command, cwd: cwd)
     }
@@ -304,10 +320,25 @@ public actor RexConversationSource {
             throw BridgeError("read_only", "This Rex conversation has no live verified terminal.", status: 409)
         }
         guard let terminal = try? await provider.terminal(terminalID),
-              terminal.state != "exited", terminal.processName == entry.descriptor.agent else {
+              terminal.state != "exited", Self.matchesProcess(terminal.processName, agent: entry.descriptor.agent) else {
             throw BridgeError("read_only", "The Agent has left this Rex terminal.", status: 409)
         }
         return terminalID
+    }
+
+    private static func matchesProcess(_ processName: String?, agent: String) -> Bool {
+        guard let processName else { return false }
+        if agent == "antigravity" { return ["agy", "antigravity"].contains(processName) }
+        return processName == agent
+    }
+
+    private static func hookState(event: String, agent: String) -> String {
+        switch event {
+        case "SessionEnd": return "ended"
+        case "Stop": return "idle"
+        case "SessionStart": return agent == "antigravity" ? "idle" : "working"
+        default: return "working"
+        }
     }
 
     private func transcriptAllowed(_ path: String) -> Bool {

@@ -50,7 +50,8 @@ struct TranscriptResponseReader {
         for (offset, line) in lines.enumerated() {
             let seq = startingSeq + offset
             guard let data = line.data(using: .utf8), let root = try? decoder.decode(JSONValue.self, from: data), root.object != nil, root["isSidechain"].bool != true else { continue }
-            let stamp = root["timestamp"].string.flatMap { fractional.date(from: $0) ?? plain.date(from: $0) }.flatMap(valid)
+            let rawStamp = root["timestamp"].string ?? (agent == "antigravity" ? root["created_at"].string : nil)
+            let stamp = rawStamp.flatMap { fractional.date(from: $0) ?? plain.date(from: $0) }.flatMap(valid)
             let rowMessages = grouped[seq] ?? []
             if agent == "claude", isInterruption(root) {
                 // Claude writes its interruption as a synthetic user message.
@@ -61,7 +62,8 @@ struct TranscriptResponseReader {
             // A finished background task that finds Claude idle is delivered as its own user record, which the
             // chat hides as meta. Claude answers it in a new turn, so it opens a response like a prompt does;
             // without that, the answer joins the finished turn before it and never gets its own footer.
-            if rowMessages.contains(where: { $0.role == .user }) || (agent == "claude" && isTaskNotice(root)) {
+            if rowMessages.contains(where: { $0.role == .user }) || (agent == "claude" && isTaskNotice(root))
+                || (agent == "antigravity" && state.finished && rowMessages.contains(where: { $0.role == .agent })) {
                 finish(at: state.lastResponseStamp, duration: nil, recorded: false)
                 state.response = []; state.start = stamp; state.lastResponseStamp = nil; state.finished = false
                 state.result.currentTurnStartedAt = stamp; state.result.currentTurnCompleted = false
@@ -80,6 +82,13 @@ struct TranscriptResponseReader {
                    state.runID == payload["turn_id"].string {
                     let elapsed = stamp.flatMap { end in state.runStart.map { end.timeIntervalSince($0) } }
                     finish(at: stamp, duration: elapsed, recorded: elapsed != nil); state.runStart = nil; state.runID = nil
+                }
+            }
+            if agent == "antigravity", root["type"].string == "PLANNER_RESPONSE" {
+                let status = (root["status"].string ?? "").uppercased()
+                let hasCalls = !(root["tool_calls"].array ?? []).isEmpty
+                if !hasCalls, ["DONE", "ERROR", "CANCELED"].contains(status) {
+                    finish(at: stamp, duration: nil, recorded: stamp != nil && state.start != nil)
                 }
             }
         }

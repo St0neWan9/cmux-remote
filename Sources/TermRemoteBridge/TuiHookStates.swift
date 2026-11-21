@@ -8,7 +8,8 @@ struct TuiHookStates: Sendable {
     /// Applies one `agent.*` journal item; items from other providers or without a session leave the states unchanged.
     mutating func apply(_ item: JSONValue) {
         let payload = item["payload"]
-        guard payload["adapter"]["id"].string == "claude", let native = payload["native_event"].string,
+        guard let adapter = payload["adapter"]["id"].string, ["claude", "antigravity"].contains(adapter),
+              let native = payload["native_event"].string,
               let session = payload["normalized"]["agent_session_id"].string, UUID(uuidString: session) != nil else { return }
         let key = session.lowercased()
         switch Self.state(native: native, tool: payload["normalized"]["tool_name"].string, notification: payload["native"]["notification_type"].string, source: payload["native"]["source"].string) {
@@ -24,9 +25,10 @@ struct TuiHookStates: Sendable {
     /// The state a hook implies: nil keeps the current state, `.some(nil)` forgets the session.
     static func state(native: String, tool: String?, notification: String?, source: String?) -> String?? {
         switch native {
-        case "PreToolUse": return ["AskUserQuestion", "ExitPlanMode"].contains(tool ?? "") ? "needs_input" : "working"
+        case "PreToolUse": return ["AskUserQuestion", "ExitPlanMode", "ask_question"].contains(tool ?? "") ? "needs_input" : "working"
         case "UserPromptSubmit", "UserPromptExpansion", "PostToolUse", "PostToolUseFailure", "PostToolBatch",
-             "SubagentStart", "SubagentStop", "PreCompact", "PostCompact", "ElicitationResult": return "working"
+             "SubagentStart", "SubagentStop", "PreCompact", "PostCompact", "ElicitationResult",
+             "PreInvocation", "PostInvocation": return "working"
         case "PermissionRequest", "Elicitation": return "needs_input"
         case "Notification":
             switch notification { case "permission_prompt": return "needs_input"; case "idle_prompt": return "idle"; default: return nil }

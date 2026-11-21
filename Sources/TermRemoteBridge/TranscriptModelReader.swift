@@ -5,7 +5,7 @@ import TermRemoteCore
 ///
 /// Claude Code names the model on every reply and prints `Set model to …` when the reader switches; a subagent's
 /// replies run on their own model, so sidechain records are skipped. Codex names model and effort in the
-/// `turn_context` that opens each turn.
+/// `turn_context` that opens each turn. Antigravity names the model on each `PLANNER_RESPONSE`.
 struct TranscriptModelReader {
     func read(lines: [String], agent: String) -> AgentModelState? {
         var latest: AgentModelState?
@@ -13,11 +13,19 @@ struct TranscriptModelReader {
             // Every refresh walks the window, so a substring test keeps the JSON parse for the rows that can carry a model.
             if agent == "claude" {
                 guard line.contains("\"model\":\"") || line.contains("model to `") || line.contains("model as `") else { continue }
+            } else if agent == "antigravity" {
+                guard line.contains("\"PLANNER_RESPONSE\"") && line.contains("\"model\"") else { continue }
             } else {
                 guard line.contains("\"turn_context\"") else { continue }
             }
             guard let data = line.data(using: .utf8), let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
-            if let found = agent == "claude" ? claude(value) : codex(value) { latest = found }
+            let found: AgentModelState?
+            switch agent {
+            case "claude": found = claude(value)
+            case "antigravity": found = antigravity(value)
+            default: found = codex(value)
+            }
+            if let found { latest = found }
         }
         return latest
     }
@@ -41,6 +49,11 @@ struct TranscriptModelReader {
         guard value["type"] as? String == "turn_context", let payload = value["payload"] as? [String: Any],
               let model = (payload["model"] as? String).flatMap(Self.bounded) else { return nil }
         return AgentModelState(model: model, effort: (payload["effort"] as? String).flatMap(Self.bounded))
+    }
+    private func antigravity(_ value: [String: Any]) -> AgentModelState? {
+        guard value["type"] as? String == "PLANNER_RESPONSE",
+              let model = (value["model"] as? String).flatMap(Self.bounded) else { return nil }
+        return AgentModelState(model: model)
     }
     private static func bounded(_ text: String) -> String? {
         let value = text.trimmingCharacters(in: .whitespacesAndNewlines)

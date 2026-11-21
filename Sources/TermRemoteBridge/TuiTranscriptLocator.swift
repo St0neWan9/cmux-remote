@@ -5,17 +5,19 @@ import TermRemoteCore
 public struct TuiTranscriptLocator: Sendable {
     private let claudeRoot: URL
     private let codexRoot: URL
+    private let antigravityRoot: URL?
     private let entryLimit: Int
     /// The directory each transcript recorded, kept after the first read: a list read asks for it every few seconds.
     private let memo: TranscriptCwdMemo
-    public init(claudeRoot: URL, codexRoot: URL, entryLimit: Int = 20_000) {
+    public init(claudeRoot: URL, codexRoot: URL, antigravityRoot: URL? = nil, entryLimit: Int = 20_000) {
         self.claudeRoot = claudeRoot.resolvingSymlinksInPath().standardizedFileURL
         self.codexRoot = codexRoot.resolvingSymlinksInPath().standardizedFileURL
+        self.antigravityRoot = antigravityRoot?.resolvingSymlinksInPath().standardizedFileURL
         self.entryLimit = entryLimit
         memo = TranscriptCwdMemo()
     }
     public func locate(provider: String, sessionID: String, cwd: String?) throws -> String? {
-        guard UUID(uuidString: sessionID) != nil, ["claude", "codex"].contains(provider) else { return nil }
+        guard UUID(uuidString: sessionID) != nil, ["claude", "codex", "antigravity"].contains(provider) else { return nil }
         let result = try search([provider: [sessionID.lowercased()]])
         let key = provider + ":" + sessionID.lowercased()
         guard !result.ambiguous.contains(key) else { throw BridgeError("history_unavailable", "Multiple records match this exact Agent session.", status: 409) }
@@ -39,6 +41,14 @@ public struct TuiTranscriptLocator: Sendable {
         // The directory is written once, in the session's own header; a list read asks for it every few seconds.
         let key = provider + ":" + sessionID.lowercased()
         if let known = memo.recordedCwd(key) { return known }
+        if provider == "antigravity", let antigravityRoot {
+            if let cwd = AntigravityProcessRegistry(root: antigravityRoot).metadata(sessionID: sessionID)?.workspacePaths.first,
+               cwd.hasPrefix("/") {
+                memo.remember(cwd, for: key)
+                return cwd
+            }
+            return nil
+        }
         guard let path = (try? locate(provider: provider, sessionID: sessionID, cwd: nil)).flatMap({ $0 }), path.hasPrefix("/") else { return nil }
         let handle = try FileHandle(forReadingFrom: URL(fileURLWithPath: path)); defer { try? handle.close() }
         // The session header is the first line; read only a bounded prefix so a long transcript cannot stall it.
@@ -100,9 +110,41 @@ public struct TuiTranscriptLocator: Sendable {
                 }
             }
         }
+        if let ids = wanted["antigravity"], !ids.isEmpty, let antigravityRoot {
+            let brain = antigravityRoot.appendingPathComponent("brain", isDirectory: true)
+            if (try? brain.resourceValues(forKeys: [.isSymbolicLinkKey])).map({ $0.isSymbolicLink != true }) == true {
+                for id in ids {
+                    try Task.checkCancellation(); visited += 1
+                    guard visited <= entryLimit else { throw BridgeError("history_too_large", "The transcript lookup exceeds the discovery limit.", status: 413) }
+                    let logs = brain.appendingPathComponent(id, isDirectory: true)
+                        .appendingPathComponent(".system_generated", isDirectory: true)
+                        .appendingPathComponent("logs", isDirectory: true)
+                    let full = logs.appendingPathComponent("transcript_full.jsonl")
+                    let compact = logs.appendingPathComponent("transcript.jsonl")
+                    if FileManager.default.fileExists(atPath: full.path) {
+                        try record(id, at: full, provider: "antigravity")
+                    } else if FileManager.default.fileExists(atPath: compact.path) {
+                        try record(id, at: compact, provider: "antigravity")
+                    }
+                }
+            }
+        }
         return (found, ambiguous)
     }
     private func pending(provider: String, sessionID: String, cwd: String?) -> String? {
+        if provider == "antigravity", let antigravityRoot {
+            let brain = antigravityRoot.appendingPathComponent("brain", isDirectory: true)
+            if FileManager.default.fileExists(atPath: brain.path) {
+                guard let values = try? brain.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey]),
+                      values.isDirectory == true, values.isSymbolicLink != true else { return nil }
+            }
+            let path = brain.appendingPathComponent(sessionID.lowercased(), isDirectory: true)
+                .appendingPathComponent(".system_generated", isDirectory: true)
+                .appendingPathComponent("logs", isDirectory: true)
+                .appendingPathComponent("transcript_full.jsonl")
+            guard !FileManager.default.fileExists(atPath: path.path) else { return nil }
+            return path.standardizedFileURL.path
+        }
         guard provider == "claude", let cwd, cwd.hasPrefix("/"), cwd.utf8.count < 4096 else { return nil }
         let encoded = cwd.unicodeScalars.map { CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789").contains($0) ? String($0) : "-" }.joined()
         let project = claudeRoot.appendingPathComponent("projects").appendingPathComponent(encoded, isDirectory: true)

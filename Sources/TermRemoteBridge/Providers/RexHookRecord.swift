@@ -38,7 +38,7 @@ public struct RexHookSpool: Sendable {
                   let size = values.fileSize, size <= 65_536,
                   let data = try? Data(contentsOf: url), data.count <= 65_536,
                   let record = try? JSONDecoder().decode(RexHookRecord.self, from: data),
-                  ["claude", "codex"].contains(record.agent),
+                  ["claude", "codex", "antigravity"].contains(record.agent),
                   record.rexBlock.hasPrefix("block:"), record.sessionID.utf8.count <= 256,
                   record.transcript.utf8.count <= 4_096, record.cwd.hasPrefix("/") else { continue }
             result.append(record)

@@ -120,7 +120,7 @@ struct TuiSessionSnapshot: Sendable {
         })
         var bound: [Binding] = [], claimed = Set<String>()
         for agent in arrays["agents"]! {
-            guard agent["source"].string == "hook", let provider = agent["extra"]["agent"].string, ["claude", "codex"].contains(provider),
+            guard agent["source"].string == "hook", let provider = agent["extra"]["agent"].string, ["claude", "codex", "antigravity"].contains(provider),
                   let providerSession = agent["extra"]["agent_session_id"].string, UUID(uuidString: providerSession) != nil,
                   let terminal = agent["terminal_id"].string, let content = terminals[terminal], content["running"].bool == true,
                   content["lifecycle"].string == "running", let scopes = memberships[terminal], scopes.count == 1, let workspace = scopes.first else { continue }
